@@ -700,3 +700,285 @@ test("rbxtsc consumer plugin resolves and emitted TypeScript rechecks into Luau"
 		/resolveAll\("fixture-game\/server\/collection:Hidden"\)/,
 	);
 });
+
+test("T2 exact-line diagnostics and reviewer bypasses", () => {
+	const prefix = 'import { Subsystem, CrucibleBehaviour, inject, type All } from "@trioforge/crucible";\n';
+	const cases = [
+		["CRU004", 'import "@trioforge/crucible/emit";'],
+		["CRU004", 'import "@trioforge/crucible/internal/foo";'],
+		["CRU005", "export const bad = inject<number>();"],
+		["CRU005", "export class Bad extends Subsystem { field = inject<Subsystem>(); }"],
+		["CRU005", "export const bad = inject();"],
+		["CRU009", "export class Bad extends Subsystem { onInit() {} }"],
+		["CRU009", "export class Bad extends Subsystem { Update() {} }"],
+		["CRU009", "export class Bad extends Subsystem { updte() {} }"],
+		["CRU011", "export class Bad extends Subsystem { protected override preRender() {} }"],
+		["CRU011", "export class Bad extends Subsystem { static override renderPriority = 1; }"],
+		["CRU012", "export class Bad extends Subsystem { protected override async start() {} }"],
+		[
+			"CRU012",
+			"export class Bad extends Subsystem { protected override start(): Promise<void> | undefined { return undefined; } }",
+		],
+		[
+			"CRU012",
+			"type Result = Promise<void> | undefined;\nexport class Bad extends Subsystem { protected override start(): Result { return undefined; } }",
+		],
+		[
+			"CRU013",
+			"export class Concrete extends Subsystem {}\nlet variable = Concrete;\nexport class Bad extends variable {}",
+		],
+		[
+			"CRU013",
+			"export class Concrete extends Subsystem {}\nconst alias = Concrete;\nexport class Bad extends alias {}",
+		],
+		[
+			"CRU013",
+			"export class Concrete extends Subsystem {}\ntype Constructor = typeof Concrete;\nconst alias: Constructor = Concrete;\nexport class Bad extends alias {}",
+		],
+	];
+	for (const [code, text] of cases) {
+		const { diagnostics } = run(prefix + text);
+		const expectedLine = (prefix + text).trimEnd().split("\n").length;
+		assert.ok(
+			diagnostics.some(
+				(d) =>
+					d.code === 90000 + Number(code.slice(3)) &&
+					d.category === ts.DiagnosticCategory.Error &&
+					d.file.getLineAndCharacterOfPosition(d.start).line + 1 === expectedLine,
+			),
+			code + ": " + text + JSON.stringify(diagnostics.map((d) => d.messageText)),
+		);
+		assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+	}
+	for (const [code, text] of [
+		["CRU004", 'import type { Missing } from "@trioforge/crucible/missing";'],
+		["CRU005", "export const bad = inject<Missing>();"],
+		["CRU009", "export class Bad extends Subsystem { onInit(value: Missing) {} }"],
+		["CRU011", "export class Bad extends Subsystem { protected override preRender(value: Missing) {} }"],
+		["CRU012", "export class Bad extends Subsystem { protected override async start(value: Missing) {} }"],
+		[
+			"CRU013",
+			"export class Concrete extends Subsystem {}\nexport class Bad extends Concrete implements Missing {}",
+		],
+		["CRU014", "interface Generic<T> { value: T; }\nexport const bad = inject<Generic<Missing>>();"],
+	]) {
+		const result = run(prefix + text);
+		assert.ok(
+			result.diagnostics.some((d) => d.code === 90000 + Number(code.slice(3))),
+			code + " malformed input",
+		);
+		assert.ok(!result.diagnostics.some((d) => d.code === 90000), code + " never throws");
+	}
+	const definitions =
+		"export interface Handler<T = string> { handle(value: T): void; }\ntype Alias = Handler<string>;\ninterface Mid extends Handler<number> {}\ninterface Transitive extends Mid {}\n";
+	for (const target of ["Handler<string>", "Handler", "Alias", "Transitive"]) {
+		for (const text of [
+			"export class Bad extends Subsystem implements " + target + " { handle(value: any) {} }",
+			"export let bad: All<" + target + ">;",
+			"export const bad = inject<" + target + ">();",
+			"export const bad = inject<All<" + target + ">>();",
+		]) {
+			const { diagnostics } = run(prefix + definitions + text);
+			assert.ok(
+				diagnostics.some(
+					(d) =>
+						d.code === 90014 &&
+						d.category === ts.DiagnosticCategory.Error &&
+						d.file.getLineAndCharacterOfPosition(d.start).line + 1 === 6,
+				),
+				target + text + JSON.stringify(diagnostics.map((d) => d.messageText)),
+			);
+		}
+	}
+	const control = run(
+		prefix +
+			"interface Plain { value: string; }\nexport const one = inject<Plain>();\nexport let all: All<Plain>;\nexport class Clean extends Subsystem { protected override update() {} helper() {} upXXte() {} }",
+	);
+	assert.deepEqual(
+		control.diagnostics.map((d) => d.messageText),
+		[],
+	);
+});
+
+test("T2 K1 tag forwarding written defaults and non-tag parameters", () => {
+	const prefix =
+		'import { CrucibleBehaviour, inject, type All } from "@trioforge/crucible";\n' +
+		"export abstract class Openable<Tag extends string = string> extends CrucibleBehaviour<Tag, Model> {}\n" +
+		"export abstract class Forward<Tag extends string = string> extends Openable<Tag> {}\n" +
+		"export abstract class ForwardAgain<Tag extends string = string> extends Forward<Tag> {}\n";
+	for (const target of ["Openable<string>", "Openable", "ForwardAgain<string>", "ForwardAgain"]) {
+		const { diagnostics } = run(
+			prefix + "export let all: All<" + target + ">;\nexport const one = inject<" + target + ">();",
+		);
+		assert.deepEqual(
+			diagnostics.map((d) => d.messageText),
+			[],
+			target,
+		);
+	}
+	assert.deepEqual(
+		run(prefix + 'export class Door extends ForwardAgain<"Door"> {}').diagnostics.map((d) => d.messageText),
+		[],
+	);
+	for (const target of ['Openable<"Door">', 'ForwardAgain<"Door">'])
+		for (const text of ["export let all: All<" + target + ">;", "export const one = inject<" + target + ">();"]) {
+			const { diagnostics } = run(prefix + text);
+			assert.ok(
+				diagnostics.some(
+					(d) => d.code === 90014 && d.file.getLineAndCharacterOfPosition(d.start).line + 1 === 5,
+				),
+				text,
+			);
+		}
+	const mixed =
+		prefix +
+		"export abstract class Mixed<Tag extends string, Other = number> extends ForwardAgain<Tag> { value!: Other; }\n";
+	for (const text of [
+		'export class Door extends Mixed<"Door"> {}',
+		"export let all: All<Mixed<string>>;",
+		"export const one = inject<Mixed<string>>();",
+	])
+		assert.ok(
+			run(mixed + text).diagnostics.some((d) => d.code === 90014),
+			text,
+		);
+});
+
+test("T2 folder sides include inherited members and nearest segment", () => {
+	const prefix = 'import { Subsystem } from "@trioforge/crucible";\n';
+	const files = [];
+	try {
+		for (const folder of ["client", "server", "shared", "server/client", "client/shared"]) {
+			const dir = path.join(game, "src", folder);
+			fs.mkdirSync(dir, { recursive: true });
+			const file = path.join(dir, "side.ts");
+			files.push(file);
+			write(
+				file,
+				prefix +
+					"export abstract class Base extends Subsystem { protected override preRender() {} static override renderPriority = 1; protected override onShutdown() {} }",
+			);
+		}
+		const base = path.join(game, "src/client/base.ts");
+		files.push(base);
+		write(base, prefix + "export abstract class Foreign extends Subsystem { protected override preRender() {} }");
+
+		const shutdownBase = path.join(game, "src/server/shutdown.ts");
+		files.push(shutdownBase);
+		write(
+			shutdownBase,
+			prefix + "export abstract class Shutdown extends Subsystem { protected override onShutdown() {} }",
+		);
+		const inherited = path.join(game, "src/client/inherited.ts");
+		files.push(inherited);
+		write(inherited, 'import { Shutdown } from "../server/shutdown";\nexport class Derived extends Shutdown {}');
+		for (const [folder, member] of [
+			["client", "protected override preRender() {}"],
+			["server", "protected override onShutdown() {}"],
+			["shared", "protected override update() {}"],
+		]) {
+			const file = path.join(game, "src", folder, "clean.ts");
+			files.push(file);
+			write(file, prefix + "export class Clean extends Subsystem { " + member + " }");
+		}
+		const malformed = path.join(game, "src/client/malformed.ts");
+		files.push(malformed);
+		write(
+			malformed,
+			prefix + "export class Malformed extends Subsystem { protected override onShutdown(value: Missing) {} }",
+		);
+		const result = run(
+			'import { Foreign } from "../client/base";\nexport class Derived extends Foreign {}',
+			{},
+			{},
+			transform,
+			true,
+		);
+
+		for (const file of files.filter((file) => file.endsWith("clean.ts")))
+			assert.deepEqual(
+				result.diagnostics.filter((d) => path.normalize(d.file.fileName) === path.normalize(file)),
+				[],
+			);
+		for (const file of [inherited, malformed])
+			assert.ok(
+				result.diagnostics.some(
+					(d) =>
+						path.normalize(d.file.fileName) === path.normalize(file) &&
+						d.code === 90016 &&
+						d.category === ts.DiagnosticCategory.Error &&
+						d.file.getLineAndCharacterOfPosition(d.start).line === 1,
+				),
+			);
+		assert.ok(!result.diagnostics.some((d) => d.code === 90000));
+		for (const file of files.filter((file) => file.endsWith("side.ts"))) {
+			const diagnostics = result.diagnostics.filter((d) => d.file.fileName === file.replaceAll("\\", "/"));
+			const folder = path.basename(path.dirname(file));
+			assert.equal(
+				diagnostics.some((d) => d.code === 90011),
+				folder !== "client",
+				file,
+			);
+			assert.equal(
+				diagnostics.some((d) => d.code === 90016),
+				folder !== "server",
+				file,
+			);
+		}
+		assert.ok(
+			result.diagnostics.some(
+				(d) =>
+					d.code === 90011 &&
+					path.normalize(d.file.fileName) === path.normalize(main) &&
+					d.file.getLineAndCharacterOfPosition(d.start).line === 1,
+			),
+		);
+	} finally {
+		for (const file of files) fs.rmSync(file, { force: true });
+	}
+});
+
+test("T2 real rbxtsc reports all eight rules without a stack", () => {
+	write(
+		main,
+		[
+			'import { Subsystem, inject } from "@trioforge/crucible";',
+			'import "@trioforge/crucible/emit";',
+			"interface Promise<T> { value: T; }",
+			"interface Generic<T = string> { value: T; }",
+			"export class Concrete extends Subsystem { protected override preRender() {} onInit() {} field = inject<Subsystem>(); protected override start(): Promise<void> | undefined { return undefined; } }",
+			"const Alias = Concrete;",
+			'export class Derived extends Alias implements Generic { value = "value"; }',
+		].join("\n"),
+	);
+	const client = path.join(game, "src/client/negative.ts");
+	fs.mkdirSync(path.dirname(client), { recursive: true });
+	write(
+		client,
+		'import { Subsystem } from "@trioforge/crucible"; export class Bad extends Subsystem { protected override onShutdown() {} }',
+	);
+	try {
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		const result = spawnSync(
+			process.execPath,
+			[path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"), "-p", path.join(game, "tsconfig.json")],
+			{ cwd: game, encoding: "utf8" },
+		);
+		assert.equal(result.status, 1, result.stdout + result.stderr);
+		for (const code of ["CRU004", "CRU005", "CRU009", "CRU011", "CRU012", "CRU013", "CRU014", "CRU016"])
+			assert.match(result.stdout + result.stderr, new RegExp(code));
+		assert.doesNotMatch(result.stdout + result.stderr, /at transformer|at inspect|at visit|Node\.js v/);
+	} finally {
+		fs.rmSync(client, { force: true });
+	}
+});
+
+test("T2 K1 constructor collections share generic validation", () => {
+	const result = run(
+		'import { Subsystem, CrucibleBehaviour, type All } from "@trioforge/crucible";\nexport abstract class Openable<Tag extends string = string> extends CrucibleBehaviour<Tag> {}\nexport class Clean extends Subsystem { constructor(readonly items: All<Openable>) { super(); } }',
+	);
+	assert.deepEqual(
+		result.diagnostics.map((d) => d.messageText),
+		[],
+	);
+});

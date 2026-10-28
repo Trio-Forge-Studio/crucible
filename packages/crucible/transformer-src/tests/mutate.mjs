@@ -166,6 +166,15 @@ const mutants = [
 	]),
 ];
 
+for (const code of ["CRU004", "CRU005", "CRU009", "CRU011", "CRU012", "CRU013", "CRU014", "CRU016"]) {
+	mutants.push([
+		code,
+		"diagnostics.cjs",
+		"addDiagnostic({",
+		`code === "${code}" ? undefined : addDiagnostic({`,
+		code === "CRU016" ? "T2 folder sides" : "T2 exact-line",
+	]);
+}
 const receipts = [];
 for (const [name, file, before, after, test] of mutants) {
 	const root = path.join(scratch, name);
@@ -180,6 +189,7 @@ for (const [name, file, before, after, test] of mutants) {
 	assert.ok(original.includes(before), `${name} mutation matches the source`);
 	fs.writeFileSync(target, original.replace(before, after));
 	const built = spawnSync(process.execPath, [path.join(copy, "build.mjs")], { encoding: "utf8" });
+	if (built.status !== 0) fs.writeFileSync(target, original);
 	assert.equal(built.status, 0, built.stderr);
 	const result = spawnSync(
 		process.execPath,
@@ -187,9 +197,9 @@ for (const [name, file, before, after, test] of mutants) {
 		{ encoding: "utf8", env: { ...process.env, CRUCIBLE_TEST_REPO: repo } },
 	);
 	fs.writeFileSync(path.join(root, "result.txt"), result.stdout + result.stderr);
+	fs.writeFileSync(target, original);
 	assert.equal(result.status, 1, `${name} must be killed by ${test}: ${result.stdout}${result.stderr}`);
 	assert.match(result.stdout, new RegExp(`✖ ${test}`));
-	fs.writeFileSync(target, original);
 	receipts.push({ name, test, exitCode: result.status, restored: fs.readFileSync(target, "utf8") === original });
 	console.log(`Killed ${name} with ${test}; scratch source restored.`);
 }
