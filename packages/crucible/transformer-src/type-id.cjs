@@ -18,6 +18,24 @@ function typesCondition(value) {
 	return Object.values(value).flatMap(typesCondition);
 }
 
+function sourceRoot(options, directories = []) {
+	if (options.rootDir) return path.resolve(options.rootDir);
+	const dirs = [...directories, ...(options.rootDirs ?? [])].map((dir) => path.resolve(dir));
+	let root = dirs[0];
+	if (!root) return undefined;
+	while (
+		!dirs.every((dir) => {
+			const relative = path.relative(root, dir);
+			return !relative.startsWith("..") && !path.isAbsolute(relative);
+		})
+	) {
+		const parent = path.dirname(root);
+		if (parent === root) return undefined;
+		root = parent;
+	}
+	return root;
+}
+
 function typeId(file, name, program, ts) {
 	const owner = packageOf(file);
 	if (!owner?.json.name) return undefined;
@@ -41,9 +59,11 @@ function typeId(file, name, program, ts) {
 				{},
 				{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
 			);
-			root =
-				parsed?.options.rootDir ??
-				parsed?.options.rootDirs?.find((dir) => !path.relative(dir, file).startsWith(".."));
+			if (parsed)
+				root = sourceRoot(
+					parsed.options,
+					parsed.fileNames.filter((file) => !/\.d\.tsx?$/.test(file)).map((file) => path.dirname(file)),
+				);
 		}
 		root ??= program.getCompilerOptions().rootDir;
 		root ??= owner.dir;
@@ -57,4 +77,4 @@ function typeId(file, name, program, ts) {
 	return `${owner.json.name}/${modulePath}:${name}`;
 }
 
-module.exports = { packageOf, typeId };
+module.exports = { packageOf, typeId, sourceRoot };

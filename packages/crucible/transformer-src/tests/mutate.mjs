@@ -88,7 +88,13 @@ const mutants = [
 		'["Subsystem", "CrucibleObject"]',
 		registration,
 	],
-	["boolean-check", "index.cjs", 'if (type.flags & ts.TypeFlags.Boolean) return t("boolean");', "", registration],
+	[
+		"boolean-check",
+		"index.cjs",
+		'if (type.flags & ts.TypeFlags.Boolean) return t("boolean");',
+		'if (type.flags & ts.TypeFlags.Boolean) return t("string");',
+		registration,
+	],
 	[
 		"alias-injection",
 		"index.cjs",
@@ -112,7 +118,13 @@ const mutants = [
 		"type id failures",
 	],
 	["spread-load", "index.cjs", "if (index > loadIndex)", "if (false)", "CRU006 rejects dynamic"],
-	["multiple-roots", "index.cjs", "opts.rootDirs ?? []", "[]", "rootDirs globs"],
+	[
+		"multiple-roots",
+		"index.cjs",
+		"sourceRoot(opts, [program.getCommonSourceDirectory()])",
+		"opts.rootDir ?? opts.rootDirs?.[0]",
+		"rootDirs globs",
+	],
 	["global-resolver", "index.cjs", "Object.keys(require.cache)", "[]", "global compiler resolver"],
 	[
 		"duplicate-diagnostics",
@@ -123,6 +135,28 @@ const mutants = [
 	],
 	["abstract-import", "index.cjs", "if (!used) return next;", "return next;", "review regressions"],
 	["untouched-import", "index.cjs", "let used = false;", "let used = true;", "review regressions"],
+	[
+		"root-id-collision",
+		"type-id.cjs",
+		"root = sourceRoot(",
+		"root = ((options) => options.rootDir ?? options.rootDirs?.[0])(",
+		"rootDirs globs",
+	],
+	[
+		"boolean-union",
+		"index.cjs",
+		'if (booleanPair) checks.push(t("boolean"));',
+		'if (booleanPair) checks.push(t("string"));',
+		registration,
+	],
+	["wrapped-options", "index.cjs", "ts.isParenthesizedExpression(options) ||", "false ||", "CRU006 rejects dynamic"],
+	[
+		"class-expression-field",
+		"index.cjs",
+		"kindOf(instanceType(field.parent))",
+		"kindOf(checker.getTypeAtLocation(field.parent))",
+		"CRU003 rejects nested",
+	],
 	...["CRU001", "CRU002", "CRU003", "CRU006", "CRU007", "CRU008", "CRU010", "CRU015"].map((code) => [
 		code,
 		"diagnostics.cjs",

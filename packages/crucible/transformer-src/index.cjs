@@ -1,6 +1,6 @@
 const path = require("node:path");
 const { createRequire } = require("node:module");
-const { packageOf, typeId } = require("./type-id.cjs");
+const { packageOf, typeId, sourceRoot } = require("./type-id.cjs");
 const { createReporter } = require("./diagnostics.cjs");
 
 module.exports = function transformer(program, config = {}, extras = {}) {
@@ -27,6 +27,12 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 	const api = (symbol) => symbols.get(unalias(symbol));
 	const modifiers = (node, flags) => (ts.getCombinedModifierFlags(node) & flags) !== 0;
 	const bases = (type) => (type.target ?? type).getBaseTypes?.() ?? [];
+	const instanceType = (node) => {
+		const located = checker.getTypeAtLocation(node);
+		const signature =
+			ts.isClassExpression(node) && checker.getSignaturesOfType(located, ts.SignatureKind.Construct)[0];
+		return signature ? checker.getReturnTypeOfSignature(signature) : located;
+	};
 	const kindOf = (type, seen = new Set()) => {
 		if (seen.has(type)) return undefined;
 		seen.add(type);
@@ -146,7 +152,6 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				return str("invalid");
 			}
 			const value = id(type, at);
-			if (!value) report(at, "CRU001", "Cannot compute a package type id for this parameter.");
 			return str(value ?? "invalid");
 		};
 		const check = (type, at) => {
@@ -155,12 +160,14 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			if (type.flags & ts.TypeFlags.Boolean) return t("boolean");
 			if (type.isUnion()) {
 				const parts = type.types.filter((p) => !(p.flags & ts.TypeFlags.Undefined));
-				return parts.length === 1
-					? check(parts[0], at)
-					: call(
-							t("union"),
-							parts.map((p) => check(p, at)),
-						);
+				const booleanPair =
+					parts.some((p) => p.flags & ts.TypeFlags.BooleanLiteral && p.intrinsicName === "true") &&
+					parts.some((p) => p.flags & ts.TypeFlags.BooleanLiteral && p.intrinsicName === "false");
+				const checks = parts
+					.filter((p) => !(booleanPair && p.flags & ts.TypeFlags.BooleanLiteral))
+					.map((p) => check(p, at));
+				if (booleanPair) checks.push(t("boolean"));
+				return checks.length === 1 ? checks[0] : call(t("union"), checks);
 			}
 			if (type.flags & ts.TypeFlags.String) return t("string");
 			if (type.flags & ts.TypeFlags.Number) return t("number");
@@ -216,10 +223,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			return result;
 		};
 		const registration = (node) => {
-			const located = checker.getTypeAtLocation(node);
-			const signature =
-				ts.isClassExpression(node) && checker.getSignaturesOfType(located, ts.SignatureKind.Construct)[0];
-			const type = signature ? checker.getReturnTypeOfSignature(signature) : located;
+			const type = instanceType(node);
 			const kind = kindOf(type);
 			if (!kind || modifiers(node, ts.ModifierFlags.Abstract)) return;
 			let ctor;
@@ -315,7 +319,15 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			);
 		};
 		const boot = (node) => {
-			const options = node.arguments[0];
+			let options = node.arguments[0];
+			while (
+				options &&
+				(ts.isParenthesizedExpression(options) ||
+					ts.isAsExpression(options) ||
+					ts.isTypeAssertionExpression(options) ||
+					ts.isSatisfiesExpression(options))
+			)
+				options = options.expression;
 			if (!options || !ts.isObjectLiteralExpression(options)) {
 				report(node, "CRU006", "boot requires literal load globs.");
 				return node;
@@ -364,14 +376,13 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 							: entry.text.slice(0, entry.text.lastIndexOf("/", globAt) + 1);
 					const suffix = entry.text.slice(prefix.length).replace(/\.tsx?$/, "");
 					const opts = program.getCompilerOptions();
-					const roots = opts.rootDir ? [opts.rootDir] : (opts.rootDirs ?? []);
-					const mapped = roots
-						.map((sourceRoot) => {
-							const relative = path.relative(sourceRoot, path.resolve(root, prefix));
-							if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
-							return resolver?.getRbxPathFromFilePath(path.resolve(opts.outDir, relative));
-						})
-						.find(Boolean);
+					const inputRoot = sourceRoot(opts, [program.getCommonSourceDirectory()]);
+					const relative = inputRoot && path.relative(inputRoot, path.resolve(root, prefix));
+					const mapped =
+						relative !== undefined &&
+						!relative.startsWith("..") &&
+						!path.isAbsolute(relative) &&
+						resolver?.getRbxPathFromFilePath(path.resolve(opts.outDir, relative));
 					if (!mapped) {
 						report(entry, "CRU006", "load prefix is outside the Rojo mapping.");
 						return entry;
@@ -391,7 +402,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 					!ts.isPropertyDeclaration(field) ||
 					field.initializer !== node ||
 					modifiers(field, ts.ModifierFlags.Static) ||
-					kindOf(checker.getTypeAtLocation(field.parent)) !== "behaviour"
+					kindOf(instanceType(field.parent)) !== "behaviour"
 				) {
 					report(node, "CRU015", "attribute() must initialize a behaviour instance field.");
 					return node;

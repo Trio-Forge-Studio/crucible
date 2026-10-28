@@ -176,6 +176,7 @@ test("registration contract, inherited deps, tags, attributes, provides and symb
 	assert.deepEqual(records.Door.attributes.tint.check, { optional: "color3" });
 	assert.deepEqual(records.Door.attributes.offset.check, { optional: "vector3" });
 	assert.deepEqual(records.Door.attributes.open.check, { optional: "boolean" });
+	assert.deepEqual(records.Door.attributes.maybeOpen.check, { optional: "boolean" });
 	assert.match(output, /__crucible.attribute\(this, "fleetId"\)/);
 	assert.match(output, /__crucible.attribute\(this, "maxSpeed", 30\)/);
 	assert.match(output, /__crucible.attribute\(this, "label", undefined\)/);
@@ -256,7 +257,7 @@ test("CRU001 rejects every noninjectable constructor shape and accepts abstract 
 });
 
 test("CRU003 rejects nested, generic and nonpublic constructors including inherited visibility", () => {
-	const header = 'import { Subsystem } from "@trioforge/crucible";\n';
+	const header = 'import { Subsystem, CrucibleBehaviour, attribute } from "@trioforge/crucible";\n';
 	for (const text of [
 		"export class Bad<T> extends Subsystem {}",
 		"export function scope() { class Bad extends Subsystem {} }",
@@ -270,6 +271,11 @@ test("CRU003 rejects nested, generic and nonpublic constructors including inheri
 			run(header + text).diagnostics.some((d) => d.messageText.startsWith("CRU003")),
 			text,
 		);
+	const expression = run(
+		header + 'const Bad = class extends CrucibleBehaviour<"Bad"> { field = attribute(1); };',
+	).diagnostics;
+	assert.equal(expression.filter((d) => d.messageText.startsWith("CRU003")).length, 1);
+	assert.equal(expression.filter((d) => d.messageText.startsWith("CRU015")).length, 0);
 });
 
 test("CRU002 rejects tag unions and widened aliases but permits open abstract tags", () => {
@@ -317,6 +323,14 @@ test("CRU006 rejects dynamic load shapes and preserves string literal paths with
 		[],
 	);
 	assert.match(beforeLoad.output, /crucible-path:/);
+	for (const wrapper of ['({load: ["src/server/**/*.ts"]})', '{load: ["src/server/**/*.ts"]} as const']) {
+		const wrapped = run(header + `boot(${wrapper});`);
+		assert.deepEqual(
+			wrapped.diagnostics.map((d) => d.messageText),
+			[],
+		);
+		assert.match(wrapped.output, /crucible-path:/);
+	}
 });
 
 test("CRU015 rejects static fields, nested calls, plain classes and subsystem fields", () => {
@@ -450,6 +464,11 @@ test("type id failures report an infrastructure diagnostic for classes, injects 
 		assert.ok(
 			found.every((d) => d.messageText.startsWith("Crucible:") && d.category === ts.DiagnosticCategory.Error),
 		);
+		const dependency = run(
+			'import { Subsystem } from "@trioforge/crucible"; interface Dep {} class S extends Subsystem { constructor(dep: Dep) { super(); } }',
+		).diagnostics;
+		assert.ok(dependency.some((d) => d.messageText.startsWith("Crucible:")));
+		assert.ok(dependency.every((d) => !d.messageText.startsWith("CRU001")));
 		write(manifest, "{");
 		assert.ok(run("export const value = 1;").diagnostics.some((d) => d.messageText.startsWith("Crucible:")));
 	} finally {
@@ -482,6 +501,8 @@ test("rootDirs globs rewrite and resolver failures report CRU006 without interna
 	assert.ok(missing.diagnostics.every((d) => !/stack|CRU003|Require stack/i.test(d.messageText)));
 	const configFile = path.join(game, "tsconfig.json");
 	const original = fs.readFileSync(configFile, "utf8");
+	const projectFile = path.join(game, "default.project.json");
+	const originalProject = fs.readFileSync(projectFile, "utf8");
 	try {
 		const config = JSON.parse(original);
 		delete config.compilerOptions.rootDir;
@@ -496,8 +517,43 @@ test("rootDirs globs rewrite and resolver failures report CRU006 without interna
 		);
 		assert.equal(result.status, 0, result.stdout + result.stderr);
 		assert.match(fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8"), /crucible-path:/);
+		config.compilerOptions.rootDirs = ["src/shared", "src/server"];
+		write(configFile, config);
+		fs.mkdirSync(path.join(game, "src/shared"), { recursive: true });
+		const shared = path.join(game, "src/shared/foo.ts");
+		const server = path.join(game, "src/server/foo.ts");
+		write(shared, "export interface Foo { shared: true; }");
+		write(server, "export interface Foo { server: true; }");
+		const project = JSON.parse(originalProject);
+		project.tree.ReplicatedStorage.Shared = { $path: "out/shared" };
+		write(projectFile, project);
+		const twoRootsText =
+			'import { Subsystem } from "@trioforge/crucible"; import { boot } from "@trioforge/crucible/server"; export class S extends Subsystem {} boot({load: ["src/server/**/*.ts"]});';
+		const twoRoots = run(twoRootsText);
+		assert.deepEqual(
+			twoRoots.diagnostics.map((d) => d.messageText),
+			[],
+		);
+		assert.match(twoRoots.output, /"id": "fixture-game\/server\/main:S"/);
+		assert.equal(typeId(shared, "Foo", twoRoots.program, ts), "fixture-game/shared/foo:Foo");
+		assert.equal(typeId(server, "Foo", twoRoots.program, ts), "fixture-game/server/foo:Foo");
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		const compiled = spawnSync(
+			process.execPath,
+			[path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"), "-p", configFile],
+			{ cwd: game, encoding: "utf8" },
+		);
+		assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
+		assert.match(fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8"), /fixture-game\/server\/main:S/);
+		assert.match(
+			fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8"),
+			/crucible-path:ServerScriptService\/TS/,
+		);
 	} finally {
 		write(configFile, original);
+		write(projectFile, originalProject);
+		fs.rmSync(path.join(game, "src/shared"), { recursive: true, force: true });
+		fs.rmSync(path.join(game, "src/server/foo.ts"), { force: true });
 	}
 });
 

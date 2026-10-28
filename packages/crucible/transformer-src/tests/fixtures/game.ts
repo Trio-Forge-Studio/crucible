@@ -34,6 +34,7 @@ export class Door extends Openable<"Door"> {
 	readonly tint = attribute(new Color3());
 	readonly offset = attribute(new Vector3());
 	readonly open = attribute(false);
+	readonly maybeOpen = attribute<boolean | undefined>(undefined);
 }
 const TAG = "ConstTag";
 type AliasTag = "AliasTag";
