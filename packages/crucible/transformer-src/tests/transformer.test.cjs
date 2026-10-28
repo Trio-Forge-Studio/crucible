@@ -1002,7 +1002,7 @@ test("T2 folder sides preserve side-named source roots", () => {
 					);
 					for (const diagnostic of diagnostics) {
 						assert.equal(diagnostic.category, ts.DiagnosticCategory.Error);
-						assert.equal(diagnostic.file.fileName, file);
+						assert.equal(path.normalize(diagnostic.file.fileName), path.normalize(file));
 						assert.equal(diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line, 1);
 					}
 				}
