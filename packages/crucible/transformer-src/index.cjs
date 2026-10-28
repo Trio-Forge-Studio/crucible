@@ -473,10 +473,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				resolvedBases(type).some((base) => promise(base, seen))
 			);
 		};
-		const configFilePath = program.getCompilerOptions().configFilePath;
-		const sideRoot = configFilePath
-			? path.dirname(configFilePath)
-			: path.dirname(sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]));
+		const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;
 		const side = (node) =>
 			path
 				.relative(sideRoot, node.getSourceFile().fileName)

@@ -249,10 +249,39 @@ const mutants = [
 	[
 		"side-source-root-anchor",
 		"index.cjs",
-		"const sideRoot = configFilePath\n\t\t\t? path.dirname(configFilePath)\n\t\t\t: path.dirname(sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]));",
+		"const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;",
 		"const sideRoot = sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]);",
 		"T2 folder sides preserve side-named source roots",
 	],
+	...[
+		[
+			"side-tsconfig-anchor",
+			"path.dirname(program.getCompilerOptions().configFilePath ?? path.join(program.getCurrentDirectory(), 'tsconfig.json'))",
+			"T2 package sides layouts",
+		],
+		[
+			"side-parent-source-anchor",
+			"path.dirname(sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]))",
+			"T2 package sides layouts",
+		],
+		[
+			"side-above-package-anchor",
+			"path.dirname(packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root)",
+			"T2 package sides exclude",
+		],
+		[
+			"side-no-package-source-anchor",
+			"packageOf(source.fileName)?.dir ?? program.getCommonSourceDirectory()",
+			"T2 package sides without",
+		],
+	].map(([name, root, test]) => [
+		name,
+		"index.cjs",
+		"const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;",
+		`const sideRoot = ${root};`,
+		test,
+	]),
+
 	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
 	[
 		"side-absolute-path",
