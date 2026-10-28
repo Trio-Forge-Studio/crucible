@@ -52,16 +52,20 @@ end
 
 tests["inject before boot or awake rejects, then resolves an awake provider"] = function()
 	local w = world()
-	local _, record = w.define("Provider", "subsystem", nil, { provides = { "I" } })
-	spec.eq(pcall(w.emit.resolve, "I"), false, "before seal")
+	local _, record = w.define("Provider", "subsystem", nil, { provides = { "RequestedService" } })
+	spec.eq(pcall(w.emit.resolve, "RequestedService"), false, "before seal")
 	w.seal()
-	spec.eq(pcall(w.emit.resolve, "I"), false, "before construction")
+	spec.eq(pcall(w.emit.resolve, "RequestedService"), false, "before construction")
 	local state = w.track(record)
 	state.object = {}
 	state.phase = 1
-	spec.eq(pcall(w.emit.resolve, "I"), false, "constructed")
+	local ok, err = pcall(w.emit.resolve, "RequestedService")
+
+	spec.eq(ok, false, "constructed")
+	spec.has(err, "RequestedService", "requested type named")
+	spec.has(err, "not awake yet", "reason named")
 	state.phase = 2
-	spec.eq(w.emit.resolve("I"), state.object, "awake")
+	spec.eq(w.emit.resolve("RequestedService"), state.object, "awake")
 	spec.eq(pcall(w.emit.resolve, "Missing"), false, "missing provider")
 end
 
@@ -347,6 +351,32 @@ tests["start yields then observes with its owner while task.spawn remains ownerl
 	set:join({})
 	spec.eq(owned, 2, "owned observer disconnected")
 	spec.eq(spawned, 3, "spawned observer retained")
+end
+
+tests["observe from a start that already destroyed its own object leaves no live subscription"] = function()
+	local w = world()
+	local set = w.emit.resolveAll("I")
+	local calls = 0
+	local state, thread, ended
+	local _, record = w.define("Watcher", "behaviour", {
+		start = function()
+			thread = coroutine.running()
+			coroutine.yield()
+			w.life.request(state, 2)
+			ended = state.phase
+			set:observe(function()
+				calls += 1
+			end)
+		end,
+	})
+	w.seal()
+	state = w.track(record)
+	w.admit({ state })
+	spec.eq(coroutine.resume(thread), true, "start resumed outside a drain")
+	spec.eq(ended, 6, "destroyed while its start thread runs (C6)")
+	set:join({})
+	spec.eq(calls, 0, "an ended owner gets no callbacks")
+	spec.eq(#set.observers.items, 0, "no observer retained")
 end
 
 return tests
