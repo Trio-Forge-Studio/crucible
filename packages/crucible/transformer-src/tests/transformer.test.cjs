@@ -1339,11 +1339,15 @@ test("T2 package sides exclude a side-named package root", () => {
 });
 
 test("T2 package sides without a package search the whole path", () => {
-	const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "crucible-side-"));
+	const { packageOf } = require("../type-id.cjs");
+	const tempRoot =
+		process.platform === "win32" ? path.join(process.env.SystemRoot, "Temp") : require("node:os").tmpdir();
+	const dir = fs.mkdtempSync(path.join(tempRoot, "crucible-side-"));
 	try {
 		const game = sideHarness.setup({ ancestor: "plain", files: { "src/empty.ts": "export {};" } });
 		fs.symlinkSync(path.join(game, "node_modules"), path.join(dir, "node_modules"), "junction");
 		const file = path.join(dir, "server/combat/main.ts");
+		assert.equal(packageOf(file), undefined);
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(
 			file,
