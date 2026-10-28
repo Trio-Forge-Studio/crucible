@@ -1,0 +1,9 @@
+{
+	"content": [
+		{
+			"type": "text",
+			"text": "S2 store awake\nS2 controller awake\nS2 controller start\nS2 server booted\nS2 renderer awake\nS2 renderer start\nS2 client booted\nS2 render 1\nS2 render 2\nS2 render 3\nS2 render 4\nS2 render 5\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nS2 controller shutdown\nS2 store shutdown"
+		}
+	],
+	"isError": false
+}

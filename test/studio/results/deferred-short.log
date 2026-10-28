@@ -1,0 +1,14 @@
+2026-10-28T21:41:38.320Z,35.320011,580c,6,Info [FLog::CreatorOutput] S2 store awake
+2026-10-28T21:41:38.321Z,35.321007,580c,6,Info [FLog::CreatorOutput] S2 controller awake
+2026-10-28T21:41:38.321Z,35.321007,580c,6,Info [FLog::CreatorOutput] S2 controller start
+2026-10-28T21:41:38.321Z,35.321007,580c,6,Info [FLog::CreatorOutput] S2 server booted
+2026-10-28T21:41:38.684Z,35.684040,be34,6,Info [FLog::CreatorOutput] S2 renderer awake
+2026-10-28T21:41:38.684Z,35.684040,be34,6,Info [FLog::CreatorOutput] S2 renderer start
+2026-10-28T21:41:38.684Z,35.684040,be34,6,Info [FLog::CreatorOutput] S2 client booted
+2026-10-28T21:41:42.416Z,39.416706,b21c,6,Info [FLog::CreatorOutput] S2 render 1
+2026-10-28T21:41:42.786Z,39.786610,b21c,6,Info [FLog::CreatorOutput] S2 render 2
+2026-10-28T21:41:42.867Z,39.867695,b21c,6,Info [FLog::CreatorOutput] S2 render 3
+2026-10-28T21:41:42.970Z,39.970421,b21c,6,Info [FLog::CreatorOutput] S2 render 4
+2026-10-28T21:41:43.023Z,40.023735,b21c,6,Info [FLog::CreatorOutput] S2 render 5
+2026-10-28T21:41:47.804Z,44.804646,3290,6,Info [FLog::CreatorOutput] S2 controller shutdown
+2026-10-28T21:41:48.526Z,45.526337,3290,6,Info [FLog::CreatorOutput] S2 store shutdown

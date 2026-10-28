@@ -3,7 +3,7 @@
 	"private": true,
 	"scripts": {
 		"build": "pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build && pnpm --filter @trioforge/crucible-sample-game build && node -e \"require('node:fs').mkdirSync('build', { recursive: true })\" && rojo build examples/sample-game/default.project.json -o build/sample-game.rbxl",
-		"test": "pnpm run build && lune run test",
+		"test": "pnpm run build && lune run test && node --test test/sample-build.test.mjs",
 		"check": "vp check && stylua --check test .lune && selene test .lune && pnpm run test && pnpm --filter @trioforge/crucible test:transformer",
 		"fmt": "vp fmt && stylua test .lune",
 		"prepare": "vp config"

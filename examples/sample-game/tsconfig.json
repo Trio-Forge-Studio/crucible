@@ -6,7 +6,8 @@
 		"rootDir": "src",
 		"outDir": "out",
 		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
-		"declaration": false
+		"declaration": false,
+		"plugins": [{ "transform": "@trioforge/crucible/transformer" }]
 	},
 	"include": ["src"]
 }

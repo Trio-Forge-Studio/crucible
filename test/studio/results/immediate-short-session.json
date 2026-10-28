@@ -1,0 +1,18 @@
+{
+	"behavior": "Immediate",
+	"shutdown": "short",
+	"pid": 7428,
+	"place": "C:\\Users\\Admin\\.t3\\worktrees\\crucible\\t3-245e91ef\\build\\sample-studio\\s2-immediate-short-16172-c0c5a8de-185a-41e6-ac00-f9ac52ff9b3e.rbxl",
+	"launchedAt": "2026-10-28T21:46:30.891Z",
+	"freePhysicalMemoryKB": 1576176,
+	"studioId": "cf87221d-4486-4ea1-ace7-5fa0c6e88b8f",
+	"version": "0.745.0.7451137",
+	"nativeLog": "0.745.0.7451137_20261028T214631Z_Studio_059A0_last.log",
+	"stopRequestedAt": "2026-10-28T21:47:53.817Z",
+	"editConfirmedAt": "2026-10-28T21:48:03.110Z",
+	"closeMethod": "Stop-Process",
+	"closed": true,
+	"processRemaining": true,
+	"processRemainingAfterRecheck": false,
+	"recheckedAt": "2026-10-28T21:49:36.137Z"
+}

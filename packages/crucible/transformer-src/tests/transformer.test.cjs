@@ -15,7 +15,9 @@ after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 const game = path.join(scratch, "client/game");
 const installed = path.join(game, "node_modules/@trioforge/crucible");
 fs.mkdirSync(path.join(game, "src/server"), { recursive: true });
-fs.cpSync(path.join(__dirname, "fixtures/api"), installed, { recursive: true });
+fs.mkdirSync(installed, { recursive: true });
+for (const entry of ["out", "server", "client", "emit", "package.json"])
+	fs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });
 fs.mkdirSync(path.join(game, "node_modules/@rbxts"), { recursive: true });
 for (const name of ["types", "compiler-types"])
 	fs.symlinkSync(
@@ -24,22 +26,7 @@ for (const name of ["types", "compiler-types"])
 		"junction",
 	);
 const write = (file, value) => fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value));
-write(path.join(installed, "package.json"), {
-	name: "@trioforge/crucible",
-	version: "0.0.0",
-	types: "index.d.ts",
-	main: "init.luau",
-	exports: {
-		".": { types: "./index.d.ts", default: "./init.luau" },
-		"./server": { types: "./server.d.ts", default: "./server.luau" },
-		"./client": { types: "./client.d.ts", default: "./client.luau" },
-		"./emit": { types: "./emit.d.ts", default: "./emit.luau" },
-		"./transformer": "./transformer/index.js",
-	},
-});
 fs.cpSync(path.join(packageRoot, "transformer"), path.join(installed, "transformer"), { recursive: true });
-for (const file of ["init.luau", "emit.luau", "server.luau", "client.luau"])
-	write(path.join(installed, file), "return {}\n");
 write(path.join(game, "package.json"), { name: "fixture-game", private: true });
 write(path.join(game, "tsconfig.json"), {
 	extends: path.join(repo, "tsconfig.rbxts.json"),

@@ -2,7 +2,7 @@
 	"name": "@trioforge/crucible-sample-game",
 	"private": true,
 	"scripts": {
-		"build": "rbxtsc --type game"
+		"build": "node build.mjs"
 	},
 	"dependencies": {
 		"@trioforge/crucible": "workspace:*"
