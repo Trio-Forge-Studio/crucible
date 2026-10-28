@@ -1,0 +1,587 @@
+local spec = require("./lib/load")
+local world = require("./lib/world")
+
+local Phase, Want, Hook, Kind = world.Phase, world.Want, world.Hook, world.Kind
+
+local function guardedEnables(limit: number)
+	local enables = 0
+	return function()
+		enables += 1
+		if enables > limit then
+			error(`unbounded: more than {limit} enables`)
+		end
+	end
+end
+
+return {
+	["a batch runs construct, awake, enable, join, start, then frame hooks"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A"))
+		spec.list(w.events, { "construct:A", "awake:A", "onEnable:A", "join:A", "start:A", "tick:A" }, "events")
+		spec.eq(a.phase, Phase.Enabled, "phase")
+	end,
+
+	["a throw in update while Enabled runs onDisable then onDestroy and ends Faulted"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A"))
+		w.clear()
+		w.life.fault(a, Hook.Frame, "update threw")
+		spec.list(w.events, { "untick:A", "leave:A", "onDisable:A", "onDestroy:A", "faulted:A" }, "events")
+		spec.eq(a.phase, Phase.Faulted, "phase")
+		spec.eq(a.fault.hook, Hook.Frame, "primary fault")
+		spec.eq(w.life.stateOf(a.object), nil, "state released")
+		w.clear()
+		w.life.request(a, Want.Enabled)
+		w.life.fault(a, Hook.Frame, "again")
+		spec.eq(#w.events, 0, "Faulted is terminal")
+		spec.eq(#a.fault.cleanup, 0, "no failure attached after the end")
+	end,
+
+	["a throw part way through onEnable still runs exactly one onDisable"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			onEnable = function()
+				error("half enabled")
+			end,
+		}))
+		spec.list(
+			w.events,
+			{ "construct:A", "awake:A", "onEnable:A", "onDisable:A", "onDestroy:A", "faulted:A" },
+			"events"
+		)
+		spec.eq(a.fault.hook, Hook.OnEnable, "primary fault")
+	end,
+
+	["failures during fault cleanup attach to the first fault and never stop cleanup"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			onEnable = function()
+				error("first")
+			end,
+			onDisable = function()
+				error("second")
+			end,
+			onDestroy = function()
+				error("third")
+			end,
+		}))
+		spec.eq(w.count("onDisable:A"), 1, "onDisable runs once")
+		spec.eq(w.count("onDestroy:A"), 1, "onDestroy runs once")
+		spec.eq(w.count("faulted:A"), 1, "ended once")
+		spec.eq(a.fault.hook, Hook.OnEnable, "primary fault")
+		spec.eq(#a.fault.cleanup, 2, "attached failures")
+		spec.eq(a.fault.cleanup[1].hook, Hook.OnDisable, "first attached")
+		spec.eq(a.fault.cleanup[2].hook, Hook.OnDestroy, "second attached")
+	end,
+
+	["a throw in a normal onDisable faults and still destroys once"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			onDisable = function()
+				error("disable threw")
+			end,
+		}))
+		w.clear()
+		w.life.request(a, Want.Disabled)
+		spec.list(w.events, { "untick:A", "leave:A", "onDisable:A", "onDestroy:A", "faulted:A" }, "events")
+		spec.eq(a.fault.hook, Hook.OnDisable, "primary fault")
+	end,
+
+	["a constructor throw gives no hooks and no onDestroy, and its batch carries on"] = function()
+		local w = world.new()
+		local a, b = w.boot(
+			w.make("A", {
+				construct = function()
+					error("constructor threw")
+				end,
+			}),
+			w.make("B")
+		)
+		spec.list(
+			w.events,
+			{ "construct:A", "faulted:A", "construct:B", "awake:B", "onEnable:B", "join:B", "start:B", "tick:B" },
+			"events"
+		)
+		spec.eq(a.phase, Phase.Faulted, "phase")
+		spec.eq(a.fault.hook, Hook.Construct, "primary fault")
+		spec.eq(a.object, nil, "no object")
+		spec.eq(b.phase, Phase.Enabled, "peer")
+	end,
+
+	["a throw in awake still runs onDestroy, and no onEnable"] = function()
+		local w = world.new()
+		w.boot(w.make("A", {
+			awake = function()
+				error("awake threw")
+			end,
+		}))
+		spec.list(w.events, { "construct:A", "awake:A", "onDestroy:A", "faulted:A" }, "events")
+	end,
+
+	["a throw in start faults with start as the primary"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			start = function()
+				error("start threw")
+			end,
+		}))
+		spec.list(w.events, {
+			"construct:A",
+			"awake:A",
+			"onEnable:A",
+			"join:A",
+			"start:A",
+			"leave:A",
+			"onDisable:A",
+			"onDestroy:A",
+			"faulted:A",
+		}, "events")
+		spec.eq(a.fault.hook, Hook.Start, "primary fault")
+	end,
+
+	["destroy while start is suspended cancels it"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", { start = "suspend" }))
+		spec.list(
+			w.events,
+			{ "construct:A", "awake:A", "onEnable:A", "join:A", "start:A" },
+			"no frame hooks before start returns"
+		)
+		w.clear()
+		w.life.request(a, Want.Destroyed)
+		spec.list(w.events, { "leave:A", "onDisable:A", "cancel:A", "onDestroy:A", "destroyed:A" }, "events")
+		w.clear()
+		w.life.finishStart(a, true, nil)
+		spec.eq(#w.events, 0, "a start that outlived its generation is ignored")
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+	end,
+
+	["disable while start is suspended keeps start running and ticks after re-enable"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", { start = "suspend" }))
+		w.clear()
+		w.life.request(a, Want.Disabled)
+		spec.list(w.events, { "leave:A", "onDisable:A" }, "disable does not cancel start")
+		w.clear()
+		w.life.finishStart(a, true, nil)
+		spec.eq(#w.events, 0, "a disabled object does not tick")
+		w.life.request(a, Want.Enabled)
+		spec.list(w.events, { "onEnable:A", "join:A", "tick:A" }, "re-enable")
+	end,
+
+	["re-entrant creation during awake drains before any enable or start"] = function()
+		local w = world.new()
+		w.boot(w.make("A", {
+			awake = function()
+				w.life.admit({ w.make("B") })
+			end,
+		}))
+		spec.list(w.events, {
+			"construct:A",
+			"awake:A",
+			"construct:B",
+			"awake:B",
+			"onEnable:A",
+			"join:A",
+			"onEnable:B",
+			"join:B",
+			"start:A",
+			"tick:A",
+			"start:B",
+			"tick:B",
+		}, "events")
+	end,
+
+	["creation during start runs as its own batch at once"] = function()
+		local w = world.new()
+		w.boot(w.make("A", {
+			start = function()
+				w.life.admit({ w.make("C") })
+			end,
+		}))
+		spec.list(w.events, {
+			"construct:A",
+			"awake:A",
+			"onEnable:A",
+			"join:A",
+			"start:A",
+			"construct:C",
+			"awake:C",
+			"onEnable:C",
+			"join:C",
+			"start:C",
+			"tick:C",
+			"tick:A",
+		}, "events")
+	end,
+
+	["an awake closure that never settles stops after 1,024 waves and drops the last wave"] = function()
+		local w = world.new()
+		local function chain(i)
+			return w.make(`N{i}`, {
+				awake = function()
+					w.life.admit({ chain(i + 1) })
+				end,
+			})
+		end
+		local ok, err = pcall(w.life.admit, { chain(1) })
+		spec.eq(ok, true, `admit returned: {err}`)
+		spec.eq(#w.failures, 1, "one failure reported")
+		spec.has(w.failures[1], "1024 waves", "the failure names the cap")
+		local awakes, ticks = 0, 0
+		for _, e in w.events do
+			if string.sub(e, 1, 6) == "awake:" then
+				awakes += 1
+			elseif string.sub(e, 1, 5) == "tick:" then
+				ticks += 1
+			end
+		end
+		spec.eq(awakes, 1024, "awake waves run")
+		spec.eq(ticks, 1024, "every member still enabled and started")
+		spec.eq(w.count("construct:N1025"), 0, "the dropped wave is never constructed")
+		spec.eq(w.count("destroyed:N1025"), 1, "the dropped wave ends with no hooks")
+	end,
+
+	["a request made twice converges to the same state"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A"))
+		w.clear()
+		w.life.request(a, Want.Disabled)
+		w.life.request(a, Want.Disabled)
+		spec.list(w.events, { "untick:A", "leave:A", "onDisable:A" }, "disable twice")
+		spec.eq(a.phase, Phase.Disabled, "phase")
+		w.clear()
+		w.life.request(a, Want.Enabled)
+		w.life.request(a, Want.Enabled)
+		spec.list(w.events, { "onEnable:A", "join:A", "tick:A" }, "enable twice")
+		w.clear()
+		w.life.request(a, Want.Destroyed)
+		w.life.request(a, Want.Destroyed)
+		w.life.request(a, Want.Enabled)
+		spec.list(
+			w.events,
+			{ "untick:A", "leave:A", "onDisable:A", "onDestroy:A", "destroyed:A" },
+			"destroy twice, then enable"
+		)
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+	end,
+
+	["a request from inside a hook takes effect after the hook returns"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			onEnable = function(s)
+				w.life.request(s, Want.Disabled)
+			end,
+		}))
+		spec.list(w.events, { "construct:A", "awake:A", "onEnable:A", "onDisable:A" }, "never joins or starts")
+		spec.eq(a.phase, Phase.Disabled, "phase")
+	end,
+
+	["an object disabled before its enable sweep runs onEnable and start at its first enable"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			awake = function(s)
+				w.life.request(s, Want.Disabled)
+			end,
+		}))
+		spec.list(w.events, { "construct:A", "awake:A" }, "begins disabled with no hooks")
+		w.clear()
+		w.life.request(a, Want.Enabled)
+		spec.list(w.events, { "onEnable:A", "join:A", "start:A", "tick:A" }, "first enable")
+	end,
+
+	["removal before awake drops the object with no hooks"] = function()
+		local w = world.new()
+		local b
+		w.boot(w.make("A", {
+			awake = function()
+				b = w.make("B")
+				w.life.admit({ b })
+				w.life.request(b, Want.Destroyed)
+			end,
+		}))
+		spec.eq(w.count("destroyed:B"), 1, "dropped")
+		spec.eq(w.count("construct:B"), 0, "never constructed")
+		spec.eq(b.phase, Phase.Destroyed, "phase")
+	end,
+
+	["terminal phases have no step for any request"] = function()
+		local life = spec.fresh("internal/lifecycle")
+		for _, phase in { Phase.Faulted, Phase.Destroyed } do
+			for _, want in { Want.Enabled, Want.Disabled, Want.Destroyed } do
+				local state = { phase = phase, start = 0, gate = 4, want = want, joined = false, ticking = false }
+				spec.eq(life.nextStep(state), nil, "terminal")
+			end
+		end
+	end,
+
+	["destroy requested from a worker the start thread resumed completes teardown (reviewer B's cancel probe)"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.result = w.runner.call(function()
+					w.life.request(s, Want.Destroyed)
+				end, nil, nil)
+			end,
+		}))
+		w.clear()
+		local ok, err = coroutine.resume(w.threads.A)
+		spec.eq(ok, true, `the start thread resumed without an error: {err}`)
+		spec.eq(w.result, 0, "the destroying callback returned Ok")
+		spec.list(w.events, { "leave:A", "onDisable:A", "onDestroy:A", "destroyed:A" }, "teardown")
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+		spec.eq(a.queued, false, "not left on the work stack")
+		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
+		spec.eq(coroutine.status(w.threads.A), "dead", "the start thread ran to its end")
+		w.flush()
+		spec.eq(w.count("cancel:A"), 0, "a finished start thread is not cancelled")
+		w.clear()
+		w.boot(w.make("B"))
+		spec.eq(w.count("tick:B"), 1, "a later batch still runs")
+	end,
+
+	["a start thread that destroys its own object is cancelled at its next yield"] = function()
+		local w = world.new()
+		local reached = false
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.life.request(s, Want.Destroyed)
+				coroutine.yield()
+				reached = true
+			end,
+		}))
+		w.clear()
+		coroutine.resume(w.threads.A)
+		spec.list(w.events, { "leave:A", "onDisable:A", "onDestroy:A", "destroyed:A" }, "teardown while start runs")
+		w.flush()
+		spec.eq(w.count("cancel:A"), 1, "cancelled once it suspended")
+		spec.eq(coroutine.status(w.threads.A), "dead", "status")
+		spec.eq(reached, false, "never resumed")
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+	end,
+
+	["a request from a hook for another object applies after that hook returns"] = function()
+		local w = world.new()
+		local a, b = w.boot(w.make("A"), w.make("B"))
+		w.scripts.A.onDisable = function()
+			w.life.request(b, Want.Destroyed)
+			table.insert(w.events, "onDisable:A returned")
+		end
+		w.clear()
+		w.life.request(a, Want.Disabled)
+		spec.list(w.events, {
+			"untick:A",
+			"leave:A",
+			"onDisable:A",
+			"onDisable:A returned",
+			"untick:B",
+			"leave:B",
+			"onDisable:B",
+			"onDestroy:B",
+			"destroyed:B",
+		}, "events")
+	end,
+
+	["an onEnable and an onDisable that undo each other fault after the bound and still clean up"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A"))
+		local guard = guardedEnables(500)
+		w.scripts.A.onEnable = function(s)
+			guard()
+			w.life.request(s, Want.Disabled)
+		end
+		w.scripts.A.onDisable = function(s)
+			w.life.request(s, Want.Enabled)
+		end
+		w.clear()
+		w.life.request(a, Want.Disabled)
+		spec.eq(a.phase, Phase.Faulted, "phase")
+		spec.eq(a.fault.hook, Hook.Settle, "the primary fault names the bound")
+		spec.eq(w.count("onDisable:A"), w.count("onEnable:A") + 1, "every enable interval closed exactly once")
+		spec.eq(w.count("onDestroy:A"), 1, "onDestroy ran once")
+		spec.eq(w.count("faulted:A"), 1, "ended once")
+		spec.eq(w.count("onEnable:A") <= 32, true, `transitions stayed bounded: {w.count("onEnable:A")} enables`)
+		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
+	end,
+
+	["C5: 1,000 generations in one batch that each toggle a watcher once never fault"] = function()
+		local w = world.new()
+		local watcher = w.boot(w.make("W"))
+		local function toggle()
+			w.life.request(watcher, if watcher.want == Want.Enabled then Want.Disabled else Want.Enabled)
+		end
+		local batch = {}
+		for i = 1, 1000 do
+			table.insert(batch, w.make(`N{i}`, { join = toggle }))
+		end
+		w.life.admit(batch)
+		local faulted = 0
+		for _, s in batch do
+			if s.fault ~= nil then
+				faulted += 1
+			end
+		end
+		spec.eq(faulted, 0, "faulted generations")
+		spec.eq(watcher.fault, nil, "the watcher's fault")
+		spec.eq(watcher.phase, Phase.Enabled, "the watcher ends enabled after an even number of toggles")
+		spec.eq(w.count("onEnable:W"), 501, "the watcher's enables")
+	end,
+
+	["C5: two objects that toggle each other fault with Settle"] = function()
+		local w = world.new()
+		local a, b = w.boot(w.make("A"), w.make("B"))
+		local guard = guardedEnables(500)
+		w.scripts.A.onDisable = function()
+			w.life.request(b, Want.Disabled)
+		end
+		w.scripts.B.onDisable = function()
+			w.life.request(a, Want.Enabled)
+		end
+		w.scripts.A.onEnable = function()
+			guard()
+			w.life.request(b, Want.Enabled)
+		end
+		w.scripts.B.onEnable = function()
+			guard()
+			w.life.request(a, Want.Disabled)
+		end
+		w.life.request(a, Want.Disabled)
+		local settled = (a.fault and a.fault.hook == Hook.Settle) or (b.fault and b.fault.hook == Hook.Settle)
+		spec.eq(settled, true, `a Settle fault: A {a.fault and a.fault.error}, B {b.fault and b.fault.error}`)
+		for _, name in { "A", "B" } do
+			spec.eq(w.count(`onDisable:{name}`), w.count(`onEnable:{name}`), `{name}'s enable intervals all closed`)
+		end
+		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
+	end,
+
+	["kind: a Subsystem gets construct, awake and start but no onEnable, onDisable or onDestroy"] = function()
+		local w = world.new()
+		local s = w.boot(w.make("S", {}, Kind.Subsystem))
+		w.life.request(s, Want.Disabled)
+		w.life.request(s, Want.Enabled)
+		w.life.request(s, Want.Destroyed)
+		local hooks = {}
+		for _, e in w.events do
+			local name = string.match(e, "^(%a+):")
+			if table.find({ "construct", "awake", "start", "onEnable", "onDisable", "onDestroy" }, name) then
+				table.insert(hooks, e)
+			end
+		end
+		spec.list(hooks, { "construct:S", "awake:S", "start:S" }, "hooks")
+		spec.eq(s.phase, Phase.Destroyed, "phase")
+	end,
+
+	["act-on 4: destroy whose start cancellation throws still tears down once and diagnoses Cancel"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", { start = "suspend" }))
+		w.cancelError = "cancel refused"
+		w.clear()
+		local ok, err = pcall(w.life.request, a, Want.Destroyed)
+		spec.eq(ok, true, `no error reached the caller: {err}`)
+		spec.list(
+			w.events,
+			{ "leave:A", "onDisable:A", "cancel:A", "diagnose:A", "onDestroy:A", "destroyed:A" },
+			"events"
+		)
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+		spec.eq(a.fault, nil, "the generation is not faulted")
+		spec.eq(w.diagnosed[1].hook, Hook.Cancel, "diagnosed hook")
+		spec.has(w.diagnosed[1].error, "cancel refused", "diagnosed error")
+		spec.eq(#w.failures, 0, "no drain failure")
+	end,
+
+	["act-on 4: a faulted generation whose start cancellation throws attaches it to the fault"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", { start = "suspend" }))
+		w.cancelError = "cancel refused"
+		w.clear()
+		local ok, err = pcall(w.life.fault, a, Hook.Frame, "update threw")
+		spec.eq(ok, true, `no error reached the caller: {err}`)
+		spec.eq(w.count("onDestroy:A"), 1, "onDestroy ran once")
+		spec.eq(w.count("faulted:A"), 1, "ended once")
+		spec.eq(a.fault.hook, Hook.Frame, "primary fault")
+		spec.eq(#a.fault.cleanup, 1, "attached failures")
+		spec.eq(a.fault.cleanup[1].hook, Hook.Cancel, "attached hook")
+		spec.has(a.fault.cleanup[1].error, "cancel refused", "attached error")
+		spec.eq(#w.diagnosed, 0, "nothing diagnosed separately")
+	end,
+
+	["act-on 4: a deferred start cancellation that throws is diagnosed after the generation ended"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.life.request(s, Want.Destroyed)
+				coroutine.yield()
+			end,
+		}))
+		w.cancelError = "cancel refused"
+		coroutine.resume(w.threads.A)
+		spec.eq(a.phase, Phase.Destroyed, "ended before the deferred cancel")
+		local ok, err = pcall(w.flush)
+		spec.eq(ok, true, `the deferred cancel did not throw: {err}`)
+		spec.eq(w.count("cancel:A"), 1, "cancel attempted once")
+		spec.eq(#w.diagnosed, 1, "diagnosed once")
+		spec.eq(w.diagnosed[1].hook, Hook.Cancel, "diagnosed hook")
+		spec.eq(w.count("destroyed:A"), 1, "ended once")
+	end,
+
+	["act-on 10: a throwing start's fault carries a traceback"] = function()
+		local w = world.new()
+		local function startThatThrows()
+			error("start threw")
+		end
+		local a = w.boot(w.make("A", { start = startThatThrows }))
+		spec.eq(a.fault.hook, Hook.Start, "primary fault")
+		spec.has(a.fault.error, "start threw", "the message")
+		spec.has(a.fault.error, "function startThatThrows", "the traceback names the throwing function")
+	end,
+
+	["C6: destroy during a running start defers its cancellation; code up to the next yield runs once and its result is ignored (assumes task.defer runs before the cancelled start thread resumes)"] = function()
+		local w = world.new()
+		local ranAfterDestroy, resumedAfterYield = 0, false
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.life.request(s, Want.Destroyed)
+				ranAfterDestroy += 1
+				coroutine.yield()
+				resumedAfterYield = true
+			end,
+		}))
+		w.clear()
+		coroutine.resume(w.threads.A)
+		spec.list(w.events, { "leave:A", "onDisable:A", "onDestroy:A", "destroyed:A" }, "teardown with no cancel yet")
+		spec.eq(ranAfterDestroy, 1, "code up to the next yield ran once")
+		w.flush()
+		spec.eq(w.count("cancel:A"), 1, "cancelled at its next yield")
+		spec.eq(#w.diagnosed, 0, "nothing diagnosed")
+		spec.eq(coroutine.status(w.threads.A), "dead", "the start thread is dead")
+		spec.eq(resumedAfterYield, false, "never resumed past the yield")
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+	end,
+
+	["C6: a start that destroys its own object and then throws leaves no fault"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.life.request(s, Want.Destroyed)
+				error("threw after its destroy")
+			end,
+		}))
+		w.clear()
+		local ok, err = coroutine.resume(w.threads.A)
+		spec.eq(ok, true, `the start thread returned: {err}`)
+		spec.eq(a.fault, nil, "no fault")
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+		spec.list(w.events, { "leave:A", "onDisable:A", "onDestroy:A", "destroyed:A" }, "events")
+	end,
+}
