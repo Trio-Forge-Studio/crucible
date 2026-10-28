@@ -197,6 +197,27 @@ const mutants = [
 		"SetAttribute(BOOTED_ATTRIBUTE, false)",
 		"side entries enforce",
 	],
+	[
+		"V1 absolute shutdown clock",
+		"packages/crucible/src/internal/boot.ts",
+		"port.clock() - startTime >=",
+		"port.clock() >=",
+		"S1 deadline is 25",
+	],
+	[
+		"V2 post-commit rollback",
+		"packages/crucible/src/internal/boot.ts",
+		'if (stage !== "booting") return;',
+		"",
+		"post-commit Subsystem fault keeps binding live",
+	],
+	[
+		"V11 load-pattern segment guard",
+		"packages/crucible/src/internal/boot.ts",
+		'if (segments.some((s) => s === "" || s === "." || s === "..")) error(`Invalid Crucible load pattern: ${pattern}`);',
+		"",
+		"load patterns reject empty and parent segments",
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });
