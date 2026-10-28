@@ -1022,4 +1022,109 @@ test("X7 hook get on a tagged instance whose required attribute is invalid", fun
 	spec.eq(w.engine.logged("get pending"), 0, "invalid attribute is not pending")
 end)
 
+test("F1 control: get inside a hook on a pending pair still warns per site", function()
+	local w = World()
+	local B = w.define("B")
+	local target = w.tagged("T", "B")
+	w.define("A", {
+		awake = function()
+			for _ = 1, 2 do
+				B:get(target)
+			end
+			B:get(target)
+		end,
+	})
+	w.tagged("I", "A")
+	w.boot()
+	spec.eq(w.engine.logged("get pending"), 2, "two sites")
+end)
+
+test("F1 control: tag added but signal undelivered still warns", function()
+	local w = World()
+	local B = w.define("B")
+	local A = w.define("A", {
+		awake = function(self)
+			B:get(self.instance)
+		end,
+	})
+	w.boot()
+	local i = w.engine.instance("I")
+	w.engine.addTag(i, "B")
+	w.engine.addTag(i, "A")
+	A:get(i)
+	print("F1 undelivered warnings", w.engine.logged("get pending"))
+	spec.eq(w.engine.logged("get pending"), 1, "pending tag warns")
+end)
+
+test("R3 accepts rejection survives repeated hook gets without user code", function()
+	local w = World()
+	local allow, calls = false, 0
+	local during
+	local B = w.define("B", {
+		accepts = function()
+			calls += 1
+			return allow
+		end,
+	})
+	local r = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			allow = true
+			local before = calls
+			B:get(r)
+			B:get(r)
+			during = calls - before
+			spec.eq(w.engine.logged("get pending"), 0, "get preserves rejection")
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	spec.eq(during, 0, "get never calls user accepts")
+	spec.eq(w.engine.logged("get pending"), 0, "no false warnings")
+end)
+
+test("R3 refresh clears accepts rejection before hook get", function()
+	local w = World()
+	local allow = false
+	local B = w.define("B", {
+		accepts = function()
+			return allow
+		end,
+	})
+	local r = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			allow = true
+			w.behaviour:refresh(r)
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	spec.eq(w.engine.logged("get pending"), 1, "refresh clears rejection")
+	spec.eq(B:get(r) ~= nil, true, "admitted")
+end)
+
+test("R3 attribute pending checks every descriptor and required absence", function()
+	for _, mode in { "required absent", "optional absent", "other invalid" } do
+		local w = World()
+		local other = numeric(true)
+		other.name = "Other"
+		local B = w.define("B", {}, { attributes = { speed = numeric(mode ~= "optional absent"), other = other } })
+		local r = w.tagged("R", "B", { Speed = "bad", Other = 1 })
+		local A = w.define("A", {
+			awake = function()
+				w.engine.setAttribute(r, "Speed", if mode == "other invalid" then 5 else nil)
+				if mode == "other invalid" then
+					w.engine.setAttribute(r, "Other", "bad")
+				end
+				B:get(r)
+			end,
+		})
+		w.boot()
+		A:get(w.tagged("I", "A"))
+		spec.eq(w.engine.logged("get pending"), if mode == "optional absent" then 1 else 0, mode)
+	end
+end)
+
 return tests

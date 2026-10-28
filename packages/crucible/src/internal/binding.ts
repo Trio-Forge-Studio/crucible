@@ -14,7 +14,7 @@ interface Pair {
 	parked: boolean;
 	running: boolean;
 	reset: boolean;
-	rejected: boolean;
+	rejected?: "class" | "attributes" | "accepts";
 	wrongClass: boolean;
 	readonly warnings: Map<string, string>;
 }
@@ -77,7 +77,7 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 			parked: false,
 			running: false,
 			reset: false,
-			rejected: false,
+			rejected: undefined,
 			wrongClass: wrongClasses.get(record)?.has(instance) ?? false,
 			warnings: new Map(),
 		};
@@ -87,7 +87,7 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 }
 function queue(pair: Pair) {
 	if (pair.running) return;
-	pair.rejected = false;
+	pair.rejected = undefined;
 	if (pair.parked) {
 		pair.parked = false;
 		pair.queued = false;
@@ -223,7 +223,7 @@ function evaluate(pair: Pair): ObjectState | undefined {
 	connect(pair);
 	if (record.suppressed.has(instance)) return undefined;
 	if (!record.instanceClasses.some((name) => engine.isA(instance, name))) {
-		pair.rejected = true;
+		pair.rejected = "class";
 		if (!pair.wrongClass) {
 			pair.wrongClass = true;
 			let warned = wrongClasses.get(record);
@@ -247,8 +247,12 @@ function evaluate(pair: Pair): ObjectState | undefined {
 		if (!ok) valid = false;
 		attributes[field] = value;
 	}
-	if (!valid || !accepted(pair)) {
-		pair.rejected = true;
+	if (!valid) {
+		pair.rejected = "attributes";
+		return undefined;
+	}
+	if (!accepted(pair)) {
+		pair.rejected = "accepts";
 		return undefined;
 	}
 	if (
@@ -324,14 +328,19 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 	const pair = pairFor(record, instance);
 	if (isDraining()) {
 		const state = record.bound.get(instance);
+		let attributesValid = true;
+		if (pair.rejected === "attributes") {
+			for (const [, descriptor] of record.attributes ?? new Map<string, import("../emit").EmittedAttribute>()) {
+				const value = port().getAttribute(instance, descriptor.name);
+				if (value === undefined ? descriptor.required : !descriptor.check(value)) attributesValid = false;
+			}
+		}
 		if (
-			state !== undefined
-				? !isLive(state)
-				: pair.queued ||
-					(!pair.rejected &&
-						port().inWorld(instance) &&
-						port().hasTag(instance, record.tag) &&
-						!record.suppressed.has(instance))
+			(state === undefined || !isLive(state)) &&
+			(pair.rejected === undefined || (pair.rejected === "attributes" && attributesValid)) &&
+			port().inWorld(instance) &&
+			port().hasTag(instance, record.tag) &&
+			!record.suppressed.has(instance)
 		) {
 			const [source, line] = debug.info(3, "sl");
 			const site = `${source}:${line}`;
@@ -340,7 +349,9 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 				port().log(LogLevel.Warning, `Crucible get pending at ${site}`);
 			}
 		}
+		const rejected = pair.rejected;
 		queue(pair);
+		pair.rejected = rejected;
 	} else {
 		queue(pair);
 		const held = queued.filter((other) => other !== pair);

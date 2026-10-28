@@ -10,7 +10,65 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-binding-mutants-
 const binding = "packages/crucible/src/internal/binding.ts";
 const behaviour = "packages/crucible/src/crucible-behaviour.ts";
 const mutants = [
-	["G1 pending ignores rejection", binding, "!pair.rejected &&", "true &&", "F1 residual:"],
+	["M1 queue retains rejection", binding, "pair.rejected = undefined;", "", "R3 refresh clears"],
+	[
+		"M3 attribute rejection omitted",
+		binding,
+		'pair.rejected = "attributes";',
+		"pair.rejected = undefined;",
+		"X7 hook get",
+	],
+	[
+		"M5 queue membership means pending",
+		binding,
+		"(state === undefined || !isLive(state)) &&",
+		"pair.queued || (state === undefined || !isLive(state)) &&",
+		"X6 two hook gets",
+	],
+	["R3 get clears rejection", binding, "pair.rejected = rejected;", "pair.rejected = undefined;", "X3 two hook gets"],
+	[
+		"R3 corrected attributes stay rejected",
+		binding,
+		'(pair.rejected === "attributes" && attributesValid)',
+		"false",
+		"X2 invalid attribute",
+	],
+	[
+		"R3 ignores current attribute checks",
+		binding,
+		"attributesValid = false;",
+		"attributesValid = true;",
+		"X7 hook get",
+	],
+	[
+		"R3 required absence allowed",
+		binding,
+		"value === undefined ? descriptor.required : !descriptor.check(value)",
+		"value === undefined ? false : !descriptor.check(value)",
+		"R3 attribute pending checks",
+	],
+	[
+		"R3 optional absence rejected",
+		binding,
+		"value === undefined ? descriptor.required : !descriptor.check(value)",
+		"value === undefined ? true : !descriptor.check(value)",
+		"R3 attribute pending checks",
+	],
+	[
+		"R3 get runs user accepts",
+		binding,
+		"const rejected = pair.rejected;",
+		"accepted(pair); const rejected = pair.rejected;",
+		"R3 accepts rejection",
+	],
+
+	[
+		"G1 pending ignores rejection",
+		binding,
+		'(pair.rejected === undefined || (pair.rejected === "attributes" && attributesValid))',
+		"true",
+		"F1 residual:",
+	],
 	[
 		"N1 parked flag not cleared after restore",
 		binding,
@@ -18,7 +76,13 @@ const mutants = [
 		"",
 		"PN1 restored parked pair",
 	],
-	["N2 pending ignores suppression", binding, "!record.suppressed.has(instance))", "true)", "PN2 hook get"],
+	[
+		"N2 pending ignores suppression",
+		binding,
+		"!record.suppressed.has(instance)\n\t\t)",
+		"true\n\t\t)",
+		"PN2 hook get",
+	],
 	[
 		"N4 restore re-adds unparked pairs",
 		binding,
@@ -59,7 +123,7 @@ const mutants = [
 	[
 		"F1 false pending warning",
 		binding,
-		"state !== undefined\n\t\t\t\t? !isLive(state)\n\t\t\t\t: pair.queued ||\n\t\t\t\t\t(!pair.rejected &&\n\t\t\t\t\t\tport().inWorld(instance) &&\n\t\t\t\t\t\tport().hasTag(instance, record.tag) &&\n\t\t\t\t\t\t!record.suppressed.has(instance))",
+		'(state === undefined || !isLive(state)) &&\n\t\t\t(pair.rejected === undefined || (pair.rejected === "attributes" && attributesValid)) &&\n\t\t\tport().inWorld(instance) &&\n\t\t\tport().hasTag(instance, record.tag) &&\n\t\t\t!record.suppressed.has(instance)',
 		"state === undefined || !isLive(state)",
 		"untagged instance does not warn pending",
 	],
