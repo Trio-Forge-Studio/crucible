@@ -11,6 +11,7 @@ interface Pair {
 	readonly instance: Instance;
 	connections?: Disconnect[];
 	queued: boolean;
+	parked: boolean;
 	running: boolean;
 	reset: boolean;
 	wrongClass: boolean;
@@ -72,6 +73,7 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 			record,
 			instance,
 			queued: false,
+			parked: false,
 			running: false,
 			reset: false,
 			wrongClass: wrongClasses.get(record)?.has(instance) ?? false,
@@ -83,6 +85,10 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 }
 function queue(pair: Pair) {
 	if (pair.running) return;
+	if (pair.parked) {
+		pair.parked = false;
+		pair.queued = false;
+	}
 	if (!pair.queued) {
 		pair.queued = true;
 		queued.push(pair);
@@ -222,9 +228,10 @@ function evaluate(pair: Pair): ObjectState | undefined {
 				wrongClasses.set(record, warned);
 			}
 			warned.add(instance);
+			const className = record.id.split(":").pop() ?? record.id;
 			engine.log(
 				LogLevel.Warning,
-				`${engine.describe(instance)} is a ${instance.ClassName}; ${record.id} needs a ${record.instanceClasses.join(" or ")}`,
+				`${engine.describe(instance)} is a ${instance.ClassName}; ${className} needs a ${record.instanceClasses.join(" or ")}`,
 			);
 		}
 		return undefined;
@@ -311,7 +318,11 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 	queue(pair);
 	if (isDraining()) {
 		const state = record.bound.get(instance);
-		if (state === undefined || !isLive(state)) {
+		if (
+			state !== undefined
+				? !isLive(state)
+				: port().inWorld(instance) && port().hasTag(instance, record.tag) && !record.suppressed.has(instance)
+		) {
 			const [source, line] = debug.info(3, "sl");
 			const site = `${source}:${line}`;
 			if (!getWarnings.has(site)) {
@@ -321,9 +332,11 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 		}
 	} else {
 		const held = queued.filter((other) => other !== pair);
+		for (const other of held) other.parked = true;
 		queued = [pair];
 		drain();
-		queued = [...held, ...queued];
+		queued = [...held.filter((other) => other.parked), ...queued];
+		for (const other of held) other.parked = false;
 		if (queued.size() > 0) {
 			notePairs();
 			schedule();

@@ -10,6 +10,50 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-binding-mutants-
 const binding = "packages/crucible/src/internal/binding.ts";
 const behaviour = "packages/crucible/src/crucible-behaviour.ts";
 const mutants = [
+	[
+		"V1 Roblox StarterPlayer exclusion",
+		"packages/crucible/src/internal/roblox-port.ts",
+		'\n\t\tgame.GetService("StarterPlayer"),',
+		"",
+		"Roblox binding port maps",
+	],
+	[
+		"V4 wrong class warns only once per record",
+		binding,
+		"if (!pair.wrongClass)",
+		"if (!pair.wrongClass && wrongClasses.get(record) === undefined)",
+		"wrong class warns once",
+	],
+	["V5 warning reset", binding, "pair.warnings.delete(field);", "", "invalid valid same invalid"],
+	[
+		"V6 parked pairs lost",
+		binding,
+		"queued = [...held.filter((other) => other.parked), ...queued];",
+		"queued = [...queued];",
+		"outside get reconciles only",
+	],
+	["V8 reset pair not requeued", binding, "if (pair.reset) queue(pair);", "", "RemoveTag then AddTag and Parent nil"],
+	[
+		"F1 false pending warning",
+		binding,
+		"state !== undefined\n\t\t\t\t? !isLive(state)\n\t\t\t\t: port().inWorld(instance) && port().hasTag(instance, record.tag) && !record.suppressed.has(instance)",
+		"state === undefined || !isLive(state)",
+		"untagged instance does not warn pending",
+	],
+	[
+		"F2 parked refresh ignored",
+		binding,
+		"if (pair.parked)",
+		"if (pair.parked && !pair.queued)",
+		"outside get runs a parked pair",
+	],
+	[
+		"F8 record id in class warning",
+		binding,
+		'const className = record.id.split(":").pop() ?? record.id;',
+		"const className = record.id;",
+		"wrong class warns once",
+	],
 	["no leave-world admission", binding, "engine.inWorld(instance)", "true", "Parent nil fires removed"],
 	["no tag admission", binding, "engine.hasTag(instance, record.tag)", "true", "AddTag then get outside"],
 	[
