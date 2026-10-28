@@ -10,6 +10,7 @@ return {
 		assert(h.loaded[h.crucible.server] == nil, "root never loads server")
 		assert(h.loaded[h.crucible.client] == nil, "root never loads client")
 		assert(type(h.import(h.crucible.server).boot) == "function", "server boot resolves")
+		assert(h.loaded[h.crucible.server] ~= nil, "loader observes a server import")
 		local client = loadPlace(true)
 		assert(type(client.import(client.crucible.client).boot) == "function", "client boot resolves")
 		assert(client.import(client.crucible.client).BOOTED_ATTRIBUTE == "CrucibleBooted", "boot flag resolves")

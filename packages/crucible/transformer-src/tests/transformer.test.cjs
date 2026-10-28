@@ -81,6 +81,25 @@ test("fixture uses every real package declaration and physical side entry byte f
 		);
 });
 
+test("real emit literal declaration accepts boolean string and number literals", () => {
+	write(
+		main,
+		'import { t } from "@trioforge/crucible/emit";\nt.literal(true);\nt.literal(false);\nt.literal("walk");\nt.literal(-2);\n',
+	);
+	const config = ts.getParsedCommandLineOfConfigFile(
+		path.join(game, "tsconfig.json"),
+		{},
+		{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
+	);
+	const program = ts.createProgram(config.fileNames, config.options);
+	assert.deepEqual(
+		program
+			.getSemanticDiagnostics(program.getSourceFile(main))
+			.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")),
+		[],
+	);
+});
+
 function run(text = positive, options = {}, pluginConfig = {}, factory = transform, allSources = false) {
 	write(main, text);
 	const config = ts.getParsedCommandLineOfConfigFile(

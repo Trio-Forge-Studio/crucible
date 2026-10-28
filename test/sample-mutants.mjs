@@ -19,6 +19,20 @@ const rebuild = () => {
 };
 const mutants = [
 	[
+		"V1 owned session matches a 12-character prefix",
+		"test/studio/session.mjs",
+		"studio.name === placeName",
+		"studio.name.startsWith(placeName.slice(0, 12))",
+		() => node(["--test", "--test-name-pattern=owned PID selection", "test/studio/verification.test.mjs"]),
+	],
+	[
+		"V2 fingerprint skips diagnostics.cjs",
+		"examples/sample-game/build.mjs",
+		".filter((name) => /\\.(cjs|mjs)$/.test(name))",
+		'.filter((name) => /\\.(cjs|mjs)$/.test(name) && name !== "diagnostics.cjs")',
+		() => node(["--test", "test/sample-build.test.mjs"]),
+	],
+	[
 		"probe check paired command skipped",
 		"package.json",
 		"selene --config probes/engine/selene.toml probes && ",

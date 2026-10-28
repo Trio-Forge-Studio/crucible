@@ -1,0 +1,398 @@
+[
+	{
+		"name": "registration",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "kind",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "abstract",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "generic-base",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "symbol-identity",
+		"test": "API identity",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "deps",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "provides",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "tag",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "instance",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "attributes",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "attribute-rewrite",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "inject",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "boot",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "capitalization",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "undefined-check",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "type-id",
+		"test": "package declaration ids",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "exports-types",
+		"test": "package declaration ids",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "behaviour-provides-stop",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "boolean-check",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "alias-injection",
+		"test": "rbxtsc consumer plugin resolves",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "nested-all",
+		"test": "CRU001 rejects every",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "class-expression",
+		"test": "CRU003 rejects nested",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "missing-id",
+		"test": "type id failures",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "spread-load",
+		"test": "CRU006 rejects dynamic",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "multiple-roots",
+		"test": "rootDirs globs",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "global-resolver",
+		"test": "global compiler resolver",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "duplicate-diagnostics",
+		"test": "diagnostics deduplicate",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "abstract-import",
+		"test": "review regressions",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "untouched-import",
+		"test": "review regressions",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "root-id-collision",
+		"test": "rootDirs globs",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "boolean-union",
+		"test": "registration contract",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "wrapped-options",
+		"test": "CRU006 rejects dynamic",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "class-expression-field",
+		"test": "CRU003 rejects nested",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "attribute-type-dropped",
+		"test": "rbxtsc Van attribute reads",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "check-colon-call",
+		"test": "rbxtsc Van attribute reads",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "literal-boolean-declaration",
+		"test": "real emit literal declaration accepts",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "constructor-type-accepted",
+		"test": "CRU001 rejects every",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "ambient-registered",
+		"test": "ambient classes emit",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "global-alias-ignored",
+		"test": "CRU010 rejects global primitive aliases",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "keep-ts-extension",
+		"test": "CRU006 rejects dynamic",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "N1-own-type-arg-ignored",
+		"test": "attribute rewrite preserves a written alias type argument",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "N2-abstract-typeof-accepted",
+		"test": "CRU001 rejects every",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "N3-namespace-ambient-registered",
+		"test": "ambient classes emit",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "N10-enclosing-dropped",
+		"test": "rbxtsc inferred attribute aliases resolve outside the emitting file scope",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "cru005-constructor-type",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "cru012-no-bases",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "cru014-no-inherited-implements",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "cru005-typeof-strict",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "hooks-include-public",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "side-absolute-path",
+		"test": "T2 folder sides ignore directories above the common source root",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU001",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU002",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU003",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU006",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU007",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU008",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU010",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU015",
+		"test": "diagnostic negative probes",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU004",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU005",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU009",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU011",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU012",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU013",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU014",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "CRU016",
+		"test": "T2 folder sides",
+		"exitCode": 1,
+		"restored": true
+	}
+]

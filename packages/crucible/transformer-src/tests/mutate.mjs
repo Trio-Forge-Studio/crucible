@@ -155,10 +155,17 @@ const mutants = [
 	["attribute-type-dropped", "index.cjs", "[typeNode],", "undefined,", "rbxtsc Van attribute reads"],
 	[
 		"check-colon-call",
-		"tests/fixtures/api/emit.d.ts",
+		"../out/emit/index.d.ts",
 		"readonly optional: (check: Check) => Check;",
 		"optional(check: Check): Check;",
 		"rbxtsc Van attribute reads",
+	],
+	[
+		"literal-boolean-declaration",
+		"../out/emit/index.d.ts",
+		"expected: string | number | boolean",
+		"expected: string | number",
+		"real emit literal declaration accepts",
 	],
 	[
 		"constructor-type-accepted",
@@ -271,6 +278,8 @@ for (const [name, file, before, after, test] of mutants) {
 	const root = path.join(scratch, name);
 	const copy = path.join(root, "transformer-src");
 	fs.mkdirSync(copy, { recursive: true });
+	for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"])
+		fs.cpSync(path.join(source, "..", entry), path.join(root, entry), { recursive: true });
 	for (const entry of fs.readdirSync(source)) {
 		if (entry === "build") continue;
 		fs.cpSync(path.join(source, entry), path.join(copy, entry), { recursive: true });

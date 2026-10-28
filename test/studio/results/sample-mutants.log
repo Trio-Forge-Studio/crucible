@@ -1,4 +1,6 @@
 BASELINE sample build and compiled lifecycle specs 0
+KILLED V1 owned session matches a 12-character prefix; rebuild or syntax 0; named spec 1
+KILLED V2 fingerprint skips diagnostics.cjs; rebuild or syntax 0; named spec 1
 KILLED probe check paired command skipped; rebuild or syntax 0; named spec 1
 KILLED startup launch cap guard changed; rebuild or syntax 0; named spec 1
 KILLED fingerprint guard reset deleted; rebuild or syntax 0; named spec 1

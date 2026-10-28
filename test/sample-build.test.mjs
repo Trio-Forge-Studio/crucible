@@ -38,14 +38,16 @@ test("A4 transformer source changes invalidate the sample output and rebuild rea
 		};
 		build();
 		const receipt = path.join(sample, "out/transformer.sha256");
-		const before = fs.readFileSync(receipt, "utf8");
 		const entry = path.join(sample, "out/server/main.server.luau");
 		assert.match(fs.readFileSync(entry, "utf8"), /crucible-path:ServerScriptService/);
-		fs.writeFileSync(entry, "stale compiled output");
-		fs.appendFileSync(path.join(transformer, "index.cjs"), "\n\n");
-		build();
-		assert.notEqual(fs.readFileSync(receipt, "utf8"), before);
-		assert.match(fs.readFileSync(entry, "utf8"), /crucible-path:ServerScriptService/);
+		for (const name of fs.readdirSync(transformer).filter((name) => /\.(cjs|mjs)$/.test(name))) {
+			const before = fs.readFileSync(receipt, "utf8");
+			fs.writeFileSync(entry, "stale compiled output");
+			fs.appendFileSync(path.join(transformer, name), "\n\n");
+			build();
+			assert.notEqual(fs.readFileSync(receipt, "utf8"), before, `${name} invalidates the receipt`);
+			assert.match(fs.readFileSync(entry, "utf8"), /crucible-path:ServerScriptService/, `${name} recompiles`);
+		}
 	} finally {
 		fs.rmSync(scratch, { recursive: true, force: true });
 	}

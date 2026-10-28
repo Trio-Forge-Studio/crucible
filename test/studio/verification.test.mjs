@@ -10,6 +10,7 @@ test("pnpm check includes the probe format lint and regression commands", () => 
 	assert.match(scripts.check, /stylua --check [^&]*\bprobes\b/);
 	assert(scripts.check.includes("selene --config probes/engine/selene.toml probes"));
 	assert(scripts.check.includes("node --test probes/engine/verification.test.mjs"));
+	assert.match(scripts.fmt, /stylua [^&]*\bprobes\b/);
 });
 
 test("owned PID selection requires exact place and Studio executable despite PID reuse", () => {
@@ -21,13 +22,15 @@ test("owned PID selection requires exact place and Studio executable despite PID
 		`"C:\\Roblox\\RobloxStudioBeta.exe" "${place}.other"`,
 	])
 		assert.equal(ownsProcess(command, place), false);
+	const ownedName = createPlaceName("deferred-short");
+	const foreignName = createPlaceName("deferred-short");
 	assert.equal(
 		selectStudio(
 			[
-				{ name: "foreign.rbxl", id: "foreign" },
-				{ name: "owned.rbxl", id: "owned" },
+				{ name: foreignName, id: "foreign" },
+				{ name: ownedName, id: "owned" },
 			],
-			"owned.rbxl",
+			ownedName,
 		),
 		"owned",
 	);
@@ -72,6 +75,8 @@ test("both Studio modes retain binding render Error traceback shutdown and count
 		assert.equal(trace.match(/S2 measure MAX_BATCHES .*starts=1024 expectedFailures=1/g)?.length, 5);
 		assert.equal(trace.match(/S2 measure MAX_CHAINED_REQUESTS .*requests=65539 expectedFailures=1/g)?.length, 5);
 		assert.equal(session.processRemaining, false);
+		assert.equal(typeof session.driverPid, "number");
+		assert.equal(trace.match(/S2 profile /g)?.length, 3);
 	}
 });
 
