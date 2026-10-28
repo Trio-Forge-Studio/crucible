@@ -1127,4 +1127,116 @@ test("R3 attribute pending checks every descriptor and required absence", functi
 	end
 end)
 
+test("Y2 wrong class, hook refreshes it, then get", function()
+	local w = World()
+	local B, br = w.define("B")
+	local wrong = w.engine.instance("W", "Part")
+	w.engine.addTag(wrong, "B")
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(wrong)
+			B:get(wrong)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Y2 warnings", warned, "bound after flush", br.bound[wrong] ~= nil)
+	spec.eq(br.bound[wrong], nil, "never binds")
+	spec.eq(warned, 0, "wrong class is not pending after a refresh")
+end)
+
+test("Y2b default scope (ServerStorage), hook refreshes it, then get", function()
+	local w = World()
+	local B, br = w.define("B")
+	local stored = w.engine.instance("S")
+	stored.container = "ServerStorage"
+	w.engine.addTag(stored, "B")
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(stored)
+			B:get(stored)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Y2b warnings", warned, "bound after flush", br.bound[stored] ~= nil)
+	spec.eq(br.bound[stored], nil, "never binds")
+	spec.eq(warned, 0, "default scope is not pending after a refresh")
+end)
+
+test("Y2d invalid required attribute, hook refreshes it, then get", function()
+	local w = World()
+	local B, br = w.define("B", {}, { attributes = { speed = numeric(true) } })
+	local r = w.tagged("R", "B", { Speed = "fast" })
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(r)
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Y2d warnings", warned, "bound after flush", br.bound[r] ~= nil)
+	spec.eq(br.bound[r], nil, "never binds")
+	spec.eq(warned, 0, "invalid attribute is not pending after a refresh")
+end)
+
+test("Y4 j first: admitted pair is pending before awake", function()
+	local w = World()
+	local allow = false
+	local seen, pending
+	local B, br = w.define("B", {
+		accepts = function()
+			return allow
+		end,
+	})
+	local r = w.tagged("R", "B")
+	local C = w.define("C", {
+		awake = function()
+			pending = B:get(r)
+			seen = true
+		end,
+	})
+	local A = w.define("A", {
+		awake = function()
+			local j = w.tagged("J", "C")
+			C:get(j)
+			allow = true
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	w.engine.flush()
+	spec.eq(seen, true, "C awake ran")
+	spec.eq(pending, nil, "B not yet awake in C hook")
+	spec.eq(br.bound[r] ~= nil, true, "B admitted after hook")
+	print("Y4 j first warnings", w.engine.logged("get pending"))
+	spec.eq(w.engine.logged("get pending"), 2, "C get and admitted B get both warn")
+end)
+
+test("Y2e corrected default scope is pending before its signal", function()
+	local w = World()
+	local B, br = w.define("B")
+	local r = w.tagged("R", "B")
+	r.container = "ServerStorage"
+	local A = w.define("A", {
+		awake = function()
+			r.container = "Workspace"
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	spec.eq(w.engine.logged("get pending"), 1, "current scope permits pending")
+	w.engine.flush()
+	spec.eq(br.bound[r] ~= nil, true, "binds in corrected scope")
+end)
+
 return tests
