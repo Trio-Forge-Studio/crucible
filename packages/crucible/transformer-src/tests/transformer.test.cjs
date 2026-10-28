@@ -229,6 +229,7 @@ test("CRU001 rejects every noninjectable constructor shape and accepts abstract 
 	for (const parameter of [
 		"value: number",
 		"value: typeof Dependency",
+		"value: typeof AbstractDependency",
 		"value: Instance",
 		"value: Model | BasePart",
 		"value?: Dependency",
@@ -240,7 +241,7 @@ test("CRU001 rejects every noninjectable constructor shape and accepts abstract 
 	]) {
 		const text =
 			header +
-			'declare class Dependency {}\ninterface Generic<T> { value: T; }\nclass Concrete extends CrucibleBehaviour<"Concrete"> {}\nexport class Bad extends Subsystem { constructor(' +
+			'declare class Dependency {}\nabstract class AbstractDependency {}\ninterface Generic<T> { value: T; }\nclass Concrete extends CrucibleBehaviour<"Concrete"> {}\nexport class Bad extends Subsystem { constructor(' +
 			parameter +
 			") { super(); } }";
 		assert.ok(
@@ -380,14 +381,34 @@ test("CRU010 rejects global primitive aliases on the attribute field line", () =
 
 test("ambient classes emit no registration while concrete classes do", () => {
 	const { output, diagnostics } = run(
-		'import { Subsystem } from "@trioforge/crucible"; export declare class Ghost extends Subsystem {} export class Real extends Subsystem {}',
+		`import { Subsystem } from "@trioforge/crucible";
+export declare class Ghost extends Subsystem {}
+declare namespace N { export class Ghost extends Subsystem {} }
+declare global { class GlobalGhost extends Subsystem {} }
+export class Real extends Subsystem {}`,
 	);
 	assert.deepEqual(
 		diagnostics.map((d) => d.messageText),
 		[],
 	);
 	assert.doesNotMatch(output, /defineClass\(Ghost/);
+	assert.doesNotMatch(output, /defineClass\(GlobalGhost/);
 	assert.match(output, /defineClass\(Real/);
+});
+
+test("attribute rewrite preserves a written alias type argument", () => {
+	const { output, diagnostics } = run(
+		`import { attribute, CrucibleBehaviour } from "@trioforge/crucible";
+type Speed = number;
+export class Vehicle extends CrucibleBehaviour<"Vehicle"> {
+ readonly speed = attribute<Speed>();
+}`,
+	);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(output, /__crucible.attribute<Speed>\(this, "speed"\)/);
 });
 
 test("mixed attribute unions use a union check", () => {
@@ -787,6 +808,30 @@ export class Van extends CrucibleBehaviour<"Van", Model> {
 		assert.doesNotMatch(luau, /__crucible.t:(?:optional|literal|union)\(/);
 	} finally {
 		fs.rmSync(alias);
+	}
+});
+
+test("rbxtsc inferred attribute aliases resolve outside the emitting file scope", () => {
+	const modes = path.join(game, "src/server/modes.ts");
+	write(modes, 'export type Mixed = "a" | 3; export const DEFAULT_MIXED: Mixed = "a";');
+	write(
+		main,
+		`import { attribute, CrucibleBehaviour } from "@trioforge/crucible";
+import { DEFAULT_MIXED } from "./modes";
+export class Vehicle extends CrucibleBehaviour<"Vehicle"> {
+ readonly mixed = attribute(DEFAULT_MIXED);
+}`,
+	);
+	try {
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		const result = spawnSync(
+			process.execPath,
+			[path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"), "-p", path.join(game, "tsconfig.json")],
+			{ cwd: game, encoding: "utf8" },
+		);
+		assert.equal(result.status, 0, result.stdout + result.stderr);
+	} finally {
+		fs.rmSync(modes);
 	}
 });
 
