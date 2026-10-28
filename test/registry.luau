@@ -3,6 +3,42 @@ local world = require("./lib/registry-world")
 local meter = require("./lib/meter")
 local tests = {}
 
+tests["scheduler admission and server seal keep the registered hook mask after class mutation"] = function()
+	local w = world()
+	local class, record = w.define("RegisteredWithoutHooks", "behaviour")
+	local seen = {}
+	class.update = function()
+		table.insert(seen, "update")
+	end
+	class.preRender = function()
+		table.insert(seen, "preRender")
+	end
+	local scheduler = w.graph
+		.module("internal/scheduler").Scheduler
+		.new(w.engine.port, { renders = true, fixedRate = 60 }, w.hooks.hooks().frame)
+	local state = w.track(record)
+	state.object = setmetatable({}, class)
+	scheduler:add(state)
+	w.engine.cycle(1 / 60, true)
+	spec.list(seen, {}, "late overrides do not enter scheduler lanes")
+	spec.eq(#w.engine.renderSteps, 0, "late preRender does not bind a render step")
+	local ok, err = pcall(w.seal)
+	spec.eq(ok, true, `server seal accepts the registered hook mask: {tostring(err)}`)
+end
+
+tests["server seal rejects renderPriority without a preRender hook and names the class"] = function()
+	local w = world()
+	local _, record = w.define("PriorityOnly", "subsystem", { renderPriority = 100 })
+	local result = w.registry.plan({ record }, { renders = false })
+	spec.eq(result.ok, false, "priority alone is a server render problem")
+	spec.eq(#result.problems, 1, "one server render problem")
+	spec.eq(result.problems[1].kind, "render-on-server", "problem kind")
+	spec.eq(result.problems[1].id, "PriorityOnly", "problem names its class")
+	local ok, err = pcall(w.seal)
+	spec.eq(ok, false, "server seal rejects a priority-only class")
+	spec.has(err, "PriorityOnly renders but is loaded on the server", "seal names the render class")
+end
+
 tests["defineClass records override masks once and scheduler lanes follow registered overrides"] = function()
 	local Engine = require("./lib/engine")
 	for mask = 0, 15 do
