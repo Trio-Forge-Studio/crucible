@@ -3,6 +3,7 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
 	staged: {
 		"*": "vp check --fix",
+		"*.luau": "stylua",
 	},
 	fmt: {
 		printWidth: 120,
