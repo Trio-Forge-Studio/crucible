@@ -204,7 +204,13 @@ const mutants = [
 		"const ok = true;",
 		"default accepts excludes",
 	],
-	["bound get skips accepts", binding, "!accepted(pair, have)", "false", "override replaces accepts"],
+	[
+		"bound get skips accepts",
+		binding,
+		"const ok = accepted(pair, have);",
+		"const ok = true;",
+		"override replaces accepts",
+	],
 	[
 		"C4 remove suppression",
 		binding,
