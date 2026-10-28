@@ -75,7 +75,80 @@ test("C1: outside get reconciles only its pair while unrelated signals remain pe
 	spec.eq(ar.bound[a], nil, "unrelated A not reconciled")
 	spec.eq(#calls, 0, "queued A did not wake")
 	spec.eq(br.bound[b] ~= nil, true, "B admitted")
+	w.engine.flush()
+	spec.eq(ar.bound[a] ~= nil, true, "parked pair restored")
 end)
+
+test("C1: get inside a hook on an untagged instance does not warn pending", function()
+	local w = World()
+	local B = w.define("B")
+	local plain = w.engine.instance("Plain")
+	w.define("A", {
+		awake = function()
+			spec.eq(B:get(plain), nil, "untagged has no binding")
+		end,
+	})
+	w.tagged("I", "A")
+	w.boot()
+	spec.eq(w.engine.logged("get pending"), 0, "untagged is not pending")
+end)
+
+test("C1: outside get runs a parked pair refreshed by its hook in the same drain", function()
+	local w = World()
+	local _, br = w.define("B")
+	local target = w.engine.instance("T")
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(target)
+		end,
+	})
+	w.boot()
+	w.engine.addTag(target, "B")
+	table.remove(w.engine.deferred, 1)()
+	local i = w.tagged("I", "A")
+	spec.eq(A:get(i) ~= nil, true, "selected binding awake")
+	spec.eq(br.bound[target] ~= nil, true, "refreshed parked pair admitted")
+	spec.eq(br.bound[target].phase, 3, "refreshed binding enabled before get returns")
+end)
+
+test("rule 5: invalid valid same invalid resets the warning condition", function()
+	local w = World()
+	local A = w.define("A", {}, {
+		attributes = { speed = numeric(true) },
+		init = function(self)
+			self.speed = w.emit.attribute(self, "speed")
+		end,
+	})
+	local i = w.tagged("I", "A", { Speed = 7 })
+	w.boot()
+	for _, value in { "bad", 5, "bad" } do
+		w.engine.setAttribute(i, "Speed", value)
+		w.engine.flush()
+	end
+	spec.eq(A:get(i).speed, 5, "last valid")
+	spec.eq(w.engine.logged("keeping the last valid value"), 2, "same invalid warns after valid")
+end)
+
+test(
+	"S1 Deferred: RemoveTag then AddTag and Parent nil then back in one resumption create new bindings without get",
+	function()
+		local w = World()
+		local _, ar = w.define("A")
+		local i = w.tagged("I", "A")
+		w.boot()
+		w.engine.flush()
+		local old = ar.bound[i]
+		w.engine.removeTag(i, "A")
+		w.engine.addTag(i, "A")
+		w.engine.flush()
+		spec.eq(ar.bound[i] ~= nil and ar.bound[i] ~= old, true, "tag return creates new binding")
+		old = ar.bound[i]
+		w.engine.move(i, nil)
+		w.engine.move(i, "Workspace")
+		w.engine.flush()
+		spec.eq(ar.bound[i] ~= nil and ar.bound[i] ~= old, true, "world return creates new binding")
+	end
+)
 
 test("C1: get inside a hook never runs lifecycle and warns once per call site when pending", function()
 	local w = World()
@@ -326,14 +399,17 @@ end)
 
 test("rule 4: wrong class warns once per instance and class with full name and requirements", function()
 	local w = World()
-	local A = w.define("Van")
+	local A = w.define("game/vehicles/server/Van:Van", {}, { tag = "Van" })
 	w.boot()
-	local i = w.engine.instance("Workspace.Van1", "Part")
-	w.engine.addTag(i, "Van")
-	for _ = 1, 3 do
-		spec.eq(A:get(i), nil, "wrong class")
+	for n = 1, 2 do
+		local name = "Workspace.Van" .. n
+		local i = w.engine.instance(name, "Part")
+		w.engine.addTag(i, "Van")
+		for _ = 1, 3 do
+			spec.eq(A:get(i), nil, "wrong class")
+		end
+		spec.eq(w.engine.logged(name .. " is a Part; Van needs a Model"), 1, "exact diagnostic once per instance")
 	end
-	spec.eq(w.engine.logged("Workspace.Van1 is a Part; Van needs a Model"), 1, "exact diagnostic once")
 end)
 
 test("S1 Deferred: Parent nil fires removed with HasTag true and reparent fires added with a new binding", function()
@@ -702,6 +778,16 @@ test("Roblox binding port maps CollectionService ancestry attributes scope and d
 	spec.eq(p.inWorld(instance), true, "IsDescendantOf game")
 	spec.eq(p.isA(instance, "Model"), true, "IsA")
 	spec.eq(p.bindingScope(instance), false, "scope")
+	for _, name in
+		{ "ServerStorage", "ReplicatedStorage", "ServerScriptService", "StarterGui", "StarterPack", "StarterPlayer" }
+	do
+		local descendant = {
+			IsDescendantOf = function(_, ancestor)
+				return ancestor == services[name]
+			end,
+		}
+		spec.eq(p.bindingScope(descendant), false, name .. " descendant excluded by Roblox port")
+	end
 	spec.eq(p.getAttribute(instance, "Speed"), 12, "GetAttribute")
 	spec.eq(p.describe(instance), "Workspace.I", "GetFullName")
 	local heard = 0
