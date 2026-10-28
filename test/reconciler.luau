@@ -106,7 +106,7 @@ return {
 		spec.eq(#w.failures, 1, "no stale failure")
 	end,
 
-	["act-on 5 (A11): a second failure during recovery force-ends the stranded generations without hooks"] = function()
+	["act-on 5 (A11): a generation whose teardown fails again is force-ended without hooks and the others tear down"] = function()
 		local w = world.new()
 		local a, b, c =
 			w.make("A"), w.make("B", {
@@ -131,10 +131,64 @@ return {
 			spec.eq(s.joined, false, `{name} left its sets`)
 			spec.eq(s.queued, false, `{name} is off the work stack`)
 		end
-		spec.eq(w.count("onDisable:A") + w.count("onDestroy:A"), 0, "a force-ended generation runs no user hooks")
+		spec.eq(w.count("onDisable:B") + w.count("onDestroy:B"), 0, "the force-ended generation runs no user hooks")
+		assertIntervalsClosed(w, { "A", "C" })
 		w.clear()
 		w.boot(w.make("D"))
 		spec.eq(w.count("tick:D"), 1, "a later batch runs")
 		spec.eq(#w.failures, 2, "no stale failure")
+	end,
+
+	["act-on 5: recovery that force-ends one generation still applies the other queued requests"] = function()
+		local w = world.new()
+		local a, b = w.boot(w.make("A"), w.make("B"))
+		w.scripts.A.untick = function()
+			error("untick threw")
+		end
+		w.scripts.A.leave = function()
+			error("leave threw")
+		end
+		w.clear()
+		w.life.within(nil, nil, Hook.Frame, function()
+			w.life.request(a, world.Want.Destroyed)
+			w.life.request(b, world.Want.Disabled)
+		end, nil, nil)
+		spec.eq(a.phase, Phase.Faulted, "A is force-ended")
+		spec.eq(w.count("faulted:A"), 1, "A ended once")
+		spec.eq(b.phase, Phase.Disabled, "B applied its request")
+		spec.eq(b.ticking, false, "B stopped ticking")
+		spec.eq(w.count("onDisable:B"), 1, "B ran onDisable")
+		spec.eq(b.queued, false, "B is off the work stack")
+		spec.eq(#w.failures, 2, "both internal errors reported")
+		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
+	end,
+
+	["act-on 5: force-ending a generation whose start is running defers the start's cancellation (C6)"] = function()
+		local w = world.new()
+		local after = false
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.life.request(s, world.Want.Destroyed)
+				coroutine.yield()
+				after = true
+			end,
+		}))
+		w.scripts.A.untick = function()
+			error("untick threw")
+		end
+		w.scripts.A.leave = function()
+			error("leave threw")
+		end
+		local ok, err = coroutine.resume(w.threads.A)
+		spec.eq(ok, true, `the start thread ran to its next yield: {err}`)
+		spec.eq(a.phase, Phase.Faulted, "force-ended")
+		spec.eq(w.count("faulted:A"), 1, "ended once")
+		spec.eq(w.count("cancel:A"), 0, "no cancel while the start thread runs")
+		w.flush()
+		spec.eq(w.count("cancel:A"), 1, "the deferred check cancelled it")
+		spec.eq(coroutine.status(w.threads.A), "dead", "the start thread is dead")
+		spec.eq(after, false, "never resumed past the yield")
 	end,
 }

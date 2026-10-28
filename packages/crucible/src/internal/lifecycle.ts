@@ -121,7 +121,11 @@ function release(s: ObjectState) {
 	if (s.object !== undefined) states.delete(s.object);
 	const subscriptions = s.subscriptions;
 	s.subscriptions = undefined;
-	if (subscriptions !== undefined) for (const disconnect of subscriptions) disconnect();
+	if (subscriptions === undefined) return;
+	for (const disconnect of subscriptions) {
+		const [ok, err] = pcall(disconnect);
+		if (!ok) cleanup(s, Hook.Internal, err);
+	}
 }
 
 function finish(s: ObjectState) {
@@ -236,14 +240,12 @@ function perform(s: ObjectState, step: Step) {
 	}
 }
 
-/** Ends a stranded generation with no user hooks, after recovery itself failed. Every effect is protected. */
+/** Ends a generation with no user hooks, after its own teardown failed again. Every effect is protected. */
 function forceEnd(s: ObjectState) {
 	const fx = effects();
 	const thread = s.startThread;
 	s.startThread = undefined;
-	if (s.start === StartPhase.Running && thread !== undefined && coroutine.status(thread) === "suspended") {
-		cancelSuspended(thread);
-	}
+	if (s.start === StartPhase.Running && thread !== undefined) pcall(stopStart, s, thread);
 	if (s.ticking) {
 		s.ticking = false;
 		pcall(fx.untick, s);
@@ -269,8 +271,21 @@ export const MAX_BATCHES = 1024;
 /** @internal Reconcile rounds one drain may run. Binding that queues pairs on every round stops here. */
 export const MAX_RECONCILE_ROUNDS = 1024;
 
-/** @internal Retries after an internal error before the stranded generations are force-ended. */
+/** @internal Consecutive internal errors that fault or force-end nothing before the drain gives up on its work. */
 export const MAX_RECOVERIES = 1;
+
+/** @internal How far C5's ancestry check follows `cause` links. A longer chain counts as outside. */
+export const MAX_CAUSES = 1024;
+
+/** True when `s` made, directly or through other generations' steps, the request that `stepping` is running. */
+function causedBy(stepping: ObjectState, s: ObjectState): boolean {
+	let link = stepping.cause;
+	for (let hops = 0; link !== undefined && hops < MAX_CAUSES; hops++) {
+		if (link === s) return true;
+		link = link.cause;
+	}
+	return false;
+}
 
 type Entry = ObjectState | Batch;
 
@@ -302,6 +317,8 @@ class Reconciler {
 	private batches = 0;
 	/** The first cap failure this drain. */
 	private failure?: string;
+	/** Generations whose `transitions` or `cause` this drain set. The drain clears both when it ends. */
+	private readonly touched = new Array<ObjectState>();
 
 	isDraining(): boolean {
 		return this.depth > 0;
@@ -334,11 +351,16 @@ class Reconciler {
 		this.fresh.push(s);
 	}
 
-	/** C5: a request outside any step starts a chain, and one from another object's step continues that chain. */
+	/**
+	 * C5: a request from outside `s` restarts its count. A request is from inside when `s` made it, or when `s`
+	 * caused the step that made it, so two objects that toggle each other keep counting while a cascade does not.
+	 */
 	chain(s: ObjectState) {
 		const stepping = this.stepping;
-		if (stepping === undefined) s.transitions = 0;
-		else if (stepping !== s) s.transitions = stepping.transitions;
+		if (stepping === s) return;
+		if (stepping === undefined || !causedBy(stepping, s)) s.transitions = 0;
+		s.cause = stepping;
+		if (stepping !== undefined) this.touched.push(s);
 	}
 
 	private raise(s: ObjectState, gate: Gate) {
@@ -449,6 +471,7 @@ class Reconciler {
 	private settleStep(s: ObjectState): boolean {
 		const step = nextStep(s);
 		if (step === undefined) return false;
+		if (s.transitions === 0) this.touched.push(s);
 		s.transitions += 1;
 		if (s.transitions > MAX_TRANSITIONS && s.fault === undefined) {
 			note(s, Hook.Settle, `did not settle after ${MAX_TRANSITIONS} transitions along one chain of requests`);
@@ -489,18 +512,12 @@ class Reconciler {
 	}
 
 	/**
-	 * Empties the work after an internal error. Appends to `stranded` every generation the lost work would have
-	 * moved on: the one mid-step, and every unfinished batch's generations short of the start gate. Returns the
-	 * other object entries in the order they would have run.
+	 * Empties the work after an internal error. Returns the generations the lost work would have moved on, in
+	 * the order they would have run, with every unfinished batch's generations short of the start gate first:
+	 * those batches are gone, so nothing else would ever raise their gates.
 	 */
-	private unwind(stranded: ObjectState[], seen: Set<ObjectState>): ObjectState[] {
-		const strand = (s: ObjectState) => {
-			if (hasEnded(s) || seen.has(s)) return;
-			seen.add(s);
-			stranded.push(s);
-		};
-		if (this.stepping !== undefined) strand(this.stepping);
-		this.stepping = undefined;
+	private unwind(): LuaTuple<[stranded: ObjectState[], rest: ObjectState[]]> {
+		const stranded = new Array<ObjectState>();
 		const rest = new Array<ObjectState>();
 		const order = [...this.fresh];
 		for (let i = this.stack.size() - 1; i >= 0; i--) order.push(this.stack[i]);
@@ -512,33 +529,64 @@ class Reconciler {
 				rest.push(entry);
 				continue;
 			}
-			for (const s of entry.members) if (s.gate < Gate.Start) strand(s);
-			for (const s of entry.pending) if (s.gate < Gate.Start) strand(s);
+			for (const s of entry.members) if (s.gate < Gate.Start) stranded.push(s);
+			for (const s of entry.pending) if (s.gate < Gate.Start) stranded.push(s);
 		}
-		return rest;
+		return $tuple(stranded, rest);
 	}
 
-	/** Runs every queued change to rest. Never throws: failures reach `effects.failed` once the drain recovered. */
+	/**
+	 * Runs every queued change to rest. Never throws: failures reach `effects.failed` once the drain recovered.
+	 * After an internal error, the generation mid-step and every stranded batch generation fault with
+	 * `Internal` and tear down through their normal steps. One whose teardown fails again is force-ended. Each
+	 * retry faults or force-ends at least one generation, so recovery ends; when one would not, the drain
+	 * force-ends what is left instead of retrying forever.
+	 */
 	drain() {
 		if (this.depth > 0 || (this.stack.size() === 0 && this.fresh.size() === 0 && !this.pairsQueued)) return;
 		const errors = new Array<string>();
-		const stranded = new Array<ObjectState>();
-		const seen = new Set<ObjectState>();
+		const faulted = new Set<ObjectState>();
+		let idle = 0;
 		let [result, err] = this.enter(settle, this, undefined);
 		while (result !== CallResult.Ok) {
 			errors.push(tostring(err));
-			const before = stranded.size();
-			const rest = this.unwind(stranded, seen);
-			for (let i = before; i < stranded.size(); i++) note(stranded[i], Hook.Internal, err);
-			if (errors.size() > MAX_RECOVERIES) {
+			const culprit = this.stepping;
+			this.stepping = undefined;
+			const [stranded, rest] = this.unwind();
+			let progressed = false;
+			if (culprit !== undefined && !hasEnded(culprit)) {
+				if (faulted.has(culprit)) forceEnd(culprit);
+				else {
+					faulted.add(culprit);
+					note(culprit, Hook.Internal, err);
+				}
+				progressed = true;
+			}
+			for (const s of stranded) {
+				if (hasEnded(s) || faulted.has(s)) continue;
+				faulted.add(s);
+				note(s, Hook.Internal, err);
+				progressed = true;
+			}
+			idle = progressed ? 0 : idle + 1;
+			const left = [...stranded, ...rest].filter((s) => !hasEnded(s));
+			if (idle > MAX_RECOVERIES) {
 				this.pairsQueued = false;
-				for (const s of stranded) if (!hasEnded(s)) forceEnd(s);
+				for (const s of left) {
+					if (hasEnded(s)) continue;
+					if (!faulted.has(s)) note(s, Hook.Internal, err);
+					forceEnd(s);
+				}
 				break;
 			}
-			for (const s of stranded) if (!hasEnded(s)) this.push(s);
-			for (const s of rest) this.push(s);
+			for (const s of left) this.push(s);
 			[result, err] = this.enter(settle, this, undefined);
 		}
+		for (const s of this.touched) {
+			s.transitions = 0;
+			s.cause = undefined;
+		}
+		this.touched.clear();
 		this.rounds = 0;
 		this.batches = 0;
 		this.stepping = undefined;

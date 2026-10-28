@@ -452,10 +452,72 @@ return {
 		w.life.request(a, Want.Disabled)
 		local settled = (a.fault and a.fault.hook == Hook.Settle) or (b.fault and b.fault.hook == Hook.Settle)
 		spec.eq(settled, true, `a Settle fault: A {a.fault and a.fault.error}, B {b.fault and b.fault.error}`)
-		for _, name in { "A", "B" } do
-			spec.eq(w.count(`onDisable:{name}`), w.count(`onEnable:{name}`), `{name}'s enable intervals all closed`)
+		for _, s in { a, b } do
+			local name = s.record.name
+			local open = if s.phase == Phase.Enabled then 1 else 0
+			spec.eq(w.count(`onEnable:{name}`) - w.count(`onDisable:{name}`), open, `{name}'s open enable intervals`)
 		end
 		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
+	end,
+
+	["C5: a cascade of 40 objects that each disable the next never faults"] = function()
+		local w = world.new()
+		local nodes = {}
+		for i = 1, 40 do
+			nodes[i] = w.make(`N{i}`)
+		end
+		w.life.admit(nodes)
+		for i = 1, 39 do
+			w.scripts[`N{i}`].onDisable = function()
+				w.life.request(nodes[i + 1], Want.Disabled)
+			end
+		end
+		w.life.request(nodes[1], Want.Disabled)
+		for i, s in nodes do
+			spec.eq(s.fault, nil, `N{i} fault`)
+			spec.eq(s.phase, Phase.Disabled, `N{i} phase`)
+		end
+	end,
+
+	["C5: a start that toggles its own object across 100 yields never faults"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				for _ = 1, 100 do
+					coroutine.yield()
+					w.life.request(s, if s.want == Want.Enabled then Want.Disabled else Want.Enabled)
+				end
+			end,
+		}))
+		for _ = 1, 100 do
+			coroutine.resume(w.threads.A)
+		end
+		spec.eq(a.fault, nil, "fault")
+		spec.eq(a.phase, Phase.Enabled, "an even number of toggles ends enabled")
+		spec.eq(w.count("onDisable:A"), 50, "disables")
+	end,
+
+	["act-on 5: a subscription disconnect that throws still disconnects the rest and ends the generation once"] = function()
+		local w = world.new()
+		local a = w.boot(w.make("A"))
+		local second = false
+		a.subscriptions = {
+			function()
+				error("disconnect threw")
+			end,
+			function()
+				second = true
+			end,
+		}
+		local ok, err = pcall(w.life.request, a, Want.Destroyed)
+		spec.eq(ok, true, `no error reached the caller: {err}`)
+		spec.eq(second, true, "the second subscription disconnected")
+		spec.eq(w.count("destroyed:A"), 1, "ended once")
+		spec.eq(a.fault, nil, "the generation is not faulted")
+		spec.eq(w.diagnosed[1] and w.diagnosed[1].hook, Hook.Internal, "the disconnect failure is diagnosed")
+		spec.has(w.diagnosed[1].error, "disconnect threw", "diagnosed error")
+		spec.eq(#w.failures, 0, "no drain failure")
 	end,
 
 	["kind: a Subsystem gets construct, awake and start but no onEnable, onDisable or onDestroy"] = function()
