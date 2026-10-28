@@ -1,0 +1,14 @@
+{
+	"name": "@trioforge/crucible-sample-game",
+	"private": true,
+	"scripts": {
+		"build": "rbxtsc --type game"
+	},
+	"dependencies": {
+		"@trioforge/crucible": "workspace:*"
+	},
+	"devDependencies": {
+		"@rbxts/compiler-types": "3.0.0-types.0",
+		"@rbxts/types": "1.0.959"
+	}
+}

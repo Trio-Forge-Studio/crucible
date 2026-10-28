@@ -1,0 +1,29 @@
+{
+	"name": "@trioforge/crucible",
+	"version": "0.0.0",
+	"private": true,
+	"license": "UNLICENSED",
+	"main": "out/init.luau",
+	"types": "out/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./out/index.d.ts",
+			"default": "./out/init.luau"
+		},
+		"./server": {
+			"types": "./out/server/index.d.ts",
+			"default": "./out/server/init.luau"
+		},
+		"./client": {
+			"types": "./out/client/index.d.ts",
+			"default": "./out/client/init.luau"
+		}
+	},
+	"scripts": {
+		"build": "rbxtsc --type package"
+	},
+	"devDependencies": {
+		"@rbxts/compiler-types": "3.0.0-types.0",
+		"@rbxts/types": "1.0.959"
+	}
+}

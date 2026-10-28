@@ -1,0 +1,12 @@
+{
+	"extends": "../../tsconfig.rbxts.json",
+	"compilerOptions": {
+		"typeRoots": ["node_modules/@rbxts", "node_modules/@trioforge"],
+		"types": ["compiler-types", "types"],
+		"rootDir": "src",
+		"outDir": "out",
+		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
+		"declaration": false
+	},
+	"include": ["src"]
+}

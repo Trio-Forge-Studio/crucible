@@ -1,0 +1,4 @@
+{
+	"main": "../out/client/init.luau",
+	"types": "../out/client/index.d.ts"
+}

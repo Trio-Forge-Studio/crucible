@@ -1,0 +1,18 @@
+{
+	"name": "crucible-workspace",
+	"private": true,
+	"scripts": {
+		"build": "pnpm --filter @trioforge/crucible build && pnpm --filter @trioforge/crucible-sample-game build && node -e \"require('node:fs').mkdirSync('build', { recursive: true })\" && rojo build examples/sample-game/default.project.json -o build/sample-game.rbxl",
+		"test": "pnpm run build && lune run test",
+		"check": "vp check && stylua --check test .lune && selene test .lune && pnpm run test",
+		"fmt": "vp fmt && stylua test .lune",
+		"prepare": "vp config"
+	},
+	"devDependencies": {
+		"@trioforge/tooling": "0.1.0",
+		"roblox-ts": "3.0.0",
+		"typescript": "5.5.3",
+		"vite-plus": "1.3.0"
+	},
+	"packageManager": "pnpm@12.15.0"
+}
