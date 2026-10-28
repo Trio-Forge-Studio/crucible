@@ -1255,3 +1255,120 @@ export abstract class Openable<Tag extends string> extends CrucibleBehaviour<Tag
 		fs.rmSync(base);
 	}
 });
+
+const sideHarness = require("./side-harness.cjs");
+for (const c of require("./fixtures/side-cases.cjs")) {
+	test(`T2 package sides f4 ${c.name}`, () => {
+		const r = sideHarness.run(c);
+		assert.equal(r.thrown, undefined);
+		assert.deepEqual(
+			r.diags.map((d) => [d.code, d.line, d.file, d.category]).sort(),
+			c.expect.map(([code, line, file]) => [code, line, file, 1]).sort(),
+		);
+	});
+}
+
+test("T2 package sides layouts A B C D and f5 configurations", () => {
+	const H = 'import { Subsystem } from "@trioforge/crucible";\n';
+	const files = {
+		"src/server/combat/main.ts": H + "export class S extends Subsystem { protected override onShutdown() {} }",
+		"src/server/combat/r.ts": H + "export class R extends Subsystem { protected override preRender() {} }",
+	};
+	for (const [name, configPath, options, override] of [
+		["A", "configs/tsconfig.json", { rootDir: "src" }, {}],
+		["B", "src/server/tsconfig.json", { rootDir: "." }, {}],
+		["C", "tsconfig.json", { rootDir: null }, { configFilePath: undefined }],
+		["D rootDir", "tsconfig.json", { rootDir: "src/server/combat" }, {}],
+		["D rootDirs", "tsconfig.json", { rootDir: null, rootDirs: ["src/server/combat"] }, {}],
+		["f5 src", "tsconfig.json", { rootDir: "src" }, {}],
+		["f5 server", "tsconfig.json", { rootDir: "src/server" }, {}],
+		["f5 rootDirs", "tsconfig.json", { rootDir: null, rootDirs: ["src/server"] }, {}],
+	]) {
+		const dir = sideHarness.setup({ ancestor: "plain", files, compilerOptions: options });
+		const original = path.join(dir, "tsconfig.json");
+		if (name === "A") {
+			fs.renameSync(original, path.join(dir, "tsconfig.base.json"));
+			fs.mkdirSync(path.join(dir, "configs"));
+			fs.writeFileSync(
+				path.join(dir, configPath),
+				JSON.stringify({ extends: "../tsconfig.base.json", include: ["../src"] }),
+			);
+		} else if (name === "B") {
+			const config = JSON.parse(fs.readFileSync(original, "utf8"));
+			config.include = ["."];
+			config.compilerOptions.typeRoots = ["../../node_modules/@rbxts", "../../node_modules/@trioforge"];
+			fs.writeFileSync(path.join(dir, configPath), JSON.stringify(config));
+			fs.unlinkSync(original);
+		}
+		const r = sideHarness.transformAt(dir, configPath, override);
+		assert.deepEqual(r.diags, ["CRU011@src/server/combat/r.ts:2"], name);
+	}
+});
+
+test("T2 package sides exclude package folder and its parent", () => {
+	for (const folder of ["client", "server", "shared"]) {
+		const dir = sideHarness.setup({
+			ancestor: folder,
+			files: {
+				"src/unmarked.ts":
+					'import { Subsystem } from "@trioforge/crucible";\nexport class U extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
+			},
+		});
+		for (const root of [dir, path.join(dir, "src")]) {
+			fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "nested-game" }));
+			assert.deepEqual(sideHarness.transformAt(dir, "tsconfig.json").diags, [
+				"CRU011@src/unmarked.ts:2",
+				"CRU016@src/unmarked.ts:2",
+			]);
+		}
+	}
+});
+
+test("T2 package sides exclude a side-named package root", () => {
+	for (const folder of ["client", "server", "shared"]) {
+		const file = `src/${folder}/main.ts`;
+		const dir = sideHarness.setup({
+			ancestor: "plain",
+			files: {
+				[file]: 'import { Subsystem } from "@trioforge/crucible";\nexport class U extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
+			},
+		});
+		fs.writeFileSync(path.join(dir, "src", folder, "package.json"), JSON.stringify({ name: "nested" }));
+		assert.deepEqual(sideHarness.transformAt(dir, "tsconfig.json").diags, [`CRU011@${file}:2`, `CRU016@${file}:2`]);
+	}
+});
+
+test("T2 package sides without a package search the whole path", () => {
+	const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "crucible-side-"));
+	try {
+		const game = sideHarness.setup({ ancestor: "plain", files: { "src/empty.ts": "export {};" } });
+		fs.symlinkSync(path.join(game, "node_modules"), path.join(dir, "node_modules"), "junction");
+		const file = path.join(dir, "server/combat/main.ts");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(
+			file,
+			'import { Subsystem } from "@trioforge/crucible";\nexport abstract class S extends Subsystem { protected override onShutdown() {} protected override preRender() {} }',
+		);
+		const config = ts.getParsedCommandLineOfConfigFile(
+			path.join(game, "tsconfig.json"),
+			{},
+			{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
+		);
+		const program = ts.createProgram([file], {
+			...config.options,
+			rootDir: path.dirname(file),
+			configFilePath: undefined,
+		});
+		const diagnostics = [];
+		const result = ts.transform(program.getSourceFile(file), [
+			transform(program, {}, { ts, addDiagnostic: (d) => diagnostics.push(d) }),
+		]);
+		result.dispose();
+		assert.deepEqual(
+			diagnostics.map((d) => [d.code, d.file.fileName, d.file.getLineAndCharacterOfPosition(d.start).line]),
+			[[90011, file.replaceAll("\\", "/"), 1]],
+		);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
