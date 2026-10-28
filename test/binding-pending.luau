@@ -149,6 +149,8 @@ do
 			br.bound[target] == during
 		)
 		spec.eq(seen, nil, "hook sees nothing")
+		spec.eq(during ~= nil, true, "hook get queues the parked pair in the same drain")
+		spec.eq(w.engine.logged("get pending"), 1, "parked pair warns once")
 		spec.eq(br.bound[target] ~= nil, true, "bound")
 	end)
 
@@ -752,10 +754,12 @@ do
 		w.boot()
 		w.engine.flush()
 		local before = br.bound[r] ~= nil
+		spec.eq(before, true, "pair starts bound")
 		allow = false
 		w.behaviour:refresh(r)
 		w.engine.flush()
 		local after = br.bound[r] ~= nil
+		spec.eq(after, false, "reevaluation unbinds the pair")
 		A:get(w.tagged("I", "A"))
 		local warned = w.engine.logged("get pending")
 		w.engine.flush()
@@ -785,9 +789,11 @@ do
 		w.boot()
 		w.engine.flush()
 		local before = br.bound[r] ~= nil
+		spec.eq(before, true, "pair starts bound")
 		w.engine.move(r, "ServerStorage")
 		w.engine.flush()
 		local after = br.bound[r] ~= nil
+		spec.eq(after, false, "reevaluation unbinds the pair")
 		A:get(w.tagged("I", "A"))
 		local warned = w.engine.logged("get pending")
 		w.engine.flush()

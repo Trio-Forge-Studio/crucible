@@ -29,6 +29,7 @@ let queued = new Array<Pair>();
 let scheduled = false;
 const getWarnings = new Set<string>();
 let scopeRejected = false;
+let scopeTarget: Instance | undefined;
 
 function port(): EnginePort {
 	return installed ?? error("Crucible binding used before boot");
@@ -40,7 +41,7 @@ export function useEngine(engine: EnginePort) {
 /** @internal */
 export function defaultAccepts(instance: Instance): boolean {
 	const ok = port().bindingScope(instance);
-	if (!ok) scopeRejected = true;
+	if (!ok && instance === scopeTarget) scopeRejected = true;
 	return ok;
 }
 
@@ -206,8 +207,12 @@ function evaluate(pair: Pair): ObjectState | undefined {
 			request(have, Want.Destroyed);
 			return undefined;
 		}
+		scopeRejected = false;
+		scopeTarget = instance;
+		const ok = accepted(pair, have);
+		if (!ok) pair.rejected = scopeRejected ? "scope" : "accepts";
 		if (
-			!accepted(pair, have) ||
+			!ok ||
 			pair.reset ||
 			!engine.inWorld(instance) ||
 			!engine.hasTag(instance, record.tag) ||
@@ -256,6 +261,7 @@ function evaluate(pair: Pair): ObjectState | undefined {
 		return undefined;
 	}
 	scopeRejected = false;
+	scopeTarget = instance;
 	if (!accepted(pair)) {
 		pair.rejected = scopeRejected ? "scope" : "accepts";
 		return undefined;

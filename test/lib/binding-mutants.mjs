@@ -287,6 +287,34 @@ const mutants = [
 		"",
 		"binding rereads tag changes",
 	],
+	[
+		"W3 scope flag not reset before accepts",
+		binding,
+		"\tscopeRejected = false;\n\tscopeTarget = instance;\n\tif (!accepted(pair)) {",
+		"\tscopeTarget = instance;\n\tif (!accepted(pair)) {",
+		"Z5b scope rejection at boot",
+	],
+	[
+		"W4 default accepts raises scope flag in scope",
+		binding,
+		"if (!ok && instance === scopeTarget) scopeRejected = true;",
+		"if (instance === scopeTarget) scopeRejected = true;",
+		"Z4 user accepts calls default scope",
+	],
+	[
+		"R5 bound branch drops rejection reason",
+		binding,
+		'if (!ok) pair.rejected = scopeRejected ? "scope" : "accepts";',
+		"",
+		"Z1 bound pair re-evaluated",
+	],
+	[
+		"R5 default scope flag ignores target",
+		binding,
+		"if (!ok && instance === scopeTarget) scopeRejected = true;",
+		"if (!ok) scopeRejected = true;",
+		"Z3 user accepts consults default scope",
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });
@@ -330,7 +358,10 @@ try {
 		assert.equal(compiled.status, 0, name + " build failed\n" + compiled.stdout + compiled.stderr);
 		const tested = run("lune", ["run", "test", target]);
 		assert.notEqual(tested.status, 0, `${name} survived\n${tested.stdout}${tested.stderr}`);
-		assert.ok((tested.stdout + tested.stderr).includes("FAIL binding.luau"), `${name} must fail its named spec`);
+		assert.ok(
+			(tested.stdout + tested.stderr).match(/FAIL binding(?:-pending)?\.luau/),
+			`${name} must fail its named spec`,
+		);
 		console.log(`KILLED ${name} | ${target} | build 0, spec ${tested.status}`);
 		completed++;
 		fs.writeFileSync(path.join(scratch, file), original);
