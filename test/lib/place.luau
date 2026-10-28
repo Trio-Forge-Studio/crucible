@@ -20,6 +20,9 @@ return function(client: boolean?)
 		IsClient = function()
 			return client == true
 		end,
+		IsServer = function()
+			return client ~= true
+		end,
 	}
 	local game = {
 		GetService = function(_self, name: string)

@@ -38,7 +38,7 @@ end
 
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
 -- that builds a runtime starts clean.
-local function graph()
+local function graph(defaults)
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
 	local TS = {}
@@ -57,6 +57,9 @@ local function graph()
 	function load(path: string, globals: { [string]: any }?): any
 		if loaded[path] == nil then
 			local env: { [string]: any } = { script = node(path), _G = G, task = task }
+			for key, value in defaults or {} do
+				env[key] = value
+			end
 			for key, value in globals or {} do
 				env[key] = value
 			end
@@ -88,8 +91,8 @@ function spec.fresh(relative: string, globals: { [string]: any }?): any
 end
 
 -- A fresh graph to load several modules that must share state, such as lifecycle and its runner.
-function spec.runtime()
-	return graph()
+function spec.runtime(defaults)
+	return graph(defaults)
 end
 
 function spec.eq(actual: any, expected: any, label: string)
