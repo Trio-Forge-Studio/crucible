@@ -211,6 +211,43 @@ const mutants = [
 		"rbxtsc inferred attribute aliases resolve outside the emitting file scope",
 	],
 
+	[
+		"cru005-constructor-type",
+		"index.cjs",
+		"checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)",
+		"false",
+		"T2 exact-line",
+	],
+	[
+		"cru012-no-bases",
+		"index.cjs",
+		"resolvedBases(type).some((base) => promise(base, seen))",
+		"false",
+		"T2 exact-line",
+	],
+	[
+		"cru014-no-inherited-implements",
+		"index.cjs",
+		"for (const target of clause.types)\n\t\t\t\t\t\t\tif (genericTarget(checker.getTypeAtLocation(target), mode, seen)) return true;",
+		"for (const target of []) return true;",
+		"T2 exact-line",
+	],
+	[
+		"cru005-typeof-strict",
+		"index.cjs",
+		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t)",
+		"false",
+		"T2 exact-line",
+	],
+	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
+	[
+		"side-absolute-path",
+		"index.cjs",
+		"path\n\t\t\t\t.relative(sideRoot, node.getSourceFile().fileName)",
+		"node.getSourceFile().fileName",
+		"T2 folder sides ignore directories above the common source root",
+	],
+
 	...["CRU001", "CRU002", "CRU003", "CRU006", "CRU007", "CRU008", "CRU010", "CRU015"].map((code) => [
 		code,
 		"diagnostics.cjs",

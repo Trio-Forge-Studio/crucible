@@ -473,10 +473,11 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				resolvedBases(type).some((base) => promise(base, seen))
 			);
 		};
+		const sideRoot = sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]);
 		const side = (node) =>
-			node
-				.getSourceFile()
-				.fileName.replaceAll("\\", "/")
+			path
+				.relative(sideRoot, node.getSourceFile().fileName)
+				.replaceAll("\\", "/")
 				.split("/")
 				.slice(0, -1)
 				.reverse()
@@ -595,11 +596,13 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 						!modifiers(parent, ts.ModifierFlags.Abstract)
 					)
 						inside = true;
+				const symbol = target?.getSymbol();
 				if (
 					inside ||
-					!target
-						?.getSymbol()
-						?.declarations?.some((decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl))
+					!symbol?.declarations?.some(
+						(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),
+					) ||
+					checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)
 				)
 					report(
 						node,
