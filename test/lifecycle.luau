@@ -431,10 +431,10 @@ return {
 		spec.eq(w.count("onEnable:W"), 501, "the watcher's enables")
 	end,
 
-	["C5: two objects that toggle each other fault with Settle"] = function()
+	["C5 gap: two objects that toggle each other stop at the chained-request cap with a logged failure"] = function()
 		local w = world.new()
 		local a, b = w.boot(w.make("A"), w.make("B"))
-		local guard = guardedEnables(500)
+		local guard = guardedEnables(100000)
 		w.scripts.A.onDisable = function()
 			w.life.request(b, Want.Disabled)
 		end
@@ -452,6 +452,8 @@ return {
 		w.life.request(a, Want.Disabled)
 		local settled = (a.fault and a.fault.hook == Hook.Settle) or (b.fault and b.fault.hook == Hook.Settle)
 		spec.eq(settled, true, `a Settle fault: A {a.fault and a.fault.error}, B {b.fault and b.fault.error}`)
+		spec.eq(#w.failures, 1, "failures reported")
+		spec.has(w.failures[1], "65536 requests", "the failure names the cap")
 		for _, s in { a, b } do
 			local name = s.record.name
 			local open = if s.phase == Phase.Enabled then 1 else 0
@@ -460,10 +462,10 @@ return {
 		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
 	end,
 
-	["C5: a three-object cycle whose requests coalesce on queued objects faults with Settle"] = function()
+	["C5 gap: a three-object cycle whose requests coalesce on queued objects stops at the chained-request cap"] = function()
 		local w = world.new()
 		local a, b, c = w.boot(w.make("A"), w.make("B"), w.make("C"))
-		local guard = guardedEnables(3000)
+		local guard = guardedEnables(200000)
 		local function toggle(s)
 			w.life.request(s, if s.want == Want.Enabled then Want.Disabled else Want.Enabled)
 		end
@@ -504,7 +506,7 @@ return {
 		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
 	end,
 
-	["C5: a ring of 1,100 objects that each toggle the next faults with Settle"] = function()
+	["C5 gap: a ring of 1,100 objects that each toggle the next stops at the chained-request cap"] = function()
 		local w = world.new()
 		local nodes = {}
 		for i = 1, 1100 do
@@ -590,6 +592,66 @@ return {
 		spec.eq(w.count("onDestroy:A"), 1, "A tore down once")
 		for i = 1, 200 do
 			spec.eq(nodes[i].fault, nil, `N{i} fault`)
+		end
+	end,
+
+	["C5: 60 cascading sources that each toggle the same 60 targets never fault them"] = function()
+		local w = world.new()
+		local sources, targets = {}, {}
+		for i = 1, 60 do
+			sources[i] = w.make(`S{i}`)
+			targets[i] = w.make(`T{i}`)
+		end
+		w.life.admit(sources)
+		w.life.admit(targets)
+		for i = 1, 60 do
+			w.scripts[`S{i}`].onDisable = function()
+				for _, t in targets do
+					w.life.request(t, if t.want == Want.Enabled then Want.Disabled else Want.Enabled)
+				end
+				if i < 60 then
+					w.life.request(sources[i + 1], Want.Disabled)
+				end
+			end
+		end
+		w.life.request(sources[1], Want.Disabled)
+		for _, list in { sources, targets } do
+			for _, n in list do
+				spec.eq(n.fault, nil, `{n.record.name} fault`)
+			end
+		end
+		spec.eq(sources[60].phase, Phase.Disabled, "the cascade reached its end")
+		spec.eq(#w.failures, 0, "no drain failure")
+	end,
+
+	["C5 gap: the chained-request cap faults a member of the cycle, never a target that only receives requests"] = function()
+		local w = world.new()
+		local a, b = w.boot(w.make("A"), w.make("B"))
+		local passive = {}
+		for i = 1, 10 do
+			passive[i] = w.make(`P{i}`)
+		end
+		w.life.admit(passive)
+		local guard = guardedEnables(200000)
+		local function toggle(s)
+			w.life.request(s, if s.want == Want.Enabled then Want.Disabled else Want.Enabled)
+		end
+		local function act(other)
+			return function()
+				guard()
+				for _, p in passive do
+					toggle(p)
+				end
+				toggle(other)
+			end
+		end
+		w.scripts.A.onEnable, w.scripts.A.onDisable = act(b), act(b)
+		w.scripts.B.onEnable, w.scripts.B.onDisable = act(a), act(a)
+		w.life.request(a, Want.Disabled)
+		local members = (a.fault and a.fault.hook == Hook.Settle) or (b.fault and b.fault.hook == Hook.Settle)
+		spec.eq(members, true, "a cycle member faulted with Settle")
+		for _, p in passive do
+			spec.eq(p.fault, nil, `{p.record.name} fault`)
 		end
 	end,
 

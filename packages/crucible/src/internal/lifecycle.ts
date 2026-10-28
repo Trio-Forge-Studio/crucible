@@ -1,5 +1,5 @@
 import { call, CallResult, disown, own, ownerOf } from "./runner";
-import type { Batch, CausalRoot, LifeEffects, LifeObject, LifeRecord, LifeState, ObjectState } from "./state";
+import type { Batch, LifeEffects, LifeObject, LifeRecord, LifeState, ObjectState } from "./state";
 import { Gate, Hook, Kind, Phase, StartPhase, Step, Sweep, Want, Work } from "./state";
 
 /**
@@ -268,6 +268,13 @@ export const MAX_AWAKE_WAVES = 1024;
 /** @internal Batches one drain may start. A chain of objects creating objects in `start` stops here. */
 export const MAX_BATCHES = 1024;
 
+/**
+ * @internal
+ * Requests that steps may make in one drain. C5 bounds an object that undoes itself, not objects that undo each
+ * other; this cap ends such a cycle. Like the batch cap it is a failure, and its value waits on a Studio measurement.
+ */
+export const MAX_CHAINED_REQUESTS = 65_536;
+
 /** @internal Reconcile rounds one drain may run. Binding that queues pairs on every round stops here. */
 export const MAX_RECONCILE_ROUNDS = 1024;
 
@@ -302,6 +309,7 @@ class Reconciler {
 	private pairsQueued = false;
 	private rounds = 0;
 	private batches = 0;
+	private requests = 0;
 	/** The first cap failure this drain. */
 	private failure?: string;
 
@@ -336,28 +344,22 @@ class Reconciler {
 		this.fresh.push(s);
 	}
 
-	/**
-	 * C5 restarts `s`'s count on a request made from outside it, which bounds an object that undoes itself.
-	 * Requests made outside any step start a new causal root, and a step's requests carry its root, whose budget
-	 * bounds generations that undo each other.
-	 */
+	/** C5: a request made from outside `s` restarts its count; one made by its own step does not. */
 	chain(s: ObjectState) {
 		const stepping = this.stepping;
-		if (stepping === s) return;
-		s.transitions = 0;
-		this.rooted(s, stepping?.root ?? { steps: 0, reached: 0 });
-	}
-
-	private rooted(s: ObjectState, root: CausalRoot) {
-		if (s.root === root) return;
-		s.root = root;
-		root.reached += 1;
+		if (stepping !== s) s.transitions = 0;
+		if (stepping === undefined) return;
+		this.requests += 1;
+		if (this.requests <= MAX_CHAINED_REQUESTS || stepping.fault !== undefined) return;
+		// A cycle's members keep requesting while a passive target never does, so the requester is the one to end.
+		this.requests = 0;
+		const message = `Crucible: objects kept changing each other through ${MAX_CHAINED_REQUESTS} requests in one drain`;
+		this.fail(message);
+		note(stepping, Hook.Settle, message);
 	}
 
 	private raise(s: ObjectState, gate: Gate) {
 		if (s.gate < gate) s.gate = gate;
-		s.transitions = 0;
-		this.rooted(s, { steps: 0, reached: 0 });
 		this.push(s);
 	}
 
@@ -465,8 +467,6 @@ class Reconciler {
 		const step = nextStep(s);
 		if (step === undefined) return false;
 		s.transitions += 1;
-		const root = s.root;
-		if (root !== undefined) root.steps += 1;
 		if (s.fault === undefined) {
 			if (s.transitions > MAX_TRANSITIONS) {
 				note(
@@ -474,12 +474,6 @@ class Reconciler {
 					Hook.Settle,
 					`did not settle after ${MAX_TRANSITIONS} transitions since a request from outside it`,
 				);
-				return true;
-			}
-			if (root !== undefined && root.steps > MAX_TRANSITIONS * root.reached) {
-				// Restarting the budget faults one generation of the cycle; its teardown ends the cycle.
-				root.steps = 0;
-				note(s, Hook.Settle, `objects kept changing each other: over ${MAX_TRANSITIONS} steps per object`);
 				return true;
 			}
 		}
@@ -590,6 +584,7 @@ class Reconciler {
 		}
 		this.rounds = 0;
 		this.batches = 0;
+		this.requests = 0;
 		this.stepping = undefined;
 		const failure = this.failure;
 		this.failure = undefined;
