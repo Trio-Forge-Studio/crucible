@@ -177,12 +177,12 @@ test("registration contract, inherited deps, tags, attributes, provides and symb
 	assert.deepEqual(records.Door.attributes.offset.check, { optional: "vector3" });
 	assert.deepEqual(records.Door.attributes.open.check, { optional: "boolean" });
 	assert.deepEqual(records.Door.attributes.maybeOpen.check, { optional: "boolean" });
-	assert.match(output, /__crucible.attribute\(this, "fleetId"\)/);
-	assert.match(output, /__crucible.attribute\(this, "maxSpeed", 30\)/);
-	assert.match(output, /__crucible.attribute\(this, "label", undefined\)/);
+	assert.match(output, /__crucible.attribute<string>\(this, "fleetId"\)/);
+	assert.match(output, /__crucible.attribute<number>\(this, "maxSpeed", 30\)/);
+	assert.match(output, /__crucible.attribute<string \| undefined>\(this, "label", undefined\)/);
 	assert.match(output, /__crucible.resolve<Store>\("fixture-game\/server\/main:Store"\)/);
 	assert.match(output, /__crucible.resolveAll<Child>\("fixture-game\/server\/main:Child"\)/);
-	assert.match(output, /crucible-path:ServerScriptService\/TS\/\*\*\/\*\{Service,Behaviour\}/);
+	assert.match(output, /"crucible-path:ServerScriptService\/TS\/\*\*\/\*\{Service,Behaviour\}"/);
 });
 
 test("diagnostic negative probes and clean controls use exact source lines", () => {
@@ -228,6 +228,7 @@ test("CRU001 rejects every noninjectable constructor shape and accepts abstract 
 	const header = 'import { Subsystem, CrucibleBehaviour, type All } from "@trioforge/crucible";\n';
 	for (const parameter of [
 		"value: number",
+		"value: typeof Dependency",
 		"value: Instance",
 		"value: Model | BasePart",
 		"value?: Dependency",
@@ -239,7 +240,7 @@ test("CRU001 rejects every noninjectable constructor shape and accepts abstract 
 	]) {
 		const text =
 			header +
-			'interface Dependency {}\ninterface Generic<T> { value: T; }\nclass Concrete extends CrucibleBehaviour<"Concrete"> {}\nexport class Bad extends Subsystem { constructor(' +
+			'declare class Dependency {}\ninterface Generic<T> { value: T; }\nclass Concrete extends CrucibleBehaviour<"Concrete"> {}\nexport class Bad extends Subsystem { constructor(' +
 			parameter +
 			") { super(); } }";
 		assert.ok(
@@ -314,7 +315,7 @@ test("CRU006 rejects dynamic load shapes and preserves string literal paths with
 		diagnostics.map((d) => d.messageText),
 		[],
 	);
-	assert.match(output, /crucible-path:ServerScriptService\/TS\/main/);
+	assert.match(output, /"crucible-path:ServerScriptService\/TS\/main"/);
 	const beforeLoad = run(
 		header + 'const options = {fixedRate: 30}; boot({...options, load: ["src/server/**/*.ts"]});',
 	);
@@ -357,6 +358,47 @@ test("CRU010 rejects global provides and attributes in addition to constructor d
 			run(header + text).diagnostics.some((d) => d.messageText.startsWith("CRU010")),
 			text,
 		);
+});
+
+test("CRU010 rejects global primitive aliases on the attribute field line", () => {
+	const { diagnostics } = run(
+		[
+			'import { attribute, CrucibleBehaviour } from "@trioforge/crucible";',
+			"declare global {",
+			" type GlobalSpeed = number;",
+			"}",
+			"",
+			'export class Van extends CrucibleBehaviour<"Van"> {',
+			" readonly speed = attribute<GlobalSpeed>();",
+			"}",
+		].join("\n"),
+	);
+	const found = diagnostics.filter((d) => d.messageText.startsWith("CRU010"));
+	assert.equal(found.length, 1);
+	assert.equal(found[0].file.getLineAndCharacterOfPosition(found[0].start).line + 1, 7);
+});
+
+test("ambient classes emit no registration while concrete classes do", () => {
+	const { output, diagnostics } = run(
+		'import { Subsystem } from "@trioforge/crucible"; export declare class Ghost extends Subsystem {} export class Real extends Subsystem {}',
+	);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.doesNotMatch(output, /defineClass\(Ghost/);
+	assert.match(output, /defineClass\(Real/);
+});
+
+test("mixed attribute unions use a union check", () => {
+	const { output, diagnostics } = run(
+		'import { attribute, CrucibleBehaviour } from "@trioforge/crucible"; export class Mixed extends CrucibleBehaviour<"Mixed"> { readonly value = attribute<string | number>(); }',
+	);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(output, /__crucible.t.union\(__crucible.t.string, __crucible.t.number\)/);
 });
 
 test("API identity ignores local lookalikes and follows namespace and renamed imports", () => {
@@ -436,7 +478,7 @@ test("review regressions cover alias macros, abstract-only imports, empty files 
 		aliased.diagnostics.map((d) => d.messageText),
 		[],
 	);
-	assert.match(aliased.output, /__crucible.attribute\(this, "x", 1\)/);
+	assert.match(aliased.output, /__crucible.attribute<number>\(this, "x", 1\)/);
 	assert.match(aliased.output, /"x":/);
 	assert.ok(
 		run(header + "const a = attribute; const bad = a(1);").diagnostics.some((d) =>
@@ -981,4 +1023,84 @@ test("T2 K1 constructor collections share generic validation", () => {
 		result.diagnostics.map((d) => d.messageText),
 		[],
 	);
+});
+
+test("rbxtsc Van attribute reads retain types and checks use dot calls", () => {
+	const alias = path.join(game, "src/server/attribute-types.ts");
+	write(alias, "export type Tint = Color3;");
+	write(
+		main,
+		`import { attribute, CrucibleBehaviour } from "@trioforge/crucible";
+import type { Tint } from "./attribute-types";
+export class Van extends CrucibleBehaviour<"Van", Model> {
+ readonly fleetId = attribute<string>();
+ readonly maxSpeed = attribute(30);
+ readonly label = attribute<string | undefined>(undefined);
+ readonly tint: Tint = attribute(new Color3());
+ readonly accent = attribute<Tint>(new Color3());
+ readonly offset = attribute(new Vector3());
+ readonly mode = attribute<"walk" | "drive">("walk");
+ protected override fixedUpdate(step: number) {
+  const root = this.instance.PrimaryPart;
+  if (root === undefined) return;
+  const velocity = root.AssemblyLinearVelocity;
+  if (velocity.Magnitude > this.maxSpeed) root.AssemblyLinearVelocity = velocity.Unit.mul(this.maxSpeed);
+  print(this.fleetId + "-", this.fleetId.size(), this.fleetId.sub(1, 2), this.label ?? "none", this.tint.R, this.accent.R, this.offset.Magnitude, step);
+ }
+}`,
+	);
+	try {
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		const result = spawnSync(
+			process.execPath,
+			[
+				path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"),
+				"-p",
+				path.join(game, "tsconfig.json"),
+				"--writeTransformedFiles",
+			],
+			{ cwd: game, encoding: "utf8" },
+		);
+		assert.equal(result.status, 0, result.stdout + result.stderr);
+		const luau = fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8");
+		assert.match(luau, /__crucible.t.optional\(/);
+		assert.match(luau, /__crucible.t.literal\(/);
+		assert.match(luau, /__crucible.t.union\(/);
+		assert.doesNotMatch(luau, /__crucible.t:(?:optional|literal|union)\(/);
+	} finally {
+		fs.rmSync(alias);
+	}
+});
+
+test("rbxtsc abstract attributes compile across base and concrete modules", () => {
+	const base = path.join(game, "src/server/base.ts");
+	write(
+		base,
+		`import { attribute, CrucibleBehaviour } from "@trioforge/crucible";
+export abstract class Openable<Tag extends string> extends CrucibleBehaviour<Tag, Model> {
+ readonly closedYaw = attribute(0);
+ readonly key = attribute<string>();
+}`,
+	);
+	write(main, 'import { Openable } from "./base"; export class Door extends Openable<"Door"> {}');
+	try {
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		const result = spawnSync(
+			process.execPath,
+			[path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"), "-p", path.join(game, "tsconfig.json")],
+			{ cwd: game, encoding: "utf8" },
+		);
+		assert.equal(result.status, 0, result.stdout + result.stderr);
+		const baseLuau = fs.readFileSync(path.join(game, "out/server/base.luau"), "utf8");
+		const doorLuau = fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8");
+		assert.match(baseLuau, /local __crucible =/);
+		assert.match(baseLuau, /__crucible.attribute\(self, "closedYaw", 0\)/);
+		assert.match(baseLuau, /__crucible.attribute\(self, "key"\)/);
+		assert.doesNotMatch(baseLuau, /defineClass\(/);
+		assert.match(doorLuau, /defineClass\(Door/);
+		assert.match(doorLuau, /name = "ClosedYaw"/);
+		assert.match(doorLuau, /name = "Key"/);
+	} finally {
+		fs.rmSync(base);
+	}
 });

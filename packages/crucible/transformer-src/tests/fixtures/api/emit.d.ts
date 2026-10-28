@@ -23,14 +23,14 @@ export type EmittedClass =
 export declare function defineClass(klass: new (...args: never[]) => CrucibleObject, emitted: EmittedClass): void;
 export declare function resolve<T extends object>(id: string): T;
 export declare function resolveAll<T extends object>(id: string): All<T>;
-export declare function attribute(object: object, field: string, fallback?: unknown): any;
+export declare function attribute<T>(object: object, field: string, fallback?: T): T;
 export declare const t: {
 	readonly string: Check;
 	readonly number: Check;
 	readonly boolean: Check;
 	readonly vector3: Check;
 	readonly color3: Check;
-	literal(expected: string | number | boolean): Check;
-	optional(check: Check): Check;
-	union(...checks: Check[]): Check;
+	readonly literal: (expected: string | number | boolean) => Check;
+	readonly optional: (check: Check) => Check;
+	readonly union: (...checks: Check[]) => Check;
 };
