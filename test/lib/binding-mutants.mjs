@@ -10,6 +10,29 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-binding-mutants-
 const binding = "packages/crucible/src/internal/binding.ts";
 const behaviour = "packages/crucible/src/crucible-behaviour.ts";
 const mutants = [
+	["G1 pending ignores rejection", binding, "!pair.rejected &&", "true &&", "F1 residual:"],
+	[
+		"N1 parked flag not cleared after restore",
+		binding,
+		"for (const other of held) other.parked = false;",
+		"",
+		"PN1 restored parked pair",
+	],
+	["N2 pending ignores suppression", binding, "!record.suppressed.has(instance))", "true)", "PN2 hook get"],
+	[
+		"N4 restore re-adds unparked pairs",
+		binding,
+		"held.filter((other) => other.parked)",
+		"held",
+		"PN4 refreshed parked pair",
+	],
+	[
+		"N5 queue leaves parked flag set",
+		binding,
+		"\t\tpair.parked = false;\n\t\tpair.queued = false;",
+		"\t\tpair.queued = false;",
+		"PN4 refreshed parked pair",
+	],
 	[
 		"V1 Roblox StarterPlayer exclusion",
 		"packages/crucible/src/internal/roblox-port.ts",
@@ -36,7 +59,7 @@ const mutants = [
 	[
 		"F1 false pending warning",
 		binding,
-		"state !== undefined\n\t\t\t\t? !isLive(state)\n\t\t\t\t: port().inWorld(instance) && port().hasTag(instance, record.tag) && !record.suppressed.has(instance)",
+		"state !== undefined\n\t\t\t\t? !isLive(state)\n\t\t\t\t: pair.queued ||\n\t\t\t\t\t(!pair.rejected &&\n\t\t\t\t\t\tport().inWorld(instance) &&\n\t\t\t\t\t\tport().hasTag(instance, record.tag) &&\n\t\t\t\t\t\t!record.suppressed.has(instance))",
 		"state === undefined || !isLive(state)",
 		"untagged instance does not warn pending",
 	],

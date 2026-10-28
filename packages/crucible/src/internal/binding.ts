@@ -14,6 +14,7 @@ interface Pair {
 	parked: boolean;
 	running: boolean;
 	reset: boolean;
+	rejected: boolean;
 	wrongClass: boolean;
 	readonly warnings: Map<string, string>;
 }
@@ -76,6 +77,7 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 			parked: false,
 			running: false,
 			reset: false,
+			rejected: false,
 			wrongClass: wrongClasses.get(record)?.has(instance) ?? false,
 			warnings: new Map(),
 		};
@@ -85,6 +87,7 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 }
 function queue(pair: Pair) {
 	if (pair.running) return;
+	pair.rejected = false;
 	if (pair.parked) {
 		pair.parked = false;
 		pair.queued = false;
@@ -220,6 +223,7 @@ function evaluate(pair: Pair): ObjectState | undefined {
 	connect(pair);
 	if (record.suppressed.has(instance)) return undefined;
 	if (!record.instanceClasses.some((name) => engine.isA(instance, name))) {
+		pair.rejected = true;
 		if (!pair.wrongClass) {
 			pair.wrongClass = true;
 			let warned = wrongClasses.get(record);
@@ -243,7 +247,10 @@ function evaluate(pair: Pair): ObjectState | undefined {
 		if (!ok) valid = false;
 		attributes[field] = value;
 	}
-	if (!valid || !accepted(pair)) return undefined;
+	if (!valid || !accepted(pair)) {
+		pair.rejected = true;
+		return undefined;
+	}
 	if (
 		pair.reset ||
 		!engine.inWorld(instance) ||
@@ -315,13 +322,16 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 	const record = recordOf(klass);
 	if (record === undefined || record.kind !== Kind.Behaviour) return undefined;
 	const pair = pairFor(record, instance);
-	queue(pair);
 	if (isDraining()) {
 		const state = record.bound.get(instance);
 		if (
 			state !== undefined
 				? !isLive(state)
-				: port().inWorld(instance) && port().hasTag(instance, record.tag) && !record.suppressed.has(instance)
+				: pair.queued ||
+					(!pair.rejected &&
+						port().inWorld(instance) &&
+						port().hasTag(instance, record.tag) &&
+						!record.suppressed.has(instance))
 		) {
 			const [source, line] = debug.info(3, "sl");
 			const site = `${source}:${line}`;
@@ -330,7 +340,9 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 				port().log(LogLevel.Warning, `Crucible get pending at ${site}`);
 			}
 		}
+		queue(pair);
 	} else {
+		queue(pair);
 		const held = queued.filter((other) => other !== pair);
 		for (const other of held) other.parked = true;
 		queued = [pair];
