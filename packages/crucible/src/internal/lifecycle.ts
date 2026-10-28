@@ -176,7 +176,6 @@ function perform(s: ObjectState, step: Step) {
 			if (result !== CallResult.Ok) {
 				note(s, Hook.Construct, value);
 			} else {
-				// The construct effect returns the object it built.
 				const object = value as LifeObject;
 				s.object = object;
 				states.set(object, s);
