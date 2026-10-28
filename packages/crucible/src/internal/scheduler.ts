@@ -1,18 +1,12 @@
 import { DenseList } from "./dense-list";
+import { FrameHook } from "./hooks";
 import { within } from "./lifecycle";
 import { Hook, type LifeObject, type LifeRecord, type ObjectState } from "./state";
 import { FrameEvent, LogLevel, type Disconnect, type EnginePort } from "./port";
 
 /** @internal */
-export const enum FrameHook {
-	PreRender,
-	FixedUpdate,
-	Update,
-	LateUpdate,
-}
-
-/** @internal */
 export interface SchedulerRecord extends LifeRecord {
+	readonly id: string;
 	readonly hooks: number;
 	readonly renderPriority?: number;
 }
@@ -61,6 +55,7 @@ class Lane {
 export class Scheduler {
 	private readonly lanes: { readonly [H in FrameHook]: Lane };
 	private readonly renderLanes = new Map<number, Lane>();
+	private readonly refusedClasses = new Set<string>();
 	private readonly step: number;
 	private carry = 0;
 	private postSimulation?: Disconnect;
@@ -80,12 +75,16 @@ export class Scheduler {
 	}
 
 	add(s: ObjectState) {
-		const mask = (s.record as SchedulerRecord).hooks;
+		const record = s.record as SchedulerRecord;
+		const mask = record.hooks;
 		if (
 			!this.config.renders &&
-			((mask & (1 << FrameHook.PreRender)) !== 0 || (s.record as SchedulerRecord).renderPriority !== undefined)
+			((mask & (1 << FrameHook.PreRender)) !== 0 || record.renderPriority !== undefined)
 		) {
-			this.port.log(LogLevel.Error, "Crucible server refuses preRender and renderPriority");
+			if (!this.refusedClasses.has(record.id)) {
+				this.refusedClasses.add(record.id);
+				this.port.log(LogLevel.Error, `Crucible server refuses preRender and renderPriority for ${record.id}`);
+			}
 			return;
 		}
 		if ((mask & (1 << FrameHook.PreRender)) !== 0) this.join(this.renderLaneOf(s), FrameHook.PreRender, s);

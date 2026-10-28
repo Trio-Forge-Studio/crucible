@@ -93,14 +93,18 @@ function tests.server_refuses_preRender_or_renderPriority_and_reports_through_th
 	local function ran()
 		seen += 1
 	end
-	w.member("hook", { preRender = ran, update = ran })
+	local hook = w.member("hook", { preRender = ran, update = ran })
 	w.member("priority", { update = ran }, 0)
+	w.scheduler:add(hook)
+	w.member("hook", { preRender = ran })
 	w.member("valid", { update = ran })
 	w.engine.cycle(STEP, true)
 	spec.eq(seen, 1, "only valid server class bound")
 	spec.eq(#w.engine.renderSteps, 0, "no bindings")
 	spec.eq(#w.engine.frames[F.PreRender].list, 0, "no plain connection")
 	spec.eq(#w.engine.logs, 2, "both forms reported")
+	spec.eq(w.engine.logged("for hook"), 1, "hook class named once across objects and retries")
+	spec.eq(w.engine.logged("for priority"), 1, "priority class named once")
 	for _, log in w.engine.logs do
 		spec.eq(log.level, 1, "Error")
 	end

@@ -24,6 +24,7 @@ return function(renders, rate)
 			w.scheduler:remove(s)
 		end
 		local state = w.make(name, script)
+		state.record.id = name
 		local mask = 0
 		for index, hook in names do
 			if methods[hook] then
