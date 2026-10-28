@@ -1330,10 +1330,13 @@ test("T2 package sides exclude a side-named package root", () => {
 		const dir = sideHarness.setup({
 			ancestor: "plain",
 			files: {
-				[file]: 'import { Subsystem } from "@trioforge/crucible";\nexport class U extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
+				[file]: 'import { Subsystem } from "@trioforge/crucible";\nexport abstract class U extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
 			},
 		});
-		fs.writeFileSync(path.join(dir, "src", folder, "package.json"), JSON.stringify({ name: "nested" }));
+		fs.writeFileSync(
+			path.join(dir, "src", folder, "package.json"),
+			JSON.stringify(folder === "server" ? {} : { name: "nested" }),
+		);
 		assert.deepEqual(sideHarness.transformAt(dir, "tsconfig.json").diags, [`CRU011@${file}:2`, `CRU016@${file}:2`]);
 	}
 });

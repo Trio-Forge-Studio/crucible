@@ -255,6 +255,11 @@ const mutants = [
 	],
 	...[
 		[
+			"v4-named-package-only",
+			"((owner) => (owner?.json.name ? owner.dir : undefined))(packageOf(source.fileName)) ?? path.parse(path.resolve(source.fileName)).root",
+			"T2 package sides exclude a side-named package root",
+		],
+		[
 			"side-tsconfig-anchor",
 			"path.dirname(program.getCompilerOptions().configFilePath ?? path.join(program.getCurrentDirectory(), 'tsconfig.json'))",
 			"T2 package sides layouts",
