@@ -233,11 +233,25 @@ const mutants = [
 		"T2 exact-line",
 	],
 	[
-		"cru005-typeof-strict",
+		"cru005-declared-type-filter",
 		"index.cjs",
 		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t) ||\n\t\t\t\t\tchecker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)",
 		"!symbol?.declarations?.length || (symbol.declarations.some((decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl)) && checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target))",
 		"T2 exact-line",
+	],
+	[
+		"cru005-typeof-strict",
+		"index.cjs",
+		"ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),",
+		"ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl) || true,",
+		"T2 exact-line",
+	],
+	[
+		"side-source-root-anchor",
+		"index.cjs",
+		"const sideRoot = configFilePath\n\t\t\t? path.dirname(configFilePath)\n\t\t\t: path.dirname(sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]));",
+		"const sideRoot = sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]);",
+		"T2 folder sides preserve side-named source roots",
 	],
 	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
 	[
