@@ -67,7 +67,7 @@ local function graph()
 	end
 	return {
 		module = function(relative: string, globals: { [string]: any }?): any
-			return load(ROOT .. "/" .. relative, globals)
+			return load(if relative == "" then ROOT else ROOT .. "/" .. relative, globals)
 		end,
 	}
 end

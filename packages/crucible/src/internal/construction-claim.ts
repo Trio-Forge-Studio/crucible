@@ -1,14 +1,14 @@
 import type { ObjectState } from "./state";
-let claim: ObjectState | undefined;
+const claims = new Map<thread, ObjectState>();
 /** @internal */
 export function setClaim(state: ObjectState) {
-	claim = state;
+	claims.set(coroutine.running(), state);
 }
 /** @internal */
 export function readClaim(): ObjectState | undefined {
-	return claim;
+	return claims.get(coroutine.running());
 }
 /** @internal */
-export function clearClaim() {
-	claim = undefined;
+export function clearClaim(thread = coroutine.running()) {
+	claims.delete(thread);
 }
