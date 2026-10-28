@@ -9,3 +9,8 @@ export function selectStudio(studios, placeName) {
 	if (matches.length > 1) throw Error(`Multiple Studios match owned place ${placeName}`);
 	return matches[0]?.id;
 }
+
+export function ownsProcess(commandLine, place) {
+	const args = commandLine?.match(/"[^"]*"|\S+/g)?.map((arg) => arg.replace(/^"|"$/g, "").toLowerCase()) ?? [];
+	return args[0]?.endsWith("\\robloxstudiobeta.exe") === true && args.includes(place.toLowerCase());
+}

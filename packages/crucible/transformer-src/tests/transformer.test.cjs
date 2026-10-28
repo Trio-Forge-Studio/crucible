@@ -62,6 +62,25 @@ write(path.join(game, "default.project.json"), {
 const main = path.join(game, "src/server/main.ts");
 const positive = fs.readFileSync(path.join(__dirname, "fixtures/game.ts"), "utf8");
 
+test("fixture uses every real package declaration and physical side entry byte for byte", () => {
+	assert.equal(
+		fs.readFileSync(path.join(installed, "package.json"), "utf8"),
+		fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+	);
+	for (const name of fs
+		.readdirSync(path.join(packageRoot, "out"), { recursive: true })
+		.filter((name) => name.endsWith(".d.ts")))
+		assert.equal(
+			fs.readFileSync(path.join(installed, "out", name), "utf8"),
+			fs.readFileSync(path.join(packageRoot, "out", name), "utf8"),
+		);
+	for (const side of ["server", "client", "emit"])
+		assert.equal(
+			fs.readFileSync(path.join(installed, side, "package.json"), "utf8"),
+			fs.readFileSync(path.join(packageRoot, side, "package.json"), "utf8"),
+		);
+});
+
 function run(text = positive, options = {}, pluginConfig = {}, factory = transform, allSources = false) {
 	write(main, text);
 	const config = ts.getParsedCommandLineOfConfigFile(

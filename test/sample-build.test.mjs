@@ -30,7 +30,10 @@ test("A4 transformer source changes invalidate the sample output and rebuild rea
 				);
 		}
 		const build = () => {
-			const result = spawnSync(process.execPath, [path.join(sample, "build.mjs")], { encoding: "utf8" });
+			const result = spawnSync(process.execPath, [path.join(sample, "build.mjs")], {
+				cwd: sample,
+				encoding: "utf8",
+			});
 			assert.equal(result.status, 0, result.stdout + result.stderr);
 		};
 		build();

@@ -19,6 +19,8 @@ return {
 	["compiled sample server boots dependencies behaviours and shutdown under the fake engine"] = function()
 		local h = loadPlace()
 		local member = h.engine.instance("sample", "Part", { Identity = "fleet-23" })
+		local missing = h.engine.instance("missing", "Part", {})
+		h.engine.addTag(missing, "S2Member")
 		h.engine.addTag(member, "S2Member")
 		local entry = h.place:GetService("ServerScriptService").TS.main
 		h.load(entry)
@@ -43,7 +45,7 @@ return {
 			{ "S2 controller shutdown", "S2 store shutdown" },
 			"dependent shuts down first"
 		)
-		assert(#h.engine.logs == 0, "no runtime faults")
+		assert(#h.engine.logs == 1 and h.engine.logs[1].level == 0, "only missing required attribute warning")
 		assert(h.loaded[h.crucible.client] == nil, "server does not load client")
 		h.place:Destroy()
 	end,
