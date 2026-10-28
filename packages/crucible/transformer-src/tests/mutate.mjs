@@ -235,8 +235,8 @@ const mutants = [
 	[
 		"cru005-typeof-strict",
 		"index.cjs",
-		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t)",
-		"!symbol?.declarations?.some(() => true)",
+		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t) ||\n\t\t\t\t\tchecker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)",
+		"!symbol?.declarations?.length || (symbol.declarations.some((decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl)) && checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target))",
 		"T2 exact-line",
 	],
 	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
