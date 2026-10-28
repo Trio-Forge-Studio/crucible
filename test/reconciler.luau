@@ -175,16 +175,20 @@ return {
 				after = true
 			end,
 		}))
-		w.scripts.A.untick = function()
-			error("untick threw")
-		end
 		w.scripts.A.leave = function()
 			error("leave threw")
+		end
+		w.scripts.A.lookup = function(hook)
+			if hook == Hook.OnDisable then
+				error("hook lookup threw")
+			end
 		end
 		local ok, err = coroutine.resume(w.threads.A)
 		spec.eq(ok, true, `the start thread ran to its next yield: {err}`)
 		spec.eq(a.phase, Phase.Faulted, "force-ended")
 		spec.eq(w.count("faulted:A"), 1, "ended once")
+		spec.eq(w.count("onDestroy:A"), 0, "force-ended, not torn down through Destroy")
+		spec.eq(#w.failures, 2, "both internal errors reported")
 		spec.eq(w.count("cancel:A"), 0, "no cancel while the start thread runs")
 		w.flush()
 		spec.eq(w.count("cancel:A"), 1, "the deferred check cancelled it")

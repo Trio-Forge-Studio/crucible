@@ -71,7 +71,11 @@ function world.new()
 			end
 			return { name = s.record.name }
 		end,
-		hook = function(_, hook)
+		hook = function(s, hook)
+			local lookup = scriptOf(s).lookup
+			if lookup then
+				lookup(hook)
+			end
 			return effect(HOOK_NAMES[hook])
 		end,
 		start = function(s)
