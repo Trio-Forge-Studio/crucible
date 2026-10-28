@@ -2,7 +2,7 @@
 
 while read -r local_ref local_sha remote_ref remote_sha; do
 	if [ "$remote_ref" = refs/heads/main ]; then
-		printf '%s\n' 'Push to main refused. Use an explicit refspec as in AGENTS.md: git push origin HEAD:refs/heads/chore/scaffold' >&2
+		printf '%s\n' 'Push to main refused. Push a branch and open a PR: git push origin HEAD:refs/heads/<type>/<short-description>' >&2
 		exit 1
 	fi
 done
