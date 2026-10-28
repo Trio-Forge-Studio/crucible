@@ -139,10 +139,10 @@ export interface ObjectState extends LifeState {
 	object?: LifeObject;
 	/** On the work stack. A request for a queued object only changes `want`; its next step reads it. */
 	queued: boolean;
-	/** Steps this drain since a request from outside the object. `MAX_TRANSITIONS` faults it. */
+	/** Steps since a request from another causal root reached the object. `MAX_TRANSITIONS` faults it. */
 	transitions: number;
-	/** The generation whose step made this generation's latest request in the current drain. */
-	cause?: ObjectState;
+	/** The outside event this generation's steps descend from. A step's requests carry its root. */
+	root: number;
 	startThread?: thread;
 	/** Disconnects for the `All<T>.observe` subscriptions this object owns. Run when the generation ends. */
 	subscriptions?: (() => void)[];

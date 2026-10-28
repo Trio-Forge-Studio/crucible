@@ -460,6 +460,81 @@ return {
 		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
 	end,
 
+	["C5: a three-object cycle whose requests coalesce on queued objects faults with Settle"] = function()
+		local w = world.new()
+		local a, b, c = w.boot(w.make("A"), w.make("B"), w.make("C"))
+		local guard = guardedEnables(3000)
+		local function toggle(s)
+			w.life.request(s, if s.want == Want.Enabled then Want.Disabled else Want.Enabled)
+		end
+		w.scripts.A.onEnable = function()
+			guard()
+			w.life.request(c, Want.Enabled)
+		end
+		w.scripts.A.onDisable = function()
+			w.life.request(b, Want.Disabled)
+			w.life.request(c, Want.Disabled)
+			w.life.request(b, Want.Enabled)
+		end
+		w.scripts.B.onEnable = function()
+			guard()
+			w.life.request(b, Want.Disabled)
+			w.life.request(a, Want.Enabled)
+		end
+		w.scripts.B.onDisable = function()
+			w.life.request(c, Want.Disabled)
+		end
+		w.scripts.C.onEnable = function()
+			guard()
+			w.life.request(a, Want.Disabled)
+		end
+		w.scripts.C.onDisable = function()
+			toggle(b)
+			toggle(a)
+		end
+		w.life.request(a, Want.Disabled)
+		local settled = 0
+		for _, s in { a, b, c } do
+			if s.fault ~= nil then
+				spec.eq(s.fault.hook, Hook.Settle, `{s.record.name}'s fault is the bound, not the guard`)
+				settled += 1
+			end
+		end
+		spec.eq(settled > 0, true, "the cycle faulted with Settle")
+		spec.eq(w.life.isDraining(), false, "the reconciler is idle")
+	end,
+
+	["C5: a ring of 1,100 objects that each toggle the next faults with Settle"] = function()
+		local w = world.new()
+		local nodes = {}
+		for i = 1, 1100 do
+			nodes[i] = w.make(`N{i}`)
+		end
+		w.life.admit(nodes)
+		local calls = 0
+		for i = 1, 1100 do
+			local function toggleNext()
+				calls += 1
+				if calls > 200000 then
+					error("unbounded: more than 200000 hook calls")
+				end
+				local s = nodes[i % 1100 + 1]
+				w.life.request(s, if s.want == Want.Enabled then Want.Disabled else Want.Enabled)
+			end
+			w.scripts[`N{i}`].onEnable = toggleNext
+			w.scripts[`N{i}`].onDisable = toggleNext
+		end
+		w.life.request(nodes[1], Want.Disabled)
+		local settled = 0
+		for _, s in nodes do
+			if s.fault ~= nil then
+				spec.eq(s.fault.hook, Hook.Settle, `{s.record.name}'s fault is the bound, not the guard`)
+				settled += 1
+			end
+		end
+		spec.eq(settled > 0, true, "the ring faulted with Settle")
+	end,
+
 	["C5: a cascade of 40 objects that each disable the next never faults"] = function()
 		local w = world.new()
 		local nodes = {}

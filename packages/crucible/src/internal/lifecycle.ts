@@ -80,6 +80,7 @@ export function track(record: LifeRecord, instance?: Instance, attributes?: Reco
 		attributes,
 		queued: false,
 		transitions: 0,
+		root: 0,
 	};
 }
 
@@ -274,19 +275,6 @@ export const MAX_RECONCILE_ROUNDS = 1024;
 /** @internal Consecutive internal errors that fault or force-end nothing before the drain gives up on its work. */
 export const MAX_RECOVERIES = 1;
 
-/** @internal How far C5's ancestry check follows `cause` links. A longer chain counts as outside. */
-export const MAX_CAUSES = 1024;
-
-/** True when `s` made, directly or through other generations' steps, the request that `stepping` is running. */
-function causedBy(stepping: ObjectState, s: ObjectState): boolean {
-	let link = stepping.cause;
-	for (let hops = 0; link !== undefined && hops < MAX_CAUSES; hops++) {
-		if (link === s) return true;
-		link = link.cause;
-	}
-	return false;
-}
-
 type Entry = ObjectState | Batch;
 
 function awaking(batch: Batch): boolean {
@@ -317,8 +305,8 @@ class Reconciler {
 	private batches = 0;
 	/** The first cap failure this drain. */
 	private failure?: string;
-	/** Generations whose `transitions` or `cause` this drain set. The drain clears both when it ends. */
-	private readonly touched = new Array<ObjectState>();
+	/** The last causal root handed out. Each outside event gets the next one. */
+	private roots = 0;
 
 	isDraining(): boolean {
 		return this.depth > 0;
@@ -352,19 +340,28 @@ class Reconciler {
 	}
 
 	/**
-	 * C5: a request from outside `s` restarts its count. A request is from inside when `s` made it, or when `s`
-	 * caused the step that made it, so two objects that toggle each other keep counting while a cascade does not.
+	 * C5: what reaches `s` from outside any step is a new causal root, and what a step asks for carries that
+	 * step's root. Only a new root restarts the count, so a cycle of any length keeps counting on one root, while
+	 * a cascade steps each object a few times and a stream-in reaches a watcher once per member's root.
 	 */
 	chain(s: ObjectState) {
-		const stepping = this.stepping;
-		if (stepping === s) return;
-		if (stepping === undefined || !causedBy(stepping, s)) s.transitions = 0;
-		s.cause = stepping;
-		if (stepping !== undefined) this.touched.push(s);
+		this.rooted(s, this.stepping?.root ?? this.newRoot());
+	}
+
+	private newRoot(): number {
+		this.roots += 1;
+		return this.roots;
+	}
+
+	private rooted(s: ObjectState, root: number) {
+		if (s.root === root) return;
+		s.root = root;
+		s.transitions = 0;
 	}
 
 	private raise(s: ObjectState, gate: Gate) {
 		if (s.gate < gate) s.gate = gate;
+		this.rooted(s, this.newRoot());
 		this.push(s);
 	}
 
@@ -471,7 +468,6 @@ class Reconciler {
 	private settleStep(s: ObjectState): boolean {
 		const step = nextStep(s);
 		if (step === undefined) return false;
-		if (s.transitions === 0) this.touched.push(s);
 		s.transitions += 1;
 		if (s.transitions > MAX_TRANSITIONS && s.fault === undefined) {
 			note(s, Hook.Settle, `did not settle after ${MAX_TRANSITIONS} transitions along one chain of requests`);
@@ -582,11 +578,6 @@ class Reconciler {
 			for (const s of left) this.push(s);
 			[result, err] = this.enter(settle, this, undefined);
 		}
-		for (const s of this.touched) {
-			s.transitions = 0;
-			s.cause = undefined;
-		}
-		this.touched.clear();
 		this.rounds = 0;
 		this.batches = 0;
 		this.stepping = undefined;
@@ -670,6 +661,7 @@ export function request(s: ObjectState, want: Want) {
 export function fault(s: ObjectState, hook: Hook, err: unknown) {
 	if (hasEnded(s)) return;
 	note(s, hook, err);
+	reconciler.chain(s);
 	reconciler.push(s);
 	reconciler.drain();
 }
@@ -680,6 +672,7 @@ export function finishStart(s: ObjectState, ok: boolean, err: unknown) {
 	s.startThread = undefined;
 	s.start = StartPhase.Done;
 	if (!ok) note(s, Hook.Start, err);
+	reconciler.chain(s);
 	reconciler.push(s);
 	reconciler.drain();
 }
