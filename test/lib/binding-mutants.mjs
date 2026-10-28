@@ -10,20 +10,8 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-binding-mutants-
 const binding = "packages/crucible/src/internal/binding.ts";
 const behaviour = "packages/crucible/src/crucible-behaviour.ts";
 const mutants = [
-	[
-		"no leave-world admission",
-		binding,
-		"engine.inWorld(instance) && engine.hasTag(instance, record.tag)",
-		"engine.hasTag(instance, record.tag)",
-		"Parent nil fires removed",
-	],
-	[
-		"no tag admission",
-		binding,
-		"engine.inWorld(instance) && engine.hasTag(instance, record.tag)",
-		"engine.inWorld(instance)",
-		"AddTag then get outside",
-	],
+	["no leave-world admission", binding, "engine.inWorld(instance)", "true", "Parent nil fires removed"],
+	["no tag admission", binding, "engine.hasTag(instance, record.tag)", "true", "AddTag then get outside"],
 	[
 		"Roblox tag mapping",
 		"packages/crucible/src/internal/roblox-port.ts",
@@ -126,6 +114,13 @@ const mutants = [
 	],
 	["wrong class warning dedup", binding, "if (!pair.wrongClass)", "if (true)", "wrong class warns once"],
 	["ancestry watcher", binding, "queue(pair);\n\t\t\tschedule();", "schedule();", "default accepts excludes"],
+	[
+		"no admission recheck after accepts",
+		binding,
+		"\n\tif (\n\t\tpair.reset ||\n\t\t!engine.inWorld(instance) ||\n\t\t!engine.hasTag(instance, record.tag) ||\n\t\trecord.suppressed.has(instance)\n\t)\n\t\treturn undefined;",
+		"",
+		"binding rereads tag changes",
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });
@@ -164,7 +159,7 @@ try {
 		if (index < Number(process.argv[2] ?? 0)) continue;
 		const original = originals.get(file);
 		assert.ok(original.includes(before), `${name} pattern exists`);
-		fs.writeFileSync(path.join(scratch, file), original.replace(before, after));
+		fs.writeFileSync(path.join(scratch, file), original.replaceAll(before, after));
 		const compiled = build();
 		assert.equal(compiled.status, 0, name + " build failed\n" + compiled.stdout + compiled.stderr);
 		const tested = run("lune", ["run", "test", target]);
