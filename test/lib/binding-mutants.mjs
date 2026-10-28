@@ -10,7 +10,36 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-binding-mutants-
 const binding = "packages/crucible/src/internal/binding.ts";
 const behaviour = "packages/crucible/src/crucible-behaviour.ts";
 const mutants = [
-	["M1 queue retains rejection", binding, "pair.rejected = undefined;", "", "R3 refresh clears"],
+	[
+		"R4 evaluate retains rejection",
+		binding,
+		"const engine = port();\n\tpair.rejected = undefined;",
+		"const engine = port();",
+		"Y4 j first",
+	],
+	[
+		"R4 queue clears every reason",
+		binding,
+		'if (pair.rejected === "accepts") pair.rejected = undefined;',
+		"pair.rejected = undefined;",
+		"Y2 wrong class",
+	],
+	["R4 scope recorded as accepts", binding, 'scopeRejected ? "scope" : "accepts"', '"accepts"', "Y2b default scope"],
+	[
+		"R4 scope never pending",
+		binding,
+		'(pair.rejected === "scope" && port().bindingScope(instance))',
+		"false",
+		"Y2e corrected default scope",
+	],
+
+	[
+		"M1 queue retains rejection",
+		binding,
+		'if (pair.rejected === "accepts") pair.rejected = undefined;',
+		"",
+		"R3 refresh clears",
+	],
 	[
 		"M3 attribute rejection omitted",
 		binding,
@@ -65,7 +94,7 @@ const mutants = [
 	[
 		"G1 pending ignores rejection",
 		binding,
-		'(pair.rejected === undefined || (pair.rejected === "attributes" && attributesValid))',
+		'(pair.rejected === undefined ||\n\t\t\t\t(pair.rejected === "attributes" && attributesValid) ||\n\t\t\t\t(pair.rejected === "scope" && port().bindingScope(instance)))',
 		"true",
 		"F1 residual:",
 	],
@@ -123,7 +152,7 @@ const mutants = [
 	[
 		"F1 false pending warning",
 		binding,
-		'(state === undefined || !isLive(state)) &&\n\t\t\t(pair.rejected === undefined || (pair.rejected === "attributes" && attributesValid)) &&\n\t\t\tport().inWorld(instance) &&\n\t\t\tport().hasTag(instance, record.tag) &&\n\t\t\t!record.suppressed.has(instance)',
+		'(state === undefined || !isLive(state)) &&\n\t\t\t(pair.rejected === undefined ||\n\t\t\t\t(pair.rejected === "attributes" && attributesValid) ||\n\t\t\t\t(pair.rejected === "scope" && port().bindingScope(instance))) &&\n\t\t\tport().inWorld(instance) &&\n\t\t\tport().hasTag(instance, record.tag) &&\n\t\t\t!record.suppressed.has(instance)',
 		"state === undefined || !isLive(state)",
 		"untagged instance does not warn pending",
 	],
@@ -168,7 +197,13 @@ const mutants = [
 	["C1 all pairs", binding, "queued = [pair];", "queued = queued;", "outside get reconciles only"],
 	["C1 no outside reconcile", binding, "drain();\n\t\tqueued =", "queued =", "AddTag then get outside"],
 	["C1 no pending warning", binding, "if (!getWarnings.has(site))", "if (false)", "get inside a hook never"],
-	["C3 default scope", binding, "return port().bindingScope(instance);", "return true;", "default accepts excludes"],
+	[
+		"C3 default scope",
+		binding,
+		"const ok = port().bindingScope(instance);",
+		"const ok = true;",
+		"default accepts excludes",
+	],
 	["bound get skips accepts", binding, "!accepted(pair, have)", "false", "override replaces accepts"],
 	[
 		"C4 remove suppression",

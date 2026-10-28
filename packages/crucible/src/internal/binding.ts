@@ -14,7 +14,7 @@ interface Pair {
 	parked: boolean;
 	running: boolean;
 	reset: boolean;
-	rejected?: "class" | "attributes" | "accepts";
+	rejected?: "class" | "attributes" | "scope" | "accepts";
 	wrongClass: boolean;
 	readonly warnings: Map<string, string>;
 }
@@ -28,6 +28,7 @@ const byTag = new Map<string, BehaviourRecord[]>();
 let queued = new Array<Pair>();
 let scheduled = false;
 const getWarnings = new Set<string>();
+let scopeRejected = false;
 
 function port(): EnginePort {
 	return installed ?? error("Crucible binding used before boot");
@@ -38,7 +39,9 @@ export function useEngine(engine: EnginePort) {
 }
 /** @internal */
 export function defaultAccepts(instance: Instance): boolean {
-	return port().bindingScope(instance);
+	const ok = port().bindingScope(instance);
+	if (!ok) scopeRejected = true;
+	return ok;
 }
 
 /** @internal */
@@ -87,7 +90,7 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 }
 function queue(pair: Pair) {
 	if (pair.running) return;
-	pair.rejected = undefined;
+	if (pair.rejected === "accepts") pair.rejected = undefined;
 	if (pair.parked) {
 		pair.parked = false;
 		pair.queued = false;
@@ -191,6 +194,7 @@ function accepted(pair: Pair, state?: ObjectState): boolean {
 function evaluate(pair: Pair): ObjectState | undefined {
 	const { record, instance } = pair;
 	const engine = port();
+	pair.rejected = undefined;
 	const present = engine.inWorld(instance) && engine.hasTag(instance, record.tag);
 	if (!present) {
 		reset(pair);
@@ -251,8 +255,9 @@ function evaluate(pair: Pair): ObjectState | undefined {
 		pair.rejected = "attributes";
 		return undefined;
 	}
+	scopeRejected = false;
 	if (!accepted(pair)) {
-		pair.rejected = "accepts";
+		pair.rejected = scopeRejected ? "scope" : "accepts";
 		return undefined;
 	}
 	if (
@@ -337,7 +342,9 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 		}
 		if (
 			(state === undefined || !isLive(state)) &&
-			(pair.rejected === undefined || (pair.rejected === "attributes" && attributesValid)) &&
+			(pair.rejected === undefined ||
+				(pair.rejected === "attributes" && attributesValid) ||
+				(pair.rejected === "scope" && port().bindingScope(instance))) &&
 			port().inWorld(instance) &&
 			port().hasTag(instance, record.tag) &&
 			!record.suppressed.has(instance)
