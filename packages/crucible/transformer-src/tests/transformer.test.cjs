@@ -12,7 +12,7 @@ const packageRoot = path.resolve(__dirname, "../..");
 const scratch = path.join(repo, "build/transformer-tests", String(process.pid));
 fs.rmSync(scratch, { recursive: true, force: true });
 after(() => fs.rmSync(scratch, { recursive: true, force: true }));
-const game = path.join(scratch, "game");
+const game = path.join(scratch, "client/game");
 const installed = path.join(game, "node_modules/@trioforge/crucible");
 fs.mkdirSync(path.join(game, "src/server"), { recursive: true });
 fs.cpSync(path.join(__dirname, "fixtures/api"), installed, { recursive: true });
@@ -770,6 +770,18 @@ test("T2 exact-line diagnostics and reviewer bypasses", () => {
 		["CRU004", 'import "@trioforge/crucible/emit";'],
 		["CRU004", 'import "@trioforge/crucible/internal/foo";'],
 		["CRU005", "export const bad = inject<number>();"],
+		["CRU005", "export class Concrete extends Subsystem {}\nexport const bad = inject<typeof Concrete>();"],
+		["CRU005", "export class Concrete extends Subsystem {}\nexport const bad = inject<All<typeof Concrete>>();"],
+		["CRU005", "export const bad = inject<{ a: number }>();"],
+		["CRU005", "enum Target { A }\nexport const bad = inject<Target>();"],
+		[
+			"CRU012",
+			"interface MyP extends Promise<void> {}\nexport class Bad extends Subsystem { protected override start(): MyP | undefined { return undefined; } }",
+		],
+		[
+			"CRU014",
+			'interface H<T> { value: T; }\nexport abstract class Openable<Tag extends string> extends CrucibleBehaviour<Tag, Model> {}\nexport abstract class B<Tag extends string> extends Openable<Tag> implements H<number> { value = 1; }\nexport class Door extends B<"Door"> {}',
+		],
 		["CRU005", "export class Bad extends Subsystem { field = inject<Subsystem>(); }"],
 		["CRU005", "export const bad = inject();"],
 		["CRU009", "export class Bad extends Subsystem { onInit() {} }"],
@@ -855,7 +867,7 @@ test("T2 exact-line diagnostics and reviewer bypasses", () => {
 	}
 	const control = run(
 		prefix +
-			"interface Plain { value: string; }\nexport const one = inject<Plain>();\nexport let all: All<Plain>;\nexport class Clean extends Subsystem { protected override update() {} helper() {} upXXte() {} }",
+			'interface Plain { value: string; }\nexport const one = inject<Plain>();\nexport let all: All<Plain>;\nexport class Clean extends Subsystem { protected override update() {} helper() {} upXXte() {} }\nexport class CleanBehaviour extends CrucibleBehaviour<"Clean", Model> { Remove() {} isEnable() {} }',
 	);
 	assert.deepEqual(
 		control.diagnostics.map((d) => d.messageText),
@@ -905,6 +917,31 @@ test("T2 K1 tag forwarding written defaults and non-tag parameters", () => {
 			run(mixed + text).diagnostics.some((d) => d.code === 90014),
 			text,
 		);
+});
+
+test("T2 folder sides ignore directories above the common source root", () => {
+	const file = path.join(game, "src/unmarked.ts");
+	try {
+		write(
+			file,
+			'import { Subsystem } from "@trioforge/crucible";\nexport class Unmarked extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
+		);
+		for (const options of [
+			{},
+			{ rootDir: undefined },
+			{ rootDir: undefined, rootDirs: [path.join(game, "src")] },
+		]) {
+			const { diagnostics } = run("", options, {}, transform, true);
+			const actual = diagnostics.filter((d) => path.normalize(d.file.fileName) === path.normalize(file));
+			assert.deepEqual(actual.map((d) => d.code).sort(), [90011, 90016]);
+			for (const diagnostic of actual) {
+				assert.equal(diagnostic.category, ts.DiagnosticCategory.Error);
+				assert.equal(diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line, 1);
+			}
+		}
+	} finally {
+		fs.rmSync(file, { force: true });
+	}
 });
 
 test("T2 folder sides include inherited members and nearest segment", () => {
