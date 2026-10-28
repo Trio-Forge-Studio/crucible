@@ -1,6 +1,6 @@
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const scratch = mkdtempSync(join(tmpdir(), "crucible-r4-mutants-"));
@@ -12,6 +12,44 @@ const scheduler = "packages/crucible/out/internal/scheduler.luau";
 const engine = "test/lib/engine.luau";
 const dense = "packages/crucible/out/internal/dense-list.luau";
 const rules = [
+	[
+		"M1 one binding name for every priority",
+		scheduler,
+		"port.bindRenderStep(`crucible:{priority}`, priority, run)",
+		'port.bindRenderStep("crucible", priority, run)',
+		"emptying_one_render_priority_",
+	],
+	[
+		"M2 carry kept when the fixed lane empties",
+		scheduler,
+		"fixed.disconnect = nil\n\t\t\tself.carry = 0",
+		"fixed.disconnect = nil",
+		"scripted_dt_",
+	],
+	["M4 lateUpdate receives the fixed step", scheduler, "late:run(dt)", "late:run(self.step)", "lanes_use_"],
+	["M5 update receives the fixed step", scheduler, "update:run(dt)", "update:run(self.step)", "lanes_use_"],
+	[
+		"M6 preRender receives the fixed step",
+		scheduler,
+		"return lane:run(dt)",
+		"return lane:run(self.step)",
+		"lanes_use_",
+	],
+	["M8 fixed lane never reconnects after emptying", scheduler, "\t\t\tfixed.disconnect = nil\n", "", "scripted_dt_"],
+	[
+		"M10 untick short-circuits the late lane",
+		scheduler,
+		"local changed = update.members:remove(s)\n\t\tif (late.members:remove(s) or changed)",
+		"if (update.members:remove(s) or late.members:remove(s))",
+		"disable_removes_both_",
+	],
+	[
+		"M15 carry cleared on every untick",
+		scheduler,
+		"\t\tlocal update = self.lanes[2]\n\t\tlocal late = self.lanes[3]\n\t\tlocal changed",
+		"\t\tself.carry = 0\n\t\tlocal update = self.lanes[2]\n\t\tlocal late = self.lanes[3]\n\t\tlocal changed",
+		"fixed_carry_survives_",
+	],
 	["fixed receives frame dt", scheduler, "lane:run(self.step)", "lane:run(dt)", "scripted_dt_"],
 	[
 		"wrong render priority",
@@ -74,6 +112,7 @@ const rules = [
 	],
 ];
 const log = [];
+let failures = 0;
 for (const [name, file, from, to, prefix, suite = "scheduler"] of rules) {
 	const path = join(scratch, file);
 	const original = readFileSync(path, "utf8");
@@ -90,9 +129,9 @@ for (const [name, file, from, to, prefix, suite = "scheduler"] of rules) {
 	log.push(`${passed ? "PASS" : "FAIL"} ${name}\n${run.stdout}${run.stderr}`);
 	console.log(`${passed ? "PASS" : "FAIL"} ${name}`);
 	if (!passed) {
-		writeFileSync(resolve("test/scheduler-mutants.log"), log.join("\n"));
-		throw new Error(`Mutant failed: ${name}`);
+		failures += 1;
 	}
 }
-writeFileSync(resolve("test/scheduler-mutants.log"), log.join("\n"));
-console.log(`${rules.length}/${rules.length} mutants killed. Scratch restored at ${scratch}`);
+writeFileSync(join(scratch, "scheduler-mutants.log"), log.join("\n"));
+console.log(`${rules.length - failures}/${rules.length} mutants killed. Scratch restored at ${scratch}`);
+if (failures > 0) process.exitCode = 1;

@@ -10,11 +10,12 @@ local tests = {}
 function tests.lanes_use_PreSimulation_and_PostSimulation_with_the_whole_update_lane_before_lateUpdate()
 	local w = new()
 	local seen = {}
+	local frameDt = 0.031
 	for _, name in { "A", "B" } do
 		local methods = {}
 		for _, hook in { "fixedUpdate", "update", "lateUpdate", "preRender" } do
 			methods[hook] = function(_, dt)
-				spec.eq(dt, STEP, "dt")
+				spec.eq(dt, if hook == "fixedUpdate" then STEP else frameDt, hook .. " dt")
 				table.insert(seen, hook .. name)
 			end
 		end
@@ -24,8 +25,8 @@ function tests.lanes_use_PreSimulation_and_PostSimulation_with_the_whole_update_
 	w.engine.frame(F.Heartbeat, STEP)
 	spec.list(seen, {}, "unrelated events")
 	w.engine.frame(F.PreSimulation, STEP)
-	w.engine.frame(F.PostSimulation, STEP)
-	w.engine.frame(F.PreRender, STEP)
+	w.engine.frame(F.PostSimulation, frameDt)
+	w.engine.frame(F.PreRender, frameDt)
 	spec.list(seen, {
 		"fixedUpdateA",
 		"fixedUpdateB",
@@ -164,8 +165,71 @@ function tests.scripted_dt_keeps_fraction_drops_excess_steps_and_resets_carry_wh
 	w.engine.frame(F.PreSimulation, step * 0.25)
 	w.life.request(s, World.Want.Disabled)
 	w.life.request(s, World.Want.Enabled)
-	w.engine.frame(F.PreSimulation, step * 0.5)
+	w.engine.frame(F.PreSimulation, step * 0.75)
 	spec.eq(count, 7, "empty lane discards carry")
+	w.engine.frame(F.PreSimulation, step)
+	spec.eq(count, 8, "fixed lane reconnects")
+end
+
+function tests.fixed_carry_survives_unticking_another_fixed_or_non_fixed_member()
+	for _, hook in { "fixedUpdate", "update" } do
+		local w = new(true, 64)
+		local step = 1 / 64
+		local count = 0
+		w.member("stays enabled", {
+			fixedUpdate = function()
+				count += 1
+			end,
+		})
+		local other = w.member("unticked", { [hook] = function() end })
+		w.engine.frame(F.PreSimulation, step * 0.25)
+		spec.eq(count, 0, "partial step")
+		w.life.request(other, World.Want.Disabled)
+		w.engine.frame(F.PreSimulation, step * 0.75)
+		spec.eq(count, 1, hook .. " untick preserves another member's carry")
+	end
+end
+
+function tests.disable_removes_both_update_and_lateUpdate_and_disconnects_PostSimulation()
+	local w = new()
+	local seen = {}
+	local s = w.member("both lanes", {
+		update = function()
+			table.insert(seen, "update")
+		end,
+		lateUpdate = function()
+			table.insert(seen, "lateUpdate")
+		end,
+	})
+	w.engine.frame(F.PostSimulation, STEP)
+	spec.list(seen, { "update", "lateUpdate" }, "enabled hooks run")
+	table.clear(seen)
+	w.life.request(s, World.Want.Disabled)
+	w.engine.frame(F.PostSimulation, STEP)
+	spec.list(seen, {}, "disabled hooks do not run")
+	spec.eq(#w.engine.frames[F.PostSimulation].list, 0, "both lanes disconnected")
+end
+
+function tests.emptying_one_render_priority_keeps_the_other_priority_running()
+	local w = new()
+	local seen = {}
+	local a = w.member("A", {
+		preRender = function()
+			table.insert(seen, "A")
+		end,
+	}, 100)
+	w.member("B", {
+		preRender = function()
+			table.insert(seen, "B")
+		end,
+	}, 200)
+	w.engine.frame(F.PreRender, STEP)
+	spec.list(seen, { "A", "B" }, "both priorities run")
+	w.life.request(a, World.Want.Disabled)
+	table.clear(seen)
+	w.engine.frame(F.PreRender, STEP)
+	spec.list(seen, { "B" }, "other priority stays bound")
+	spec.eq(#w.engine.renderSteps, 1, "only the empty lane unbound")
 end
 
 function tests.a_frame_hook_that_calls_remove_finishes_before_teardown_and_no_removed_member_ticks_again()

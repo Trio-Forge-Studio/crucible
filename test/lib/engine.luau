@@ -222,10 +222,12 @@ function engine.new()
 			local step = { name = name, priority = priority, fn = fn, order = e.bound, connected = true }
 			table.insert(e.renderSteps, step)
 			return function()
-				step.connected = false
-				local index = table.find(e.renderSteps, step)
-				if index then
-					table.remove(e.renderSteps, index)
+				for index = #e.renderSteps, 1, -1 do
+					local bound = e.renderSteps[index]
+					if bound.name == name then
+						bound.connected = false
+						table.remove(e.renderSteps, index)
+					end
 				end
 			end
 		end,
