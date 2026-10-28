@@ -1,0 +1,393 @@
+const path = require("node:path");
+const { createRequire } = require("node:module");
+const { packageOf, typeId } = require("./type-id.cjs");
+const { createReporter } = require("./diagnostics.cjs");
+
+module.exports = function transformer(program, config = {}, extras = {}) {
+	const ts = extras.ts ?? require("typescript");
+	const checker = program.getTypeChecker();
+	const f = ts.factory;
+	const symbols = new Map();
+	const unalias = (s) => s && (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
+	for (const source of program.getSourceFiles()) {
+		const owner = packageOf(source.fileName);
+		if (owner?.json.name !== "@trioforge/crucible") continue;
+		const module = checker.getSymbolAtLocation(source);
+		if (!module) continue;
+		for (const symbol of checker.getExportsOfModule(module)) {
+			const target = unalias(symbol);
+			if (!symbols.has(target)) symbols.set(target, symbol.name);
+		}
+	}
+	const api = (symbol) => symbols.get(unalias(symbol));
+	const modifiers = (node, flags) => (ts.getCombinedModifierFlags(node) & flags) !== 0;
+	const bases = (type) => (type.target ?? type).getBaseTypes?.() ?? [];
+	const kindOf = (type, seen = new Set()) => {
+		if (seen.has(type)) return undefined;
+		seen.add(type);
+		const name = api(type.getSymbol());
+		if (name === "Subsystem") return "subsystem";
+		if (name === "CrucibleBehaviour") return "behaviour";
+		for (const base of bases(type)) {
+			const kind = kindOf(base, seen);
+			if (kind) return kind;
+		}
+	};
+	return (context) => (source) => {
+		if (source.isDeclarationFile) return source;
+		let used = false;
+		const report = createReporter(ts, extras.addDiagnostic ?? ((d) => context.addDiagnostic(d)));
+		const runtime = (name) => {
+			used = true;
+			return f.createPropertyAccessExpression(f.createIdentifier("__crucible"), name);
+		};
+		const call = (expression, args, types) => f.createCallExpression(expression, types, args);
+		const str = (s) => f.createStringLiteral(s);
+		const array = (values) => f.createArrayLiteralExpression(values);
+		const object = (values) =>
+			f.createObjectLiteralExpression(
+				Object.entries(values).map(([key, value]) => f.createPropertyAssignment(str(key), value)),
+				true,
+			);
+		const globalType = (type, at, seen = new Set()) => {
+			if (seen.has(type)) return;
+			seen.add(type);
+			for (const symbol of [type.aliasSymbol, type.getSymbol()]) {
+				for (const decl of symbol?.declarations ?? []) {
+					if (
+						program.isSourceFileDefaultLibrary(decl.getSourceFile()) ||
+						/node_modules[\\/]@rbxts[\\/]/.test(decl.getSourceFile().fileName)
+					)
+						continue;
+					let global = !ts.isExternalModule(decl.getSourceFile());
+					for (let p = decl.parent; p; p = p.parent)
+						if (ts.isModuleDeclaration(p) && p.flags & ts.NodeFlags.GlobalAugmentation) global = true;
+					if (global)
+						report(
+							at,
+							"CRU010",
+							"Type comes from global declarations; import a module type for incremental correctness.",
+						);
+				}
+			}
+			for (const part of type.isUnion() ? type.types : []) globalType(part, at, seen);
+		};
+		const globalReferences = (node, at, seen = new Set()) => {
+			if (!node || seen.has(node)) return;
+			seen.add(node);
+			if (ts.isTypeReferenceNode(node)) {
+				const symbol = unalias(checker.getSymbolAtLocation(node.typeName));
+				for (const decl of symbol?.declarations ?? []) {
+					if (ts.isTypeAliasDeclaration(decl)) {
+						let global = !ts.isExternalModule(decl.getSourceFile());
+						for (let p = decl.parent; p; p = p.parent)
+							if (ts.isModuleDeclaration(p) && p.flags & ts.NodeFlags.GlobalAugmentation) global = true;
+						if (global)
+							report(
+								at,
+								"CRU010",
+								"Attribute and dependency aliases must come from module declarations.",
+							);
+						globalReferences(decl.type, at, seen);
+					}
+				}
+			}
+			ts.forEachChild(node, (child) => globalReferences(child, at, seen));
+		};
+		const id = (type, at) => {
+			globalType(type, at);
+			const symbol = type.getSymbol();
+			const decl = symbol?.declarations?.find((d) => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d));
+			return decl && typeId(decl.getSourceFile().fileName, symbol.name, program, ts);
+		};
+		const allTarget = (type) => (api(type.getSymbol()) === "All" ? checker.getTypeArguments(type)[0] : undefined);
+		const injectable = (type, at, all = false) => {
+			const target = allTarget(type);
+			if (target) return object({ all: injectable(target, at, true) });
+			globalType(type, at);
+			const symbol = type.getSymbol();
+			const isNominal = symbol?.declarations?.some(
+				(d) => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d),
+			);
+			const engineInstance = checker.resolveName("Instance", at, ts.SymbolFlags.Type, false);
+			const instance =
+				engineInstance && checker.isTypeAssignableTo(type, checker.getDeclaredTypeOfSymbol(engineInstance));
+			const generic = type.objectFlags & ts.ObjectFlags.Reference && checker.getTypeArguments(type).length > 0;
+			const concreteBehaviour =
+				kindOf(type) === "behaviour" &&
+				symbol?.declarations?.some((d) => ts.isClassDeclaration(d) && !modifiers(d, ts.ModifierFlags.Abstract));
+			if (!isNominal || instance || type.isUnion() || generic || (!all && concreteBehaviour)) {
+				report(
+					at,
+					"CRU001",
+					concreteBehaviour
+						? "Inject All<X> or call X.get(instance) for a concrete behaviour."
+						: "Constructor parameter must be a plain class, interface or All<T>.",
+				);
+				return str("invalid");
+			}
+			const value = id(type, at);
+			if (!value) report(at, "CRU001", "Cannot compute a package type id for this parameter.");
+			return str(value ?? "invalid");
+		};
+		const check = (type, at) => {
+			globalType(type, at);
+			const t = (name) => f.createPropertyAccessExpression(runtime("t"), name);
+			if (type.isUnion()) {
+				const parts = type.types.filter((p) => !(p.flags & ts.TypeFlags.Undefined));
+				return parts.length === 1
+					? check(parts[0], at)
+					: call(
+							t("union"),
+							parts.map((p) => check(p, at)),
+						);
+			}
+			if (type.flags & ts.TypeFlags.String) return t("string");
+			if (type.flags & ts.TypeFlags.Number) return t("number");
+			if (type.flags & ts.TypeFlags.Boolean) return t("boolean");
+			if (type.isStringLiteral()) return call(t("literal"), [str(type.value)]);
+			if (type.isNumberLiteral())
+				return call(t("literal"), [
+					type.value < 0
+						? f.createPrefixUnaryExpression(ts.SyntaxKind.MinusToken, f.createNumericLiteral(-type.value))
+						: f.createNumericLiteral(type.value),
+				]);
+			if (type.flags & ts.TypeFlags.BooleanLiteral)
+				return call(t("literal"), [type.intrinsicName === "true" ? f.createTrue() : f.createFalse()]);
+			const name = type.getSymbol()?.name;
+			const engineType = name && checker.resolveName(name, at, ts.SymbolFlags.Type, false);
+			if ((name === "Vector3" || name === "Color3") && engineType === type.getSymbol())
+				return t(name.toLowerCase());
+			report(
+				at,
+				"CRU007",
+				"Attribute fields support string, number, boolean, Vector3, Color3 and literal unions.",
+			);
+			return t("string");
+		};
+		const isMacro = (node, name) =>
+			ts.isCallExpression(node) && api(checker.getSymbolAtLocation(node.expression)) === name;
+		const attributes = (type) => {
+			const result = {};
+			for (const prop of checker.getPropertiesOfType(type)) {
+				const decl = prop.valueDeclaration;
+				if (
+					!decl ||
+					!ts.isPropertyDeclaration(decl) ||
+					!decl.initializer ||
+					!isMacro(decl.initializer, "attribute")
+				)
+					continue;
+				const required = decl.initializer.arguments.length === 0;
+				let valueCheck = check(checker.getTypeOfSymbolAtLocation(prop, decl), decl);
+				if (!required)
+					valueCheck = call(f.createPropertyAccessExpression(runtime("t"), "optional"), [valueCheck]);
+				result[prop.name] = object({
+					name: str(prop.name[0].toUpperCase() + prop.name.slice(1)),
+					check: valueCheck,
+					required: required ? f.createTrue() : f.createFalse(),
+				});
+			}
+			return result;
+		};
+		const registration = (node) => {
+			const type = checker.getTypeAtLocation(node);
+			const kind = kindOf(type);
+			if (!kind || modifiers(node, ts.ModifierFlags.Abstract)) return;
+			let ctor;
+			let current = type;
+			const constructors = new Set();
+			while (current && !constructors.has(current)) {
+				constructors.add(current);
+				const declaration = current.getSymbol()?.declarations?.find(ts.isClassDeclaration);
+				ctor = declaration?.members.find(ts.isConstructorDeclaration);
+				if (ctor) break;
+				current = bases(current)[0];
+			}
+			if (
+				!node.name ||
+				!ts.isSourceFile(node.parent) ||
+				node.typeParameters?.length ||
+				(ctor && modifiers(ctor, ts.ModifierFlags.Private | ts.ModifierFlags.Protected))
+			) {
+				report(
+					node,
+					"CRU003",
+					"Registered classes must be named, non-generic, module-level classes with public constructors.",
+				);
+				return;
+			}
+			const staticType = checker.getTypeOfSymbolAtLocation(checker.getSymbolAtLocation(node.name), node);
+			const signature = checker.getSignaturesOfType(staticType, ts.SignatureKind.Construct)[0];
+			const deps = (signature?.parameters ?? []).map((param) => {
+				const decl = param.valueDeclaration ?? node;
+				globalReferences(decl.type, decl);
+				if (decl.questionToken || decl.dotDotDotToken || decl.initializer)
+					report(decl, "CRU001", "Optional, defaulted and rest parameters are not injectable.");
+				return injectable(checker.getTypeOfSymbolAtLocation(param, node), decl);
+			});
+			const provides = new Set();
+			const seen = new Set();
+			const provide = (current) => {
+				if (
+					seen.has(current) ||
+					["Subsystem", "CrucibleBehaviour", "CrucibleObject"].includes(api(current.getSymbol()))
+				)
+					return;
+				seen.add(current);
+				if (current !== type) {
+					const value = id(current, node);
+					if (value) provides.add(value);
+				}
+				for (const base of bases(current)) provide(base);
+				for (const decl of current.getSymbol()?.declarations ?? []) {
+					for (const clause of decl.heritageClauses ?? [])
+						if (clause.token === ts.SyntaxKind.ImplementsKeyword)
+							for (const target of clause.types) provide(checker.getTypeAtLocation(target));
+				}
+			};
+			provide(type);
+			const data = {
+				kind: str(kind),
+				id: str(id(type, node) ?? "invalid"),
+				deps: array(deps),
+				provides: array([...provides].map(str)),
+			};
+			if (kind === "behaviour") {
+				const memberType = (name) => {
+					const prop = checker.getPropertyOfType(type, name);
+					return prop && checker.getTypeOfSymbolAtLocation(prop, node);
+				};
+				const tag = memberType("tag");
+				if (!tag?.isStringLiteral())
+					report(node, "CRU002", "A concrete behaviour tag must be exactly one string literal.");
+				data.tag = str(tag?.isStringLiteral() ? tag.value : "invalid");
+				const instance = memberType("instance");
+				const parts = instance?.isUnion() ? instance.types : [instance];
+				const instances = checker.resolveName("Instances", node, ts.SymbolFlags.Type, false);
+				const allowed = instances && checker.getDeclaredTypeOfSymbol(instances);
+				data.instance = array(
+					parts.map((part) => {
+						const name = part?.getSymbol()?.name;
+						const expected = name && allowed && checker.getPropertyOfType(allowed, name);
+						if (
+							!expected ||
+							checker.getTypeOfSymbolAtLocation(expected, node).getSymbol() !== part.getSymbol()
+						)
+							report(node, "CRU008", "Instance type must be an Instances class or union of them.");
+						return str(name ?? "Instance");
+					}),
+				);
+				const fields = attributes(type);
+				if (Object.keys(fields).length) data.attributes = object(fields);
+			}
+			return f.createExpressionStatement(
+				call(runtime("defineClass"), [f.createIdentifier(node.name.text), object(data)]),
+			);
+		};
+		const boot = (node) => {
+			const options = node.arguments[0];
+			if (!options || !ts.isObjectLiteralExpression(options)) {
+				report(node, "CRU006", "boot requires literal load globs.");
+				return node;
+			}
+			const properties = options.properties.map((prop) => {
+				if (!prop.name || (prop.name.text ?? prop.name.getText()) !== "load") return prop;
+				if (!ts.isPropertyAssignment(prop) || !ts.isArrayLiteralExpression(prop.initializer)) {
+					report(prop, "CRU006", "load must be an array of string literals.");
+					return prop;
+				}
+				const entries = prop.initializer.elements.map((entry) => {
+					if (!ts.isStringLiteral(entry)) {
+						report(entry, "CRU006", "load entry must be a string literal.");
+						return entry;
+					}
+					const root = path.dirname(
+						program.getCompilerOptions().configFilePath ??
+							path.join(program.getCurrentDirectory(), "tsconfig.json"),
+					);
+					const requireCompiler = createRequire(require.resolve("roblox-ts/package.json", { paths: [root] }));
+					const { RojoResolver } = requireCompiler("@roblox-ts/rojo-resolver");
+					const rojoPath = config.rojo ?? RojoResolver.findRojoConfigFilePath(root).path;
+					const resolver = rojoPath && RojoResolver.fromPath(path.resolve(root, rojoPath));
+					const globAt = entry.text.search(/[?*{[]/);
+					const prefix =
+						globAt < 0
+							? path.dirname(entry.text) + "/"
+							: entry.text.slice(0, entry.text.lastIndexOf("/", globAt) + 1);
+					const suffix = entry.text.slice(prefix.length).replace(/\.tsx?$/, "");
+					const opts = program.getCompilerOptions();
+					const output = path.resolve(opts.outDir, path.relative(opts.rootDir, path.resolve(root, prefix)));
+					const mapped = resolver?.getRbxPathFromFilePath(output);
+					if (!mapped) {
+						report(entry, "CRU006", "load prefix is outside the Rojo mapping.");
+						return entry;
+					}
+					return str(`crucible-path:${[...mapped, suffix].join("/")}`);
+				});
+				return f.updatePropertyAssignment(prop, prop.name, array(entries));
+			});
+			return f.updateCallExpression(node, node.expression, node.typeArguments, [
+				f.updateObjectLiteralExpression(options, properties),
+			]);
+		};
+		const visit = (node) => {
+			if (isMacro(node, "attribute")) {
+				const field = node.parent;
+				if (
+					!ts.isPropertyDeclaration(field) ||
+					field.initializer !== node ||
+					modifiers(field, ts.ModifierFlags.Static) ||
+					kindOf(checker.getTypeAtLocation(field.parent)) !== "behaviour"
+				) {
+					report(node, "CRU015", "attribute() must initialize a behaviour instance field.");
+					return node;
+				}
+				globalReferences(field.type, field);
+				for (const type of node.typeArguments ?? []) globalReferences(type, field);
+				check(checker.getTypeAtLocation(field), field);
+				return call(runtime("attribute"), [
+					f.createThis(),
+					str(checker.getSymbolAtLocation(field.name)?.name ?? field.name.getText()),
+					...node.arguments.map((arg) => ts.visitNode(arg, visit)),
+				]);
+			}
+			if (isMacro(node, "inject")) {
+				const own = node.typeArguments?.[0];
+				if (!own) return node;
+				const type = checker.getTypeFromTypeNode(own);
+				const target = allTarget(type);
+				const typeNode = target && ts.isTypeReferenceNode(own) ? own.typeArguments?.[0] : own;
+				return call(
+					runtime(target ? "resolveAll" : "resolve"),
+					[str(id(target ?? type, node) ?? "invalid")],
+					[typeNode ?? own],
+				);
+			}
+			if (isMacro(node, "boot")) return boot(node);
+			const next = ts.visitEachChild(node, visit, context);
+			if (ts.isClassDeclaration(node)) {
+				const emitted = registration(node);
+				if (emitted) return [next, emitted];
+			}
+			return next;
+		};
+		try {
+			const next = ts.visitEachChild(source, visit, context);
+			if (!used) return next;
+			const imports = f.createImportDeclaration(
+				undefined,
+				f.createImportClause(false, undefined, f.createNamespaceImport(f.createIdentifier("__crucible"))),
+				str("@trioforge/crucible/emit"),
+			);
+			return f.updateSourceFile(next, [imports, ...next.statements]);
+		} catch (error) {
+			report(
+				source,
+				"CRU003",
+				`Cannot transform malformed input: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return source;
+		}
+	};
+};

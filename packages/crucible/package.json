@@ -17,13 +17,19 @@
 		"./client": {
 			"types": "./out/client/index.d.ts",
 			"default": "./out/client/init.luau"
-		}
+		},
+		"./transformer": "./transformer/index.js"
 	},
 	"scripts": {
-		"build": "rbxtsc --type package"
+		"build": "rbxtsc --type package",
+		"build:transformer": "node transformer-src/build.mjs",
+		"test:transformer": "node --test transformer-src/tests/*.test.cjs"
 	},
 	"devDependencies": {
 		"@rbxts/compiler-types": "3.0.0-types.0",
 		"@rbxts/types": "1.0.959"
+	},
+	"peerDependencies": {
+		"typescript": "5.5.3"
 	}
 }
