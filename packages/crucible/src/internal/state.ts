@@ -139,10 +139,10 @@ export interface ObjectState extends LifeState {
 	object?: LifeObject;
 	/** On the work stack. A request for a queued object only changes `want`; its next step reads it. */
 	queued: boolean;
-	/** Steps since a request from another causal root reached the object. `MAX_TRANSITIONS` faults it. */
+	/** C5: steps since the last request made from outside the object. `MAX_TRANSITIONS` faults it. */
 	transitions: number;
 	/** The outside event this generation's steps descend from. A step's requests carry its root. */
-	root: number;
+	root?: CausalRoot;
 	startThread?: thread;
 	/** Disconnects for the `All<T>.observe` subscriptions this object owns. Run when the generation ends. */
 	subscriptions?: (() => void)[];
@@ -154,6 +154,16 @@ export const enum Sweep {
 	Awake,
 	Enable,
 	Start,
+}
+
+/**
+ * @internal
+ * One outside event and everything its steps asked for. A cycle among k generations revisits the same k, so
+ * its steps outgrow `MAX_TRANSITIONS` per generation reached; a cascade reaches a new generation every few steps.
+ */
+export interface CausalRoot {
+	steps: number;
+	reached: number;
 }
 
 /** @internal New generations going through construct, awake, enable and start together. */

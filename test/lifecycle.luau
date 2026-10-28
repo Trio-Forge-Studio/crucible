@@ -532,7 +532,65 @@ return {
 				settled += 1
 			end
 		end
-		spec.eq(settled > 0, true, "the ring faulted with Settle")
+		spec.eq(settled, 1, "one generation faulted with Settle, which breaks the ring")
+	end,
+
+	["C5: 1,000 objects in one cascade that each toggle a shared target once never fault it"] = function()
+		local w = world.new()
+		local target = w.boot(w.make("T"))
+		local nodes = {}
+		for i = 1, 1000 do
+			nodes[i] = w.make(`N{i}`)
+		end
+		w.life.admit(nodes)
+		for i = 1, 1000 do
+			w.scripts[`N{i}`].onDisable = function()
+				w.life.request(target, if target.want == Want.Enabled then Want.Disabled else Want.Enabled)
+				if i < 1000 then
+					w.life.request(nodes[i + 1], Want.Disabled)
+				end
+			end
+		end
+		w.life.request(nodes[1], Want.Disabled)
+		spec.eq(target.fault, nil, "the target's fault")
+		spec.eq(w.count("onDisable:T"), 500, "the target's disables")
+		spec.eq(nodes[1000].phase, Phase.Disabled, "the cascade reached its end")
+		for i, n in nodes do
+			spec.eq(n.fault, nil, `N{i} fault`)
+		end
+	end,
+
+	["C5: an object that undoes itself inside a large cascade faults within its own bound"] = function()
+		local w = world.new()
+		local nodes = {}
+		for i = 1, 200 do
+			nodes[i] = w.make(`N{i}`)
+		end
+		local a = w.make("A")
+		table.insert(nodes, a)
+		w.life.admit(nodes)
+		for i = 1, 199 do
+			w.scripts[`N{i}`].onDisable = function()
+				w.life.request(nodes[i + 1], Want.Disabled)
+			end
+		end
+		w.scripts.N200.onDisable = function()
+			w.life.request(a, Want.Disabled)
+		end
+		local guard = guardedEnables(40)
+		w.scripts.A.onEnable = function(s)
+			guard()
+			w.life.request(s, Want.Disabled)
+		end
+		w.scripts.A.onDisable = function(s)
+			w.life.request(s, Want.Enabled)
+		end
+		w.life.request(nodes[1], Want.Disabled)
+		spec.eq(a.fault and a.fault.hook, Hook.Settle, `A's fault: {a.fault and a.fault.error}`)
+		spec.eq(w.count("onDestroy:A"), 1, "A tore down once")
+		for i = 1, 200 do
+			spec.eq(nodes[i].fault, nil, `N{i} fault`)
+		end
 	end,
 
 	["C5: a cascade of 40 objects that each disable the next never faults"] = function()

@@ -1,5 +1,5 @@
 import { call, CallResult, disown, own, ownerOf } from "./runner";
-import type { Batch, LifeEffects, LifeObject, LifeRecord, LifeState, ObjectState } from "./state";
+import type { Batch, CausalRoot, LifeEffects, LifeObject, LifeRecord, LifeState, ObjectState } from "./state";
 import { Gate, Hook, Kind, Phase, StartPhase, Step, Sweep, Want, Work } from "./state";
 
 /**
@@ -80,7 +80,6 @@ export function track(record: LifeRecord, instance?: Instance, attributes?: Reco
 		attributes,
 		queued: false,
 		transitions: 0,
-		root: 0,
 	};
 }
 
@@ -305,8 +304,6 @@ class Reconciler {
 	private batches = 0;
 	/** The first cap failure this drain. */
 	private failure?: string;
-	/** The last causal root handed out. Each outside event gets the next one. */
-	private roots = 0;
 
 	isDraining(): boolean {
 		return this.depth > 0;
@@ -340,28 +337,27 @@ class Reconciler {
 	}
 
 	/**
-	 * C5: what reaches `s` from outside any step is a new causal root, and what a step asks for carries that
-	 * step's root. Only a new root restarts the count, so a cycle of any length keeps counting on one root, while
-	 * a cascade steps each object a few times and a stream-in reaches a watcher once per member's root.
+	 * C5 restarts `s`'s count on a request made from outside it, which bounds an object that undoes itself.
+	 * Requests made outside any step start a new causal root, and a step's requests carry its root, whose budget
+	 * bounds generations that undo each other.
 	 */
 	chain(s: ObjectState) {
-		this.rooted(s, this.stepping?.root ?? this.newRoot());
+		const stepping = this.stepping;
+		if (stepping === s) return;
+		s.transitions = 0;
+		this.rooted(s, stepping?.root ?? { steps: 0, reached: 0 });
 	}
 
-	private newRoot(): number {
-		this.roots += 1;
-		return this.roots;
-	}
-
-	private rooted(s: ObjectState, root: number) {
+	private rooted(s: ObjectState, root: CausalRoot) {
 		if (s.root === root) return;
 		s.root = root;
-		s.transitions = 0;
+		root.reached += 1;
 	}
 
 	private raise(s: ObjectState, gate: Gate) {
 		if (s.gate < gate) s.gate = gate;
-		this.rooted(s, this.newRoot());
+		s.transitions = 0;
+		this.rooted(s, { steps: 0, reached: 0 });
 		this.push(s);
 	}
 
@@ -469,9 +465,23 @@ class Reconciler {
 		const step = nextStep(s);
 		if (step === undefined) return false;
 		s.transitions += 1;
-		if (s.transitions > MAX_TRANSITIONS && s.fault === undefined) {
-			note(s, Hook.Settle, `did not settle after ${MAX_TRANSITIONS} transitions along one chain of requests`);
-			return true;
+		const root = s.root;
+		if (root !== undefined) root.steps += 1;
+		if (s.fault === undefined) {
+			if (s.transitions > MAX_TRANSITIONS) {
+				note(
+					s,
+					Hook.Settle,
+					`did not settle after ${MAX_TRANSITIONS} transitions since a request from outside it`,
+				);
+				return true;
+			}
+			if (root !== undefined && root.steps > MAX_TRANSITIONS * root.reached) {
+				// Restarting the budget faults one generation of the cycle; its teardown ends the cycle.
+				root.steps = 0;
+				note(s, Hook.Settle, `objects kept changing each other: over ${MAX_TRANSITIONS} steps per object`);
+				return true;
+			}
 		}
 		this.stepping = s;
 		perform(s, step);
