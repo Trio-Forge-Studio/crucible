@@ -2,7 +2,8 @@
 -- Deferred signal behaviour, which FD's places set, and run with task.defer callbacks when the test calls flush.
 local task = require("@lune/task")
 
-local FrameEvent = { PreRender = 0, PreSimulation = 1, PostSimulation = 2 }
+local FrameEvent =
+	{ PreRender = 0, PreSimulation = 1, PostSimulation = 2, RenderStepped = 3, PreAnimation = 4, Heartbeat = 5 }
 
 local engine = {}
 engine.FrameEvent = FrameEvent
@@ -12,9 +13,10 @@ local function listeners()
 end
 
 local function connect(group, fn)
-	local entry = { fn = fn }
+	local entry = { fn = fn, connected = true }
 	table.insert(group.list, entry)
 	return function()
+		entry.connected = false
 		local index = table.find(group.list, entry)
 		if index then
 			table.remove(group.list, index)
@@ -38,7 +40,14 @@ function engine.new()
 		instances = {},
 		tagAdded = {},
 		tagRemoved = {},
-		frames = { [0] = listeners(), [1] = listeners(), [2] = listeners() },
+		frames = {
+			[0] = listeners(),
+			[1] = listeners(),
+			[2] = listeners(),
+			[3] = listeners(),
+			[4] = listeners(),
+			[5] = listeners(),
+		},
 		renderSteps = {},
 		bound = 0,
 	}
@@ -52,7 +61,9 @@ function engine.new()
 		local args = table.pack(...)
 		for _, entry in table.clone(signal.list) do
 			table.insert(e.deferred, function()
-				entry.fn(table.unpack(args, 1, args.n))
+				if entry.connected then
+					entry.fn(table.unpack(args, 1, args.n))
+				end
 			end)
 		end
 	end
@@ -117,12 +128,19 @@ function engine.new()
 		end
 	end
 
-	-- PreRender also runs the bound render steps, lowest priority first, in bind order for equal priorities.
-	function e.frame(event: number, dt: number)
-		for _, entry in table.clone(e.frames[event].list) do
-			entry.fn(dt)
+	local function frameSignal(event, dt, reverse)
+		local entries = table.clone(e.frames[event].list)
+		for i = 1, #entries do
+			local entry = entries[if reverse then #entries - i + 1 else i]
+			if entry.connected then
+				entry.fn(dt)
+			end
 		end
+	end
+
+	function e.frame(event: number, dt: number)
 		if event ~= FrameEvent.PreRender then
+			frameSignal(event, dt, false)
 			return
 		end
 		local steps = table.clone(e.renderSteps)
@@ -133,7 +151,22 @@ function engine.new()
 			return a.order < b.order
 		end)
 		for _, step in steps do
-			step.fn(dt)
+			if step.connected then
+				step.fn(dt)
+			end
+		end
+		frameSignal(FrameEvent.RenderStepped, dt, false)
+		frameSignal(FrameEvent.PreRender, dt, true)
+	end
+
+	function e.cycle(dt: number, renders: boolean)
+		if renders then
+			e.frame(FrameEvent.PreRender, dt)
+		end
+		for _, event in
+			{ FrameEvent.PreAnimation, FrameEvent.PreSimulation, FrameEvent.PostSimulation, FrameEvent.Heartbeat }
+		do
+			e.frame(event, dt)
 		end
 	end
 
@@ -186,9 +219,10 @@ function engine.new()
 		end,
 		bindRenderStep = function(name, priority, fn)
 			e.bound += 1
-			local step = { name = name, priority = priority, fn = fn, order = e.bound }
+			local step = { name = name, priority = priority, fn = fn, order = e.bound, connected = true }
 			table.insert(e.renderSteps, step)
 			return function()
+				step.connected = false
 				local index = table.find(e.renderSteps, step)
 				if index then
 					table.remove(e.renderSteps, index)

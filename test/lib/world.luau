@@ -33,6 +33,7 @@ function world.new()
 	local graph = spec.runtime()
 	local engine = Engine.new()
 	local w = {
+		graph = graph,
 		life = graph.module("internal/lifecycle"),
 		runner = graph.module("internal/runner"),
 		DenseList = graph.module("internal/dense-list").DenseList,

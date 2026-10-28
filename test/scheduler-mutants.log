@@ -1,0 +1,68 @@
+PASS fixed receives frame dt
+KILLED scripted_dt_keeps_fraction_drops_excess_steps_and_resets_carry_when_empty C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:162: whole steps: expected 1, got 0
+
+PASS wrong render priority
+KILLED S1_bindings_ascend_by_priority_equal_priorities_keep_bind_order_before_RenderStepped_then_newest_PreRender C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:61: S1 row 3:
+         expected 0 100 199 200 same lane equal 201 2000 RenderStepped new plain old
+         got      2000 201 200 same lane 199 100 0 equal RenderStepped new plain old
+
+PASS fixed event
+KILLED lanes_use_PreSimulation_and_PostSimulation_with_the_whole_update_lane_before_lateUpdate C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:25: unrelated events:
+         expected 
+         got      fixedUpdateA fixedUpdateB
+
+PASS post event
+KILLED lanes_use_PreSimulation_and_PostSimulation_with_the_whole_update_lane_before_lateUpdate C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:25: unrelated events:
+         expected 
+         got      updateA updateB lateUpdateA lateUpdateB
+
+PASS late before update
+KILLED lanes_use_PreSimulation_and_PostSimulation_with_the_whole_update_lane_before_lateUpdate C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:29: lane order:
+         expected fixedUpdateA fixedUpdateB updateA updateB lateUpdateA lateUpdateB preRenderA preRenderB
+         got      fixedUpdateA fixedUpdateB lateUpdateA lateUpdateB updateA updateB preRenderA preRenderB
+
+PASS descending priorities
+KILLED S1_bindings_ascend_by_priority_equal_priorities_keep_bind_order_before_RenderStepped_then_newest_PreRender C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:61: S1 row 3:
+         expected 0 100 199 200 same lane equal 201 2000 RenderStepped new plain old
+         got      2000 201 200 same lane equal 199 100 0 RenderStepped new plain old
+
+PASS reverse equal binds
+KILLED S1_bindings_ascend_by_priority_equal_priorities_keep_bind_order_before_RenderStepped_then_newest_PreRender C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:61: S1 row 3:
+         expected 0 100 199 200 same lane equal 201 2000 RenderStepped new plain old
+         got      0 100 199 equal 200 same lane 201 2000 RenderStepped new plain old
+
+PASS plain PreRender before bindings
+KILLED S1_bindings_ascend_by_priority_equal_priorities_keep_bind_order_before_RenderStepped_then_newest_PreRender C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:61: S1 row 3:
+         expected 0 100 199 200 same lane equal 201 2000 RenderStepped new plain old
+         got      new plain old 0 100 199 200 same lane equal 201 2000 RenderStepped new plain old
+
+PASS oldest plain PreRender first
+KILLED S1_bindings_ascend_by_priority_equal_priorities_keep_bind_order_before_RenderStepped_then_newest_PreRender C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:61: S1 row 3:
+         expected 0 100 199 200 same lane equal 201 2000 RenderStepped new plain old
+         got      0 100 199 200 same lane equal 201 2000 RenderStepped old plain new
+
+PASS server accepts render
+KILLED server_refuses_preRender_or_renderPriority_and_reports_through_the_port C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:99: only valid server class bound: expected 1, got 3
+
+PASS no frame blame
+KILLED throw_or_yield_faults_only_its_owner_and_the_rest_of_each_lane_runs_in_order C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:133: only B faulted: expected 5, got 3
+
+PASS no fixed cap
+KILLED a long frame runs at most four steps, drops the other whole steps and keeps the fraction C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler-accumulator:32: steps: expected 4, got 10
+
+PASS discard fraction
+KILLED short frames accumulate until a whole step is due C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler-accumulator:26: second frame: expected 1, got 0
+
+PASS no dt clamp
+KILLED a negative frame time counts as zero C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler-accumulator:44: steps: expected 0, got -60
+
+PASS no pool compaction
+KILLED pool_rule_all_five_lane_kinds_bound_slot_work_and_growth_and_preserve_tick_order C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:334: slot growth stops: expected 4000, got 4500
+
+PASS no untick
+KILLED disable_during_each_lane_skips_the_next_member_and_later_lanes C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:261: disabled before next member: expected 4, got 5
+
+PASS wrong S1 cycle
+KILLED S1_client_render_then_PreAnimation_PreSimulation_PostSimulation_Heartbeat_and_server_omits_render C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-TrVMDL\test\scheduler:85: S1 frame order:
+         expected PreRender PreAnimation PreSimulation PostSimulation Heartbeat
+         got      PreRender PreSimulation PreAnimation PostSimulation Heartbeat
