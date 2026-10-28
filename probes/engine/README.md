@@ -19,13 +19,15 @@ pnpm exec vp fmt probes/engine
 pnpm check
 ```
 
-The driver builds with Rojo under the already ignored `build/engine/`. It uses WMI to launch Studio outside the shell's process tree, following Fragile Delivery's launch mechanics. It selects its MCP session by place filename and verifies its PID's command line. Each launch records `Win32_OperatingSystem.FreePhysicalMemory` in KB. It refuses to launch while any previous recorded PID exists. Run one driver at a time.
+The driver builds with Rojo under the already ignored `build/engine/`. It uses WMI to launch Studio outside the shell's process tree, following Fragile Delivery's launch mechanics. Each launch uses a place filename containing the driver PID and a fresh UUID. It selects only that exact MCP place name, rejects multiple matches, and verifies its launched PID's command line. Each launch records `Win32_OperatingSystem.FreePhysicalMemory` in KB. It refuses to launch while any previous recorded PID exists. Run one driver at a time.
 
-After Stop Play, the driver observes for eight seconds in the short case or 45 seconds in the long case. It saves console output, the native log, an extracted `S1|` trace, and session metadata. It calls `CloseMainWindow` on its own PID and waits up to 30 seconds. Only if that PID still runs does it call `Stop-Process -Id`. It then verifies that PID exited. No other Studio is driven or closed.
+After Stop Play, the driver observes for eight seconds in the short case or 45 seconds in the long case. It saves console output, the native log, an extracted `S1|` trace, and session metadata. It calls `CloseMainWindow` on its own PID and waits up to 30 seconds. Only if that PID still runs does it call `Stop-Process -Id`. It records which close method ran and verifies that PID exited. No other Studio is driven or closed.
 
 Each invocation replaces that case's results. Archive existing results before rerunning. If Studio crashes during startup, preserve that attempt's session and native log, wait 60 seconds, and retry. Stop after three startup crashes and report every log and memory reading. If Studio cannot connect to MCP, report that blocker. Do not substitute documentation.
 
 The generated Rojo project sets `Workspace.SignalBehavior` and writes the same label to an attribute for trace metadata. Direct script reads of that property failed in this Studio. The initial instrument failure is preserved in `results/instrument-failure-native.log`. The nested Selene standard extends Roblox with `version()`. The root `luau+lune` standard stays unchanged.
+
+Run `node --test probes/engine/verification.test.mjs` to check staged Luau routing, row 1b evidence, unique launch names, and rejection of ambiguous Studio sessions.
 
 ## Read the traces
 
@@ -38,7 +40,7 @@ Render order R, observed in all 35 complete intervals per run, is `Bind0, Bind10
 | Question | Measured answer | SignalBehavior | Studio version | Log and lines |
 | --- | --- | --- | --- | --- |
 | 1a. Parent nil and back | D removed after the write, f3 to f4. HasTag stayed true. Reparent added again, f5 to f6. I removed and added inside each write at f3 and f5. | D, I | 0.745.0.7451137 | [deferred-short.log](results/deferred-short.log) L4-18; [immediate-short.log](results/immediate-short.log) L3-14 |
-| 1b. ServerStorage and back | Neither move emitted added or removed on the server. Initial AddTag emitted added. | D, I | 0.745.0.7451137 | [deferred-short.log](results/deferred-short.log) L23-34; [immediate-short.log](results/immediate-short.log) L20-29 |
+| 1b. ServerStorage and back | Neither move emitted added or removed on the server. Initial AddTag emitted added. | D, I | 0.745.0.7451137 | [deferred-short.log](results/deferred-short.log) L23-39; [immediate-short.log](results/immediate-short.log) L20-33 |
 | 1c. Destroy | One removed signal. D after Destroy, f15 to f16. I inside Destroy at f15, with Parent still Workspace in the handler. HasTag read true immediately after Destroy in both. | D, I | 0.745.0.7451137 | [deferred-short.log](results/deferred-short.log) L40-47; [immediate-short.log](results/immediate-short.log) L34-41 |
 | 1d. AddTag then RemoveTag | Added then removed. D both after the writes, f17 to f18. I inside each write at f17. | D, I | 0.745.0.7451137 | [deferred-short.log](results/deferred-short.log) L51-56; [immediate-short.log](results/immediate-short.log) L46-50 |
 | 1e. Created and cloned at nil | No added handler at nil. Clone retained tag. Parenting emitted added for created then cloned. D after both writes, f23 to f24. I inside each write at f23. | D, I | 0.745.0.7451137 | [deferred-short.log](results/deferred-short.log) L60-80; [immediate-short.log](results/immediate-short.log) L55-74 |

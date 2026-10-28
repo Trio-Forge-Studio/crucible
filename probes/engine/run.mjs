@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import readline from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
+import { createPlaceName, selectStudio } from "./session.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const build = path.join(root, "build/engine");
@@ -29,7 +30,7 @@ for (const service of ["ServerScriptService", "StarterPlayer"]) {
 	probe.$path = path.join(root, "probes/engine", probe.$path);
 }
 const projectFile = path.join(build, `${label}.project.json`);
-const place = path.join(build, `s1-${label}.rbxl`);
+const place = path.join(build, createPlaceName(label));
 fs.writeFileSync(projectFile, JSON.stringify(project, null, 2));
 execFileSync("rojo", ["build", projectFile, "-o", place], { stdio: "inherit" });
 const exe = ps(
@@ -118,7 +119,7 @@ try {
 	while (!studioId && Date.now() < deadline) {
 		if (!owns()) throw Error("Owned Studio exited during startup");
 		const list = JSON.parse(text(await call("list_roblox_studios"))).studios;
-		studioId = list.find((studio) => studio.name === path.basename(place))?.id;
+		studioId = selectStudio(list, path.basename(place));
 		if (!studioId) await delay(2000);
 	}
 	if (!studioId)
@@ -198,8 +199,8 @@ try {
 		}
 	}
 	if (owns()) {
-		ps(
-			`$probeProcess = Get-Process -Id ${pid}; $probeProcess.CloseMainWindow() | Out-Null; if (-not $probeProcess.WaitForExit(30000)) { Stop-Process -Id ${pid}; $probeProcess.WaitForExit(10000) | Out-Null }`,
+		identity.closeMethod = ps(
+			`$probeProcess = Get-Process -Id ${pid}; $probeProcess.CloseMainWindow() | Out-Null; if (-not $probeProcess.WaitForExit(30000)) { Stop-Process -Id ${pid}; $probeProcess.WaitForExit(10000) | Out-Null; 'Stop-Process' } else { 'CloseMainWindow' }`,
 		);
 		identity.closed = true;
 		console.log(`Closed owned Studio PID ${pid}`);
