@@ -1,0 +1,198 @@
+2026-10-28T18:15:38.609Z,24.609598,7160,6,Info [FLog::CreatorOutput] S1|server|0001|0.000041|f0|metadata|version=0.745.0.7451137 behavior=Deferred
+2026-10-28T18:15:38.846Z,24.846224,8ba4,6,Info [FLog::CreatorOutput] S1|server|0002|0.237405|f0|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:38.866Z,24.866261,6354,6,Info [FLog::CreatorOutput] S1|server|0003|0.257408|f1|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:38.866Z,24.866261,6354,6,Info [FLog::CreatorOutput] S1|server|0004|0.257664|f2|1a|added Part parent=Workspace
+2026-10-28T18:15:38.900Z,24.900320,4118,6,Info [FLog::CreatorOutput] S1|server|0005|0.291521|f2|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:39.026Z,25.026480,8ba4,6,Info [FLog::CreatorOutput] S1|client|0001|0.000014|metadata|version=0.745.0.7451137 behavior=Deferred
+2026-10-28T18:15:39.026Z,25.026480,8ba4,6,Info [FLog::CreatorOutput] S1|client|0002|0.000437|5.client|result[1]=false
+2026-10-28T18:15:39.026Z,25.026480,8ba4,6,Info [FLog::CreatorOutput] S1|client|0003|0.000750|5.client|result[2]=BindToClose can only be called on the server.
+2026-10-28T18:15:39.085Z,25.085903,6354,6,Info [FLog::CreatorOutput] S1|server|0006|0.477132|f3|1a|before Parent=nil
+2026-10-28T18:15:39.087Z,25.087898,6354,6,Info [FLog::CreatorOutput] S1|server|0007|0.478411|f3|1a|after Parent=nil HasTag=true
+2026-10-28T18:15:39.087Z,25.087898,6354,6,Info [FLog::CreatorOutput] S1|server|0008|0.478600|f3|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:39.087Z,25.087898,6354,6,Info [FLog::CreatorOutput] S1|server|0009|0.478732|f4|1a|removed Part parent=nil
+2026-10-28T18:15:39.417Z,25.417311,b3d4,6,Info [FLog::CreatorOutput] S1|server|0010|0.808606|f4|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:39.420Z,25.420307,1ecc,6,Info [FLog::CreatorOutput] S1|server|0011|0.811021|f5|1a|settled HasTag=true
+2026-10-28T18:15:39.420Z,25.420307,1ecc,6,Info [FLog::CreatorOutput] S1|server|0012|0.811217|f5|1a|before Parent=workspace
+2026-10-28T18:15:39.420Z,25.420307,1ecc,6,Info [FLog::CreatorOutput] S1|server|0013|0.811485|f5|1a|after Parent=workspace
+2026-10-28T18:15:39.420Z,25.420307,1ecc,6,Info [FLog::CreatorOutput] S1|server|0014|0.811625|f5|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:39.420Z,25.420307,1ecc,6,Info [FLog::CreatorOutput] S1|server|0015|0.811763|f6|1a|added Part parent=Workspace
+2026-10-28T18:15:39.442Z,25.442158,5ea0,6,Info [FLog::CreatorOutput] S1|server|0016|0.833092|f6|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:42.303Z,28.303946,b714,6,Info [FLog::CreatorOutput] S1|server|0017|3.695194|f7|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:42.303Z,28.303946,b714,6,Info [FLog::CreatorOutput] S1|server|0018|3.695515|f8|1b|added Part parent=Workspace
+2026-10-28T18:15:43.749Z,29.749331,1ecc,6,Info [FLog::CreatorOutput] S1|server|0019|5.140060|f8|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.006Z,30.006968,4118,6,Info [FLog::CreatorOutput] S1|client|0004|4.981483|3.client|frame=1 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.103Z,30.103851,8ba4,6,Info [FLog::CreatorOutput] S1|server|0020|5.495439|f9|1b|before ServerStorage
+2026-10-28T18:15:44.103Z,30.103851,36b4,6,Info [FLog::CreatorOutput] S1|server|0021|5.495880|f9|1b|after ServerStorage
+2026-10-28T18:15:44.104Z,30.104849,36b4,6,Info [FLog::CreatorOutput] S1|server|0022|5.496083|f9|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.130Z,30.130812,36b4,6,Info [FLog::CreatorOutput] S1|client|0005|5.104421|3.client|frame=2 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.144Z,30.144068,8ba4,6,Info [FLog::CreatorOutput] S1|server|0023|5.534916|f10|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.188Z,30.188112,36b4,6,Info [FLog::CreatorOutput] S1|client|0006|5.161942|3.client|frame=3 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.204Z,30.204128,36b4,6,Info [FLog::CreatorOutput] S1|server|0024|5.595677|f11|1b|before workspace
+2026-10-28T18:15:44.204Z,30.204128,36b4,6,Info [FLog::CreatorOutput] S1|server|0025|5.596032|f11|1b|after workspace
+2026-10-28T18:15:44.205Z,30.205130,36b4,6,Info [FLog::CreatorOutput] S1|server|0026|5.596218|f11|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.274Z,30.274145,8ba4,6,Info [FLog::CreatorOutput] S1|client|0007|5.248161|3.client|frame=4 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.294Z,30.294157,6354,6,Info [FLog::CreatorOutput] S1|server|0027|5.684910|f12|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.334Z,30.334974,36b4,6,Info [FLog::CreatorOutput] S1|client|0008|5.308669|3.client|frame=5 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.432Z,30.432116,36b4,6,Info [FLog::CreatorOutput] S1|server|0028|5.822755|f13|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.432Z,30.432116,36b4,6,Info [FLog::CreatorOutput] S1|server|0029|5.823134|f14|1c|added Part parent=Workspace
+2026-10-28T18:15:44.447Z,30.447136,1ecc,6,Info [FLog::CreatorOutput] S1|client|0009|5.420876|3.client|frame=6 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.484Z,30.484188,36b4,6,Info [FLog::CreatorOutput] S1|server|0030|5.875615|f14|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.505Z,30.505217,8ba4,6,Info [FLog::CreatorOutput] S1|client|0010|5.478985|3.client|frame=7 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.517Z,30.517233,1ecc,6,Info [FLog::CreatorOutput] S1|server|0031|5.908239|f15|1c|before Destroy
+2026-10-28T18:15:44.518Z,30.518234,1ecc,6,Info [FLog::CreatorOutput] S1|server|0032|5.908593|f15|1c|after Destroy HasTag=true
+2026-10-28T18:15:44.518Z,30.518234,1ecc,6,Info [FLog::CreatorOutput] S1|server|0033|5.908722|f15|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.518Z,30.518234,1ecc,6,Info [FLog::CreatorOutput] S1|server|0034|5.908807|f16|1c|removed Part parent=nil
+2026-10-28T18:15:44.534Z,30.534891,36b4,6,Info [FLog::CreatorOutput] S1|client|0011|5.508537|3.client|frame=8 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.552Z,30.552021,36b4,6,Info [FLog::CreatorOutput] S1|server|0035|5.941970|f16|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.568Z,30.568142,8ba4,6,Info [FLog::CreatorOutput] S1|client|0012|5.540634|3.client|frame=9 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.587Z,30.587286,8ba4,6,Info [FLog::CreatorOutput] S1|server|0036|5.977013|f17|1d|before AddTag
+2026-10-28T18:15:44.588Z,30.588295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0037|5.977369|f17|1d|after AddTag before RemoveTag
+2026-10-28T18:15:44.588Z,30.588295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0038|5.977491|f17|1d|after RemoveTag
+2026-10-28T18:15:44.588Z,30.588295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0039|5.977596|f17|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.588Z,30.588295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0040|5.977735|f18|1d|added Part parent=Workspace
+2026-10-28T18:15:44.588Z,30.588295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0041|5.977825|f18|1d|removed Part parent=Workspace
+2026-10-28T18:15:44.604Z,30.604416,b714,6,Info [FLog::CreatorOutput] S1|client|0013|5.577173|3.client|frame=10 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.628Z,30.628597,8ba4,6,Info [FLog::CreatorOutput] S1|server|0042|6.017644|f18|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.642Z,30.642082,1ecc,6,Info [FLog::CreatorOutput] S1|client|0014|5.616119|3.client|frame=11 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.660Z,30.660946,7160,6,Info [FLog::CreatorOutput] S1|server|0043|6.052083|f19|1e|tagged at nil
+2026-10-28T18:15:44.660Z,30.660946,7160,6,Info [FLog::CreatorOutput] S1|server|0044|6.052402|f19|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.677Z,30.677822,8ba4,6,Info [FLog::CreatorOutput] S1|client|0015|5.651201|3.client|frame=12 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.694Z,30.694700,1ecc,6,Info [FLog::CreatorOutput] S1|server|0045|6.085653|f20|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.710Z,30.710585,36b4,6,Info [FLog::CreatorOutput] S1|client|0016|5.684991|3.client|frame=13 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.729Z,30.729448,8ba4,6,Info [FLog::CreatorOutput] S1|server|0046|6.120160|f21|1e|clone HasTag=true
+2026-10-28T18:15:44.729Z,30.729448,8ba4,6,Info [FLog::CreatorOutput] S1|server|0047|6.120499|f21|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.745Z,30.745897,8ba4,6,Info [FLog::CreatorOutput] S1|client|0017|5.719275|3.client|frame=14 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.762Z,30.762859,36b4,6,Info [FLog::CreatorOutput] S1|server|0048|6.154102|f22|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.785Z,30.785807,1ecc,6,Info [FLog::CreatorOutput] S1|client|0018|5.759583|3.client|frame=15 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.837Z,30.837358,47f8,6,Info [FLog::CreatorOutput] S1|server|0049|6.228745|f23|1e|before parent created
+2026-10-28T18:15:44.837Z,30.837358,47f8,6,Info [FLog::CreatorOutput] S1|server|0050|6.229096|f23|1e|after parent created before parent clone
+2026-10-28T18:15:44.838Z,30.838364,47f8,6,Info [FLog::CreatorOutput] S1|server|0051|6.229384|f23|1e|after parent clone
+2026-10-28T18:15:44.838Z,30.838364,47f8,6,Info [FLog::CreatorOutput] S1|server|0052|6.229527|f23|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.838Z,30.838364,47f8,6,Info [FLog::CreatorOutput] S1|server|0053|6.229647|f24|1e|added CreatedAtNil parent=Workspace
+2026-10-28T18:15:44.838Z,30.838364,47f8,6,Info [FLog::CreatorOutput] S1|server|0054|6.229749|f24|1e|added ClonedAtNil parent=Workspace
+2026-10-28T18:15:44.846Z,30.846395,36b4,6,Info [FLog::CreatorOutput] S1|client|0019|5.819167|3.client|frame=16 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.926Z,30.926723,36b4,6,Info [FLog::CreatorOutput] S1|server|0055|6.316370|f24|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.940Z,30.940079,8ba4,6,Info [FLog::CreatorOutput] S1|client|0020|5.914712|3.client|frame=17 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.960Z,30.960032,36b4,6,Info [FLog::CreatorOutput] S1|server|0056|6.351000|f25|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.961Z,30.961029,36b4,6,Info [FLog::CreatorOutput] S1|server|0057|6.351370|f26|1e|removed ClonedAtNil parent=nil
+2026-10-28T18:15:44.974Z,30.974995,6354,6,Info [FLog::CreatorOutput] S1|client|0021|5.948954|3.client|frame=18 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.985Z,30.985970,1ecc,6,Info [FLog::CreatorOutput] S1|server|0058|6.377233|f26|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:44.992Z,30.992952,4118,6,Info [FLog::CreatorOutput] S1|client|0022|5.968062|3.client|frame=19 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.018Z,31.018890,1ecc,6,Info [FLog::CreatorOutput] S1|server|0059|6.410617|f27|2.wait|running schedules check
+2026-10-28T18:15:45.018Z,31.018890,1ecc,6,Info [FLog::CreatorOutput] S1|server|0060|6.410829|f27|2.wait|before yield
+2026-10-28T18:15:45.019Z,31.019888,1ecc,6,Info [FLog::CreatorOutput] S1|server|0061|6.410964|f27|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.019Z,31.019888,1ecc,6,Info [FLog::CreatorOutput] S1|server|0062|6.411137|f28|2.wait|check status=suspended
+2026-10-28T18:15:45.019Z,31.019888,1ecc,6,Info [FLog::CreatorOutput] S1|server|0063|6.411223|f28|2.wait|cancel ok=true result=nil
+2026-10-28T18:15:45.022Z,31.022881,6354,6,Info [FLog::CreatorOutput] S1|client|0023|5.996883|3.client|frame=20 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.042Z,31.042273,8ba4,6,Info [FLog::CreatorOutput] S1|server|0064|6.432538|f28|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.043Z,31.043276,6354,6,Info [FLog::CreatorOutput] S1|client|0024|6.016803|3.client|frame=21 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.056Z,31.056295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0065|6.446687|f29|2.wait|final status=dead
+2026-10-28T18:15:45.056Z,31.056295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0066|6.446941|f29|2.wait0|running schedules check
+2026-10-28T18:15:45.056Z,31.056295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0067|6.447020|f29|2.wait0|before yield
+2026-10-28T18:15:45.056Z,31.056295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0068|6.447121|f29|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.056Z,31.056295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0069|6.447210|f30|2.wait0|check status=suspended
+2026-10-28T18:15:45.056Z,31.056295,8ba4,6,Info [FLog::CreatorOutput] S1|server|0070|6.447284|f30|2.wait0|cancel ok=true result=nil
+2026-10-28T18:15:45.057Z,31.057297,4118,6,Info [FLog::CreatorOutput] S1|client|0025|6.031243|3.client|frame=22 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.072Z,31.072321,6540,6,Info [FLog::CreatorOutput] S1|server|0071|6.463046|f30|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.073Z,31.073322,8ba4,6,Info [FLog::CreatorOutput] S1|client|0026|6.046345|3.client|frame=23 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0072|6.476679|f31|2.wait0|final status=dead
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0073|6.476915|f31|2.event|running schedules check
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0074|6.476999|f31|2.event|before yield
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0075|6.477074|f31|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0076|6.477134|f32|2.event|check status=suspended
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0077|6.477185|f32|2.event|cancel ok=true result=nil
+2026-10-28T18:15:45.086Z,31.086344,4118,6,Info [FLog::CreatorOutput] S1|server|0078|6.477226|f32|2.event|fire event after yield
+2026-10-28T18:15:45.089Z,31.089348,8ba4,6,Info [FLog::CreatorOutput] S1|client|0027|6.063150|3.client|frame=24 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.103Z,31.103371,6354,6,Info [FLog::CreatorOutput] S1|server|0079|6.494117|f32|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.107Z,31.107376,6540,6,Info [FLog::CreatorOutput] S1|client|0028|6.080051|3.client|frame=25 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0080|6.512334|f33|2.event|final status=dead
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0081|6.512752|f33|2.defer-before|running schedules check
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0082|6.512840|f33|2.defer-before|before yield
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0083|6.512950|f33|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0084|6.513021|f34|2.defer-before|RESUMED segment after first yield
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0085|6.513073|f34|2.defer-before|check status=suspended
+2026-10-28T18:15:45.122Z,31.122400,47f8,6,Info [FLog::CreatorOutput] S1|server|0086|6.513139|f34|2.defer-before|cancel ok=true result=nil
+2026-10-28T18:15:45.125Z,31.125406,8ba4,6,Info [FLog::CreatorOutput] S1|client|0029|6.098742|3.client|frame=26 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.136Z,31.136156,36b4,6,Info [FLog::CreatorOutput] S1|server|0087|6.527133|f34|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.138Z,31.138155,36b4,6,Info [FLog::CreatorOutput] S1|client|0030|6.111588|3.client|frame=27 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.153Z,31.153139,47f8,6,Info [FLog::CreatorOutput] S1|server|0088|6.544856|f35|2.defer-before|final status=dead
+2026-10-28T18:15:45.154Z,31.154139,47f8,6,Info [FLog::CreatorOutput] S1|server|0089|6.545391|f35|2.defer-after|running schedules check
+2026-10-28T18:15:45.154Z,31.154139,47f8,6,Info [FLog::CreatorOutput] S1|server|0090|6.545523|f35|2.defer-after|before yield
+2026-10-28T18:15:45.154Z,31.154139,47f8,6,Info [FLog::CreatorOutput] S1|server|0091|6.545651|f35|3.server|PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.154Z,31.154139,47f8,6,Info [FLog::CreatorOutput] S1|server|0092|6.545737|f36|2.defer-after|check status=suspended
+2026-10-28T18:15:45.154Z,31.154139,47f8,6,Info [FLog::CreatorOutput] S1|server|0093|6.545803|f36|2.defer-after|cancel ok=true result=nil
+2026-10-28T18:15:45.155Z,31.155138,36b4,6,Info [FLog::CreatorOutput] S1|client|0031|6.130187|3.client|frame=28 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.174Z,31.174120,36b4,6,Info [FLog::CreatorOutput] S1|client|0032|6.148052|3.client|frame=29 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.185Z,31.185108,36b4,6,Info [FLog::CreatorOutput] S1|server|0094|6.576497|f37|2.defer-after|final status=dead
+2026-10-28T18:15:45.185Z,31.185108,36b4,6,Info [FLog::CreatorOutput] S1|server|0095|6.576796|f37|2.spawn-callback|running schedules check
+2026-10-28T18:15:45.185Z,31.185108,36b4,6,Info [FLog::CreatorOutput] S1|server|0096|6.576947|f37|2.spawn-callback|before yield
+2026-10-28T18:15:45.186Z,31.186108,36b4,6,Info [FLog::CreatorOutput] S1|server|0097|6.577141|f38|2.spawn-callback|other callback before task.spawn(T)
+2026-10-28T18:15:45.186Z,31.186108,36b4,6,Info [FLog::CreatorOutput] S1|server|0098|6.577258|f38|2.spawn-callback|RESUMED segment after first yield
+2026-10-28T18:15:45.186Z,31.186108,36b4,6,Info [FLog::CreatorOutput] S1|server|0099|6.577339|f38|2.spawn-callback|other callback after task.spawn(T)
+2026-10-28T18:15:45.186Z,31.186108,36b4,6,Info [FLog::CreatorOutput] S1|server|0100|6.577419|f38|2.spawn-callback|check status=suspended
+2026-10-28T18:15:45.186Z,31.186108,36b4,6,Info [FLog::CreatorOutput] S1|server|0101|6.577493|f38|2.spawn-callback|cancel ok=true result=nil
+2026-10-28T18:15:45.188Z,31.188107,4118,6,Info [FLog::CreatorOutput] S1|client|0033|6.161376|3.client|frame=30 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.208Z,31.208086,6354,6,Info [FLog::CreatorOutput] S1|client|0034|6.182253|3.client|frame=31 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.223Z,31.223072,8ba4,6,Info [FLog::CreatorOutput] S1|server|0102|6.614959|f39|2.spawn-callback|final status=dead
+2026-10-28T18:15:45.224Z,31.224072,8ba4,6,Info [FLog::CreatorOutput] S1|server|0103|6.615285|f39|2.errors.cancel.running|target status=running
+2026-10-28T18:15:45.224Z,31.224072,8ba4,6,Info [FLog::CreatorOutput] S1|server|0104|6.616081|f39|2.errors.cancel.running|result[1]=false
+2026-10-28T18:15:45.225Z,31.225069,8ba4,6,Info [FLog::CreatorOutput] S1|server|0105|6.616231|f39|2.errors.cancel.running|result[2]=cannot cancel thread
+2026-10-28T18:15:45.225Z,31.225069,6354,6,Info [FLog::CreatorOutput] S1|client|0035|6.199478|3.client|frame=32 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.244Z,31.244440,47f8,6,Info [FLog::CreatorOutput] S1|client|0036|6.217293|3.client|frame=33 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.254Z,31.254465,47f8,6,Info [FLog::CreatorOutput] S1|server|0106|6.644823|f41|2.errors.cancel.normal|target status=normal
+2026-10-28T18:15:45.254Z,31.254465,47f8,6,Info [FLog::CreatorOutput] S1|server|0107|6.645075|f41|2.errors.cancel.normal|result[1]=false
+2026-10-28T18:15:45.254Z,31.254465,47f8,6,Info [FLog::CreatorOutput] S1|server|0108|6.645159|f41|2.errors.cancel.normal|result[2]=cannot cancel thread
+2026-10-28T18:15:45.254Z,31.254465,47f8,6,Info [FLog::CreatorOutput] S1|server|0109|6.645231|f41|2.errors.cancel.normal|child resume=true
+2026-10-28T18:15:45.256Z,31.256470,6354,6,Info [FLog::CreatorOutput] S1|client|0037|6.229779|3.client|frame=34 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.273Z,31.273514,6354,6,Info [FLog::CreatorOutput] S1|client|0038|6.246716|3.client|frame=35 Bind0,Bind100,Bind199,Bind200,Bind201,Bind201A,Bind201B,Bind2000,RenderStepped,PreRender-after,PreRender-before,PreAnimation,PreSimulation,PostSimulation,Heartbeat
+2026-10-28T18:15:45.287Z,31.287548,47f8,6,Info [FLog::CreatorOutput] S1|server|0110|6.677795|f43|2.errors.close.running|target status=running
+2026-10-28T18:15:45.288Z,31.288549,47f8,6,Info [FLog::CreatorOutput] S1|server|0111|6.679141|f43|2.errors.close.running|result[1]=false
+2026-10-28T18:15:45.288Z,31.288549,47f8,6,Info [FLog::CreatorOutput] S1|server|0112|6.679322|f43|2.errors.close.running|result[2]=cannot close running coroutine
+2026-10-28T18:15:45.321Z,31.321632,6354,6,Info [FLog::CreatorOutput] S1|server|0113|6.711905|f45|2.errors.close.normal|target status=normal
+2026-10-28T18:15:45.321Z,31.321632,6354,6,Info [FLog::CreatorOutput] S1|server|0114|6.712310|f45|2.errors.close.normal|result[1]=false
+2026-10-28T18:15:45.321Z,31.321632,6354,6,Info [FLog::CreatorOutput] S1|server|0115|6.712422|f45|2.errors.close.normal|result[2]=cannot close normal coroutine
+2026-10-28T18:15:45.321Z,31.321632,6354,6,Info [FLog::CreatorOutput] S1|server|0116|6.712499|f45|2.errors.close.normal|child resume=true
+2026-10-28T18:15:45.354Z,31.354263,36b4,6,Info [FLog::CreatorOutput] S1|server|0117|6.745564|f47|4|before attribute write
+2026-10-28T18:15:45.354Z,31.354263,36b4,6,Info [FLog::CreatorOutput] S1|server|0118|6.745881|f47|4|after attribute write before AddTag
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0119|6.746102|f47|4|after AddTag
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0120|6.746232|f47|4|end firing resumption
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0121|6.746383|f48|4|attribute handler start
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0122|6.746470|f48|4|attribute handler end
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0123|6.746550|f48|4|tag added handler
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0124|6.746641|f48|4|outer defer
+2026-10-28T18:15:45.355Z,31.355263,36b4,6,Info [FLog::CreatorOutput] S1|server|0125|6.746746|f48|4|defer inside attribute handler
+2026-10-28T18:15:45.385Z,31.385225,1ecc,6,Info [FLog::CreatorOutput] S1|server|0126|6.776985|f49|ready|stop play now long=true
+2026-10-28T18:15:48.822Z,34.822018,1ecc,6,Info [FLog::CreatorOutput] S1|server|0127|10.212916|f75|5|callback 1 start duration=1 clock=30.349496
+2026-10-28T18:15:48.822Z,34.822018,1ecc,6,Info [FLog::CreatorOutput] S1|server|0128|10.213182|f75|5|callback 2 start duration=3 clock=30.349762
+2026-10-28T18:15:48.822Z,34.822018,1ecc,6,Info [FLog::CreatorOutput] S1|server|0129|10.213397|f75|5|callback 3 start duration=40 clock=30.349977
+2026-10-28T18:15:49.835Z,35.835037,8ba4,6,Info [FLog::CreatorOutput] S1|server|0130|11.226067|f122|5|callback 1 end duration=1 clock=31.362638
+2026-10-28T18:15:49.835Z,35.835037,8ba4,6,Info [FLog::CreatorOutput] S1|server|0131|11.226447|f122|5.watch|tick=1 clock=31.363028
+2026-10-28T18:15:50.835Z,36.835907,1ecc,6,Info [FLog::CreatorOutput] S1|server|0132|12.226705|f182|5.watch|tick=2 clock=32.363274
+2026-10-28T18:15:51.834Z,37.834957,1ecc,6,Info [FLog::CreatorOutput] S1|server|0133|13.226005|f242|5|callback 2 end duration=3 clock=33.362574
+2026-10-28T18:15:51.852Z,37.852806,6354,6,Info [FLog::CreatorOutput] S1|server|0134|13.244404|f243|5.watch|tick=3 clock=33.380978
+2026-10-28T18:15:52.869Z,38.869366,1ecc,6,Info [FLog::CreatorOutput] S1|server|0135|14.259644|f304|5.watch|tick=4 clock=34.396214
+2026-10-28T18:15:53.884Z,39.884926,1ecc,6,Info [FLog::CreatorOutput] S1|server|0136|15.276860|f365|5.watch|tick=5 clock=35.413428
+2026-10-28T18:15:54.902Z,40.902370,1ecc,6,Info [FLog::CreatorOutput] S1|server|0137|16.293300|f426|5.watch|tick=6 clock=36.429876
+2026-10-28T18:15:55.918Z,41.918716,36b4,6,Info [FLog::CreatorOutput] S1|server|0138|17.308943|f487|5.watch|tick=7 clock=37.445515
+2026-10-28T18:15:56.934Z,42.934998,8ba4,6,Info [FLog::CreatorOutput] S1|server|0139|18.326379|f548|5.watch|tick=8 clock=38.462952
+2026-10-28T18:15:57.952Z,43.952045,1ecc,6,Info [FLog::CreatorOutput] S1|server|0140|19.343280|f609|5.watch|tick=9 clock=39.479853
+2026-10-28T18:15:58.968Z,44.968311,1ecc,6,Info [FLog::CreatorOutput] S1|server|0141|20.358844|f670|5.watch|tick=10 clock=40.495417
+2026-10-28T18:15:59.968Z,45.968227,47f8,6,Info [FLog::CreatorOutput] S1|server|0142|21.359228|f730|5.watch|tick=11 clock=41.495801
+2026-10-28T18:16:00.985Z,46.985218,1ecc,6,Info [FLog::CreatorOutput] S1|server|0143|22.376131|f791|5.watch|tick=12 clock=42.512703
+2026-10-28T18:16:01.984Z,47.984943,6354,6,Info [FLog::CreatorOutput] S1|server|0144|23.376755|f851|5.watch|tick=13 clock=43.513331
+2026-10-28T18:16:03.002Z,49.002590,36b4,6,Info [FLog::CreatorOutput] S1|server|0145|24.393987|f912|5.watch|tick=14 clock=44.530555
+2026-10-28T18:16:04.019Z,50.019039,1ecc,6,Info [FLog::CreatorOutput] S1|server|0146|25.409261|f973|5.watch|tick=15 clock=45.545824
+2026-10-28T18:16:05.034Z,51.034122,1ecc,6,Info [FLog::CreatorOutput] S1|server|0147|26.425359|f1034|5.watch|tick=16 clock=46.561929
+2026-10-28T18:16:06.051Z,52.051281,36b4,6,Info [FLog::CreatorOutput] S1|server|0148|27.442316|f1095|5.watch|tick=17 clock=47.578886
+2026-10-28T18:16:07.051Z,53.051083,1ecc,6,Info [FLog::CreatorOutput] S1|server|0149|28.443075|f1155|5.watch|tick=18 clock=48.579650
+2026-10-28T18:16:08.068Z,54.068153,1ecc,6,Info [FLog::CreatorOutput] S1|server|0150|29.459725|f1216|5.watch|tick=19 clock=49.596294
+2026-10-28T18:16:09.069Z,55.069256,b714,6,Info [FLog::CreatorOutput] S1|server|0151|30.460459|f1276|5.watch|tick=20 clock=50.597028
+2026-10-28T18:16:10.084Z,56.084805,36b4,6,Info [FLog::CreatorOutput] S1|server|0152|31.475753|f1337|5.watch|tick=21 clock=51.612298
+2026-10-28T18:16:11.102Z,57.102535,8ba4,6,Info [FLog::CreatorOutput] S1|server|0153|32.493206|f1398|5.watch|tick=22 clock=52.629776
+2026-10-28T18:16:12.117Z,58.117886,47f8,6,Info [FLog::CreatorOutput] S1|server|0154|33.508309|f1459|5.watch|tick=23 clock=53.644875
+2026-10-28T18:16:13.119Z,59.119213,8ba4,6,Info [FLog::CreatorOutput] S1|server|0155|34.508746|f1519|5.watch|tick=24 clock=54.645319
+2026-10-28T18:16:14.134Z,60.134129,4118,6,Info [FLog::CreatorOutput] S1|server|0156|35.525397|f1580|5.watch|tick=25 clock=55.661968
+2026-10-28T18:16:15.151Z,61.151077,4118,6,Info [FLog::CreatorOutput] S1|server|0157|36.542699|f1641|5.watch|tick=26 clock=56.679274
+2026-10-28T18:16:16.169Z,62.169277,8ba4,6,Info [FLog::CreatorOutput] S1|server|0158|37.559451|f1702|5.watch|tick=27 clock=57.696014
+2026-10-28T18:16:17.186Z,63.186398,47f8,6,Info [FLog::CreatorOutput] S1|server|0159|38.575966|f1763|5.watch|tick=28 clock=58.712534
+2026-10-28T18:16:18.200Z,64.200989,1ecc,6,Info [FLog::CreatorOutput] S1|server|0160|39.592003|f1824|5.watch|tick=29 clock=59.728577
