@@ -131,9 +131,9 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			if (target && !all) return object({ all: injectable(target, at, true) });
 			globalType(type, at);
 			const symbol = type.getSymbol();
-			const isNominal = symbol?.declarations?.some(
-				(d) => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d),
-			);
+			const isNominal =
+				symbol?.declarations?.some((d) => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d)) &&
+				checker.getDeclaredTypeOfSymbol(symbol) === (type.target ?? type);
 			const engineInstance = checker.resolveName("Instance", at, ts.SymbolFlags.Type, false);
 			const instance =
 				engineInstance && checker.isTypeAssignableTo(type, checker.getDeclaredTypeOfSymbol(engineInstance));
@@ -225,7 +225,12 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		const registration = (node) => {
 			const type = instanceType(node);
 			const kind = kindOf(type);
-			if (!kind || modifiers(node, ts.ModifierFlags.Abstract)) return;
+			if (
+				!kind ||
+				modifiers(node, ts.ModifierFlags.Abstract | ts.ModifierFlags.Ambient) ||
+				node.flags & ts.NodeFlags.Ambient
+			)
+				return;
 			let ctor;
 			let current = type;
 			const constructors = new Set();
@@ -410,11 +415,18 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				globalReferences(field.type, field);
 				for (const type of node.typeArguments ?? []) globalReferences(type, field);
 				check(checker.getTypeAtLocation(field), field);
-				return call(runtime("attribute"), [
-					f.createThis(),
-					str(checker.getSymbolAtLocation(field.name)?.name ?? field.name.getText()),
-					...node.arguments.map((arg) => ts.visitNode(arg, visit)),
-				]);
+				const typeNode =
+					node.typeArguments?.[0] ??
+					checker.typeToTypeNode(checker.getTypeAtLocation(field), field, ts.NodeBuilderFlags.NoTruncation);
+				return call(
+					runtime("attribute"),
+					[
+						f.createThis(),
+						str(checker.getSymbolAtLocation(field.name)?.name ?? field.name.getText()),
+						...node.arguments.map((arg) => ts.visitNode(arg, visit)),
+					],
+					[typeNode],
+				);
 			}
 			if (isMacro(node, "inject")) {
 				const own = node.typeArguments?.[0];

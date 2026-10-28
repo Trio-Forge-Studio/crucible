@@ -478,7 +478,7 @@ test("review regressions cover alias macros, abstract-only imports, empty files 
 		aliased.diagnostics.map((d) => d.messageText),
 		[],
 	);
-	assert.match(aliased.output, /__crucible.attribute\(this, "x", 1\)/);
+	assert.match(aliased.output, /__crucible.attribute<number>\(this, "x", 1\)/);
 	assert.match(aliased.output, /"x":/);
 	assert.ok(
 		run(header + "const a = attribute; const bad = a(1);").diagnostics.some((d) =>
@@ -755,6 +755,7 @@ export class Van extends CrucibleBehaviour<"Van", Model> {
  readonly maxSpeed = attribute(30);
  readonly label = attribute<string | undefined>(undefined);
  readonly tint: Tint = attribute(new Color3());
+ readonly accent = attribute<Tint>(new Color3());
  readonly offset = attribute(new Vector3());
  readonly mode = attribute<"walk" | "drive">("walk");
  protected override fixedUpdate(step: number) {
@@ -762,7 +763,7 @@ export class Van extends CrucibleBehaviour<"Van", Model> {
   if (root === undefined) return;
   const velocity = root.AssemblyLinearVelocity;
   if (velocity.Magnitude > this.maxSpeed) root.AssemblyLinearVelocity = velocity.Unit.mul(this.maxSpeed);
-  print(this.fleetId + "-", this.fleetId.size(), this.fleetId.sub(1, 2), this.label ?? "none", this.tint.R, this.offset.Magnitude, step);
+  print(this.fleetId + "-", this.fleetId.size(), this.fleetId.sub(1, 2), this.label ?? "none", this.tint.R, this.accent.R, this.offset.Magnitude, step);
  }
 }`,
 	);

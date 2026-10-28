@@ -10,19 +10,13 @@ const scratch = path.join(repo, "build/transformer-mutants");
 fs.rmSync(scratch, { recursive: true, force: true });
 const registration = "registration contract";
 const mutants = [
-	[
-		"registration",
-		"index.cjs",
-		"if (!kind || modifiers(node, ts.ModifierFlags.Abstract)) return;",
-		"if (true) return;",
-		registration,
-	],
+	["registration", "index.cjs", "!kind ||", "true ||", registration],
 	["kind", "index.cjs", "kind: str(kind)", 'kind: str("broken")', registration],
 	[
 		"abstract",
 		"index.cjs",
-		"if (!kind || modifiers(node, ts.ModifierFlags.Abstract)) return;",
-		"if (!kind) return;",
+		"ts.ModifierFlags.Abstract | ts.ModifierFlags.Ambient",
+		"ts.ModifierFlags.Ambient",
 		registration,
 	],
 	["generic-base", "index.cjs", "(type.target ?? type).getBaseTypes?.()", "type.getBaseTypes?.()", registration],
@@ -157,6 +151,38 @@ const mutants = [
 		"kindOf(checker.getTypeAtLocation(field.parent))",
 		"CRU003 rejects nested",
 	],
+
+	["attribute-type-dropped", "index.cjs", "[typeNode],", "undefined,", "rbxtsc Van attribute reads"],
+	[
+		"check-colon-call",
+		"tests/fixtures/api/emit.d.ts",
+		"readonly optional: (check: Check) => Check;",
+		"optional(check: Check): Check;",
+		"rbxtsc Van attribute reads",
+	],
+	[
+		"constructor-type-accepted",
+		"index.cjs",
+		"checker.getDeclaredTypeOfSymbol(symbol) === (type.target ?? type)",
+		"true",
+		"CRU001 rejects every",
+	],
+	[
+		"ambient-registered",
+		"index.cjs",
+		"modifiers(node, ts.ModifierFlags.Abstract | ts.ModifierFlags.Ambient) ||\n\t\t\t\tnode.flags & ts.NodeFlags.Ambient",
+		"modifiers(node, ts.ModifierFlags.Abstract)",
+		"ambient classes emit",
+	],
+	[
+		"global-alias-ignored",
+		"index.cjs",
+		"if (ts.isTypeAliasDeclaration(decl)) {\n\t\t\t\t\t\tif (isGlobal(decl))",
+		"if (ts.isTypeAliasDeclaration(decl)) {\n\t\t\t\t\t\tif (false)",
+		"CRU010 rejects global primitive aliases",
+	],
+	["keep-ts-extension", "index.cjs", '.replace(/\\.tsx?$/, "")', "", "CRU006 rejects dynamic"],
+
 	...["CRU001", "CRU002", "CRU003", "CRU006", "CRU007", "CRU008", "CRU010", "CRU015"].map((code) => [
 		code,
 		"diagnostics.cjs",
