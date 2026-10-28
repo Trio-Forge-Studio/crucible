@@ -28,7 +28,6 @@ export class DenseList<T extends defined> {
 		return this.slots.has(item);
 	}
 
-	/** Idempotent. Returns false when the item was already present. */
 	add(item: T): boolean {
 		if (this.slots.has(item)) return false;
 		this.items[this.end] = item;
@@ -38,7 +37,6 @@ export class DenseList<T extends defined> {
 		return true;
 	}
 
-	/** Idempotent. Returns false when the item was absent. */
 	remove(item: T): boolean {
 		const slot = this.slots.get(item);
 		if (slot === undefined) return false;

@@ -799,7 +799,7 @@ return {
 		spec.has(a.fault.error, "function startThatThrows", "the traceback names the throwing function")
 	end,
 
-	["C6: destroy during a running start defers its cancellation; code up to the next yield runs once and its result is ignored (assumes task.defer runs before the cancelled start thread resumes)"] = function()
+	["C6: destroy during a running start defers its cancellation; code up to the next yield runs once and its result is ignored (assumes the deferred check runs before the start thread's second resumption)"] = function()
 		local w = world.new()
 		local ranAfterDestroy, resumedAfterYield = 0, false
 		local a = w.boot(w.make("A", {
@@ -822,6 +822,39 @@ return {
 		spec.eq(coroutine.status(w.threads.A), "dead", "the start thread is dead")
 		spec.eq(resumedAfterYield, false, "never resumed past the yield")
 		spec.eq(a.phase, Phase.Destroyed, "phase")
+	end,
+
+	["C6: a start resumption queued ahead of the deferred check runs one more segment, is ignored, and is cancelled at its following yield (fake-engine order, as S1 measured in Studio 0.745)"] = function()
+		local w = world.new()
+		local extraSegments, resumedPastExtra = 0, false
+		local a = w.boot(w.make("A", {
+			start = function(s)
+				w.threads.A = coroutine.running()
+				coroutine.yield()
+				w.engine.port.defer(function()
+					local ok, err = coroutine.resume(w.threads.A)
+					spec.eq(ok, true, `the queued resumption ran: {err}`)
+				end)
+				w.life.request(s, Want.Destroyed)
+				coroutine.yield()
+				extraSegments += 1
+				coroutine.yield()
+				resumedPastExtra = true
+			end,
+		}))
+		w.clear()
+		coroutine.resume(w.threads.A)
+		spec.list(w.events, { "leave:A", "onDisable:A", "onDestroy:A", "destroyed:A" }, "teardown with no cancel yet")
+		w.flush()
+		spec.eq(extraSegments, 1, "the queued resumption ran one more segment")
+		spec.eq(w.count("cancel:A"), 1, "cancelled at its following yield")
+		spec.eq(coroutine.status(w.threads.A), "dead", "the start thread is dead")
+		spec.eq(resumedPastExtra, false, "never resumed past the following yield")
+		spec.eq(a.fault, nil, "the ignored segment left no fault")
+		spec.eq(a.phase, Phase.Destroyed, "phase")
+		spec.eq(w.count("destroyed:A"), 1, "ended once")
+		spec.eq(w.count("tick:A"), 0, "nothing ticked")
+		spec.eq(a.ticking, false, "not ticking")
 	end,
 
 	["C6: a start that destroys its own object and then throws leaves no fault"] = function()
