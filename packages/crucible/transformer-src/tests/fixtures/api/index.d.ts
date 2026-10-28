@@ -1,19 +1,19 @@
 type AttributeValue = string | number | boolean | Vector3 | Color3;
 
 declare abstract class CrucibleObject {
-	static readonly renderPriority?: number; // client classes only
+	static readonly renderPriority?: number;
 	protected awake(): void;
-	protected start(): void; // may yield; frame hooks begin when it returns
-	protected fixedUpdate(step: number): void; // step is always 1 / fixedRate
+	protected start(): void;
+	protected fixedUpdate(step: number): void;
 	protected update(dt: number): void;
-	protected lateUpdate(dt: number): void; // after every update of the frame
-	protected preRender(dt: number): void; // client classes only
+	protected lateUpdate(dt: number): void;
+	protected preRender(dt: number): void;
 }
 
 export type { CrucibleObject };
 
 export abstract class Subsystem extends CrucibleObject {
-	protected onShutdown(): void; // server classes only, on BindToClose, may yield
+	protected onShutdown(): void;
 }
 
 export abstract class CrucibleBehaviour<Tag extends string, I extends Instance = Instance> extends CrucibleObject {
@@ -42,13 +42,13 @@ export interface All<T extends object> {
 
 export function inject<T extends object>(): T;
 
-export function attribute<T extends AttributeValue>(): T; // required
-export function attribute(fallback: number): number; // optional; these three overloads stop literal inference
+export function attribute<T extends AttributeValue>(): T;
+export function attribute(fallback: number): number;
 export function attribute(fallback: string): string;
 export function attribute(fallback: boolean): boolean;
-export function attribute<T extends AttributeValue | undefined>(fallback: T): T; // optional, explicit or object types
+export function attribute<T extends AttributeValue | undefined>(fallback: T): T;
 
 export interface BootOptions {
 	readonly load: readonly string[];
-	readonly fixedRate?: number; // default 60
+	readonly fixedRate?: number;
 }

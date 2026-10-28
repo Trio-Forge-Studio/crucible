@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const ts = require("typescript");
 const transform = require("../index.cjs");
 const { typeId } = require("../type-id.cjs");
@@ -11,6 +11,7 @@ const repo = process.env.CRUCIBLE_TEST_REPO ?? path.resolve(__dirname, "../../..
 const packageRoot = path.resolve(__dirname, "../..");
 const scratch = path.join(repo, "build/transformer-tests", String(process.pid));
 fs.rmSync(scratch, { recursive: true, force: true });
+after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 const game = path.join(scratch, "game");
 const installed = path.join(game, "node_modules/@trioforge/crucible");
 fs.mkdirSync(path.join(game, "src/server"), { recursive: true });
@@ -28,10 +29,17 @@ write(path.join(installed, "package.json"), {
 	version: "0.0.0",
 	types: "index.d.ts",
 	main: "init.luau",
-	exports: { ".": { types: "./index.d.ts", default: "./init.luau" }, "./transformer": "./transformer/index.js" },
+	exports: {
+		".": { types: "./index.d.ts", default: "./init.luau" },
+		"./server": { types: "./server.d.ts", default: "./server.luau" },
+		"./client": { types: "./client.d.ts", default: "./client.luau" },
+		"./emit": { types: "./emit.d.ts", default: "./emit.luau" },
+		"./transformer": "./transformer/index.js",
+	},
 });
 fs.cpSync(path.join(packageRoot, "transformer"), path.join(installed, "transformer"), { recursive: true });
-for (const file of ["init.luau", "emit.luau", "server.luau"]) write(path.join(installed, file), "return {}\n");
+for (const file of ["init.luau", "emit.luau", "server.luau", "client.luau"])
+	write(path.join(installed, file), "return {}\n");
 write(path.join(game, "package.json"), { name: "fixture-game", private: true });
 write(path.join(game, "tsconfig.json"), {
 	extends: path.join(repo, "tsconfig.rbxts.json"),
@@ -67,23 +75,28 @@ write(path.join(game, "default.project.json"), {
 const main = path.join(game, "src/server/main.ts");
 const positive = fs.readFileSync(path.join(__dirname, "fixtures/game.ts"), "utf8");
 
-function run(text = positive) {
+function run(text = positive, options = {}, pluginConfig = {}, factory = transform, allSources = false) {
 	write(main, text);
 	const config = ts.getParsedCommandLineOfConfigFile(
 		path.join(game, "tsconfig.json"),
 		{},
 		{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
 	);
-	const program = ts.createProgram(config.fileNames, config.options);
+	const program = ts.createProgram(config.fileNames, { ...config.options, ...options });
 	const diagnostics = [];
-	const result = ts.transform(program.getSourceFile(main), [
-		transform(
+	const sources = allSources
+		? program.getSourceFiles().filter((source) => !source.isDeclarationFile)
+		: program.getSourceFile(main);
+	const result = ts.transform(sources, [
+		factory(
 			program,
-			{ rojo: path.join(game, "default.project.json") },
+			{ rojo: path.join(game, "default.project.json"), ...pluginConfig },
 			{ ts, addDiagnostic: (d) => diagnostics.push(d) },
 		),
 	]);
-	const output = ts.createPrinter().printFile(result.transformed[0]);
+	const output = ts
+		.createPrinter()
+		.printFile(result.transformed.find((source) => path.normalize(source.fileName) === path.normalize(main)));
 	result.dispose();
 	return { program, output, diagnostics };
 }
@@ -142,6 +155,7 @@ test("registration contract, inherited deps, tags, attributes, provides and symb
 	assert.deepEqual(records.Store.provides, [id("Base"), id("Child"), id("Parent")]);
 	assert.deepEqual(records.Jobs.deps, [id("Store"), { all: id("Child") }]);
 	assert.deepEqual(records.Door.deps, [id("Store")]);
+	assert.deepEqual(records.Door.provides, [id("Openable")]);
 	assert.equal(records.Door.tag, "Door");
 	assert.equal(records.ConstTag.tag, "ConstTag");
 	assert.equal(records.AliasedTag.tag, "AliasTag");
@@ -161,6 +175,7 @@ test("registration contract, inherited deps, tags, attributes, provides and symb
 	assert.deepEqual(records.Door.attributes.negative.check, { optional: { literal: -2 } });
 	assert.deepEqual(records.Door.attributes.tint.check, { optional: "color3" });
 	assert.deepEqual(records.Door.attributes.offset.check, { optional: "vector3" });
+	assert.deepEqual(records.Door.attributes.open.check, { optional: "boolean" });
 	assert.match(output, /__crucible.attribute\(this, "fleetId"\)/);
 	assert.match(output, /__crucible.attribute\(this, "maxSpeed", 30\)/);
 	assert.match(output, /__crucible.attribute\(this, "label", undefined\)/);
@@ -201,11 +216,11 @@ test("diagnostic negative probes and clean controls use exact source lines", () 
 		run(
 			header +
 				'export class Good extends Subsystem {}\nexport class Fine extends CrucibleBehaviour<"Fine"> { field = attribute(1); }',
-		).diagnostics,
+		).diagnostics.map((d) => d.messageText),
 		[],
 	);
-	const malformed = run(header + "export class Broken extends Subsystem { constructor(");
-	assert.ok(malformed.diagnostics.length || ts.getPreEmitDiagnostics(malformed.program).length);
+	const malformed = run(header + "boot({load: [undefined]});");
+	assert.ok(malformed.diagnostics.some((d) => d.messageText.startsWith("CRU006")));
 });
 
 test("CRU001 rejects every noninjectable constructor shape and accepts abstract behaviours in All", () => {
@@ -219,6 +234,7 @@ test("CRU001 rejects every noninjectable constructor shape and accepts abstract 
 		"value: Generic<string>",
 		"value: Concrete",
 		"value: All<number>",
+		"value: All<All<Dependency>>",
 	]) {
 		const text =
 			header +
@@ -244,6 +260,8 @@ test("CRU003 rejects nested, generic and nonpublic constructors including inheri
 	for (const text of [
 		"export class Bad<T> extends Subsystem {}",
 		"export function scope() { class Bad extends Subsystem {} }",
+		"export const X = class extends Subsystem {};",
+		"export function scope() { return class Y extends Subsystem {}; }",
 		"export class Bad extends Subsystem { protected constructor() { super(); } }",
 		"export class Bad extends Subsystem { private constructor() { super(); } }",
 		"abstract class Base extends Subsystem { protected constructor() { super(); } }\nexport class Bad extends Base {}",
@@ -278,6 +296,8 @@ test("CRU006 rejects dynamic load shapes and preserves string literal paths with
 		'const glob = "src/server/**/*.ts"; boot({load: [glob]});',
 		'const load = ["src/server/**/*.ts"]; boot({load});',
 		"const options = {load: []}; boot(options);",
+		'const options = {load: ["src/server/**/*.ts"]}; boot({...options});',
+		'const options = {load: ["src/server/**/*.ts"]}; boot({load: [], ...options});',
 	])
 		assert.ok(
 			run(header + text).diagnostics.some((d) => d.messageText.startsWith("CRU006")),
@@ -289,6 +309,14 @@ test("CRU006 rejects dynamic load shapes and preserves string literal paths with
 		[],
 	);
 	assert.match(output, /crucible-path:ServerScriptService\/TS\/main/);
+	const beforeLoad = run(
+		header + 'const options = {fixedRate: 30}; boot({...options, load: ["src/server/**/*.ts"]});',
+	);
+	assert.deepEqual(
+		beforeLoad.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(beforeLoad.output, /crucible-path:/);
 });
 
 test("CRU015 rejects static fields, nested calls, plain classes and subsystem fields", () => {
@@ -330,12 +358,15 @@ test("API identity ignores local lookalikes and follows namespace and renamed im
 });
 
 test("CRU007 and CRU008 reject engine type lookalikes and allow engine aliases", () => {
-	for (const text of [
-		'class Model { fake = 1; }\nclass Bad extends CrucibleBehaviour<"Bad", Model> {}',
-		'class Vector3 { fake = 1; }\nclass Bad extends CrucibleBehaviour<"Bad"> { field = attribute<never>(new Vector3() as never); }',
+	for (const [code, text] of [
+		["CRU008", 'class Model { fake = 1; }\nclass Bad extends CrucibleBehaviour<"Bad", Model> {}'],
+		[
+			"CRU007",
+			'class Vector3 { fake = 1; }\nclass Bad extends CrucibleBehaviour<"Bad"> { field = attribute<never>(new Vector3() as never); }',
+		],
 	]) {
 		const { diagnostics } = run('import { CrucibleBehaviour, attribute } from "@trioforge/crucible";\n' + text);
-		assert.ok(diagnostics.some((d) => /CRU00[78]/.test(d.messageText)));
+		assert.ok(diagnostics.some((d) => d.messageText.startsWith(code)));
 	}
 	const text =
 		'import { CrucibleBehaviour, attribute } from "@trioforge/crucible";\ntype Body = Model; type Tint = Color3;\nclass Good extends CrucibleBehaviour<"Good", Body> { field = attribute<Tint>(new Color3()); }';
@@ -372,6 +403,153 @@ test("rbxtsc reports Crucible diagnostics without a Node stack on malformed macr
 	assert.equal(result.status, 1);
 	assert.match(result.stdout + result.stderr, /CRU006/);
 	assert.doesNotMatch(result.stdout + result.stderr, /at transformer|at visit|Node\.js v/);
+});
+
+test("review regressions cover alias macros, abstract-only imports, empty files and client boot", () => {
+	const header = 'import { CrucibleBehaviour, attribute, inject, type All } from "@trioforge/crucible";\n';
+	const abstract = run(
+		header + 'export abstract class Base extends CrucibleBehaviour<"Base"> { field = attribute<boolean>(); }',
+	);
+	assert.deepEqual(
+		abstract.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(abstract.output, /import \* as __crucible/);
+	assert.doesNotMatch(abstract.output, /defineClass/);
+	assert.doesNotMatch(run("export const untouched = 1;").output, /__crucible/);
+	const aliased = run(header + 'const a = attribute; class B extends CrucibleBehaviour<"B"> { x = a(1); }');
+	assert.deepEqual(
+		aliased.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(aliased.output, /__crucible.attribute\(this, "x", 1\)/);
+	assert.match(aliased.output, /"x":/);
+	assert.ok(
+		run(header + "const a = attribute; const bad = a(1);").diagnostics.some((d) =>
+			d.messageText.startsWith("CRU015"),
+		),
+	);
+	const client = run('import { boot } from "@trioforge/crucible/client"; boot({load: ["src/server/**/*.ts"]});');
+	assert.deepEqual(
+		client.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(client.output, /crucible-path:/);
+});
+
+test("type id failures report an infrastructure diagnostic for classes, injects and provides", () => {
+	const manifest = path.join(game, "package.json");
+	const original = fs.readFileSync(manifest, "utf8");
+	try {
+		write(manifest, { private: true });
+		const found = run(
+			'import { Subsystem, inject } from "@trioforge/crucible";\ninterface Dep {}\nclass S extends Subsystem implements Dep {}\nconst one = inject<S>();',
+		).diagnostics;
+		assert.ok(found.some((d) => d.file.getLineAndCharacterOfPosition(d.start).line === 2));
+		assert.ok(found.some((d) => d.file.getLineAndCharacterOfPosition(d.start).line === 3));
+		assert.ok(
+			found.every((d) => d.messageText.startsWith("Crucible:") && d.category === ts.DiagnosticCategory.Error),
+		);
+		write(manifest, "{");
+		assert.ok(run("export const value = 1;").diagnostics.some((d) => d.messageText.startsWith("Crucible:")));
+	} finally {
+		write(manifest, original);
+	}
+	const sub = path.join(game, "src/server/sub");
+	fs.mkdirSync(sub, { recursive: true });
+	write(path.join(sub, "package.json"), { type: "module" });
+	write(path.join(sub, "dep.ts"), "export interface Dep {}");
+	try {
+		const found = run(
+			'import { Subsystem } from "@trioforge/crucible";\nimport type { Dep } from "./sub/dep";\nclass S extends Subsystem implements Dep {}',
+		).diagnostics;
+		assert.ok(found.some((d) => d.messageText.startsWith("Crucible:")));
+	} finally {
+		fs.rmSync(sub, { recursive: true, force: true });
+	}
+});
+
+test("rootDirs globs rewrite and resolver failures report CRU006 without internal stacks", () => {
+	const text = 'import { boot } from "@trioforge/crucible/server"; boot({load: ["src/server/**/*.ts"]});';
+	const multipleRoots = run(text, { rootDir: undefined, rootDirs: [path.join(game, "src")] });
+	assert.deepEqual(
+		multipleRoots.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(multipleRoots.output, /crucible-path:ServerScriptService\/TS/);
+	const missing = run(text, {}, { rojo: path.join(game, "missing.project.json") });
+	assert.ok(missing.diagnostics.some((d) => d.messageText.startsWith("CRU006")));
+	assert.ok(missing.diagnostics.every((d) => !/stack|CRU003|Require stack/i.test(d.messageText)));
+	const configFile = path.join(game, "tsconfig.json");
+	const original = fs.readFileSync(configFile, "utf8");
+	try {
+		const config = JSON.parse(original);
+		delete config.compilerOptions.rootDir;
+		config.compilerOptions.rootDirs = ["src"];
+		write(configFile, config);
+		write(main, text);
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		const result = spawnSync(
+			process.execPath,
+			[path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"), "-p", configFile],
+			{ cwd: game, encoding: "utf8" },
+		);
+		assert.equal(result.status, 0, result.stdout + result.stderr);
+		assert.match(fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8"), /crucible-path:/);
+	} finally {
+		write(configFile, original);
+	}
+});
+
+test("global compiler resolver is taken from the running compiler module", () => {
+	require(path.join(repo, "node_modules/roblox-ts/out/Project/functions/compileFiles.js"));
+	const filename = path.resolve(__dirname, "../index.cjs");
+	const sourceRequire = require("node:module").createRequire(filename);
+	const isolatedRequire = (name) => sourceRequire(name);
+	isolatedRequire.cache = require.cache;
+	isolatedRequire.resolve = (name, options) => {
+		if (name === "roblox-ts/package.json") throw new Error("No project-local rbxtsc install");
+		return sourceRequire.resolve(name, options);
+	};
+	const sandboxModule = { exports: {} };
+	require("node:vm").runInNewContext(fs.readFileSync(filename, "utf8"), {
+		module: sandboxModule,
+		require: isolatedRequire,
+		__dirname: path.dirname(filename),
+	});
+	const { diagnostics, output } = run(
+		'import { boot } from "@trioforge/crucible/server"; boot({load: ["src/server/**/*.ts"]});',
+		{},
+		{},
+		sandboxModule.exports,
+	);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(output, /crucible-path:/);
+});
+
+test("diagnostics deduplicate repeated and inherited faults across transformed files", () => {
+	const found = run(
+		'import { Subsystem, CrucibleBehaviour, attribute } from "@trioforge/crucible";\ndeclare global { interface Global {} }\nabstract class Base extends Subsystem { constructor(value: Global) { super(); } }\nclass A extends Base {}\nclass B extends Base {}\nclass Bad extends CrucibleBehaviour<"Bad"> { field = attribute<any>(); }',
+	).diagnostics;
+	assert.equal(found.filter((d) => d.messageText.startsWith("CRU010")).length, 1);
+	assert.equal(found.filter((d) => d.messageText.startsWith("CRU007")).length, 1);
+	const files = ["base.ts", "a.ts", "b.ts"].map((file) => path.join(game, "src/server", file));
+	write(
+		files[0],
+		'import { Subsystem } from "@trioforge/crucible"; export abstract class Base extends Subsystem { constructor(n: number) { super(); } }',
+	);
+	write(files[1], 'import { Base } from "./base"; export class A extends Base {}');
+	write(files[2], 'import { Base } from "./base"; export class B extends Base {}');
+	try {
+		const inherited = run("export const unrelated = 1;", {}, {}, transform, true).diagnostics;
+		assert.equal(inherited.filter((d) => d.messageText.startsWith("CRU001")).length, 1);
+		assert.equal(path.basename(inherited[0].file.fileName), "base.ts");
+	} finally {
+		for (const file of files) fs.rmSync(file);
+	}
 });
 
 test("package declaration ids ignore consumer rootDir and respect exports types conditions", () => {
@@ -447,4 +625,22 @@ test("rbxtsc consumer plugin resolves and emitted TypeScript rechecks into Luau"
 	assert.match(luau, /kind = "behaviour"/);
 	assert.match(luau, /tag = "Door"/);
 	assert.match(luau, /crucible-path:ServerScriptService\/TS/);
+	write(
+		path.join(game, "src/server/collection.ts"),
+		'import type { All } from "@trioforge/crucible"; interface Hidden { value: number; } export type Collection = All<Hidden>;',
+	);
+	write(
+		main,
+		'import { inject } from "@trioforge/crucible"; import type { Collection } from "./collection"; export const result: Collection = inject<Collection>();',
+	);
+	fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+	const hidden = spawnSync(process.execPath, [cli, "-p", path.join(game, "tsconfig.json")], {
+		cwd: game,
+		encoding: "utf8",
+	});
+	assert.equal(hidden.status, 0, hidden.stdout + hidden.stderr);
+	assert.match(
+		fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8"),
+		/resolveAll\("fixture-game\/server\/collection:Hidden"\)/,
+	);
 });

@@ -47,4 +47,8 @@ class Lookalike {
 export class Unrelated extends Lookalike {}
 export const one = inject<Store>();
 export const many = inject<All<Child>>();
+type Many = All<Child>;
+export const aliasedMany: All<Child> = inject<Many>();
+type FixedCollection<_Unused> = All<Child>;
+export const genericAlias: All<Child> = inject<FixedCollection<Store>>();
 boot({ load: ["src/server/**/*{Service,Behaviour}.ts"] });

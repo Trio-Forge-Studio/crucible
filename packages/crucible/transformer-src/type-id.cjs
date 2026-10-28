@@ -41,7 +41,9 @@ function typeId(file, name, program, ts) {
 				{},
 				{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
 			);
-			root = parsed?.options.rootDir;
+			root =
+				parsed?.options.rootDir ??
+				parsed?.options.rootDirs?.find((dir) => !path.relative(dir, file).startsWith(".."));
 		}
 		root ??= program.getCompilerOptions().rootDir;
 		root ??= owner.dir;

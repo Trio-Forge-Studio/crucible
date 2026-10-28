@@ -9,15 +9,20 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 	const f = ts.factory;
 	const symbols = new Map();
 	const unalias = (s) => s && (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
-	for (const source of program.getSourceFiles()) {
-		const owner = packageOf(source.fileName);
-		if (owner?.json.name !== "@trioforge/crucible") continue;
-		const module = checker.getSymbolAtLocation(source);
-		if (!module) continue;
-		for (const symbol of checker.getExportsOfModule(module)) {
-			const target = unalias(symbol);
-			if (!symbols.has(target)) symbols.set(target, symbol.name);
+	let invalidMetadata = false;
+	try {
+		for (const source of program.getSourceFiles()) {
+			const owner = packageOf(source.fileName);
+			if (owner?.json.name !== "@trioforge/crucible") continue;
+			const module = checker.getSymbolAtLocation(source);
+			if (!module) continue;
+			for (const symbol of checker.getExportsOfModule(module)) {
+				const target = unalias(symbol);
+				if (!symbols.has(target)) symbols.set(target, symbol.name);
+			}
 		}
+	} catch {
+		invalidMetadata = true;
 	}
 	const api = (symbol) => symbols.get(unalias(symbol));
 	const modifiers = (node, flags) => (ts.getCombinedModifierFlags(node) & flags) !== 0;
@@ -33,10 +38,22 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			if (kind) return kind;
 		}
 	};
+	const diagnosticSink = extras.addDiagnostic;
+	let report;
 	return (context) => (source) => {
 		if (source.isDeclarationFile) return source;
 		let used = false;
-		const report = createReporter(ts, extras.addDiagnostic ?? ((d) => context.addDiagnostic(d)));
+		report ??= createReporter(ts, diagnosticSink ?? ((d) => context.addDiagnostic(d)));
+		if (invalidMetadata) {
+			report(source, "Crucible", "Cannot read package metadata. Check the project's package.json files.");
+			return source;
+		}
+		const isGlobal = (decl) => {
+			if (!ts.isExternalModule(decl.getSourceFile())) return true;
+			for (let p = decl.parent; p; p = p.parent)
+				if (ts.isModuleDeclaration(p) && p.flags & ts.NodeFlags.GlobalAugmentation) return true;
+			return false;
+		};
 		const runtime = (name) => {
 			used = true;
 			return f.createPropertyAccessExpression(f.createIdentifier("__crucible"), name);
@@ -59,10 +76,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 						/node_modules[\\/]@rbxts[\\/]/.test(decl.getSourceFile().fileName)
 					)
 						continue;
-					let global = !ts.isExternalModule(decl.getSourceFile());
-					for (let p = decl.parent; p; p = p.parent)
-						if (ts.isModuleDeclaration(p) && p.flags & ts.NodeFlags.GlobalAugmentation) global = true;
-					if (global)
+					if (isGlobal(decl))
 						report(
 							at,
 							"CRU010",
@@ -79,10 +93,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				const symbol = unalias(checker.getSymbolAtLocation(node.typeName));
 				for (const decl of symbol?.declarations ?? []) {
 					if (ts.isTypeAliasDeclaration(decl)) {
-						let global = !ts.isExternalModule(decl.getSourceFile());
-						for (let p = decl.parent; p; p = p.parent)
-							if (ts.isModuleDeclaration(p) && p.flags & ts.NodeFlags.GlobalAugmentation) global = true;
-						if (global)
+						if (isGlobal(decl))
 							report(
 								at,
 								"CRU010",
@@ -98,12 +109,20 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			globalType(type, at);
 			const symbol = type.getSymbol();
 			const decl = symbol?.declarations?.find((d) => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d));
-			return decl && typeId(decl.getSourceFile().fileName, symbol.name, program, ts);
+			if (!decl) return undefined;
+			const value = typeId(decl.getSourceFile().fileName, symbol.name, program, ts);
+			if (!value)
+				report(
+					at,
+					"Crucible",
+					"Cannot compute a type id. The declaring package needs a name and a mirrored source/declaration layout.",
+				);
+			return value;
 		};
 		const allTarget = (type) => (api(type.getSymbol()) === "All" ? checker.getTypeArguments(type)[0] : undefined);
 		const injectable = (type, at, all = false) => {
 			const target = allTarget(type);
-			if (target) return object({ all: injectable(target, at, true) });
+			if (target && !all) return object({ all: injectable(target, at, true) });
 			globalType(type, at);
 			const symbol = type.getSymbol();
 			const isNominal = symbol?.declarations?.some(
@@ -133,6 +152,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		const check = (type, at) => {
 			globalType(type, at);
 			const t = (name) => f.createPropertyAccessExpression(runtime("t"), name);
+			if (type.flags & ts.TypeFlags.Boolean) return t("boolean");
 			if (type.isUnion()) {
 				const parts = type.types.filter((p) => !(p.flags & ts.TypeFlags.Undefined));
 				return parts.length === 1
@@ -144,7 +164,6 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			}
 			if (type.flags & ts.TypeFlags.String) return t("string");
 			if (type.flags & ts.TypeFlags.Number) return t("number");
-			if (type.flags & ts.TypeFlags.Boolean) return t("boolean");
 			if (type.isStringLiteral()) return call(t("literal"), [str(type.value)]);
 			if (type.isNumberLiteral())
 				return call(t("literal"), [
@@ -165,8 +184,14 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			);
 			return t("string");
 		};
-		const isMacro = (node, name) =>
-			ts.isCallExpression(node) && api(checker.getSymbolAtLocation(node.expression)) === name;
+		const isMacro = (node, name) => {
+			if (!ts.isCallExpression(node)) return false;
+			const declaration = checker.getResolvedSignature(node)?.declaration;
+			return (
+				api(checker.getSymbolAtLocation(node.expression)) === name ||
+				(declaration?.name && api(checker.getSymbolAtLocation(declaration.name)) === name)
+			);
+		};
 		const attributes = (type) => {
 			const result = {};
 			for (const prop of checker.getPropertiesOfType(type)) {
@@ -191,7 +216,10 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			return result;
 		};
 		const registration = (node) => {
-			const type = checker.getTypeAtLocation(node);
+			const located = checker.getTypeAtLocation(node);
+			const signature =
+				ts.isClassExpression(node) && checker.getSignaturesOfType(located, ts.SignatureKind.Construct)[0];
+			const type = signature ? checker.getReturnTypeOfSignature(signature) : located;
 			const kind = kindOf(type);
 			if (!kind || modifiers(node, ts.ModifierFlags.Abstract)) return;
 			let ctor;
@@ -205,6 +233,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				current = bases(current)[0];
 			}
 			if (
+				!ts.isClassDeclaration(node) ||
 				!node.name ||
 				!ts.isSourceFile(node.parent) ||
 				node.typeParameters?.length ||
@@ -218,8 +247,8 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				return;
 			}
 			const staticType = checker.getTypeOfSymbolAtLocation(checker.getSymbolAtLocation(node.name), node);
-			const signature = checker.getSignaturesOfType(staticType, ts.SignatureKind.Construct)[0];
-			const deps = (signature?.parameters ?? []).map((param) => {
+			const construct = checker.getSignaturesOfType(staticType, ts.SignatureKind.Construct)[0];
+			const deps = (construct?.parameters ?? []).map((param) => {
 				const decl = param.valueDeclaration ?? node;
 				globalReferences(decl.type, decl);
 				if (decl.questionToken || decl.dotDotDotToken || decl.initializer)
@@ -291,7 +320,16 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				report(node, "CRU006", "boot requires literal load globs.");
 				return node;
 			}
-			const properties = options.properties.map((prop) => {
+			const loadIndex = options.properties.findLastIndex(
+				(prop) => prop.name && (prop.name.text ?? prop.name.getText()) === "load",
+			);
+			if (loadIndex < 0) report(options, "CRU006", "boot requires a literal load property.");
+			const properties = options.properties.map((prop, index) => {
+				if (ts.isSpreadAssignment(prop) || (prop.name && ts.isComputedPropertyName(prop.name))) {
+					if (index > loadIndex)
+						report(prop, "CRU006", "A spread or computed key after load can replace its literal globs.");
+					return prop;
+				}
 				if (!prop.name || (prop.name.text ?? prop.name.getText()) !== "load") return prop;
 				if (!ts.isPropertyAssignment(prop) || !ts.isArrayLiteralExpression(prop.initializer)) {
 					report(prop, "CRU006", "load must be an array of string literals.");
@@ -306,10 +344,19 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 						program.getCompilerOptions().configFilePath ??
 							path.join(program.getCurrentDirectory(), "tsconfig.json"),
 					);
-					const requireCompiler = createRequire(require.resolve("roblox-ts/package.json", { paths: [root] }));
-					const { RojoResolver } = requireCompiler("@roblox-ts/rojo-resolver");
-					const rojoPath = config.rojo ?? RojoResolver.findRojoConfigFilePath(root).path;
-					const resolver = rojoPath && RojoResolver.fromPath(path.resolve(root, rojoPath));
+					let resolver;
+					try {
+						const compiler =
+							Object.keys(require.cache).find((file) =>
+								/roblox-ts[\\/]out[\\/]Project[\\/]functions[\\/]compileFiles\.js$/.test(file),
+							) ?? require.resolve("roblox-ts/package.json", { paths: [root, __dirname] });
+						const { RojoResolver } = createRequire(compiler)("@roblox-ts/rojo-resolver");
+						const rojoPath = config.rojo ?? RojoResolver.findRojoConfigFilePath(root).path;
+						resolver = rojoPath && RojoResolver.fromPath(path.resolve(root, rojoPath));
+					} catch {
+						report(entry, "CRU006", "Cannot load the running compiler's Rojo resolver or project mapping.");
+						return entry;
+					}
 					const globAt = entry.text.search(/[?*{[]/);
 					const prefix =
 						globAt < 0
@@ -317,8 +364,14 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 							: entry.text.slice(0, entry.text.lastIndexOf("/", globAt) + 1);
 					const suffix = entry.text.slice(prefix.length).replace(/\.tsx?$/, "");
 					const opts = program.getCompilerOptions();
-					const output = path.resolve(opts.outDir, path.relative(opts.rootDir, path.resolve(root, prefix)));
-					const mapped = resolver?.getRbxPathFromFilePath(output);
+					const roots = opts.rootDir ? [opts.rootDir] : (opts.rootDirs ?? []);
+					const mapped = roots
+						.map((sourceRoot) => {
+							const relative = path.relative(sourceRoot, path.resolve(root, prefix));
+							if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
+							return resolver?.getRbxPathFromFilePath(path.resolve(opts.outDir, relative));
+						})
+						.find(Boolean);
 					if (!mapped) {
 						report(entry, "CRU006", "load prefix is outside the Rojo mapping.");
 						return entry;
@@ -357,7 +410,31 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				if (!own) return node;
 				const type = checker.getTypeFromTypeNode(own);
 				const target = allTarget(type);
-				const typeNode = target && ts.isTypeReferenceNode(own) ? own.typeArguments?.[0] : own;
+				const directAll =
+					ts.isTypeReferenceNode(own) && api(checker.getSymbolAtLocation(own.typeName)) === "All";
+				const typeNode = target
+					? directAll
+						? own.typeArguments?.[0]
+						: f.createConditionalTypeNode(
+								own,
+								f.createImportTypeNode(
+									f.createLiteralTypeNode(str("@trioforge/crucible")),
+									undefined,
+									f.createIdentifier("All"),
+									[
+										f.createInferTypeNode(
+											f.createTypeParameterDeclaration(
+												undefined,
+												"__CrucibleItem",
+												f.createKeywordTypeNode(ts.SyntaxKind.ObjectKeyword),
+											),
+										),
+									],
+								),
+								f.createTypeReferenceNode("__CrucibleItem"),
+								f.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword),
+							)
+					: own;
 				return call(
 					runtime(target ? "resolveAll" : "resolve"),
 					[str(id(target ?? type, node) ?? "invalid")],
@@ -366,7 +443,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			}
 			if (isMacro(node, "boot")) return boot(node);
 			const next = ts.visitEachChild(node, visit, context);
-			if (ts.isClassDeclaration(node)) {
+			if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
 				const emitted = registration(node);
 				if (emitted) return [next, emitted];
 			}
@@ -384,8 +461,8 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		} catch (error) {
 			report(
 				source,
-				"CRU003",
-				`Cannot transform malformed input: ${error instanceof Error ? error.message : String(error)}`,
+				"Crucible",
+				`Cannot transform input: ${String(error instanceof Error ? error.message : error).split(/\r?\n/)[0]}`,
 			);
 			return source;
 		}
