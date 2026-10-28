@@ -121,7 +121,7 @@ const mutants = [
 		"wrong class admission",
 		binding,
 		"!record.instanceClasses.some((name) => engine.isA(instance, name))",
-		"false",
+		"record.instanceClasses.size() < 0",
 		"wrong class warns once",
 	],
 	["wrong class warning dedup", binding, "if (!pair.wrongClass)", "if (true)", "wrong class warns once"],
@@ -159,7 +159,9 @@ try {
 	assert.equal(build().status, 0, "baseline build");
 	const baseline = run("lune", ["run", "test", "binding"]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
-	for (const [name, file, before, after, target] of mutants) {
+	let completed = 0;
+	for (const [index, [name, file, before, after, target]] of mutants.entries()) {
+		if (index < Number(process.argv[2] ?? 0)) continue;
 		const original = originals.get(file);
 		assert.ok(original.includes(before), `${name} pattern exists`);
 		fs.writeFileSync(path.join(scratch, file), original.replace(before, after));
@@ -169,10 +171,13 @@ try {
 		assert.notEqual(tested.status, 0, `${name} survived\n${tested.stdout}${tested.stderr}`);
 		assert.ok((tested.stdout + tested.stderr).includes("FAIL binding.luau"), `${name} must fail its named spec`);
 		console.log(`KILLED ${name} | ${target} | build 0, spec ${tested.status}`);
+		completed++;
 		fs.writeFileSync(path.join(scratch, file), original);
 	}
 	assert.equal(build().status, 0, "restored build");
-	console.log(`${mutants.length}/${mutants.length} source mutants killed; restored build 0`);
+	console.log(
+		`${completed}/${mutants.length - Number(process.argv[2] ?? 0)} selected source mutants killed; restored build 0`,
+	);
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });
 }

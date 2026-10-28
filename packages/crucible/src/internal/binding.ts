@@ -189,7 +189,17 @@ function evaluate(pair: Pair): ObjectState | undefined {
 	const have = record.bound.get(instance);
 	if (have !== undefined) {
 		if (present) connect(pair);
-		if (pair.reset || !present || record.suppressed.has(instance) || !accepted(pair, have))
+		if (pair.reset || !present || record.suppressed.has(instance)) {
+			request(have, Want.Destroyed);
+			return undefined;
+		}
+		if (
+			!accepted(pair, have) ||
+			pair.reset ||
+			!engine.inWorld(instance) ||
+			!engine.hasTag(instance, record.tag) ||
+			record.suppressed.has(instance)
+		)
 			request(have, Want.Destroyed);
 		return undefined;
 	}
@@ -227,6 +237,13 @@ function evaluate(pair: Pair): ObjectState | undefined {
 		attributes[field] = value;
 	}
 	if (!valid || !accepted(pair)) return undefined;
+	if (
+		pair.reset ||
+		!engine.inWorld(instance) ||
+		!engine.hasTag(instance, record.tag) ||
+		record.suppressed.has(instance)
+	)
+		return undefined;
 	const state = track(record, instance, attributes);
 	record.bound.set(instance, state);
 	return state;
@@ -241,6 +258,7 @@ export function reconcile(): readonly ObjectState[] {
 		pair.running = true;
 		const state = evaluate(pair);
 		pair.running = false;
+		if (pair.reset && !pair.record.bound.has(pair.instance)) queue(pair);
 		if (state !== undefined) created.push(state);
 	}
 	return created;

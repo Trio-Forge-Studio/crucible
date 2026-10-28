@@ -139,9 +139,11 @@ test("C3: default accepts excludes all six storage containers and ancestry alone
 		local old = A:get(i)
 		w.engine.move(i, container)
 		w.engine.flush()
+		spec.eq(w.registry.recordOf(A).bound[i], nil, "ancestry unbound before get")
 		spec.eq(A:get(i), nil, container)
 		w.engine.move(i, "Workspace")
 		w.engine.flush()
+		spec.eq(w.registry.recordOf(A).bound[i] ~= nil, true, "ancestry rebound before get")
 		spec.eq(A:get(i) ~= nil and A:get(i) ~= old, true, "new binding")
 	end
 	spec.eq(signals, 0, "S1 row 1b no tag signal")
@@ -272,6 +274,7 @@ test("act-on 3 A3 B3: admission installs watchers before awake writes ahead of d
 	w.boot()
 	local i = w.tagged("I", "A", { Speed = 1 })
 	local a = A:get(i)
+	spec.eq(#i.attributeChanged.Speed.list, 1, "admission owns watch before tag delivery")
 	w.engine.flush()
 	spec.eq(a.speed, 2, "awake write delivered")
 	spec.eq(A:get(i), a, "same generation")
@@ -719,5 +722,26 @@ test("Roblox binding port maps CollectionService ancestry attributes scope and d
 		stop()
 	end
 	spec.eq(stops, 4, "connections disconnected")
+end)
+test("binding rereads tag changes made by accepts before retaining or creating a generation", function()
+	for _, bound in { false, true } do
+		local w = World()
+		local remove = false
+		local A = w.define("A", {
+			accepts = function(_, instance)
+				if remove then
+					w.engine.removeTag(instance, "A")
+				end
+				return true
+			end,
+		})
+		w.boot()
+		local i = w.tagged("I", "A")
+		if bound then
+			spec.eq(A:get(i) ~= nil, true, "initial binding")
+		end
+		remove = true
+		spec.eq(A:get(i), nil, "accepts removed the tag")
+	end
 end)
 return tests
