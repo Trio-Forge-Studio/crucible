@@ -1,0 +1,4 @@
+{
+	"main": "../out/emit/init.luau",
+	"types": "../out/emit/index.d.ts"
+}

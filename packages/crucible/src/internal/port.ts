@@ -32,6 +32,7 @@ export interface EnginePort {
 	/** `IsDescendantOf(game)`. False once destroyed or streamed out. */
 	readonly inWorld: (instance: Instance) => boolean;
 	readonly isA: (instance: Instance, className: string) => boolean;
+	readonly bindingScope: (instance: Instance) => boolean;
 	readonly onAncestryChanged: (instance: Instance, listener: () => void) => Disconnect;
 
 	readonly getAttribute: (instance: Instance, name: string) => unknown;
