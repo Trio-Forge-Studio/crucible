@@ -23,6 +23,7 @@ The Lune loader supplies only the engine behavior needed to execute the sample i
 - Use Conventional Commits with a scope, such as `chore(repo): scaffold the workspace`.
 - Name branches `<type>/<short-description>` and open PRs into `main`.
 - Push with an explicit refspec, such as `git push origin HEAD:refs/heads/chore/scaffold`.
+- The pre-push hook refuses pushes to `main`; `pnpm install` installs it.
 - Use squash merge and delete the branch after merge. Do not merge without task authorization.
 - Comment only a non-obvious reason that the code cannot express.
 - Keep the package private and unlicensed. Publishing, release workflows, and repository settings require a separate task.
