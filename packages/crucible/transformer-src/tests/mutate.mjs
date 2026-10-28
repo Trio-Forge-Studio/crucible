@@ -182,6 +182,34 @@ const mutants = [
 		"CRU010 rejects global primitive aliases",
 	],
 	["keep-ts-extension", "index.cjs", '.replace(/\\.tsx?$/, "")', "", "CRU006 rejects dynamic"],
+	[
+		"N1-own-type-arg-ignored",
+		"index.cjs",
+		"node.typeArguments?.[0] ??",
+		"",
+		"attribute rewrite preserves a written alias type argument",
+	],
+	[
+		"N2-abstract-typeof-accepted",
+		"index.cjs",
+		"checker.getDeclaredTypeOfSymbol(symbol) === (type.target ?? type)",
+		"(checker.getDeclaredTypeOfSymbol(symbol) === (type.target ?? type) || symbol.declarations.some((d) => modifiers(d, ts.ModifierFlags.Abstract)))",
+		"CRU001 rejects every",
+	],
+	[
+		"N3-namespace-ambient-registered",
+		"index.cjs",
+		" ||\n\t\t\t\tnode.flags & ts.NodeFlags.Ambient",
+		"",
+		"ambient classes emit",
+	],
+	[
+		"N10-enclosing-dropped",
+		"index.cjs",
+		"checker.typeToTypeNode(checker.getTypeAtLocation(field), field,",
+		"checker.typeToTypeNode(checker.getTypeAtLocation(field), undefined,",
+		"rbxtsc inferred attribute aliases resolve outside the emitting file scope",
+	],
 
 	...["CRU001", "CRU002", "CRU003", "CRU006", "CRU007", "CRU008", "CRU010", "CRU015"].map((code) => [
 		code,
