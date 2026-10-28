@@ -236,7 +236,7 @@ const mutants = [
 		"cru005-typeof-strict",
 		"index.cjs",
 		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t)",
-		"false",
+		"!symbol?.declarations?.some(() => true)",
 		"T2 exact-line",
 	],
 	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
