@@ -8,9 +8,14 @@ return {
 		assert(h.loaded[h.crucible.server] == nil, "the root must not load the server entry")
 		assert(h.loaded[h.crucible.client] == nil, "the root must not load the client entry")
 		assert(h.import(h.crucible.server).serverPlaceholder == "crucible/server", "the server subpath resolves")
-		assert(h.import(h.crucible.client).clientPlaceholder == "crucible/client", "the client subpath resolves")
+		local client = loadPlace(true)
+		assert(
+			client.import(client.crucible.client).clientPlaceholder == "crucible/client",
+			"the client subpath resolves"
+		)
 		assert(h.loaded[h.crucible.server] ~= nil, "the loader observes a server import")
-		assert(h.loaded[h.crucible.client] ~= nil, "the loader observes a client import")
+		assert(client.loaded[client.crucible.client] ~= nil, "the loader observes a client import")
+		client.place:Destroy()
 		h.place:Destroy()
 	end,
 	["the compiled server script imports the root and server subpath"] = function()

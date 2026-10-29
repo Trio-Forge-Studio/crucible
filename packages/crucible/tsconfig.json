@@ -5,7 +5,8 @@
 		"types": ["compiler-types", "types"],
 		"rootDir": "src",
 		"outDir": "out",
-		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo"
+		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
+		"stripInternal": true
 	},
 	"include": ["src"]
 }
