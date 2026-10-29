@@ -10,6 +10,35 @@ const scratch = path.join(repo, "build/transformer-mutants");
 fs.rmSync(scratch, { recursive: true, force: true });
 const registration = "registration contract";
 const mutants = [
+	[
+		"mixin-walk-dropped",
+		"index.cjs",
+		"if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));",
+		"if (base.isIntersection()) return false;",
+		"T2 CRU013 direct concrete mixin",
+	],
+	[
+		"mixin-last-intersection-member",
+		"index.cjs",
+		"if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));",
+		"if (base.isIntersection()) return concreteBase(base.types[base.types.length - 1], seen);",
+		"T2 CRU013 concrete mixin in any intersection position",
+	],
+	[
+		"mixin-first-layer-only",
+		"index.cjs",
+		"return resolvedBases(base).some((parent) => concreteBase(parent, seen));",
+		"return false;",
+		"T2 CRU013 nested concrete mixins",
+	],
+	[
+		"mixin-every-call-concrete",
+		"index.cjs",
+		"if (resolvedBases(type).some((base) => concreteBase(base)))",
+		"if (resolvedBases(type).some((base) => concreteBase(base)) || node.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword && clause.types.some((target) => ts.isCallExpression(target.expression))))",
+		"T2 CRU013 abstract and unregistered mixins stay legal",
+	],
+
 	["registration", "index.cjs", "!kind ||", "true ||", registration],
 	["kind", "index.cjs", "kind: str(kind)", 'kind: str("broken")', registration],
 	[
@@ -211,6 +240,91 @@ const mutants = [
 		"rbxtsc inferred attribute aliases resolve outside the emitting file scope",
 	],
 
+	[
+		"cru005-constructor-type",
+		"index.cjs",
+		"checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)",
+		"false",
+		"T2 exact-line",
+	],
+	[
+		"cru012-no-bases",
+		"index.cjs",
+		"resolvedBases(type).some((base) => promise(base, seen))",
+		"false",
+		"T2 exact-line",
+	],
+	[
+		"cru014-no-inherited-implements",
+		"index.cjs",
+		"for (const target of clause.types)\n\t\t\t\t\t\t\tif (genericTarget(checker.getTypeAtLocation(target), mode, seen)) return true;",
+		"for (const target of []) return true;",
+		"T2 exact-line",
+	],
+	[
+		"cru005-declared-type-filter",
+		"index.cjs",
+		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t) ||\n\t\t\t\t\tchecker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)",
+		"!symbol?.declarations?.length || (symbol.declarations.some((decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl)) && checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target))",
+		"T2 exact-line",
+	],
+	[
+		"cru005-typeof-strict",
+		"index.cjs",
+		"ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),",
+		"ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl) || true,",
+		"T2 exact-line",
+	],
+	[
+		"side-source-root-anchor",
+		"index.cjs",
+		"const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;",
+		"const sideRoot = sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]);",
+		"T2 folder sides preserve side-named source roots",
+	],
+	...[
+		[
+			"v4-named-package-only",
+			"((owner) => (owner?.json.name ? owner.dir : undefined))(packageOf(source.fileName)) ?? path.parse(path.resolve(source.fileName)).root",
+			"T2 package sides exclude a side-named package root",
+		],
+		[
+			"side-tsconfig-anchor",
+			"path.dirname(program.getCompilerOptions().configFilePath ?? path.join(program.getCurrentDirectory(), 'tsconfig.json'))",
+			"T2 package sides layouts",
+		],
+		[
+			"side-parent-source-anchor",
+			"path.dirname(sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]))",
+			"T2 package sides layouts",
+		],
+		[
+			"side-above-package-anchor",
+			"path.dirname(packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root)",
+			"T2 package sides exclude",
+		],
+		[
+			"side-no-package-source-anchor",
+			"packageOf(source.fileName)?.dir ?? program.getCommonSourceDirectory()",
+			"T2 package sides without",
+		],
+	].map(([name, root, test]) => [
+		name,
+		"index.cjs",
+		"const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;",
+		`const sideRoot = ${root};`,
+		test,
+	]),
+
+	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
+	[
+		"side-absolute-path",
+		"index.cjs",
+		"path\n\t\t\t\t.relative(sideRoot, node.getSourceFile().fileName)",
+		"node.getSourceFile().fileName",
+		"T2 folder sides ignore directories above the common source root",
+	],
+
 	...["CRU001", "CRU002", "CRU003", "CRU006", "CRU007", "CRU008", "CRU010", "CRU015"].map((code) => [
 		code,
 		"diagnostics.cjs",
@@ -220,6 +334,15 @@ const mutants = [
 	]),
 ];
 
+for (const code of ["CRU004", "CRU005", "CRU009", "CRU011", "CRU012", "CRU013", "CRU014", "CRU016"]) {
+	mutants.push([
+		code,
+		"diagnostics.cjs",
+		"addDiagnostic({",
+		`code === "${code}" ? undefined : addDiagnostic({`,
+		code === "CRU016" ? "T2 folder sides" : "T2 exact-line",
+	]);
+}
 const receipts = [];
 for (const [name, file, before, after, test] of mutants) {
 	const root = path.join(scratch, name);
@@ -234,6 +357,7 @@ for (const [name, file, before, after, test] of mutants) {
 	assert.ok(original.includes(before), `${name} mutation matches the source`);
 	fs.writeFileSync(target, original.replace(before, after));
 	const built = spawnSync(process.execPath, [path.join(copy, "build.mjs")], { encoding: "utf8" });
+	if (built.status !== 0) fs.writeFileSync(target, original);
 	assert.equal(built.status, 0, built.stderr);
 	const result = spawnSync(
 		process.execPath,
@@ -241,9 +365,9 @@ for (const [name, file, before, after, test] of mutants) {
 		{ encoding: "utf8", env: { ...process.env, CRUCIBLE_TEST_REPO: repo } },
 	);
 	fs.writeFileSync(path.join(root, "result.txt"), result.stdout + result.stderr);
+	fs.writeFileSync(target, original);
 	assert.equal(result.status, 1, `${name} must be killed by ${test}: ${result.stdout}${result.stderr}`);
 	assert.match(result.stdout, new RegExp(`✖ ${test}`));
-	fs.writeFileSync(target, original);
 	receipts.push({ name, test, exitCode: result.status, restored: fs.readFileSync(target, "utf8") === original });
 	console.log(`Killed ${name} with ${test}; scratch source restored.`);
 }

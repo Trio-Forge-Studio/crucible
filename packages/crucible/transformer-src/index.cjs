@@ -137,7 +137,10 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			const engineInstance = checker.resolveName("Instance", at, ts.SymbolFlags.Type, false);
 			const instance =
 				engineInstance && checker.isTypeAssignableTo(type, checker.getDeclaredTypeOfSymbol(engineInstance));
-			const generic = type.objectFlags & ts.ObjectFlags.Reference && checker.getTypeArguments(type).length > 0;
+			const generic =
+				type.objectFlags & ts.ObjectFlags.Reference &&
+				checker.getTypeArguments(type).length > 0 &&
+				!(all && !genericTarget(type, "target"));
 			const concreteBehaviour =
 				kindOf(type) === "behaviour" &&
 				symbol?.declarations?.some((d) => ts.isClassDeclaration(d) && !modifiers(d, ts.ModifierFlags.Abstract));
@@ -400,6 +403,224 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				f.updateObjectLiteralExpression(options, properties),
 			]);
 		};
+
+		const resolvedBases = (type) => type.getBaseTypes?.() ?? bases(type);
+
+		const concreteBase = (base, seen = new Set()) => {
+			if (seen.has(base)) return false;
+			seen.add(base);
+			if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));
+			if (
+				kindOf(base) &&
+				!api(base.getSymbol()) &&
+				base
+					.getSymbol()
+					?.declarations?.some(
+						(decl) => ts.isClassDeclaration(decl) && !modifiers(decl, ts.ModifierFlags.Abstract),
+					)
+			)
+				return true;
+			return resolvedBases(base).some((parent) => concreteBase(parent, seen));
+		};
+		const genericTarget = (type, mode, seen = new Set()) => {
+			if (!type || seen.has(type)) return false;
+			seen.add(type);
+			if (type.isUnionOrIntersection()) return type.types.some((part) => genericTarget(part, mode, seen));
+			if (["Subsystem", "CrucibleBehaviour", "CrucibleObject"].includes(api(type.getSymbol()))) return false;
+			const args = type.objectFlags & ts.ObjectFlags.Reference ? checker.getTypeArguments(type) : [];
+			if (args.length) {
+				const target = type.target ?? type;
+				const tag = checker.getPropertyOfType(target, "tag");
+				const tagType = tag && checker.getTypeOfSymbolAtLocation(tag, tag.valueDeclaration ?? source);
+				const parameters = target.typeParameters ?? [];
+				if (
+					args.some(
+						(arg, i) =>
+							kindOf(target) !== "behaviour" ||
+							parameters[i] !== tagType ||
+							(mode !== "provides" && arg.flags !== ts.TypeFlags.String),
+					)
+				)
+					return true;
+			}
+			const baseMode = type.getSymbol()?.declarations?.some(ts.isClassDeclaration) ? "provides" : mode;
+			if (resolvedBases(type).some((base) => genericTarget(base, baseMode, seen))) return true;
+			for (const decl of type.getSymbol()?.declarations ?? [])
+				for (const clause of decl.heritageClauses ?? [])
+					if (clause.token === ts.SyntaxKind.ImplementsKeyword)
+						for (const target of clause.types)
+							if (genericTarget(checker.getTypeAtLocation(target), mode, seen)) return true;
+			return false;
+		};
+		const hooks = new Set();
+		for (const [symbol, name] of symbols) {
+			if (!["Subsystem", "CrucibleBehaviour", "CrucibleObject"].includes(name)) continue;
+			for (const decl of symbol.declarations ?? [])
+				for (const member of decl.members ?? [])
+					if (
+						ts.isMethodDeclaration(member) &&
+						modifiers(member, ts.ModifierFlags.Protected) &&
+						!modifiers(member, ts.ModifierFlags.Static)
+					)
+						hooks.add(member.name.getText());
+		}
+		const near = (a, b) => {
+			if (Math.abs(a.length - b.length) > 1) return false;
+			let i = 0,
+				j = 0,
+				edits = 0;
+			while (i < a.length && j < b.length) {
+				if (a[i] === b[j]) {
+					i++;
+					j++;
+					continue;
+				}
+				if (++edits > 1) return false;
+				if (a.length >= b.length) i++;
+				if (b.length >= a.length) j++;
+			}
+			return edits + a.length - i + b.length - j === 1;
+		};
+		const promise = (type, seen = new Set()) => {
+			if (!type || seen.has(type)) return false;
+			seen.add(type);
+			return (
+				type.getSymbol()?.name === "Promise" ||
+				(type.isUnionOrIntersection() && type.types.some((part) => promise(part, seen))) ||
+				resolvedBases(type).some((base) => promise(base, seen))
+			);
+		};
+		const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;
+		const side = (node) =>
+			path
+				.relative(sideRoot, node.getSourceFile().fileName)
+				.replaceAll("\\", "/")
+				.split("/")
+				.slice(0, -1)
+				.reverse()
+				.find((part) => ["server", "client", "shared"].includes(part));
+		const inspect = (node) => {
+			if (
+				ts.isImportDeclaration(node) ||
+				ts.isExportDeclaration(node) ||
+				ts.isImportTypeNode(node) ||
+				ts.isExternalModuleReference(node) ||
+				(ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
+			) {
+				const specifier =
+					node.moduleSpecifier ?? node.argument?.literal ?? node.arguments?.[0] ?? node.expression;
+				if (
+					specifier &&
+					ts.isStringLiteral(specifier) &&
+					specifier.text.startsWith("@trioforge/crucible/") &&
+					!["@trioforge/crucible/server", "@trioforge/crucible/client"].includes(specifier.text)
+				)
+					report(node, "CRU004", "Import only the root, server or client Crucible entries.");
+			}
+			if (ts.isClassExpression(node) || ts.isClassDeclaration(node)) {
+				const type = instanceType(node);
+				if (resolvedBases(type).some((base) => concreteBase(base)))
+					report(node, "CRU013", "Extend an abstract Crucible base, not a concrete registered class.");
+				if (kindOf(type)) {
+					if (!modifiers(node, ts.ModifierFlags.Abstract) && genericTarget(type, "provides"))
+						report(node, "CRU014", "Provided types must not instantiate non-tag generic parameters.");
+					for (const clause of node.heritageClauses ?? [])
+						if (clause.token === ts.SyntaxKind.ImplementsKeyword)
+							for (const target of clause.types)
+								if (genericTarget(checker.getTypeAtLocation(target), "provides"))
+									report(
+										node,
+										"CRU014",
+										"Provided interfaces must not instantiate generic parameters.",
+									);
+					const seen = new Set();
+					const members = (current) => {
+						if (seen.has(current) || api(current.getSymbol())) return;
+						seen.add(current);
+						for (const decl of current.getSymbol()?.declarations ?? [])
+							for (const member of decl.members ?? []) {
+								const name = member.name && checker.getSymbolAtLocation(member.name)?.name;
+								if (!name) continue;
+								const at = decl === node ? member : node;
+								if (side(node) !== "client" && (name === "preRender" || name === "renderPriority"))
+									report(at, "CRU011", "preRender and renderPriority require a client class.");
+								if (side(node) !== "server" && name === "onShutdown")
+									report(at, "CRU016", "onShutdown requires a server class.");
+							}
+						for (const base of resolvedBases(current)) members(base);
+					};
+					members(type);
+					for (const member of node.members) {
+						if (!ts.isMethodDeclaration(member)) continue;
+						const name = checker.getSymbolAtLocation(member.name)?.name;
+						if (!name) continue;
+						if (
+							!hooks.has(name) &&
+							(["onInit", "onStart", "onTick", "onPhysics", "onRender"].includes(name) ||
+								[...hooks].some(
+									(hook) => hook.toLowerCase() === name.toLowerCase() || near(name, hook),
+								))
+						)
+							report(
+								member,
+								"CRU009",
+								"Method resembles a lifecycle hook. Use its exact Crucible declaration name.",
+							);
+						const signature = checker.getSignatureFromDeclaration(member);
+						if (
+							hooks.has(name) &&
+							(modifiers(member, ts.ModifierFlags.Async) ||
+								(signature && promise(checker.getReturnTypeOfSignature(signature))))
+						)
+							report(
+								member,
+								"CRU012",
+								"Crucible hooks must be synchronous and must not return a Promise.",
+							);
+					}
+				}
+			}
+			if (ts.isTypeReferenceNode(node)) {
+				const type = checker.getTypeFromTypeNode(node);
+				const target = allTarget(type);
+				if (target && genericTarget(target, "target"))
+					report(node, "CRU014", "All targets must not instantiate generic parameters except string tags.");
+			}
+			if (isMacro(node, "inject")) {
+				const own = node.typeArguments?.[0];
+				const type = own && checker.getTypeFromTypeNode(own);
+				const target = type && (allTarget(type) ?? type);
+				let inside = false;
+				for (let parent = node.parent; parent; parent = parent.parent)
+					if (
+						(ts.isClassDeclaration(parent) || ts.isClassExpression(parent)) &&
+						kindOf(instanceType(parent)) &&
+						!modifiers(parent, ts.ModifierFlags.Abstract)
+					)
+						inside = true;
+				const symbol = target?.getSymbol();
+				if (
+					inside ||
+					!symbol?.declarations?.some(
+						(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),
+					) ||
+					checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)
+				)
+					report(
+						node,
+						"CRU005",
+						"inject requires a class, interface or All target outside registered classes.",
+					);
+				if (target && genericTarget(target, "target"))
+					report(
+						node,
+						"CRU014",
+						"inject targets must not instantiate generic parameters except string tags.",
+					);
+			}
+			ts.forEachChild(node, inspect);
+		};
+
 		const visit = (node) => {
 			if (isMacro(node, "attribute")) {
 				const field = node.parent;
@@ -473,6 +694,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			return next;
 		};
 		try {
+			inspect(source);
 			const next = ts.visitEachChild(source, visit, context);
 			if (!used) return next;
 			const imports = f.createImportDeclaration(
