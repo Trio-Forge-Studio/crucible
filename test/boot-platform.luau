@@ -69,6 +69,15 @@ return {
 		spec.eq(ok, false, "untransformed rejects")
 		spec.has(err, "transformer", "actionable")
 	end,
+	["load patterns reject empty and parent segments"] = function()
+		local p = platform()
+		local boot = p.graph.module("internal/boot")
+		for _, pattern in { "crucible-path:ServerScriptService//X", "crucible-path:ServerScriptService/../X" } do
+			local ok, err = pcall(boot.parsePattern, pattern)
+			spec.eq(ok, false, "invalid segment rejects " .. pattern)
+			spec.has(err, "Invalid Crucible load pattern", "segment diagnostic")
+		end
+	end,
 	["side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot"] = function()
 		for _, client in { false, true } do
 			local p = platform(client)

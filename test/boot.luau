@@ -2,6 +2,40 @@ local spec = require("./lib/load")
 local world = require("./lib/boot-world")
 
 return {
+	["K1 boot installs its own binding engine"] = function()
+		local w = world()
+		w.binding.useEngine(nil)
+		local _, record = w.define("Zone", {})
+		local instance = w.tagged("Z1", "Zone")
+		w.boot()
+		assert(record.bound[instance], "initially tagged instance bound through the port boot installed")
+	end,
+	["K2 boot installs its own implementer port"] = function()
+		local w = world()
+		w.graph.module("internal/implementers").useImplementerPort(nil)
+		w.service("Member", {}, { provides = { "I" } })
+		w.service("Sub", {
+			start = function()
+				w.emit.resolveAll("I"):observe(function()
+					error("observer threw")
+				end)
+			end,
+		}, { deps = { "Member" } })
+		local ok, err = pcall(w.boot)
+		spec.eq(ok, true, `boot survives a throwing All callback: {tostring(err)}`)
+		spec.eq(w.engine.logged("observer threw"), 1, "All callback failure logged through the boot port")
+	end,
+	["K3 boot schedules from the registered hook mask"] = function()
+		local w = world()
+		local class = w.define("Late", {})
+		class.update = function()
+			error("late update ran")
+		end
+		w.tagged("L1", "Late")
+		w.boot()
+		w.engine.cycle(0.031, true)
+		spec.eq(w.engine.logged("late update ran"), 0, "override added after registration never ticks")
+	end,
 	["ignite wires all protected frame callers and behaviour membership lifecycle effects"] = function()
 		local w = world()
 		local events = {}
@@ -338,11 +372,34 @@ return {
 		}, { deps = { "Store" } })
 		w.boot()
 		table.clear(w.events)
+		w.now = 3600
 		w.closers[1]()
 		spec.list(w.events, { "Store" }, "remaining started")
-		spec.eq(w.now, 28, "bounded callback")
-		spec.eq(released, 25, "dependency released at deadline")
-		spec.eq(completed, 25.5, "released hook can finish after yielding")
+		spec.eq(w.now, 3628, "bounded callback")
+		spec.eq(released, 3625, "dependency released at deadline")
+		spec.eq(completed, 3625.5, "released hook can finish after yielding")
+	end,
+	["post-commit Subsystem fault keeps binding live for newly tagged instances"] = function()
+		local w = world()
+		w.service("Faulted", {
+			update = function()
+				error("post-commit frame fault")
+			end,
+		})
+		local _, record = w.define("Zone", {
+			awake = function(self)
+				table.insert(w.events, self.instance)
+			end,
+		})
+		w.boot()
+		spec.list(w.events, { "booted" }, "committed before fault")
+		w.engine.frame(2, 0.031)
+		spec.eq(w.engine.logged("post-commit frame fault"), 1, "Subsystem fault ran")
+		local instance = w.tagged("late", "Zone")
+		w.engine.flush()
+		assert(record.bound[instance], "newly tagged instance bound after fault")
+		spec.eq(#w.events, 2, "one new behaviour awakened after fault")
+		spec.eq(w.events[2], instance, "new behaviour awakened on tagged instance")
 	end,
 	["rule 2 throwing shutdown logs continues and runs for faulted Subsystems but never binds on client"] = function()
 		local w = world()
