@@ -1,5 +1,5 @@
-import { sharedPlaceholder } from "@trioforge/crucible";
-import { clientPlaceholder } from "@trioforge/crucible/client";
+import { boot, BOOTED_ATTRIBUTE } from "@trioforge/crucible/client";
 
-script.SetAttribute("CrucibleShared", sharedPlaceholder);
-script.SetAttribute("CrucibleClient", clientPlaceholder);
+boot({ load: ["src/client/systems/**"] });
+script.SetAttribute("CrucibleClient", game.GetService("Players").LocalPlayer.GetAttribute(BOOTED_ATTRIBUTE));
+print("S2 client booted");

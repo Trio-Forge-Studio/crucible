@@ -1,0 +1,38 @@
+NARROWED real source package build exit 0
+✖ real emit literal declaration accepts boolean string and number literals (879.1273ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1551.239
+
+✖ failing tests:
+
+test at build\literal-source-proof\packages\crucible\transformer-src\tests\transformer.test.cjs:84:1
+✖ real emit literal declaration accepts boolean string and number literals (879.1273ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + [
+  +   "Argument of type 'boolean' is not assignable to parameter of type 'string | number'.",
+  +   "Argument of type 'boolean' is not assignable to parameter of type 'string | number'."
+  + ]
+  - []
+
+      at TestContext.<anonymous> (C:\Users\Admin\.t3\worktrees\crucible\t3-2c2d00ef\build\literal-source-proof\packages\crucible\transformer-src\tests\transformer.test.cjs:95:9)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.start (node:internal/test_runner/test:1015:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ "Argument of type 'boolean' is not assignable to parameter of type 'string | number'.", "Argument of type 'boolean' is not assignable to parameter of type 'string | number'." ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+Scratch source restored; repository source untouched.

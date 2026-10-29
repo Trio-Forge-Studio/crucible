@@ -1,0 +1,81 @@
+Killed mixin-walk-dropped with T2 CRU013 direct concrete mixin; scratch source restored.
+Killed mixin-last-intersection-member with T2 CRU013 concrete mixin in any intersection position; scratch source restored.
+Killed mixin-first-layer-only with T2 CRU013 nested concrete mixins; scratch source restored.
+Killed mixin-every-call-concrete with T2 CRU013 abstract and unregistered mixins stay legal; scratch source restored.
+Killed registration with registration contract; scratch source restored.
+Killed kind with registration contract; scratch source restored.
+Killed abstract with registration contract; scratch source restored.
+Killed generic-base with registration contract; scratch source restored.
+Killed symbol-identity with API identity; scratch source restored.
+Killed deps with registration contract; scratch source restored.
+Killed provides with registration contract; scratch source restored.
+Killed tag with registration contract; scratch source restored.
+Killed instance with registration contract; scratch source restored.
+Killed attributes with registration contract; scratch source restored.
+Killed attribute-rewrite with registration contract; scratch source restored.
+Killed inject with registration contract; scratch source restored.
+Killed boot with registration contract; scratch source restored.
+Killed capitalization with registration contract; scratch source restored.
+Killed undefined-check with registration contract; scratch source restored.
+Killed type-id with package declaration ids; scratch source restored.
+Killed exports-types with package declaration ids; scratch source restored.
+Killed behaviour-provides-stop with registration contract; scratch source restored.
+Killed boolean-check with registration contract; scratch source restored.
+Killed alias-injection with rbxtsc consumer plugin resolves; scratch source restored.
+Killed nested-all with CRU001 rejects every; scratch source restored.
+Killed class-expression with CRU003 rejects nested; scratch source restored.
+Killed missing-id with type id failures; scratch source restored.
+Killed spread-load with CRU006 rejects dynamic; scratch source restored.
+Killed multiple-roots with rootDirs globs; scratch source restored.
+Killed global-resolver with global compiler resolver; scratch source restored.
+Killed duplicate-diagnostics with diagnostics deduplicate; scratch source restored.
+Killed abstract-import with review regressions; scratch source restored.
+Killed untouched-import with review regressions; scratch source restored.
+Killed root-id-collision with rootDirs globs; scratch source restored.
+Killed boolean-union with registration contract; scratch source restored.
+Killed wrapped-options with CRU006 rejects dynamic; scratch source restored.
+Killed class-expression-field with CRU003 rejects nested; scratch source restored.
+Killed attribute-type-dropped with rbxtsc Van attribute reads; scratch source restored.
+Killed check-colon-call with rbxtsc Van attribute reads; scratch source restored.
+Killed literal-boolean-declaration with real emit literal declaration accepts; scratch source restored.
+Killed constructor-type-accepted with CRU001 rejects every; scratch source restored.
+Killed ambient-registered with ambient classes emit; scratch source restored.
+Killed global-alias-ignored with CRU010 rejects global primitive aliases; scratch source restored.
+Killed keep-ts-extension with CRU006 rejects dynamic; scratch source restored.
+Killed N1-own-type-arg-ignored with attribute rewrite preserves a written alias type argument; scratch source restored.
+Killed N2-abstract-typeof-accepted with CRU001 rejects every; scratch source restored.
+Killed N3-namespace-ambient-registered with ambient classes emit; scratch source restored.
+Killed N10-enclosing-dropped with rbxtsc inferred attribute aliases resolve outside the emitting file scope; scratch source restored.
+Killed cru005-constructor-type with T2 exact-line; scratch source restored.
+Killed cru012-no-bases with T2 exact-line; scratch source restored.
+Killed cru014-no-inherited-implements with T2 exact-line; scratch source restored.
+Killed cru005-declared-type-filter with T2 exact-line; scratch source restored.
+Killed cru005-typeof-strict with T2 exact-line; scratch source restored.
+Killed side-source-root-anchor with T2 folder sides preserve side-named source roots; scratch source restored.
+Killed v4-named-package-only with T2 package sides exclude a side-named package root; scratch source restored.
+Killed side-tsconfig-anchor with T2 package sides layouts; scratch source restored.
+Killed side-parent-source-anchor with T2 package sides layouts; scratch source restored.
+Killed side-above-package-anchor with T2 package sides exclude; scratch source restored.
+Killed side-no-package-source-anchor with T2 package sides without; scratch source restored.
+Killed hooks-include-public with T2 exact-line; scratch source restored.
+Killed side-absolute-path with T2 folder sides ignore directories above the common source root; scratch source restored.
+Killed CRU001 with diagnostic negative probes; scratch source restored.
+Killed CRU002 with diagnostic negative probes; scratch source restored.
+Killed CRU003 with diagnostic negative probes; scratch source restored.
+Killed CRU006 with diagnostic negative probes; scratch source restored.
+Killed CRU007 with diagnostic negative probes; scratch source restored.
+Killed CRU008 with diagnostic negative probes; scratch source restored.
+Killed CRU010 with diagnostic negative probes; scratch source restored.
+Killed CRU015 with diagnostic negative probes; scratch source restored.
+Killed CRU004 with T2 exact-line; scratch source restored.
+Killed CRU005 with T2 exact-line; scratch source restored.
+Killed CRU009 with T2 exact-line; scratch source restored.
+Killed CRU011 with T2 exact-line; scratch source restored.
+Killed CRU012 with T2 exact-line; scratch source restored.
+Killed CRU013 with T2 exact-line; scratch source restored.
+Killed CRU014 with T2 exact-line; scratch source restored.
+Killed CRU016 with T2 folder sides; scratch source restored.
+Killed H1 stale entry list without emit with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.
+Killed H2 stale entry list without server and client side folders with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.
+Killed H3 copied package.json exports point at missing files with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.
+Killed H6 stale declarations replace the real root index.d.ts with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.

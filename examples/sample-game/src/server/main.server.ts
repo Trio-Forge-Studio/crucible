@@ -1,5 +1,5 @@
-import { sharedPlaceholder } from "@trioforge/crucible";
-import { serverPlaceholder } from "@trioforge/crucible/server";
+import { boot } from "@trioforge/crucible/server";
 
-script.SetAttribute("CrucibleShared", sharedPlaceholder);
-script.SetAttribute("CrucibleServer", serverPlaceholder);
+boot({ load: ["src/server/systems/**"] });
+script.SetAttribute("CrucibleServer", true);
+print("S2 server booted");

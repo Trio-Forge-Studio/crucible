@@ -15,7 +15,9 @@ after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 const game = path.join(scratch, "client/game");
 const installed = path.join(game, "node_modules/@trioforge/crucible");
 fs.mkdirSync(path.join(game, "src/server"), { recursive: true });
-fs.cpSync(path.join(__dirname, "fixtures/api"), installed, { recursive: true });
+fs.mkdirSync(installed, { recursive: true });
+for (const entry of ["out", "server", "client", "emit", "package.json"])
+	fs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });
 fs.mkdirSync(path.join(game, "node_modules/@rbxts"), { recursive: true });
 for (const name of ["types", "compiler-types"])
 	fs.symlinkSync(
@@ -24,22 +26,7 @@ for (const name of ["types", "compiler-types"])
 		"junction",
 	);
 const write = (file, value) => fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value));
-write(path.join(installed, "package.json"), {
-	name: "@trioforge/crucible",
-	version: "0.0.0",
-	types: "index.d.ts",
-	main: "init.luau",
-	exports: {
-		".": { types: "./index.d.ts", default: "./init.luau" },
-		"./server": { types: "./server.d.ts", default: "./server.luau" },
-		"./client": { types: "./client.d.ts", default: "./client.luau" },
-		"./emit": { types: "./emit.d.ts", default: "./emit.luau" },
-		"./transformer": "./transformer/index.js",
-	},
-});
 fs.cpSync(path.join(packageRoot, "transformer"), path.join(installed, "transformer"), { recursive: true });
-for (const file of ["init.luau", "emit.luau", "server.luau", "client.luau"])
-	write(path.join(installed, file), "return {}\n");
 write(path.join(game, "package.json"), { name: "fixture-game", private: true });
 write(path.join(game, "tsconfig.json"), {
 	extends: path.join(repo, "tsconfig.rbxts.json"),
@@ -74,6 +61,44 @@ write(path.join(game, "default.project.json"), {
 });
 const main = path.join(game, "src/server/main.ts");
 const positive = fs.readFileSync(path.join(__dirname, "fixtures/game.ts"), "utf8");
+
+test("fixture uses every real package declaration and physical side entry byte for byte", () => {
+	assert.equal(
+		fs.readFileSync(path.join(installed, "package.json"), "utf8"),
+		fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+	);
+	for (const name of fs
+		.readdirSync(path.join(packageRoot, "out"), { recursive: true })
+		.filter((name) => name.endsWith(".d.ts")))
+		assert.equal(
+			fs.readFileSync(path.join(installed, "out", name), "utf8"),
+			fs.readFileSync(path.join(packageRoot, "out", name), "utf8"),
+		);
+	for (const side of ["server", "client", "emit"])
+		assert.equal(
+			fs.readFileSync(path.join(installed, side, "package.json"), "utf8"),
+			fs.readFileSync(path.join(packageRoot, side, "package.json"), "utf8"),
+		);
+});
+
+test("real emit literal declaration accepts boolean string and number literals", () => {
+	write(
+		main,
+		'import { t } from "@trioforge/crucible/emit";\nt.literal(true);\nt.literal(false);\nt.literal("walk");\nt.literal(-2);\n',
+	);
+	const config = ts.getParsedCommandLineOfConfigFile(
+		path.join(game, "tsconfig.json"),
+		{},
+		{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
+	);
+	const program = ts.createProgram(config.fileNames, config.options);
+	assert.deepEqual(
+		program
+			.getSemanticDiagnostics(program.getSourceFile(main))
+			.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")),
+		[],
+	);
+});
 
 function run(text = positive, options = {}, pluginConfig = {}, factory = transform, allSources = false) {
 	write(main, text);
@@ -1257,6 +1282,35 @@ export abstract class Openable<Tag extends string> extends CrucibleBehaviour<Tag
 });
 
 const sideHarness = require("./side-harness.cjs");
+test("side harness uses every real package declaration and physical entry byte for byte", () => {
+	const sideGame = sideHarness.setup({ ancestor: "package-integrity", files: {} });
+	const sideInstalled = path.join(sideGame, "node_modules/@trioforge/crucible");
+	for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"]) {
+		const real = path.join(packageRoot, entry);
+		const copied = path.join(sideInstalled, entry);
+		const files = fs.statSync(real).isDirectory()
+			? fs
+					.readdirSync(real, { recursive: true })
+					.filter((name) => fs.statSync(path.join(real, name)).isFile())
+					.sort()
+			: [""];
+		if (fs.statSync(real).isDirectory())
+			assert.deepEqual(
+				fs
+					.readdirSync(copied, { recursive: true })
+					.filter((name) => fs.statSync(path.join(copied, name)).isFile())
+					.sort(),
+				files,
+				`${entry} contains every real package file`,
+			);
+		for (const name of files)
+			assert.deepEqual(
+				fs.readFileSync(path.join(copied, name)),
+				fs.readFileSync(path.join(real, name)),
+				`${entry}/${name}`,
+			);
+	}
+});
 for (const c of require("./fixtures/side-cases.cjs")) {
 	test(`T2 package sides f4 ${c.name}`, () => {
 		const r = sideHarness.run(c);
