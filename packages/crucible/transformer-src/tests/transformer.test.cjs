@@ -795,10 +795,11 @@ test("T2 exact-line diagnostics and reviewer bypasses", () => {
 		["CRU004", 'import "@trioforge/crucible/emit";'],
 		["CRU004", 'import "@trioforge/crucible/internal/foo";'],
 		["CRU005", "export const bad = inject<number>();"],
+		["CRU005", "export function make<T>() { return inject<T>(); }"],
 		["CRU005", "export class Concrete extends Subsystem {}\nexport const bad = inject<typeof Concrete>();"],
 		["CRU005", "export class Concrete extends Subsystem {}\nexport const bad = inject<All<typeof Concrete>>();"],
 		["CRU005", "export const bad = inject<{ a: number }>();"],
-		["CRU005", "enum Target { A }\nexport const bad = inject<Target>();"],
+		["CRU005", "enum Target { A, B }\nexport const bad = inject<Target>();"],
 		[
 			"CRU012",
 			"interface MyP extends Promise<void> {}\nexport class Bad extends Subsystem { protected override start(): MyP | undefined { return undefined; } }",
@@ -966,6 +967,74 @@ test("T2 folder sides ignore directories above the common source root", () => {
 		}
 	} finally {
 		fs.rmSync(file, { force: true });
+	}
+});
+
+test("T2 folder sides preserve side-named source roots", () => {
+	const config = ts.getParsedCommandLineOfConfigFile(
+		path.join(game, "tsconfig.json"),
+		{},
+		{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
+	);
+	for (const folder of ["server", "client", "shared"]) {
+		const dir = path.join(game, "src", folder);
+		fs.mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, "root-side.ts");
+		try {
+			for (const options of [
+				{ rootDir: dir },
+				{ rootDir: undefined, rootDirs: [dir] },
+				{ rootDir: undefined },
+				{ rootDir: undefined, configFilePath: undefined },
+			]) {
+				for (const hooks of ["allowed", "both"]) {
+					const members =
+						hooks === "both"
+							? "protected override preRender() {} protected override onShutdown() {}"
+							: folder === "server"
+								? "protected override onShutdown() {}"
+								: folder === "client"
+									? "protected override preRender() {}"
+									: "protected override update() {}";
+					write(
+						file,
+						'import { Subsystem } from "@trioforge/crucible";\nexport class RootSide extends Subsystem { ' +
+							members +
+							" }",
+					);
+					const program = ts.createProgram([file], { ...config.options, ...options });
+					const diagnostics = [];
+					const result = ts.transform(program.getSourceFile(file), [
+						transform(
+							program,
+							{ rojo: path.join(game, "default.project.json") },
+							{ ts, addDiagnostic: (d) => diagnostics.push(d) },
+						),
+					]);
+					result.dispose();
+					const expected =
+						hooks === "allowed"
+							? []
+							: folder === "server"
+								? [90011]
+								: folder === "client"
+									? [90016]
+									: [90011, 90016];
+					assert.deepEqual(
+						diagnostics.map((d) => d.code).sort(),
+						expected,
+						JSON.stringify({ folder, options, hooks }),
+					);
+					for (const diagnostic of diagnostics) {
+						assert.equal(diagnostic.category, ts.DiagnosticCategory.Error);
+						assert.equal(path.normalize(diagnostic.file.fileName), path.normalize(file));
+						assert.equal(diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line, 1);
+					}
+				}
+			}
+		} finally {
+			fs.rmSync(file, { force: true });
+		}
 	}
 });
 
@@ -1209,5 +1278,129 @@ export abstract class Openable<Tag extends string> extends CrucibleBehaviour<Tag
 		assert.match(doorLuau, /name = "Key"/);
 	} finally {
 		fs.rmSync(base);
+	}
+});
+
+const sideHarness = require("./side-harness.cjs");
+for (const c of require("./fixtures/side-cases.cjs")) {
+	test(`T2 package sides f4 ${c.name}`, () => {
+		const r = sideHarness.run(c);
+		assert.equal(r.thrown, undefined);
+		assert.deepEqual(
+			r.diags.map((d) => [d.code, d.line, d.file, d.category]).sort(),
+			c.expect.map(([code, line, file]) => [code, line, file, 1]).sort(),
+		);
+	});
+}
+
+test("T2 package sides layouts A B C D and f5 configurations", () => {
+	const H = 'import { Subsystem } from "@trioforge/crucible";\n';
+	const files = {
+		"src/server/combat/main.ts": H + "export class S extends Subsystem { protected override onShutdown() {} }",
+		"src/server/combat/r.ts": H + "export class R extends Subsystem { protected override preRender() {} }",
+	};
+	for (const [name, configPath, options, override] of [
+		["A", "configs/tsconfig.json", { rootDir: "src" }, {}],
+		["B", "src/server/tsconfig.json", { rootDir: "." }, {}],
+		["C", "tsconfig.json", { rootDir: null }, { configFilePath: undefined }],
+		["D rootDir", "tsconfig.json", { rootDir: "src/server/combat" }, {}],
+		["D rootDirs", "tsconfig.json", { rootDir: null, rootDirs: ["src/server/combat"] }, {}],
+		["f5 src", "tsconfig.json", { rootDir: "src" }, {}],
+		["f5 server", "tsconfig.json", { rootDir: "src/server" }, {}],
+		["f5 rootDirs", "tsconfig.json", { rootDir: null, rootDirs: ["src/server"] }, {}],
+	]) {
+		const dir = sideHarness.setup({ ancestor: "plain", files, compilerOptions: options });
+		const original = path.join(dir, "tsconfig.json");
+		if (name === "A") {
+			fs.renameSync(original, path.join(dir, "tsconfig.base.json"));
+			fs.mkdirSync(path.join(dir, "configs"));
+			fs.writeFileSync(
+				path.join(dir, configPath),
+				JSON.stringify({ extends: "../tsconfig.base.json", include: ["../src"] }),
+			);
+		} else if (name === "B") {
+			const config = JSON.parse(fs.readFileSync(original, "utf8"));
+			config.include = ["."];
+			config.compilerOptions.typeRoots = ["../../node_modules/@rbxts", "../../node_modules/@trioforge"];
+			fs.writeFileSync(path.join(dir, configPath), JSON.stringify(config));
+			fs.unlinkSync(original);
+		}
+		const r = sideHarness.transformAt(dir, configPath, override);
+		assert.deepEqual(r.diags, ["CRU011@src/server/combat/r.ts:2"], name);
+	}
+});
+
+test("T2 package sides exclude package folder and its parent", () => {
+	for (const folder of ["client", "server", "shared"]) {
+		const dir = sideHarness.setup({
+			ancestor: folder,
+			files: {
+				"src/unmarked.ts":
+					'import { Subsystem } from "@trioforge/crucible";\nexport class U extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
+			},
+		});
+		for (const root of [dir, path.join(dir, "src")]) {
+			fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "nested-game" }));
+			assert.deepEqual(sideHarness.transformAt(dir, "tsconfig.json").diags, [
+				"CRU011@src/unmarked.ts:2",
+				"CRU016@src/unmarked.ts:2",
+			]);
+		}
+	}
+});
+
+test("T2 package sides exclude a side-named package root", () => {
+	for (const folder of ["client", "server", "shared"]) {
+		const file = `src/${folder}/main.ts`;
+		const dir = sideHarness.setup({
+			ancestor: "plain",
+			files: {
+				[file]: 'import { Subsystem } from "@trioforge/crucible";\nexport abstract class U extends Subsystem { protected override preRender() {} protected override onShutdown() {} }',
+			},
+		});
+		fs.writeFileSync(
+			path.join(dir, "src", folder, "package.json"),
+			JSON.stringify(folder === "server" ? {} : { name: "nested" }),
+		);
+		assert.deepEqual(sideHarness.transformAt(dir, "tsconfig.json").diags, [`CRU011@${file}:2`, `CRU016@${file}:2`]);
+	}
+});
+
+test("T2 package sides without a package search the whole path", () => {
+	const { packageOf } = require("../type-id.cjs");
+	const tempRoot =
+		process.platform === "win32" ? path.join(process.env.SystemRoot, "Temp") : require("node:os").tmpdir();
+	const dir = fs.mkdtempSync(path.join(tempRoot, "crucible-side-"));
+	try {
+		const game = sideHarness.setup({ ancestor: "plain", files: { "src/empty.ts": "export {};" } });
+		fs.symlinkSync(path.join(game, "node_modules"), path.join(dir, "node_modules"), "junction");
+		const file = path.join(dir, "server/combat/main.ts");
+		assert.equal(packageOf(file), undefined);
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(
+			file,
+			'import { Subsystem } from "@trioforge/crucible";\nexport abstract class S extends Subsystem { protected override onShutdown() {} protected override preRender() {} }',
+		);
+		const config = ts.getParsedCommandLineOfConfigFile(
+			path.join(game, "tsconfig.json"),
+			{},
+			{ ...ts.sys, onUnRecoverableConfigFileDiagnostic() {} },
+		);
+		const program = ts.createProgram([file], {
+			...config.options,
+			rootDir: path.dirname(file),
+			configFilePath: undefined,
+		});
+		const diagnostics = [];
+		const result = ts.transform(program.getSourceFile(file), [
+			transform(program, {}, { ts, addDiagnostic: (d) => diagnostics.push(d) }),
+		]);
+		result.dispose();
+		assert.deepEqual(
+			diagnostics.map((d) => [d.code, d.file.fileName, d.file.getLineAndCharacterOfPosition(d.start).line]),
+			[[90011, file.replaceAll("\\", "/"), 1]],
+		);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });

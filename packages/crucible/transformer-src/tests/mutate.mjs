@@ -240,12 +240,60 @@ const mutants = [
 		"T2 exact-line",
 	],
 	[
-		"cru005-typeof-strict",
+		"cru005-declared-type-filter",
 		"index.cjs",
 		"!symbol?.declarations?.some(\n\t\t\t\t\t\t(decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),\n\t\t\t\t\t) ||\n\t\t\t\t\tchecker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target)",
 		"!symbol?.declarations?.length || (symbol.declarations.some((decl) => ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl)) && checker.getDeclaredTypeOfSymbol(symbol) !== (target.target ?? target))",
 		"T2 exact-line",
 	],
+	[
+		"cru005-typeof-strict",
+		"index.cjs",
+		"ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl),",
+		"ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl) || true,",
+		"T2 exact-line",
+	],
+	[
+		"side-source-root-anchor",
+		"index.cjs",
+		"const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;",
+		"const sideRoot = sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]);",
+		"T2 folder sides preserve side-named source roots",
+	],
+	...[
+		[
+			"v4-named-package-only",
+			"((owner) => (owner?.json.name ? owner.dir : undefined))(packageOf(source.fileName)) ?? path.parse(path.resolve(source.fileName)).root",
+			"T2 package sides exclude a side-named package root",
+		],
+		[
+			"side-tsconfig-anchor",
+			"path.dirname(program.getCompilerOptions().configFilePath ?? path.join(program.getCurrentDirectory(), 'tsconfig.json'))",
+			"T2 package sides layouts",
+		],
+		[
+			"side-parent-source-anchor",
+			"path.dirname(sourceRoot(program.getCompilerOptions(), [program.getCommonSourceDirectory()]))",
+			"T2 package sides layouts",
+		],
+		[
+			"side-above-package-anchor",
+			"path.dirname(packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root)",
+			"T2 package sides exclude",
+		],
+		[
+			"side-no-package-source-anchor",
+			"packageOf(source.fileName)?.dir ?? program.getCommonSourceDirectory()",
+			"T2 package sides without",
+		],
+	].map(([name, root, test]) => [
+		name,
+		"index.cjs",
+		"const sideRoot = packageOf(source.fileName)?.dir ?? path.parse(path.resolve(source.fileName)).root;",
+		`const sideRoot = ${root};`,
+		test,
+	]),
+
 	["hooks-include-public", "index.cjs", "modifiers(member, ts.ModifierFlags.Protected) &&", "", "T2 exact-line"],
 	[
 		"side-absolute-path",
