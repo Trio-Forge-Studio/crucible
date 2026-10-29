@@ -4,3 +4,4 @@ export type { All } from "./all";
 export { inject } from "./inject";
 export { attribute } from "./attribute";
 export const sharedPlaceholder = "crucible/shared";
+export { CrucibleBehaviour, type BehaviourClass } from "./crucible-behaviour";

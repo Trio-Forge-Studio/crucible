@@ -12,9 +12,10 @@ local function listeners()
 end
 
 local function connect(group, fn)
-	local entry = { fn = fn }
+	local entry = { fn = fn, connected = true }
 	table.insert(group.list, entry)
 	return function()
+		entry.connected = false
 		local index = table.find(group.list, entry)
 		if index then
 			table.remove(group.list, index)
@@ -52,7 +53,9 @@ function engine.new()
 		local args = table.pack(...)
 		for _, entry in table.clone(signal.list) do
 			table.insert(e.deferred, function()
-				entry.fn(table.unpack(args, 1, args.n))
+				if entry.connected then
+					entry.fn(table.unpack(args, 1, args.n))
+				end
 			end)
 		end
 	end
@@ -62,6 +65,7 @@ function engine.new()
 			Name = name,
 			ClassName = className or "Model",
 			inWorld = true,
+			container = "Workspace",
 			tags = {},
 			attributes = attributes or {},
 			ancestry = listeners(),
@@ -108,6 +112,23 @@ function engine.new()
 				fire(group(if inWorld then e.tagAdded else e.tagRemoved, tag), instance)
 			end
 		end
+	end
+
+	function e.move(instance, container)
+		instance.container = container
+		e.setInWorld(instance, container ~= nil)
+	end
+
+	function e.destroy(instance)
+		e.move(instance, nil)
+	end
+
+	function e.clone(instance)
+		local clone = e.instance(instance.Name, instance.ClassName, table.clone(instance.attributes))
+		clone.inWorld = false
+		clone.container = nil
+		clone.tags = table.clone(instance.tags)
+		return clone
 	end
 
 	-- Runs queued signals and task.defer callbacks, including ones they queue, in order.
@@ -171,6 +192,16 @@ function engine.new()
 		end,
 		isA = function(instance, className)
 			return className == "Instance" or instance.ClassName == className
+		end,
+		bindingScope = function(instance)
+			return not table.find({
+				"ServerStorage",
+				"ReplicatedStorage",
+				"ServerScriptService",
+				"StarterGui",
+				"StarterPack",
+				"StarterPlayer",
+			}, instance.container)
 		end,
 		onAncestryChanged = function(instance, fn)
 			return connect(instance.ancestry, fn)
