@@ -1,0 +1,9 @@
+{
+	"name": "CrucibleEngineProbes",
+	"tree": {
+		"$className": "DataModel",
+		"Workspace": { "$className": "Workspace", "$properties": { "SignalBehavior": "Deferred" } },
+		"ServerScriptService": { "Probe": { "$path": "server.server.luau" } },
+		"StarterPlayer": { "StarterPlayerScripts": { "Probe": { "$path": "client.client.luau" } } }
+	}
+}

@@ -1,0 +1,9 @@
+Launch history transcribed from the driver's stdout and session records for S1 r2.
+UTC launch times for final cases and the instrument failure are in their session JSON files.
+PID 11380: Deferred short, initial instrument failure. FreePhysicalMemory=2629880 KB. Exited after PID-specific CloseMainWindow/conditional Stop-Process cleanup.
+PID 36772: Deferred short, first corrected run. FreePhysicalMemory=2114508 KB. Exited after PID-specific cleanup. Repeated because the first extraction read shutdown output too early. Its transient results were replaced by the complete rerun.
+PID 48876: Deferred short, complete rerun. FreePhysicalMemory=3613408 KB. Final session reports processRemaining=false.
+PID 32216: Deferred long. FreePhysicalMemory=3752300 KB. Final session reports processRemaining=false.
+PID 13044: Immediate short. FreePhysicalMemory=4264744 KB. Final session reports processRemaining=false.
+PID 33016: Immediate long. FreePhysicalMemory=5541548 KB. Final session reports processRemaining=false.
+No startup crash occurred in r2. No crash retry was needed.
