@@ -218,6 +218,27 @@ const mutants = [
 		"",
 		"load patterns reject empty and parent segments",
 	],
+	[
+		"I2 tick recomputes the hooks mask from the class",
+		"packages/crucible/src/internal/boot.ts",
+		"tick: (s) => scheduler.add(s),",
+		"tick: (s) => {\n\t\t\t(s.record as unknown as { hooks: number }).hooks = hooks().overrides((s.record as ClassRecord).klass);\n\t\t\tscheduler.add(s);\n\t\t},",
+		"K3 boot schedules from the registered hook mask",
+	],
+	[
+		"I3 boot never installs the binding engine",
+		"packages/crucible/src/internal/boot.ts",
+		"\tuseEngine(port);\n",
+		"\tif (false as boolean) useEngine(port);\n",
+		"K1 boot installs its own binding engine",
+	],
+	[
+		"I4 boot never installs the implementer port",
+		"packages/crucible/src/internal/boot.ts",
+		"\tuseImplementerPort(port);\n",
+		"\tif (false as boolean) useImplementerPort(port);\n",
+		"K2 boot installs its own implementer port",
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });

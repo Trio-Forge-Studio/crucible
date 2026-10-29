@@ -2,6 +2,40 @@ local spec = require("./lib/load")
 local world = require("./lib/boot-world")
 
 return {
+	["K1 boot installs its own binding engine"] = function()
+		local w = world()
+		w.binding.useEngine(nil)
+		local _, record = w.define("Zone", {})
+		local instance = w.tagged("Z1", "Zone")
+		w.boot()
+		assert(record.bound[instance], "initially tagged instance bound through the port boot installed")
+	end,
+	["K2 boot installs its own implementer port"] = function()
+		local w = world()
+		w.graph.module("internal/implementers").useImplementerPort(nil)
+		w.service("Member", {}, { provides = { "I" } })
+		w.service("Sub", {
+			start = function()
+				w.emit.resolveAll("I"):observe(function()
+					error("observer threw")
+				end)
+			end,
+		}, { deps = { "Member" } })
+		local ok, err = pcall(w.boot)
+		spec.eq(ok, true, `boot survives a throwing All callback: {tostring(err)}`)
+		spec.eq(w.engine.logged("observer threw"), 1, "All callback failure logged through the boot port")
+	end,
+	["K3 boot schedules from the registered hook mask"] = function()
+		local w = world()
+		local class = w.define("Late", {})
+		class.update = function()
+			error("late update ran")
+		end
+		w.tagged("L1", "Late")
+		w.boot()
+		w.engine.cycle(0.031, true)
+		spec.eq(w.engine.logged("late update ran"), 0, "override added after registration never ticks")
+	end,
 	["ignite wires all protected frame callers and behaviour membership lifecycle effects"] = function()
 		local w = world()
 		local events = {}
