@@ -3,6 +3,7 @@ const path = require("node:path");
 const { createRequire } = require("node:module");
 const repo = process.env.CRUCIBLE_TEST_REPO ?? path.resolve(__dirname, "../../../..");
 const src = path.resolve(__dirname, "..");
+const packageRoot = path.resolve(src, "..");
 const req = createRequire(path.join(repo, "packages/crucible/package.json"));
 const ts = req("typescript");
 const transform = require(path.join(src, "index.cjs"));
@@ -20,7 +21,8 @@ function project(ancestor) {
 	const game = path.join(scratch, ancestor, "game");
 	const installed = path.join(game, "node_modules/@trioforge/crucible");
 	fs.mkdirSync(path.join(game, "src"), { recursive: true });
-	fs.cpSync(path.join(src, "tests/fixtures/api"), installed, { recursive: true });
+	for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"])
+		fs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });
 	fs.mkdirSync(path.join(game, "node_modules/@rbxts"), { recursive: true });
 	for (const name of ["types", "compiler-types"])
 		fs.symlinkSync(
@@ -28,22 +30,6 @@ function project(ancestor) {
 			path.join(game, "node_modules/@rbxts", name),
 			"junction",
 		);
-	write(path.join(installed, "package.json"), {
-		name: "@trioforge/crucible",
-		version: "0.0.0",
-		types: "index.d.ts",
-		main: "init.luau",
-		exports: {
-			".": { types: "./index.d.ts", default: "./init.luau" },
-			"./server": { types: "./server.d.ts", default: "./server.luau" },
-			"./client": { types: "./client.d.ts", default: "./client.luau" },
-			"./emit": { types: "./emit.d.ts", default: "./emit.luau" },
-			"./transformer": "./transformer/index.js",
-		},
-	});
-	fs.cpSync(path.join(src, "../transformer"), path.join(installed, "transformer"), { recursive: true });
-	for (const file of ["init.luau", "emit.luau", "server.luau", "client.luau"])
-		write(path.join(installed, file), "return {}\n");
 	write(path.join(game, "package.json"), { name: "fixture-game", private: true });
 	write(path.join(game, "default.project.json"), {
 		name: "fx",
