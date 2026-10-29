@@ -1476,6 +1476,29 @@ test("T2 CRU013 aliased concrete mixin", () => {
 	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
 });
 
+test("T2 CRU013 concrete mixin in any intersection position", () => {
+	const text =
+		'import { Subsystem } from "@trioforge/crucible";\ntype Ctor = new (...args: any[]) => object;\nfunction Extra<T extends Ctor>(B: T): T & (new (...args: any[]) => { extra: number }) { return B as never; }\nexport class OrderConcrete extends Subsystem {}\nexport class OrderPlain {}\nexport class PlainOrdered extends Extra(OrderPlain) {}\nexport class OrderMixed extends Extra(OrderConcrete) {}';
+	const { diagnostics } = run(text);
+	assert.deepEqual(
+		diagnostics
+			.filter((d) => d.code === 90013)
+			.map((d) => ({
+				line: d.file.getLineAndCharacterOfPosition(d.start).line + 1,
+				category: d.category,
+				text: d.file.text.slice(d.start, d.start + d.length),
+			})),
+		[
+			{
+				line: text.split("\n").length,
+				category: ts.DiagnosticCategory.Error,
+				text: "export class OrderMixed extends Extra(OrderConcrete) {}",
+			},
+		],
+	);
+	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+});
+
 test("T2 CRU013 abstract and unregistered mixins stay legal", () => {
 	const { diagnostics } = run(`import { Subsystem } from "@trioforge/crucible";
 function Mixin<T extends abstract new (...args: any[]) => object>(Base: T) { abstract class Layer extends Base {} return Layer; }

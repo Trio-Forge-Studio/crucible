@@ -18,6 +18,13 @@ const mutants = [
 		"T2 CRU013 direct concrete mixin",
 	],
 	[
+		"mixin-last-intersection-member",
+		"index.cjs",
+		"if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));",
+		"if (base.isIntersection()) return concreteBase(base.types[base.types.length - 1], seen);",
+		"T2 CRU013 concrete mixin in any intersection position",
+	],
+	[
 		"mixin-first-layer-only",
 		"index.cjs",
 		"return resolvedBases(base).some((parent) => concreteBase(parent, seen));",
