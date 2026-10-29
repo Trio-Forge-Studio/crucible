@@ -321,6 +321,27 @@ const mutants = [
 		"if (!ok) scopeRejected = true;",
 		"Z3 user accepts consults default scope",
 	],
+	[
+		"A1 bound branch never updates scopeTarget",
+		binding,
+		"\t\tscopeTarget = instance;\n\t\tconst ok = accepted(pair, have);",
+		"\t\tconst ok = accepted(pair, have);",
+		"Q2 Q1 after another instance was evaluated last",
+	],
+	[
+		"A2 bound branch records accepts for a scope rejection",
+		binding,
+		'if (!ok) pair.rejected = scopeRejected ? "scope" : "accepts";',
+		'if (!ok) pair.rejected = "accepts";',
+		"Q1 bound pair moved into ServerStorage, hook moves it back unsignalled, then get",
+	],
+	[
+		"A3 bound branch does not reset the scope flag",
+		binding,
+		"\t\tscopeRejected = false;\n\t\tscopeTarget = instance;\n\t\tconst ok",
+		"\t\tscopeTarget = instance;\n\t\tconst ok",
+		"Q3 scope rejection then a bound user accepts rejection in one reconcile, then get",
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });

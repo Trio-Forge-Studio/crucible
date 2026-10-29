@@ -997,4 +997,90 @@ do
 	end)
 end
 
+test("Q1 bound pair moved into ServerStorage, hook moves it back unsignalled, then get", function()
+	local w = World()
+	local B, br = w.define("B")
+	local r = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			r.container = "Workspace"
+			B:get(r)
+		end,
+	})
+	w.boot()
+	w.engine.flush()
+	spec.eq(br.bound[r] ~= nil, true, "pair starts bound")
+	w.engine.move(r, "ServerStorage")
+	w.engine.flush()
+	spec.eq(br.bound[r], nil, "scope unbinds the pair")
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Q1 warnings", warned, "bound after flush", br.bound[r] ~= nil)
+	spec.eq(br.bound[r] ~= nil, true, "corrected scope binds")
+	spec.eq(warned, 1, "scope rejection is pending when current scope admits")
+end)
+
+test("Q2 Q1 after another instance was evaluated last", function()
+	local w = World()
+	local B, br = w.define("B")
+	local r = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			r.container = "Workspace"
+			B:get(r)
+		end,
+	})
+	w.boot()
+	w.engine.flush()
+	local s = w.tagged("S", "B")
+	w.engine.flush()
+	spec.eq(br.bound[r] ~= nil and br.bound[s] ~= nil, true, "both start bound")
+	w.engine.move(r, "ServerStorage")
+	w.engine.flush()
+	spec.eq(br.bound[r], nil, "scope unbinds the pair")
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Q2 warnings", warned, "bound after flush", br.bound[r] ~= nil)
+	spec.eq(br.bound[r] ~= nil, true, "corrected scope binds")
+	spec.eq(warned, 1, "scope rejection is pending when current scope admits")
+end)
+
+test("Q3 scope rejection then a bound user accepts rejection in one reconcile, then get", function()
+	local w = World()
+	local allow = true
+	local r
+	local B, br = w.define("B", {
+		accepts = function(_, instance)
+			if instance == r then
+				return allow
+			end
+			return w.behaviour:accepts(instance)
+		end,
+	})
+	r = w.tagged("R", "B")
+	local stored = w.engine.instance("S")
+	stored.container = "ServerStorage"
+	local A = w.define("A", {
+		awake = function()
+			B:get(r)
+		end,
+	})
+	w.boot()
+	w.engine.flush()
+	spec.eq(br.bound[r] ~= nil, true, "pair starts bound")
+	allow = false
+	w.engine.addTag(stored, "B")
+	w.engine.move(r, "Workspace")
+	w.engine.flush()
+	spec.eq(br.bound[r], nil, "user accepts unbinds the pair")
+	spec.eq(br.bound[stored], nil, "scope rejects stored")
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Q3 warnings", warned, "bound after flush", br.bound[r] ~= nil)
+	spec.eq(warned, 0, "user accepts rejection of a bound pair is not pending")
+end)
+
 return tests
