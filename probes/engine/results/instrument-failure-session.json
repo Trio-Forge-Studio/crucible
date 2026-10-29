@@ -1,0 +1,14 @@
+{
+	"behavior": "Deferred",
+	"shutdown": "short",
+	"pid": 11380,
+	"place": "C:\\Users\\Admin\\.t3\\worktrees\\crucible\\t3-ae976d88\\build\\engine\\s1-deferred-short.rbxl",
+	"launchedAt": "2026-10-28T18:09:44.498Z",
+	"freePhysicalMemoryKB": 2629880,
+	"studioId": "2a96e98c-e224-47f9-9483-8cf6b3886ee2",
+	"version": "0.745.0.7451137",
+	"nativeLog": "0.745.0.7451137_20261028T180944Z_Studio_A3DC9_last.log",
+	"error": "Error: Server probe did not reach ready marker",
+	"closed": true,
+	"processRemaining": false
+}
