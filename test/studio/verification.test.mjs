@@ -4,6 +4,7 @@ import { ownsProcess, selectStudio, createPlaceName } from "./session.mjs";
 import { retryStartup } from "./startup.mjs";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 test("pnpm check includes the probe format lint and regression commands", () => {
 	const { scripts } = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, "../../package.json"), "utf8"));
@@ -109,4 +110,22 @@ test("startup crashes wait sixty seconds and stop after three launches while oth
 		),
 		2,
 	);
+});
+
+test("transformer mutation receipts list every runner mutant as killed and restored", () => {
+	const repo = path.resolve(import.meta.dirname, "../..");
+	const listed = spawnSync(
+		process.execPath,
+		[path.join(repo, "packages/crucible/transformer-src/tests/mutate.mjs"), "--list"],
+		{ encoding: "utf8" },
+	);
+	assert.equal(listed.status, 0, listed.stderr);
+	const names = JSON.parse(listed.stdout);
+	const receipts = JSON.parse(
+		fs.readFileSync(path.join(import.meta.dirname, "results/transformer-mutants.json"), "utf8"),
+	);
+	assert.equal(new Set(names).size, names.length, "runner mutant names are unique");
+	assert.deepEqual(receipts.map((receipt) => receipt.name).sort(), [...names].sort());
+	for (const receipt of receipts) assert(receipt.exitCode === 1 && receipt.restored === true, receipt.name);
+	assert(names.length >= 81, "no mutant dropped from the runner and receipts together");
 });

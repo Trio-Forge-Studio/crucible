@@ -382,6 +382,10 @@ mutants.push(
 		],
 	],
 );
+if (process.argv.includes("--list")) {
+	console.log(JSON.stringify(mutants.map(([name]) => name)));
+	process.exit(0);
+}
 const receipts = [];
 for (const [name, file, before, after, test] of mutants) {
 	const root = path.join(scratch, name);
