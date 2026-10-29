@@ -321,6 +321,38 @@ for (const code of ["CRU004", "CRU005", "CRU009", "CRU011", "CRU012", "CRU013", 
 		code === "CRU016" ? "T2 folder sides" : "T2 exact-line",
 	]);
 }
+mutants.push(
+	...[
+		[
+			"H1 stale entry list without emit",
+			"tests/side-harness.cjs",
+			'for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"])',
+			'for (const entry of ["out", "server", "client", "package.json", "transformer"])',
+			"side harness uses every real package declaration and physical entry byte for byte",
+		],
+		[
+			"H2 stale entry list without server and client side folders",
+			"tests/side-harness.cjs",
+			'for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"])',
+			'for (const entry of ["out", "emit", "package.json", "transformer"])',
+			"side harness uses every real package declaration and physical entry byte for byte",
+		],
+		[
+			"H3 copied package.json exports point at missing files",
+			"tests/side-harness.cjs",
+			"\t\tfs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });\n",
+			'\t\tfs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });\n\t{\n\t\tconst manifest = path.join(installed, "package.json");\n\t\tconst json = JSON.parse(fs.readFileSync(manifest, "utf8"));\n\t\tfor (const value of Object.values(json.exports)) if (typeof value === "object") { value.types = "./missing.d.ts"; value.default = "./missing.luau"; }\n\t\tfs.writeFileSync(manifest, JSON.stringify(json));\n\t}\n',
+			"side harness uses every real package declaration and physical entry byte for byte",
+		],
+		[
+			"H6 stale declarations replace the real root index.d.ts",
+			"tests/side-harness.cjs",
+			"\t\tfs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });\n",
+			'\t\tfs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });\n\tfs.writeFileSync(path.join(installed, "out/index.d.ts"), "export declare abstract class Subsystem { protected preRender?(): void; protected onShutdown?(): void; }\\n");\n',
+			"side harness uses every real package declaration and physical entry byte for byte",
+		],
+	],
+);
 const receipts = [];
 for (const [name, file, before, after, test] of mutants) {
 	const root = path.join(scratch, name);

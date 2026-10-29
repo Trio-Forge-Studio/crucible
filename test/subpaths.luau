@@ -17,7 +17,7 @@ return {
 		client.place:Destroy()
 		h.place:Destroy()
 	end,
-	["compiled sample server boots dependencies behaviours and shutdown under the fake engine"] = function()
+	["compiled sample server starts dependencies behaviours and shutdown under the fake engine"] = function()
 		local h = loadPlace()
 		local member = h.engine.instance("sample", "Part", { Identity = "fleet-23" })
 		local missing = h.engine.instance("missing", "Part", {})
@@ -50,7 +50,7 @@ return {
 		assert(h.loaded[h.crucible.client] == nil, "server does not load client")
 		h.place:Destroy()
 	end,
-	["compiled sample client boots and runs the render hook under the fake engine"] = function()
+	["compiled sample client starts and runs the render hook under the fake engine"] = function()
 		local h = loadPlace(true)
 		local entry = h.place:GetService("StarterPlayer").StarterPlayerScripts.TS.main
 		h.load(entry)

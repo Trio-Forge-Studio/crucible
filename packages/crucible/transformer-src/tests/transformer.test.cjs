@@ -1282,6 +1282,35 @@ export abstract class Openable<Tag extends string> extends CrucibleBehaviour<Tag
 });
 
 const sideHarness = require("./side-harness.cjs");
+test("side harness uses every real package declaration and physical entry byte for byte", () => {
+	const sideGame = sideHarness.setup({ ancestor: "package-integrity", files: {} });
+	const sideInstalled = path.join(sideGame, "node_modules/@trioforge/crucible");
+	for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"]) {
+		const real = path.join(packageRoot, entry);
+		const copied = path.join(sideInstalled, entry);
+		const files = fs.statSync(real).isDirectory()
+			? fs
+					.readdirSync(real, { recursive: true })
+					.filter((name) => fs.statSync(path.join(real, name)).isFile())
+					.sort()
+			: [""];
+		if (fs.statSync(real).isDirectory())
+			assert.deepEqual(
+				fs
+					.readdirSync(copied, { recursive: true })
+					.filter((name) => fs.statSync(path.join(copied, name)).isFile())
+					.sort(),
+				files,
+				`${entry} contains every real package file`,
+			);
+		for (const name of files)
+			assert.deepEqual(
+				fs.readFileSync(path.join(copied, name)),
+				fs.readFileSync(path.join(real, name)),
+				`${entry}/${name}`,
+			);
+	}
+});
 for (const c of require("./fixtures/side-cases.cjs")) {
 	test(`T2 package sides f4 ${c.name}`, () => {
 		const r = sideHarness.run(c);
