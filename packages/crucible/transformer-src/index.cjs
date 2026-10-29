@@ -405,6 +405,23 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		};
 
 		const resolvedBases = (type) => type.getBaseTypes?.() ?? bases(type);
+
+		const concreteBase = (base, seen = new Set()) => {
+			if (seen.has(base)) return false;
+			seen.add(base);
+			if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));
+			if (
+				kindOf(base) &&
+				!api(base.getSymbol()) &&
+				base
+					.getSymbol()
+					?.declarations?.some(
+						(decl) => ts.isClassDeclaration(decl) && !modifiers(decl, ts.ModifierFlags.Abstract),
+					)
+			)
+				return true;
+			return resolvedBases(base).some((parent) => concreteBase(parent, seen));
+		};
 		const genericTarget = (type, mode, seen = new Set()) => {
 			if (!type || seen.has(type)) return false;
 			seen.add(type);
@@ -502,24 +519,9 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			}
 			if (ts.isClassExpression(node) || ts.isClassDeclaration(node)) {
 				const type = instanceType(node);
+				if (resolvedBases(type).some((base) => concreteBase(base)))
+					report(node, "CRU013", "Extend an abstract Crucible base, not a concrete registered class.");
 				if (kindOf(type)) {
-					for (const base of resolvedBases(type)) {
-						if (
-							kindOf(base) &&
-							!api(base.getSymbol()) &&
-							base
-								.getSymbol()
-								?.declarations?.some(
-									(decl) =>
-										ts.isClassDeclaration(decl) && !modifiers(decl, ts.ModifierFlags.Abstract),
-								)
-						)
-							report(
-								node,
-								"CRU013",
-								"Extend an abstract Crucible base, not a concrete registered class.",
-							);
-					}
 					if (!modifiers(node, ts.ModifierFlags.Abstract) && genericTarget(type, "provides"))
 						report(node, "CRU014", "Provided types must not instantiate non-tag generic parameters.");
 					for (const clause of node.heritageClauses ?? [])
