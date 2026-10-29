@@ -45,7 +45,14 @@ Killed N10-enclosing-dropped with rbxtsc inferred attribute aliases resolve outs
 Killed cru005-constructor-type with T2 exact-line; scratch source restored.
 Killed cru012-no-bases with T2 exact-line; scratch source restored.
 Killed cru014-no-inherited-implements with T2 exact-line; scratch source restored.
+Killed cru005-declared-type-filter with T2 exact-line; scratch source restored.
 Killed cru005-typeof-strict with T2 exact-line; scratch source restored.
+Killed side-source-root-anchor with T2 folder sides preserve side-named source roots; scratch source restored.
+Killed v4-named-package-only with T2 package sides exclude a side-named package root; scratch source restored.
+Killed side-tsconfig-anchor with T2 package sides layouts; scratch source restored.
+Killed side-parent-source-anchor with T2 package sides layouts; scratch source restored.
+Killed side-above-package-anchor with T2 package sides exclude; scratch source restored.
+Killed side-no-package-source-anchor with T2 package sides without; scratch source restored.
 Killed hooks-include-public with T2 exact-line; scratch source restored.
 Killed side-absolute-path with T2 folder sides ignore directories above the common source root; scratch source restored.
 Killed CRU001 with diagnostic negative probes; scratch source restored.
@@ -64,3 +71,7 @@ Killed CRU012 with T2 exact-line; scratch source restored.
 Killed CRU013 with T2 exact-line; scratch source restored.
 Killed CRU014 with T2 exact-line; scratch source restored.
 Killed CRU016 with T2 folder sides; scratch source restored.
+Killed H1 stale entry list without emit with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.
+Killed H2 stale entry list without server and client side folders with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.
+Killed H3 copied package.json exports point at missing files with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.
+Killed H6 stale declarations replace the real root index.d.ts with side harness uses every real package declaration and physical entry byte for byte; scratch source restored.

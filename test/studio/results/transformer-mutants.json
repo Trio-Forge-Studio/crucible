@@ -282,8 +282,50 @@
 		"restored": true
 	},
 	{
+		"name": "cru005-declared-type-filter",
+		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
 		"name": "cru005-typeof-strict",
 		"test": "T2 exact-line",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "side-source-root-anchor",
+		"test": "T2 folder sides preserve side-named source roots",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "v4-named-package-only",
+		"test": "T2 package sides exclude a side-named package root",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "side-tsconfig-anchor",
+		"test": "T2 package sides layouts",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "side-parent-source-anchor",
+		"test": "T2 package sides layouts",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "side-above-package-anchor",
+		"test": "T2 package sides exclude",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "side-no-package-source-anchor",
+		"test": "T2 package sides without",
 		"exitCode": 1,
 		"restored": true
 	},
@@ -392,6 +434,30 @@
 	{
 		"name": "CRU016",
 		"test": "T2 folder sides",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "H1 stale entry list without emit",
+		"test": "side harness uses every real package declaration and physical entry byte for byte",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "H2 stale entry list without server and client side folders",
+		"test": "side harness uses every real package declaration and physical entry byte for byte",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "H3 copied package.json exports point at missing files",
+		"test": "side harness uses every real package declaration and physical entry byte for byte",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "H6 stale declarations replace the real root index.d.ts",
+		"test": "side harness uses every real package declaration and physical entry byte for byte",
 		"exitCode": 1,
 		"restored": true
 	}
