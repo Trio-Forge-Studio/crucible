@@ -11,8 +11,10 @@ interface Pair {
 	readonly instance: Instance;
 	connections?: Disconnect[];
 	queued: boolean;
+	parked: boolean;
 	running: boolean;
 	reset: boolean;
+	rejected?: "class" | "attributes" | "scope" | "accepts";
 	wrongClass: boolean;
 	readonly warnings: Map<string, string>;
 }
@@ -26,6 +28,8 @@ const byTag = new Map<string, BehaviourRecord[]>();
 let queued = new Array<Pair>();
 let scheduled = false;
 const getWarnings = new Set<string>();
+let scopeRejected = false;
+let scopeTarget: Instance | undefined;
 
 function port(): EnginePort {
 	return installed ?? error("Crucible binding used before boot");
@@ -36,7 +40,9 @@ export function useEngine(engine: EnginePort) {
 }
 /** @internal */
 export function defaultAccepts(instance: Instance): boolean {
-	return port().bindingScope(instance);
+	const ok = port().bindingScope(instance);
+	if (!ok && instance === scopeTarget) scopeRejected = true;
+	return ok;
 }
 
 /** @internal */
@@ -72,8 +78,10 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 			record,
 			instance,
 			queued: false,
+			parked: false,
 			running: false,
 			reset: false,
+			rejected: undefined,
 			wrongClass: wrongClasses.get(record)?.has(instance) ?? false,
 			warnings: new Map(),
 		};
@@ -83,6 +91,11 @@ function pairFor(record: BehaviourRecord, instance: Instance): Pair {
 }
 function queue(pair: Pair) {
 	if (pair.running) return;
+	if (pair.rejected === "accepts") pair.rejected = undefined;
+	if (pair.parked) {
+		pair.parked = false;
+		pair.queued = false;
+	}
 	if (!pair.queued) {
 		pair.queued = true;
 		queued.push(pair);
@@ -182,6 +195,7 @@ function accepted(pair: Pair, state?: ObjectState): boolean {
 function evaluate(pair: Pair): ObjectState | undefined {
 	const { record, instance } = pair;
 	const engine = port();
+	pair.rejected = undefined;
 	const present = engine.inWorld(instance) && engine.hasTag(instance, record.tag);
 	if (!present) {
 		reset(pair);
@@ -193,8 +207,12 @@ function evaluate(pair: Pair): ObjectState | undefined {
 			request(have, Want.Destroyed);
 			return undefined;
 		}
+		scopeRejected = false;
+		scopeTarget = instance;
+		const ok = accepted(pair, have);
+		if (!ok) pair.rejected = scopeRejected ? "scope" : "accepts";
 		if (
-			!accepted(pair, have) ||
+			!ok ||
 			pair.reset ||
 			!engine.inWorld(instance) ||
 			!engine.hasTag(instance, record.tag) ||
@@ -214,6 +232,7 @@ function evaluate(pair: Pair): ObjectState | undefined {
 	connect(pair);
 	if (record.suppressed.has(instance)) return undefined;
 	if (!record.instanceClasses.some((name) => engine.isA(instance, name))) {
+		pair.rejected = "class";
 		if (!pair.wrongClass) {
 			pair.wrongClass = true;
 			let warned = wrongClasses.get(record);
@@ -222,9 +241,10 @@ function evaluate(pair: Pair): ObjectState | undefined {
 				wrongClasses.set(record, warned);
 			}
 			warned.add(instance);
+			const className = record.id.split(":").pop() ?? record.id;
 			engine.log(
 				LogLevel.Warning,
-				`${engine.describe(instance)} is a ${instance.ClassName}; ${record.id} needs a ${record.instanceClasses.join(" or ")}`,
+				`${engine.describe(instance)} is a ${instance.ClassName}; ${className} needs a ${record.instanceClasses.join(" or ")}`,
 			);
 		}
 		return undefined;
@@ -236,7 +256,16 @@ function evaluate(pair: Pair): ObjectState | undefined {
 		if (!ok) valid = false;
 		attributes[field] = value;
 	}
-	if (!valid || !accepted(pair)) return undefined;
+	if (!valid) {
+		pair.rejected = "attributes";
+		return undefined;
+	}
+	scopeRejected = false;
+	scopeTarget = instance;
+	if (!accepted(pair)) {
+		pair.rejected = scopeRejected ? "scope" : "accepts";
+		return undefined;
+	}
 	if (
 		pair.reset ||
 		!engine.inWorld(instance) ||
@@ -308,10 +337,24 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 	const record = recordOf(klass);
 	if (record === undefined || record.kind !== Kind.Behaviour) return undefined;
 	const pair = pairFor(record, instance);
-	queue(pair);
 	if (isDraining()) {
 		const state = record.bound.get(instance);
-		if (state === undefined || !isLive(state)) {
+		let attributesValid = true;
+		if (pair.rejected === "attributes") {
+			for (const [, descriptor] of record.attributes ?? new Map<string, import("../emit").EmittedAttribute>()) {
+				const value = port().getAttribute(instance, descriptor.name);
+				if (value === undefined ? descriptor.required : !descriptor.check(value)) attributesValid = false;
+			}
+		}
+		if (
+			(state === undefined || !isLive(state)) &&
+			(pair.rejected === undefined ||
+				(pair.rejected === "attributes" && attributesValid) ||
+				(pair.rejected === "scope" && port().bindingScope(instance))) &&
+			port().inWorld(instance) &&
+			port().hasTag(instance, record.tag) &&
+			!record.suppressed.has(instance)
+		) {
 			const [source, line] = debug.info(3, "sl");
 			const site = `${source}:${line}`;
 			if (!getWarnings.has(site)) {
@@ -319,11 +362,17 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 				port().log(LogLevel.Warning, `Crucible get pending at ${site}`);
 			}
 		}
+		const rejected = pair.rejected;
+		queue(pair);
+		pair.rejected = rejected;
 	} else {
+		queue(pair);
 		const held = queued.filter((other) => other !== pair);
+		for (const other of held) other.parked = true;
 		queued = [pair];
 		drain();
-		queued = [...held, ...queued];
+		queued = [...held.filter((other) => other.parked), ...queued];
+		for (const other of held) other.parked = false;
 		if (queued.size() > 0) {
 			notePairs();
 			schedule();
