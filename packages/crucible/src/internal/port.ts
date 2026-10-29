@@ -6,6 +6,9 @@ export const enum FrameEvent {
 	PreRender,
 	PreSimulation,
 	PostSimulation,
+	RenderStepped,
+	PreAnimation,
+	Heartbeat,
 }
 
 /** @internal */

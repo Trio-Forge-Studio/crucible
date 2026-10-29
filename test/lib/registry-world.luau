@@ -4,6 +4,7 @@ local Engine = require("./engine")
 return function()
 	local graph = spec.runtime()
 	local w = {
+		graph = graph,
 		emit = graph.module("emit"),
 		registry = graph.module("internal/registry"),
 		life = graph.module("internal/lifecycle"),

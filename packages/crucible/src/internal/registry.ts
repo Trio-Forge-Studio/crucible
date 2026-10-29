@@ -1,9 +1,10 @@
 import type { CrucibleObject } from "../crucible-object";
 import type { EmittedClass } from "../emit";
-import { FrameHook, hooks } from "./hooks";
+import { FrameHook, hooks, type HookMask } from "./hooks";
 import { ImplementerSet } from "./implementers";
 import { drain } from "./lifecycle";
-import { Kind, Phase, type ObjectState, type LifeRecord } from "./state";
+import { Kind, Phase, type ObjectState } from "./state";
+import type { SchedulerRecord } from "./scheduler";
 import type { EmittedAttribute } from "../emit";
 
 /** @internal */
@@ -21,9 +22,10 @@ export type AttributeSchema = ReadonlyMap<string, EmittedAttribute>;
 /** @internal */
 export type AnyClass = new (...args: never[]) => CrucibleObject;
 
-interface RecordBase extends LifeRecord {
+interface RecordBase extends SchedulerRecord {
 	readonly id: TypeId;
 	readonly klass: AnyClass;
+	readonly hooks: HookMask;
 	readonly deps: readonly Dep[];
 	/** @internal */
 	readonly provides: readonly TypeId[];
@@ -116,6 +118,7 @@ export function define(klass: AnyClass, emitted: EmittedClass) {
 	const base = {
 		id,
 		klass,
+		hooks: hooks().overrides(klass),
 		deps: emitted.deps.map((dep): Dep =>
 			typeIs(dep, "string") ? { id: dep as TypeId, all: false } : { id: dep.all as TypeId, all: true },
 		),
@@ -182,8 +185,7 @@ export function plan(records: readonly ClassRecord[], side: SealSide): PlanResul
 			else edges.push(subsystems[0]);
 		}
 		single.set(record, edges);
-		const renders =
-			(hooks().overrides(record.klass) & (1 << FrameHook.PreRender)) !== 0 || record.renderPriority !== undefined;
+		const renders = (record.hooks & (1 << FrameHook.PreRender)) !== 0 || record.renderPriority !== undefined;
 		if (!side.renders && renders)
 			problems.push({ kind: "render-on-server", id: record.id, priority: record.renderPriority });
 	}

@@ -3,6 +3,85 @@ local world = require("./lib/registry-world")
 local meter = require("./lib/meter")
 local tests = {}
 
+tests["scheduler admission and server seal keep the registered hook mask after class mutation"] = function()
+	local w = world()
+	local class, record = w.define("RegisteredWithoutHooks", "behaviour")
+	local seen = {}
+	class.update = function()
+		table.insert(seen, "update")
+	end
+	class.preRender = function()
+		table.insert(seen, "preRender")
+	end
+	local scheduler = w.graph
+		.module("internal/scheduler").Scheduler
+		.new(w.engine.port, { renders = true, fixedRate = 60 }, w.hooks.hooks().frame)
+	local state = w.track(record)
+	state.object = setmetatable({}, class)
+	scheduler:add(state)
+	w.engine.cycle(1 / 60, true)
+	spec.list(seen, {}, "late overrides do not enter scheduler lanes")
+	spec.eq(#w.engine.renderSteps, 0, "late preRender does not bind a render step")
+	local ok, err = pcall(w.seal)
+	spec.eq(ok, true, `server seal accepts the registered hook mask: {tostring(err)}`)
+end
+
+tests["server seal rejects renderPriority without a preRender hook and names the class"] = function()
+	local w = world()
+	local _, record = w.define("PriorityOnly", "subsystem", { renderPriority = 100 })
+	local result = w.registry.plan({ record }, { renders = false })
+	spec.eq(result.ok, false, "priority alone is a server render problem")
+	spec.eq(#result.problems, 1, "one server render problem")
+	spec.eq(result.problems[1].kind, "render-on-server", "problem kind")
+	spec.eq(result.problems[1].id, "PriorityOnly", "problem names its class")
+	local ok, err = pcall(w.seal)
+	spec.eq(ok, false, "server seal rejects a priority-only class")
+	spec.has(err, "PriorityOnly renders but is loaded on the server", "seal names the render class")
+end
+
+tests["defineClass records override masks once and scheduler lanes follow registered overrides"] = function()
+	local Engine = require("./lib/engine")
+	for mask = 0, 15 do
+		local w = world()
+		local seen = {}
+		local methods = { renderPriority = 100 }
+		local names = { "preRender", "fixedUpdate", "update", "lateUpdate" }
+		for index, name in names do
+			if bit32.band(mask, 2 ^ (index - 1)) ~= 0 then
+				methods[name] = function(_, dt)
+					spec.eq(dt, 1 / 60, name .. " dt")
+					table.insert(seen, name)
+				end
+			end
+		end
+		local class, record = w.define("Registered", "behaviour", methods)
+		spec.eq(record.hooks, mask, "registration mask")
+		spec.eq(record.renderPriority, 100, "registered priority")
+		local scheduler = w.graph
+			.module("internal/scheduler").Scheduler
+			.new(w.engine.port, { renders = true, fixedRate = 60 }, w.hooks.hooks().frame)
+		local state = w.track(record)
+		state.object = setmetatable({}, class)
+		scheduler:add(state)
+		w.engine.cycle(1 / 60, true)
+		local expected = {}
+		for index, name in names do
+			if bit32.band(mask, 2 ^ (index - 1)) ~= 0 then
+				table.insert(expected, name)
+			end
+		end
+		spec.list(seen, expected, "only overridden lanes run")
+		spec.eq(#w.engine.renderSteps, if bit32.band(mask, 1) ~= 0 then 1 else 0, "priority lane")
+		scheduler:remove(state)
+		table.clear(seen)
+		w.engine.cycle(1 / 60, true)
+		spec.list(seen, {}, "registered object removed from every lane")
+		class.update = function() end
+		spec.eq(record.hooks, mask, "mask stays fixed after registration")
+		spec.eq(#w.engine.frames[Engine.FrameEvent.PostSimulation].list, 0, "simulation disconnected")
+	end
+end
+
 tests["registration preserves the wire contract, resolves dependencies and seals once"] = function()
 	local w = world()
 	local _, a = w.define("A", "subsystem", nil, { deps = { "B", { all = "I" } }, provides = { "IA" } })
