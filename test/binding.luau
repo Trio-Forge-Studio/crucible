@@ -830,4 +830,413 @@ test("binding rereads tag changes made by accepts before retaining or creating a
 		spec.eq(A:get(i), nil, "accepts removed the tag")
 	end
 end)
+test("F1 residual: hook get on a tagged wrong-class instance", function()
+	local w = World()
+	local B = w.define("B")
+	local wrong = w.engine.instance("W", "Part")
+	w.engine.addTag(wrong, "B")
+	local A = w.define("A", {
+		awake = function()
+			B:get(wrong)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	spec.eq(w.engine.logged("get pending"), 0, "wrong class is not pending")
+end)
+
+test("F1 residual: hook get on a tagged instance rejected by accepts", function()
+	local w = World()
+	local B = w.define("B", {
+		accepts = function()
+			return false
+		end,
+	})
+	local rejected = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			B:get(rejected)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	spec.eq(w.engine.logged("get pending"), 0, "rejected is not pending")
+end)
+
+test("F1 residual: hook get on a tagged instance in ServerStorage", function()
+	local w = World()
+	local B = w.define("B")
+	local stored = w.engine.instance("S")
+	stored.container = "ServerStorage"
+	w.engine.addTag(stored, "B")
+	local A = w.define("A", {
+		awake = function()
+			B:get(stored)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	spec.eq(w.engine.logged("get pending"), 0, "excluded is not pending")
+end)
+
+test("PN2 hook get on a removed (suppressed) tagged instance does not warn pending", function()
+	local w = World()
+	local B, br = w.define("B")
+	local target = w.tagged("T", "B")
+	local A = w.define("A", {
+		awake = function()
+			B:get(target)
+		end,
+	})
+	w.boot()
+	B:get(target):remove()
+	w.engine.flush()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	spec.eq(br.bound[target], nil, "removed")
+	spec.eq(w.engine.logged("get pending"), 0, "suppressed is not pending")
+end)
+
+test("PN4 refreshed parked pair is reconciled once", function()
+	local w = World()
+	local calls = 0
+	local _, br = w.define("B", {
+		accepts = function()
+			calls += 1
+			return true
+		end,
+	})
+	local target = w.engine.instance("T")
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(target)
+		end,
+	})
+	w.boot()
+	w.engine.addTag(target, "B")
+	table.remove(w.engine.deferred, 1)()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	w.engine.flush()
+	spec.eq(br.bound[target] ~= nil, true, "bound")
+	spec.eq(calls, 1, "one reconcile")
+end)
+
+test("PN1 restored parked pair is reconciled once when refreshed before the deferred drain", function()
+	local w = World()
+	local calls = 0
+	local B = w.define("B")
+	local _, cr = w.define("C", {
+		accepts = function()
+			calls += 1
+			return true
+		end,
+	})
+	w.boot()
+	local t = w.tagged("T", "B")
+	local u = w.tagged("U", "C")
+	table.remove(w.engine.deferred, 1)()
+	table.remove(w.engine.deferred, 1)()
+	B:get(t)
+	w.behaviour:refresh(u)
+	w.engine.flush()
+	spec.eq(cr.bound[u] ~= nil, true, "bound")
+	spec.eq(calls, 1, "one reconcile")
+end)
+
+test("X2 invalid attribute made valid in the hook before get, binds after flush", function()
+	local w = World()
+	local B, br = w.define("B", {}, { attributes = { speed = numeric(true) } })
+	local r = w.tagged("R", "B", { Speed = "fast" })
+	local A = w.define("A", {
+		awake = function()
+			w.engine.setAttribute(r, "Speed", 5)
+			B:get(r)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("X2 warnings", warned, "bound after flush", br.bound[r] ~= nil)
+	spec.eq(br.bound[r] ~= nil, true, "pair was pending: it binds after the flush")
+	spec.eq(warned, 1, "pending pair warns")
+end)
+
+test("X3 two hook gets at two sites on a wrong-class instance in one hook", function()
+	local w = World()
+	local B, br = w.define("B")
+	local wrong = w.engine.instance("W", "Part")
+	w.engine.addTag(wrong, "B")
+	local A = w.define("A", {
+		awake = function()
+			B:get(wrong)
+			B:get(wrong)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	w.engine.flush()
+	print("X3 warnings", w.engine.logged("get pending"), "bound", br.bound[wrong] ~= nil)
+	spec.eq(br.bound[wrong], nil, "never binds")
+	spec.eq(w.engine.logged("get pending"), 0, "wrong class is not pending")
+end)
+
+test("X6 two hook gets at two sites on an untagged instance in one hook", function()
+	local w = World()
+	local B = w.define("B")
+	local plain = w.engine.instance("Plain")
+	local A = w.define("A", {
+		awake = function()
+			B:get(plain)
+			B:get(plain)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	print("X6 warnings", w.engine.logged("get pending"))
+	spec.eq(w.engine.logged("get pending"), 0, "untagged is not pending")
+end)
+
+test("X7 hook get on a tagged instance whose required attribute is invalid", function()
+	local w = World()
+	local B, br = w.define("B", {}, { attributes = { speed = numeric(true) } })
+	local r = w.tagged("R", "B", { Speed = "fast" })
+	local A = w.define("A", {
+		awake = function()
+			B:get(r)
+		end,
+	})
+	w.boot()
+	local i = w.tagged("I", "A")
+	A:get(i)
+	w.engine.flush()
+	print("X7 warnings", w.engine.logged("get pending"), "bound", br.bound[r] ~= nil)
+	spec.eq(br.bound[r], nil, "never binds")
+	spec.eq(w.engine.logged("get pending"), 0, "invalid attribute is not pending")
+end)
+
+test("F1 control: get inside a hook on a pending pair still warns per site", function()
+	local w = World()
+	local B = w.define("B")
+	local target = w.tagged("T", "B")
+	w.define("A", {
+		awake = function()
+			for _ = 1, 2 do
+				B:get(target)
+			end
+			B:get(target)
+		end,
+	})
+	w.tagged("I", "A")
+	w.boot()
+	spec.eq(w.engine.logged("get pending"), 2, "two sites")
+end)
+
+test("F1 control: tag added but signal undelivered still warns", function()
+	local w = World()
+	local B = w.define("B")
+	local A = w.define("A", {
+		awake = function(self)
+			B:get(self.instance)
+		end,
+	})
+	w.boot()
+	local i = w.engine.instance("I")
+	w.engine.addTag(i, "B")
+	w.engine.addTag(i, "A")
+	A:get(i)
+	print("F1 undelivered warnings", w.engine.logged("get pending"))
+	spec.eq(w.engine.logged("get pending"), 1, "pending tag warns")
+end)
+
+test("R3 accepts rejection survives repeated hook gets without user code", function()
+	local w = World()
+	local allow, calls = false, 0
+	local during
+	local B = w.define("B", {
+		accepts = function()
+			calls += 1
+			return allow
+		end,
+	})
+	local r = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			allow = true
+			local before = calls
+			B:get(r)
+			B:get(r)
+			during = calls - before
+			spec.eq(w.engine.logged("get pending"), 0, "get preserves rejection")
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	spec.eq(during, 0, "get never calls user accepts")
+	spec.eq(w.engine.logged("get pending"), 0, "no false warnings")
+end)
+
+test("R3 refresh clears accepts rejection before hook get", function()
+	local w = World()
+	local allow = false
+	local B = w.define("B", {
+		accepts = function()
+			return allow
+		end,
+	})
+	local r = w.tagged("R", "B")
+	local A = w.define("A", {
+		awake = function()
+			allow = true
+			w.behaviour:refresh(r)
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	spec.eq(w.engine.logged("get pending"), 1, "refresh clears rejection")
+	spec.eq(B:get(r) ~= nil, true, "admitted")
+end)
+
+test("R3 attribute pending checks every descriptor and required absence", function()
+	for _, mode in { "required absent", "optional absent", "other invalid" } do
+		local w = World()
+		local other = numeric(true)
+		other.name = "Other"
+		local B = w.define("B", {}, { attributes = { speed = numeric(mode ~= "optional absent"), other = other } })
+		local r = w.tagged("R", "B", { Speed = "bad", Other = 1 })
+		local A = w.define("A", {
+			awake = function()
+				w.engine.setAttribute(r, "Speed", if mode == "other invalid" then 5 else nil)
+				if mode == "other invalid" then
+					w.engine.setAttribute(r, "Other", "bad")
+				end
+				B:get(r)
+			end,
+		})
+		w.boot()
+		A:get(w.tagged("I", "A"))
+		spec.eq(w.engine.logged("get pending"), if mode == "optional absent" then 1 else 0, mode)
+	end
+end)
+
+test("Y2 wrong class, hook refreshes it, then get", function()
+	local w = World()
+	local B, br = w.define("B")
+	local wrong = w.engine.instance("W", "Part")
+	w.engine.addTag(wrong, "B")
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(wrong)
+			B:get(wrong)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Y2 warnings", warned, "bound after flush", br.bound[wrong] ~= nil)
+	spec.eq(br.bound[wrong], nil, "never binds")
+	spec.eq(warned, 0, "wrong class is not pending after a refresh")
+end)
+
+test("Y2b default scope (ServerStorage), hook refreshes it, then get", function()
+	local w = World()
+	local B, br = w.define("B")
+	local stored = w.engine.instance("S")
+	stored.container = "ServerStorage"
+	w.engine.addTag(stored, "B")
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(stored)
+			B:get(stored)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Y2b warnings", warned, "bound after flush", br.bound[stored] ~= nil)
+	spec.eq(br.bound[stored], nil, "never binds")
+	spec.eq(warned, 0, "default scope is not pending after a refresh")
+end)
+
+test("Y2d invalid required attribute, hook refreshes it, then get", function()
+	local w = World()
+	local B, br = w.define("B", {}, { attributes = { speed = numeric(true) } })
+	local r = w.tagged("R", "B", { Speed = "fast" })
+	local A = w.define("A", {
+		awake = function()
+			w.behaviour:refresh(r)
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	local warned = w.engine.logged("get pending")
+	w.engine.flush()
+	print("Y2d warnings", warned, "bound after flush", br.bound[r] ~= nil)
+	spec.eq(br.bound[r], nil, "never binds")
+	spec.eq(warned, 0, "invalid attribute is not pending after a refresh")
+end)
+
+test("Y4 j first: admitted pair is pending before awake", function()
+	local w = World()
+	local allow = false
+	local seen, pending
+	local B, br = w.define("B", {
+		accepts = function()
+			return allow
+		end,
+	})
+	local r = w.tagged("R", "B")
+	local C = w.define("C", {
+		awake = function()
+			pending = B:get(r)
+			seen = true
+		end,
+	})
+	local A = w.define("A", {
+		awake = function()
+			local j = w.tagged("J", "C")
+			C:get(j)
+			allow = true
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	w.engine.flush()
+	spec.eq(seen, true, "C awake ran")
+	spec.eq(pending, nil, "B not yet awake in C hook")
+	spec.eq(br.bound[r] ~= nil, true, "B admitted after hook")
+	print("Y4 j first warnings", w.engine.logged("get pending"))
+	spec.eq(w.engine.logged("get pending"), 2, "C get and admitted B get both warn")
+end)
+
+test("Y2e corrected default scope is pending before its signal", function()
+	local w = World()
+	local B, br = w.define("B")
+	local r = w.tagged("R", "B")
+	r.container = "ServerStorage"
+	local A = w.define("A", {
+		awake = function()
+			r.container = "Workspace"
+			B:get(r)
+		end,
+	})
+	w.boot()
+	A:get(w.tagged("I", "A"))
+	spec.eq(w.engine.logged("get pending"), 1, "current scope permits pending")
+	w.engine.flush()
+	spec.eq(br.bound[r] ~= nil, true, "binds in corrected scope")
+end)
+
 return tests

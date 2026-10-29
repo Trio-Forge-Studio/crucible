@@ -11,6 +11,122 @@ const binding = "packages/crucible/src/internal/binding.ts";
 const behaviour = "packages/crucible/src/crucible-behaviour.ts";
 const mutants = [
 	[
+		"R4 evaluate retains rejection",
+		binding,
+		"const engine = port();\n\tpair.rejected = undefined;",
+		"const engine = port();",
+		"Y4 j first",
+	],
+	[
+		"R4 queue clears every reason",
+		binding,
+		'if (pair.rejected === "accepts") pair.rejected = undefined;',
+		"pair.rejected = undefined;",
+		"Y2 wrong class",
+	],
+	["R4 scope recorded as accepts", binding, 'scopeRejected ? "scope" : "accepts"', '"accepts"', "Y2b default scope"],
+	[
+		"R4 scope never pending",
+		binding,
+		'(pair.rejected === "scope" && port().bindingScope(instance))',
+		"false",
+		"Y2e corrected default scope",
+	],
+
+	[
+		"M1 queue retains rejection",
+		binding,
+		'if (pair.rejected === "accepts") pair.rejected = undefined;',
+		"",
+		"R3 refresh clears",
+	],
+	[
+		"M3 attribute rejection omitted",
+		binding,
+		'pair.rejected = "attributes";',
+		"pair.rejected = undefined;",
+		"X7 hook get",
+	],
+	[
+		"M5 queue membership means pending",
+		binding,
+		"(state === undefined || !isLive(state)) &&",
+		"pair.queued || (state === undefined || !isLive(state)) &&",
+		"X6 two hook gets",
+	],
+	["R3 get clears rejection", binding, "pair.rejected = rejected;", "pair.rejected = undefined;", "X3 two hook gets"],
+	[
+		"R3 corrected attributes stay rejected",
+		binding,
+		'(pair.rejected === "attributes" && attributesValid)',
+		"false",
+		"X2 invalid attribute",
+	],
+	[
+		"R3 ignores current attribute checks",
+		binding,
+		"attributesValid = false;",
+		"attributesValid = true;",
+		"X7 hook get",
+	],
+	[
+		"R3 required absence allowed",
+		binding,
+		"value === undefined ? descriptor.required : !descriptor.check(value)",
+		"value === undefined ? false : !descriptor.check(value)",
+		"R3 attribute pending checks",
+	],
+	[
+		"R3 optional absence rejected",
+		binding,
+		"value === undefined ? descriptor.required : !descriptor.check(value)",
+		"value === undefined ? true : !descriptor.check(value)",
+		"R3 attribute pending checks",
+	],
+	[
+		"R3 get runs user accepts",
+		binding,
+		"const rejected = pair.rejected;",
+		"accepted(pair); const rejected = pair.rejected;",
+		"R3 accepts rejection",
+	],
+
+	[
+		"G1 pending ignores rejection",
+		binding,
+		'(pair.rejected === undefined ||\n\t\t\t\t(pair.rejected === "attributes" && attributesValid) ||\n\t\t\t\t(pair.rejected === "scope" && port().bindingScope(instance)))',
+		"true",
+		"F1 residual:",
+	],
+	[
+		"N1 parked flag not cleared after restore",
+		binding,
+		"for (const other of held) other.parked = false;",
+		"",
+		"PN1 restored parked pair",
+	],
+	[
+		"N2 pending ignores suppression",
+		binding,
+		"!record.suppressed.has(instance)\n\t\t)",
+		"true\n\t\t)",
+		"PN2 hook get",
+	],
+	[
+		"N4 restore re-adds unparked pairs",
+		binding,
+		"held.filter((other) => other.parked)",
+		"held",
+		"PN4 refreshed parked pair",
+	],
+	[
+		"N5 queue leaves parked flag set",
+		binding,
+		"\t\tpair.parked = false;\n\t\tpair.queued = false;",
+		"\t\tpair.queued = false;",
+		"PN4 refreshed parked pair",
+	],
+	[
 		"V1 Roblox StarterPlayer exclusion",
 		"packages/crucible/src/internal/roblox-port.ts",
 		'\n\t\tgame.GetService("StarterPlayer"),',
@@ -36,7 +152,7 @@ const mutants = [
 	[
 		"F1 false pending warning",
 		binding,
-		"state !== undefined\n\t\t\t\t? !isLive(state)\n\t\t\t\t: port().inWorld(instance) && port().hasTag(instance, record.tag) && !record.suppressed.has(instance)",
+		'(state === undefined || !isLive(state)) &&\n\t\t\t(pair.rejected === undefined ||\n\t\t\t\t(pair.rejected === "attributes" && attributesValid) ||\n\t\t\t\t(pair.rejected === "scope" && port().bindingScope(instance))) &&\n\t\t\tport().inWorld(instance) &&\n\t\t\tport().hasTag(instance, record.tag) &&\n\t\t\t!record.suppressed.has(instance)',
 		"state === undefined || !isLive(state)",
 		"untagged instance does not warn pending",
 	],
@@ -81,8 +197,20 @@ const mutants = [
 	["C1 all pairs", binding, "queued = [pair];", "queued = queued;", "outside get reconciles only"],
 	["C1 no outside reconcile", binding, "drain();\n\t\tqueued =", "queued =", "AddTag then get outside"],
 	["C1 no pending warning", binding, "if (!getWarnings.has(site))", "if (false)", "get inside a hook never"],
-	["C3 default scope", binding, "return port().bindingScope(instance);", "return true;", "default accepts excludes"],
-	["bound get skips accepts", binding, "!accepted(pair, have)", "false", "override replaces accepts"],
+	[
+		"C3 default scope",
+		binding,
+		"const ok = port().bindingScope(instance);",
+		"const ok = true;",
+		"default accepts excludes",
+	],
+	[
+		"bound get skips accepts",
+		binding,
+		"const ok = accepted(pair, have);",
+		"const ok = true;",
+		"override replaces accepts",
+	],
 	[
 		"C4 remove suppression",
 		binding,
@@ -165,6 +293,55 @@ const mutants = [
 		"",
 		"binding rereads tag changes",
 	],
+	[
+		"W3 scope flag not reset before accepts",
+		binding,
+		"\tscopeRejected = false;\n\tscopeTarget = instance;\n\tif (!accepted(pair)) {",
+		"\tscopeTarget = instance;\n\tif (!accepted(pair)) {",
+		"Z5b scope rejection at boot",
+	],
+	[
+		"W4 default accepts raises scope flag in scope",
+		binding,
+		"if (!ok && instance === scopeTarget) scopeRejected = true;",
+		"if (instance === scopeTarget) scopeRejected = true;",
+		"Z4 user accepts calls default scope",
+	],
+	[
+		"R5 bound branch drops rejection reason",
+		binding,
+		'if (!ok) pair.rejected = scopeRejected ? "scope" : "accepts";',
+		"",
+		"Z1 bound pair re-evaluated",
+	],
+	[
+		"R5 default scope flag ignores target",
+		binding,
+		"if (!ok && instance === scopeTarget) scopeRejected = true;",
+		"if (!ok) scopeRejected = true;",
+		"Z3 user accepts consults default scope",
+	],
+	[
+		"A1 bound branch never updates scopeTarget",
+		binding,
+		"\t\tscopeTarget = instance;\n\t\tconst ok = accepted(pair, have);",
+		"\t\tconst ok = accepted(pair, have);",
+		"Q2 Q1 after another instance was evaluated last",
+	],
+	[
+		"A2 bound branch records accepts for a scope rejection",
+		binding,
+		'if (!ok) pair.rejected = scopeRejected ? "scope" : "accepts";',
+		'if (!ok) pair.rejected = "accepts";',
+		"Q1 bound pair moved into ServerStorage, hook moves it back unsignalled, then get",
+	],
+	[
+		"A3 bound branch does not reset the scope flag",
+		binding,
+		"\t\tscopeRejected = false;\n\t\tscopeTarget = instance;\n\t\tconst ok",
+		"\t\tscopeTarget = instance;\n\t\tconst ok",
+		"Q3 scope rejection then a bound user accepts rejection in one reconcile, then get",
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });
@@ -208,7 +385,10 @@ try {
 		assert.equal(compiled.status, 0, name + " build failed\n" + compiled.stdout + compiled.stderr);
 		const tested = run("lune", ["run", "test", target]);
 		assert.notEqual(tested.status, 0, `${name} survived\n${tested.stdout}${tested.stderr}`);
-		assert.ok((tested.stdout + tested.stderr).includes("FAIL binding.luau"), `${name} must fail its named spec`);
+		assert.ok(
+			(tested.stdout + tested.stderr).match(/FAIL binding(?:-pending)?\.luau/),
+			`${name} must fail its named spec`,
+		);
 		console.log(`KILLED ${name} | ${target} | build 0, spec ${tested.status}`);
 		completed++;
 		fs.writeFileSync(path.join(scratch, file), original);
