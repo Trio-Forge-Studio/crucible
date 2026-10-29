@@ -1,5 +1,29 @@
 [
 	{
+		"name": "mixin-walk-dropped",
+		"test": "T2 CRU013 direct concrete mixin",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "mixin-last-intersection-member",
+		"test": "T2 CRU013 concrete mixin in any intersection position",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "mixin-first-layer-only",
+		"test": "T2 CRU013 nested concrete mixins",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
+		"name": "mixin-every-call-concrete",
+		"test": "T2 CRU013 abstract and unregistered mixins stay legal",
+		"exitCode": 1,
+		"restored": true
+	},
+	{
 		"name": "registration",
 		"test": "registration contract",
 		"exitCode": 1,
