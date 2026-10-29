@@ -10,6 +10,35 @@ const scratch = path.join(repo, "build/transformer-mutants");
 fs.rmSync(scratch, { recursive: true, force: true });
 const registration = "registration contract";
 const mutants = [
+	[
+		"mixin-walk-dropped",
+		"index.cjs",
+		"if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));",
+		"if (base.isIntersection()) return false;",
+		"T2 CRU013 direct concrete mixin",
+	],
+	[
+		"mixin-last-intersection-member",
+		"index.cjs",
+		"if (base.isIntersection()) return base.types.some((part) => concreteBase(part, seen));",
+		"if (base.isIntersection()) return concreteBase(base.types[base.types.length - 1], seen);",
+		"T2 CRU013 concrete mixin in any intersection position",
+	],
+	[
+		"mixin-first-layer-only",
+		"index.cjs",
+		"return resolvedBases(base).some((parent) => concreteBase(parent, seen));",
+		"return false;",
+		"T2 CRU013 nested concrete mixins",
+	],
+	[
+		"mixin-every-call-concrete",
+		"index.cjs",
+		"if (resolvedBases(type).some((base) => concreteBase(base)))",
+		"if (resolvedBases(type).some((base) => concreteBase(base)) || node.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword && clause.types.some((target) => ts.isCallExpression(target.expression))))",
+		"T2 CRU013 abstract and unregistered mixins stay legal",
+	],
+
 	["registration", "index.cjs", "!kind ||", "true ||", registration],
 	["kind", "index.cjs", "kind: str(kind)", 'kind: str("broken")', registration],
 	[

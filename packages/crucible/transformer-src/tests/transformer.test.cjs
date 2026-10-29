@@ -1433,3 +1433,137 @@ test("T2 package sides without a package search the whole path", () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("T2 CRU013 direct concrete mixin", () => {
+	const text =
+		'import { Subsystem } from "@trioforge/crucible";\nfunction Mixin<T extends new (...args: any[]) => object>(Base: T) { return class extends Base {}; }\nexport class DirectConcrete extends Subsystem {}\nexport class DirectMixed extends Mixin(DirectConcrete) {}';
+	const { diagnostics } = run(text);
+	assert.deepEqual(
+		diagnostics
+			.filter((d) => d.code === 90013)
+			.map((d) => ({
+				line: d.file.getLineAndCharacterOfPosition(d.start).line + 1,
+				category: d.category,
+				text: d.file.text.slice(d.start, d.start + d.length),
+			}))
+			.filter((d) => d.text.includes("class DirectMixed")),
+		[
+			{
+				line: text.split("\n").length,
+				category: ts.DiagnosticCategory.Error,
+				text: "export class DirectMixed extends Mixin(DirectConcrete) {}",
+			},
+		],
+	);
+	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+});
+
+test("T2 CRU013 nested concrete mixins", () => {
+	const text =
+		'import { Subsystem } from "@trioforge/crucible";\nfunction Mixin<T extends new (...args: any[]) => object>(Base: T) { return class extends Base {}; }\nexport class NestedConcrete extends Subsystem {}\nfunction Other(Base: typeof NestedConcrete) { return class InnerLayer extends Base {}; }\nexport class NestedMixed extends Mixin(Other(NestedConcrete)) {}';
+	const { diagnostics } = run(text);
+	assert.deepEqual(
+		diagnostics
+			.filter((d) => d.code === 90013)
+			.map((d) => ({
+				line: d.file.getLineAndCharacterOfPosition(d.start).line + 1,
+				category: d.category,
+				text: d.file.text.slice(d.start, d.start + d.length),
+			}))
+			.filter((d) => d.text.includes("class NestedMixed")),
+		[
+			{
+				line: text.split("\n").length,
+				category: ts.DiagnosticCategory.Error,
+				text: "export class NestedMixed extends Mixin(Other(NestedConcrete)) {}",
+			},
+		],
+	);
+	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+});
+
+test("T2 CRU013 variable concrete mixin", () => {
+	const text =
+		'import { Subsystem } from "@trioforge/crucible";\nfunction Mixin<T extends new (...args: any[]) => object>(Base: T) { return class extends Base {}; }\nexport class VariableConcrete extends Subsystem {}\nlet variable = Mixin(VariableConcrete);\nexport class VariableMixed extends variable {}';
+	const { diagnostics } = run(text);
+	assert.deepEqual(
+		diagnostics
+			.filter((d) => d.code === 90013)
+			.map((d) => ({
+				line: d.file.getLineAndCharacterOfPosition(d.start).line + 1,
+				category: d.category,
+				text: d.file.text.slice(d.start, d.start + d.length),
+			}))
+			.filter((d) => d.text.includes("class VariableMixed")),
+		[
+			{
+				line: text.split("\n").length,
+				category: ts.DiagnosticCategory.Error,
+				text: "export class VariableMixed extends variable {}",
+			},
+		],
+	);
+	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+});
+
+test("T2 CRU013 aliased concrete mixin", () => {
+	const text =
+		'import { Subsystem } from "@trioforge/crucible";\nfunction Mixin<T extends new (...args: any[]) => object>(Base: T) { return class extends Base {}; }\nexport class AliasConcrete extends Subsystem {}\nconst mixinAlias = Mixin;\nconst baseAlias = mixinAlias(AliasConcrete);\nexport class AliasMixed extends baseAlias {}';
+	const { diagnostics } = run(text);
+	assert.deepEqual(
+		diagnostics
+			.filter((d) => d.code === 90013)
+			.map((d) => ({
+				line: d.file.getLineAndCharacterOfPosition(d.start).line + 1,
+				category: d.category,
+				text: d.file.text.slice(d.start, d.start + d.length),
+			}))
+			.filter((d) => d.text.includes("class AliasMixed")),
+		[
+			{
+				line: text.split("\n").length,
+				category: ts.DiagnosticCategory.Error,
+				text: "export class AliasMixed extends baseAlias {}",
+			},
+		],
+	);
+	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+});
+
+test("T2 CRU013 concrete mixin in any intersection position", () => {
+	const text =
+		'import { Subsystem } from "@trioforge/crucible";\ntype Ctor = new (...args: any[]) => object;\nfunction Extra<T extends Ctor>(B: T): T & (new (...args: any[]) => { extra: number }) { return B as never; }\nexport class OrderConcrete extends Subsystem {}\nexport class OrderPlain {}\nexport class PlainOrdered extends Extra(OrderPlain) {}\nexport class OrderMixed extends Extra(OrderConcrete) {}';
+	const { diagnostics } = run(text);
+	assert.deepEqual(
+		diagnostics
+			.filter((d) => d.code === 90013)
+			.map((d) => ({
+				line: d.file.getLineAndCharacterOfPosition(d.start).line + 1,
+				category: d.category,
+				text: d.file.text.slice(d.start, d.start + d.length),
+			})),
+		[
+			{
+				line: text.split("\n").length,
+				category: ts.DiagnosticCategory.Error,
+				text: "export class OrderMixed extends Extra(OrderConcrete) {}",
+			},
+		],
+	);
+	assert.ok(!diagnostics.some((d) => d.code === 90000), "no infrastructure failure");
+});
+
+test("T2 CRU013 abstract and unregistered mixins stay legal", () => {
+	const { diagnostics } = run(`import { Subsystem } from "@trioforge/crucible";
+function Mixin<T extends abstract new (...args: any[]) => object>(Base: T) { abstract class Layer extends Base {} return Layer; }
+export abstract class AbstractOrigin extends Subsystem {}
+export class AbstractMixed extends Mixin(AbstractOrigin) {}
+export class PlainOrigin {}
+export class PlainMixed extends Mixin(PlainOrigin) {}
+export class PlainNested extends Mixin(Mixin(PlainOrigin)) {}
+`);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+});
