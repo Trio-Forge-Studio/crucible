@@ -191,16 +191,10 @@ mod tests {
 
     #[test]
     fn version_names_the_locked_rojo() {
-        let lock = include_str!("../../../Cargo.lock");
+        let lock = include_str!("../../../Cargo.lock").replace("\r\n", "\n");
         let rojo = VERSION.strip_suffix(')').and_then(|v| v.split_once(" (rojo ")).map(|(_, rojo)| rojo).unwrap();
-        assert!(
-            lock.contains(&format!(
-                "name = \"rojo\"
-version = \"{rojo}\"
-"
-            )),
-            "Cargo.lock locks rojo {rojo}"
-        );
+        let locked = format!("name = \"rojo\"\nversion = \"{rojo}\"\n");
+        assert!(lock.contains(&locked), "Cargo.lock locks rojo {rojo}");
     }
 
     #[test]
