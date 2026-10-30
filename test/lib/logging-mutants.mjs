@@ -259,6 +259,30 @@ const verifierMutants = [
 for (const [rule, name, [[file, before, after]], target] of verifierMutants) {
 	mutants.push([`L${rule} ${name}`, file, before, after, target]);
 }
+mutants.push(
+	[
+		"L1 filter drops only Debug",
+		"packages/crucible/src/logging.ts",
+		"if (emitting || level < minimum) return;",
+		"if (emitting || (level === LogLevel.Debug && level < minimum)) return;",
+		"L1 disabled",
+	],
+	[
+		"L2 added sink replaces aggregate",
+		"packages/crucible/src/logging.ts",
+		"minimum = math.min(minimum, added.minimum);",
+		"minimum = added.minimum;",
+		"L2 aggregate",
+	],
+	[
+		"L10 Debug through Info",
+		O,
+		"logger.Output(escape(text), record.context)",
+		"logger.Info(escape(text), record.context)",
+		"L10 native",
+	],
+	["L10 Crucible warning through Game", O, "crucibleLogger!.Warn(", "gameLogger!.Warn(", "L10 native"],
+);
 mutants.push([
 	"L10 warning context omitted",
 	O,

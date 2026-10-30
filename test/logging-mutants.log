@@ -29,5 +29,9 @@ KILLED L10 logger recreated per write | L10 native | build 0, spec 1
 KILLED L10 Info drops context | L10 native | build 0, spec 1
 KILLED L10 Crucible warn unescaped | L10 native | build 0, spec 1
 KILLED L11 segment check removed | L11 names | build 0, spec 1
+KILLED L1 filter drops only Debug | L1 disabled | build 0, spec 1
+KILLED L2 added sink replaces aggregate | L2 aggregate | build 0, spec 1
+KILLED L10 Debug through Info | L10 native | build 0, spec 1
+KILLED L10 Crucible warning through Game | L10 native | build 0, spec 1
 KILLED L10 warning context omitted | L10 native | build 0, spec 1
-32/32 selected source mutants killed; restored build 0
+36/36 selected source mutants killed; restored build 0

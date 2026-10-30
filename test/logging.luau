@@ -50,15 +50,25 @@ return {
 					return "x"
 				end,
 			}) }
-		w.log:debug("{x}", context)
-		spec.eq(touched, 0, "no normalization")
-		spec.eq(w.clocks(), 0, "no record clock")
-		spec.eq(#w.e.gameLogs, 0, "no output")
+		for _, method in { "debug", "info", "warn", "error" } do
+			w.log[method](w.log, "{x}", context)
+		end
+		spec.eq(touched, 0, "no normalization at any level")
+		spec.eq(w.clocks(), 0, "no record clock at any level")
+		spec.eq(#w.e.gameLogs, 0, "no output at any level")
+		w.api.Logging.defaultSink:setMinimum(2)
+		w.log:info("{x}", context)
+		spec.eq(touched, 0, "Warning filters Info before normalization")
+		spec.eq(w.clocks(), 0, "Warning filters Info before record creation")
+		spec.eq(#w.e.gameLogs, 0, "Warning filters Info before output")
 	end,
 	["L2 aggregate tracks all writers including default and Studio live defaults"] = function()
 		for _, studio in { true, false } do
 			local w = world(studio)
 			spec.eq(w.log:isEnabled(0), studio, "environment default")
+			local high = w.api.Logging:addSink({ write = function() end }, 2)
+			spec.eq(w.log:isEnabled(0), studio, "a higher sink keeps the lowest minimum")
+			high:disconnect()
 			local sub = w.api.Logging:addSink({ write = function() end }, 0)
 			assert(w.log:isEnabled(0), "custom minimum")
 			sub:setMinimum(3)
@@ -229,14 +239,19 @@ return {
 		p.services.LogService = {
 			GetLogger = function(_, name)
 				table.insert(created, name)
-				local function write(_, text, context)
-					if fail then
-						error("native unavailable")
+				local function writer(method)
+					return function(_, text, context)
+						if fail then
+							error("native unavailable")
+						end
+						local displayed = if context then text:gsub("{{", "{"):gsub("}}", "}") else text
+						table.insert(
+							writes,
+							{ logger = name, method = method, text = text, context = context, displayed = displayed }
+						)
 					end
-					local displayed = if context then text:gsub("{{", "{"):gsub("}}", "}") else text
-					table.insert(writes, { text = text, context = context, displayed = displayed })
 				end
-				return { Output = write, Info = write, Warn = write }
+				return { Output = writer("Output"), Info = writer("Info"), Warn = writer("Warn") }
 			end,
 		}
 		local g = spec.runtime({
@@ -262,6 +277,9 @@ return {
 		for index = 1, 3 do
 			spec.eq(writes[index].text, "[Native] {{literal}}", "brace escaping")
 			spec.eq(writes[index].context, context, "structured context")
+		end
+		for index, expected in { "Game.Output", "Game.Info", "Game.Warn", "Crucible.Warn" } do
+			spec.eq(`{writes[index].logger}.{writes[index].method}`, expected, "native route " .. index)
 		end
 		spec.eq(writes[4].text, "[Crucible] braces {{literal}}", "warning escaping")
 		assert(type(writes[4].context) == "table", "warning context supplied")
