@@ -1,0 +1,305 @@
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+const FAKE_RBXTSC: &str = r#"
+const fs = require("node:fs");
+fs.writeFileSync("rbxtsc.pid", String(process.pid));
+console.log(JSON.stringify(process.argv.slice(2)));
+if (process.env.FAKE_RBXTSC_EXIT) process.exit(Number(process.env.FAKE_RBXTSC_EXIT));
+fs.mkdirSync("out", { recursive: true });
+fs.writeFileSync("out/main.server.luau", "print('hi')");
+console.log("\x1b[90m10:00:00 AM\x1b[0m - Found 0 errors. Watching for file changes.");
+setInterval(() => {}, 1000);
+"#;
+
+const PROJECT: &str = r#"{"name":"fixture","tree":{"$className":"DataModel","ReplicatedStorage":{"$className":"ReplicatedStorage","Out":{"$path":"out"}}}}"#;
+
+fn fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let rbxts = root.join("node_modules/roblox-ts");
+    fs::create_dir_all(rbxts.join("out/CLI")).unwrap();
+    fs::write(rbxts.join("package.json"), r#"{"name":"roblox-ts","bin":{"rbxtsc":"out/CLI/cli.js"}}"#).unwrap();
+    fs::write(rbxts.join("out/CLI/cli.js"), FAKE_RBXTSC).unwrap();
+    let crucible = root.join("node_modules/@trioforge/crucible");
+    fs::create_dir_all(crucible.join("transformer")).unwrap();
+    fs::write(crucible.join("package.json"), r#"{"name":"@trioforge/crucible"}"#).unwrap();
+    fs::write(crucible.join("transformer/index.js"), "module.exports = 1;").unwrap();
+    fs::write(root.join("default.project.json"), PROJECT).unwrap();
+    dir
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+fn wait_until<T>(what: &str, timeout: Duration, mut poll: impl FnMut() -> Option<T>) -> T {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(value) = poll() {
+            return value;
+        }
+        assert!(Instant::now() < deadline, "timed out after {timeout:?} waiting for {what}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+struct Dev {
+    child: Child,
+    stdout: Output,
+    stderr: Output,
+}
+
+#[derive(Clone)]
+struct Output {
+    text: Arc<Mutex<String>>,
+    closed: Arc<Mutex<bool>>,
+}
+
+impl Output {
+    fn collect(pipe: impl std::io::Read + Send + 'static) -> Self {
+        let output = Self { text: Arc::default(), closed: Arc::default() };
+        let sink = output.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                let mut text = sink.text.lock().unwrap();
+                text.push_str(&line);
+                text.push('\n');
+            }
+            *sink.closed.lock().unwrap() = true;
+        });
+        output
+    }
+
+    fn text(&self) -> String {
+        self.text.lock().unwrap().clone()
+    }
+
+    fn closed(&self) -> bool {
+        *self.closed.lock().unwrap()
+    }
+}
+
+impl Dev {
+    fn start(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_crucible"));
+        command
+            .arg("dev")
+            .args(args)
+            .current_dir(dir)
+            .envs(env.iter().copied())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(
+            &mut command,
+            windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
+        );
+        let mut child = command.spawn().unwrap();
+        let stdout = Output::collect(child.stdout.take().unwrap());
+        let stderr = Output::collect(child.stderr.take().unwrap());
+        Self { child, stdout, stderr }
+    }
+
+    fn stderr(&self) -> String {
+        self.stderr.text()
+    }
+
+    fn wait_for_stderr(&self, text: &str, timeout: Duration) {
+        wait_until(text, timeout, || self.stderr().contains(text).then_some(()));
+    }
+
+    fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn interrupt(&self) {
+        #[cfg(unix)]
+        assert!(Command::new("kill").args(["-INT", &self.pid().to_string()]).status().unwrap().success());
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+            assert_ne!(GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid()), 0, "Ctrl+Break reaches crucible dev");
+        }
+    }
+
+    fn wait(&mut self, timeout: Duration) -> ExitStatus {
+        let status = wait_until("crucible dev to exit", timeout, || self.child.try_wait().unwrap());
+        wait_until("every process to close crucible dev's output", STOP, || {
+            (self.stdout.closed() && self.stderr.closed()).then_some(())
+        });
+        assert_eq!(self.stdout.text(), "", "crucible dev prints nothing on stdout");
+        status
+    }
+}
+
+impl Drop for Dev {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            self.interrupt();
+            if wait_until_exit(&mut self.child, Duration::from_secs(10)).is_none() {
+                let _ = self.child.kill();
+            }
+        }
+    }
+}
+
+fn wait_until_exit(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().ok().flatten() {
+            return Some(status);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    None
+}
+
+fn children(pid: u32) -> Vec<u32> {
+    let output = if cfg!(windows) {
+        let filter = format!("(Get-CimInstance Win32_Process -Filter 'ParentProcessId={pid}').ProcessId");
+        Command::new("powershell").args(["-NoProfile", "-Command", &filter]).output()
+    } else {
+        Command::new("ps").args(["-o", "pid=", "--ppid", &pid.to_string()]).output()
+    };
+    String::from_utf8_lossy(&output.unwrap().stdout).split_whitespace().map(|pid| pid.parse().unwrap()).collect()
+}
+
+fn alive(pid: u32) -> bool {
+    if cfg!(windows) {
+        let tasks = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"]).output();
+        String::from_utf8_lossy(&tasks.unwrap().stdout).contains(&format!("\"{pid}\""))
+    } else {
+        Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().unwrap().success()
+    }
+}
+
+fn port_is_free(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn rbxtsc_pid(dir: &Path) -> u32 {
+    fs::read_to_string(dir.join("rbxtsc.pid")).unwrap().parse().unwrap()
+}
+
+const START: Duration = Duration::from_secs(30);
+const STOP: Duration = Duration::from_secs(15);
+
+#[test]
+fn ctrl_c_stops_roblox_ts_and_rojo() {
+    let game = fixture();
+    let port = free_port();
+    let mut dev = Dev::start(game.path(), &["--port", &port.to_string()], &[]);
+    dev.wait_for_stderr("Rojo server listening", START);
+    let stderr = dev.stderr();
+    assert!(stderr.contains(r#"[rbxtsc] ["--watch","--type","game"]"#), "{stderr}");
+    assert!(stderr.contains("[rbxtsc] 10:00:00 AM - Found 0 errors. Watching for file changes."), "{stderr}");
+    assert!(stderr.contains(&format!("[rojo]   Port:    {port}")), "{stderr}");
+    assert!(game.path().join("out/transformer.sha256").is_file(), "the first compile writes the receipt");
+    let mut spawned = children(dev.pid());
+    assert!(spawned.len() >= 2, "crucible dev runs roblox-ts and Rojo: {spawned:?}");
+    spawned.push(rbxtsc_pid(game.path()));
+    dev.interrupt();
+    let status = dev.wait(STOP);
+    assert_eq!(status.code(), Some(0), "{}", dev.stderr());
+    assert!(spawned.iter().all(|pid| !alive(*pid)), "no child outlives crucible dev: {spawned:?}");
+    assert!(port_is_free(port), "Rojo released port {port}");
+}
+
+#[test]
+fn rojo_failure_stops_roblox_ts() {
+    let game = fixture();
+    let taken = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port();
+    let mut dev = Dev::start(game.path(), &["--port", &port.to_string()], &[]);
+    let status = dev.wait(START);
+    let stderr = dev.stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("[rojo] ") && stderr.contains("crucible dev: Rojo stopped"), "{stderr}");
+    assert!(!alive(rbxtsc_pid(game.path())), "roblox-ts stops when Rojo does");
+}
+
+#[test]
+fn roblox_ts_exit_stops_dev_before_rojo_starts() {
+    let game = fixture();
+    let mut dev = Dev::start(game.path(), &["--port", &free_port().to_string()], &[("FAKE_RBXTSC_EXIT", "3")]);
+    let status = dev.wait(START);
+    let stderr = dev.stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("crucible dev: roblox-ts stopped"), "{stderr}");
+    assert!(!stderr.contains("[rojo]"), "{stderr}");
+}
+
+#[test]
+fn unknown_place_exits_2_before_starting() {
+    let game = fixture();
+    let mut dev = Dev::start(game.path(), &["--place", "arena"], &[]);
+    let status = dev.wait(START);
+    assert_eq!(status.code(), Some(2));
+    assert!(dev.stderr().contains("crucible dev: unknown place arena. Places: start"), "{}", dev.stderr());
+    assert!(!game.path().join("rbxtsc.pid").exists(), "nothing started");
+}
+
+struct Restore {
+    path: PathBuf,
+    original: Vec<u8>,
+}
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        fs::write(&self.path, &self.original).unwrap();
+    }
+}
+
+fn get(url: &str) -> Option<Vec<u8>> {
+    ureq::get(url).call().ok()?.body_mut().read_to_vec().ok()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerInfo {
+    root_instance_id: String,
+}
+
+#[test]
+fn sample_game_edit_reaches_rojo() {
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../examples/sample-game").canonicalize().unwrap();
+    assert!(
+        sample.join("node_modules/@trioforge/crucible/transformer/index.js").is_file()
+            && sample.join("node_modules/@trioforge/crucible/out/init.luau").is_file(),
+        "run pnpm install and pnpm --filter @trioforge/crucible build:transformer build from the repo root first"
+    );
+    let port = free_port();
+    let origin = format!("http://127.0.0.1:{port}");
+    let mut dev = Dev::start(&sample, &["--port", &port.to_string()], &[]);
+    let info = wait_until("Rojo to serve the sample game", Duration::from_secs(180), || {
+        let bytes = get(&format!("{origin}/api/rojo"))?;
+        Some(rmp_serde::from_slice::<ServerInfo>(&bytes).unwrap())
+    });
+    let read = format!("{origin}/api/read/{}", info.root_instance_id);
+    let source = sample.join("src/server/main.server.ts");
+    let original = fs::read(&source).unwrap();
+    let probe = format!("crucible dev probe {}", std::process::id());
+    let restore = Restore { path: source.clone(), original: original.clone() };
+    assert!(!get(&read).unwrap().windows(probe.len()).any(|window| window == probe.as_bytes()));
+    let mut edited = original.clone();
+    edited.extend_from_slice(format!("print(\"{probe}\");\n").as_bytes());
+    fs::write(&source, edited).unwrap();
+    wait_until("the edit to reach Rojo", Duration::from_secs(60), || {
+        get(&read)?.windows(probe.len()).any(|window| window == probe.as_bytes()).then_some(())
+    });
+    drop(restore);
+    let spawned = children(dev.pid());
+    assert!(spawned.len() >= 2, "crucible dev runs roblox-ts and Rojo: {spawned:?}");
+    dev.interrupt();
+    let status = dev.wait(STOP);
+    assert_eq!(status.code(), Some(0), "{}", dev.stderr());
+    assert!(spawned.iter().all(|pid| !alive(*pid)), "no child outlives crucible dev: {spawned:?}");
+    assert!(port_is_free(port), "Rojo released port {port}");
+}

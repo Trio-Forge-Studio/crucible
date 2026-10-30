@@ -65,8 +65,13 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
+      - name: Install the workspace and build the runtime for the crucible dev test
+        working-directory: .
+        run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build
       - run: cargo test --workspace --locked
       - run: node --test npm/package.test.mjs

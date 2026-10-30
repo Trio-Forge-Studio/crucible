@@ -3,6 +3,7 @@ mod build;
 mod call;
 mod child;
 mod cli;
+mod dev;
 mod discover;
 mod docs;
 mod exec;
@@ -32,6 +33,8 @@ fn main() -> ExitCode {
         Ok(Cli { command: Command::Docs { topic } }) => return docs::run(topic.as_deref()),
         Ok(Cli { command: Command::Build(args) }) => return build::main(args),
         Ok(Cli { command: Command::RojoBuild { project, output } }) => return build::rojo_main(project, output),
+        Ok(Cli { command: Command::Dev(args) }) => return dev::main(args),
+        Ok(Cli { command: Command::RojoServe { project, port } }) => return dev::rojo_main(project, port),
         Err(error) => {
             if std::env::args_os().nth(1).is_none_or(|word| word != "oc") {
                 error.exit();

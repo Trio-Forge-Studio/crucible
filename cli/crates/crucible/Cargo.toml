@@ -18,7 +18,23 @@ tempfile = "3"
 rojo = "=7.7.1"
 sha2 = "0.10"
 env_logger = "0.9"
+ctrlc = { version = "3", features = ["termination"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+	"Win32_Foundation",
+	"Win32_Security",
+	"Win32_System_JobObjects",
+	"Win32_System_Threading",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 httpmock = "0.8"
+rmp-serde = "1"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 

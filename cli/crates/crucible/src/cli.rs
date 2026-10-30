@@ -22,6 +22,17 @@ pub enum Command {
         #[arg(value_parser = topics())]
         topic: Option<String>,
     },
+    /// Watch and compile the game with roblox-ts, and serve one place to Studio with Rojo.
+    Dev(crate::dev::Args),
+    /// Serve one Rojo project. crucible dev runs this in a child process.
+    #[command(name = crate::dev::ROJO_SERVE, hide = true)]
+    RojoServe {
+        /// The Rojo project file.
+        project: PathBuf,
+        /// The port to listen on.
+        #[arg(long)]
+        port: Option<u16>,
+    },
     /// Build one Rojo project. crucible build runs this in a child process.
     #[command(name = crate::build::ROJO_BUILD, hide = true)]
     RojoBuild {

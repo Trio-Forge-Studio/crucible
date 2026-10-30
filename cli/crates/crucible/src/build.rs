@@ -139,7 +139,7 @@ impl Receipt {
         let out = root.join("out");
         let path = out.join("transformer.sha256");
         if out.exists() && std::fs::read_to_string(&path).ok().as_deref() != Some(&fingerprint) {
-            eprintln!("crucible build: the installed Crucible transformer changed, compiling from clean");
+            eprintln!("crucible: the installed Crucible transformer changed, compiling from clean");
             std::fs::remove_dir_all(&out)
                 .map_err(|error| Error::Failed(format!("cannot remove {}: {error}", out.display())))?;
         }
@@ -204,12 +204,16 @@ fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
 
 pub const ROJO_BUILD: &str = "__rojo-build";
 
-pub fn rojo_main(project: PathBuf, output: PathBuf) -> ExitCode {
-    child::exit_with_parent();
+pub fn rojo_logger() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_module_path(false)
         .format_timestamp(None)
         .init();
+}
+
+pub fn rojo_main(project: PathBuf, output: PathBuf) -> ExitCode {
+    child::exit_with_parent();
+    rojo_logger();
     #[cfg(debug_assertions)]
     if std::env::var_os("CRUCIBLE_TEST_HOLD_ROJO").is_some() {
         eprintln!("rojo child {} holding", std::process::id());
