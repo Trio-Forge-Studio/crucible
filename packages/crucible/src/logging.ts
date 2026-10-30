@@ -1,14 +1,9 @@
+import { LogLevel } from "./log-level";
 import { runtimeDiagnostic } from "./internal/diagnostics";
 import { loggingPort } from "./internal/log-output";
 import { call, CallResult } from "./internal/runner";
 
-export enum LogLevel {
-	Debug,
-	Info,
-	Warning,
-	Error,
-	Off,
-}
+export { LogLevel } from "./log-level";
 
 export type LogContext = Readonly<Record<string, unknown>>;
 export type LogProperties = Readonly<Record<string, string | number | boolean>>;
@@ -79,24 +74,28 @@ function register(sink: LogSink, level: LogLevel): SinkSubscription {
 	const existing = registrations.get(sink);
 	if (existing !== undefined) return existing.subscription;
 	assert(typeIs(sink.write, "function"), "Log sink requires write");
-	const subscription: SinkSubscription = {
-		setMinimum(value) {
-			validateMinimum(value);
-			if (!registration.connected) return;
-			registration.minimum = value;
-			derive();
-		},
-		disconnect() {
-			if (!registration.connected) return;
-			registration.connected = false;
-			registrations.delete(sink);
-			derive();
+	const registration: Registration = {
+		sink,
+		minimum: level,
+		connected: true,
+		subscription: {
+			setMinimum(value) {
+				validateMinimum(value);
+				if (!registration.connected) return;
+				registration.minimum = value;
+				derive();
+			},
+			disconnect() {
+				if (!registration.connected) return;
+				registration.connected = false;
+				registrations.delete(sink);
+				derive();
+			},
 		},
 	};
-	const registration: Registration = { sink, subscription, minimum: level, connected: true };
 	registrations.set(sink, registration);
 	derive(registration);
-	return subscription;
+	return registration.subscription;
 }
 
 function normalize(input?: LogContext): LogProperties {

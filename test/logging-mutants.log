@@ -12,4 +12,19 @@ KILLED L9 mandatory diagnostics silenced | L9 private | build 0, spec 1
 KILLED L10 fallback retry | L10 native | build 0, spec 1
 KILLED L11 length bound removed | L11 names | build 0, spec 1
 KILLED L12 preboot default disabled | L12 module | build 0, spec 1
-14/14 selected source mutants killed; restored build 0
+KILLED L1 boundary filter off by one level | L1 disabled | build 0, spec 1
+KILLED L2 disconnect skips recompute | L2 aggregate | build 0, spec 1
+KILLED L2 live default is Debug | L2 aggregate | build 0, spec 1
+KILLED L3 disconnect not idempotent | L3 subscriptions | build 0, spec 1
+KILLED L4 sink report drops traceback on throw | L4 throwing | build 0, spec 1
+KILLED L4 sink report drops traceback always | L4 throwing | build 0, spec 1
+KILLED L5 guard released before fanout | L5 whole | build 0, spec 1
+KILLED L6 instance short name in Roblox adapter | L6 frozen | build 0, spec 1
+KILLED L6 non-primitive kept raw | L6 frozen | build 0, spec 1
+KILLED L7 missing key rendered empty | L7 renderer | build 0, spec 1
+KILLED L8 traceback level points inside logging | L8 game | build 0, spec 1
+KILLED L8 game error thrown synchronously | L8 game | build 0, spec 1
+KILLED L9 diagnostics routed to game port | L9 private | build 0, spec 1
+KILLED L10 logger recreated per write | L10 native | build 0, spec 1
+KILLED L10 Info drops context | L10 native | build 0, spec 1
+KILLED L10 Crucible warn unescaped | L10 native | build 0, spec 1

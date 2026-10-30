@@ -1,3 +1,4 @@
+import { LogLevel } from "../log-level";
 import type { LogRecord } from "../logging";
 
 /** @internal */
@@ -52,19 +53,19 @@ export function createRobloxLoggingPort(): LoggingPort {
 		describeInstance: (instance) => instance.GetFullName(),
 		writeGame: (record) => {
 			const text = `[${record.source}] ${record.message}`;
-			if (record.level === 3) {
+			if (record.level === LogLevel.Error) {
 				task.spawn(() => error(`${text}\n${record.traceback ?? ""}`, 0));
 				return;
 			}
 			native(
 				() => {
 					const logger = gameLogger!;
-					if (record.level === 0) logger.Output(escape(text), record.context);
-					else if (record.level === 1) logger.Info(escape(text), record.context);
+					if (record.level === LogLevel.Debug) logger.Output(escape(text), record.context);
+					else if (record.level === LogLevel.Info) logger.Info(escape(text), record.context);
 					else logger.Warn(escape(text), record.context);
 				},
 				() => {
-					if (record.level === 2) warn(text);
+					if (record.level === LogLevel.Warning) warn(text);
 					else print(text);
 				},
 			);
@@ -73,7 +74,7 @@ export function createRobloxLoggingPort(): LoggingPort {
 			if (level === "error") task.spawn(() => error(`[Crucible] ${message}`, 0));
 			else
 				native(
-					() => crucibleLogger!.Warn(escape(`[Crucible] ${message}`)),
+					() => crucibleLogger!.Warn(escape(`[Crucible] ${message}`), {}),
 					() => warn(`[Crucible] ${message}`),
 				);
 		},
