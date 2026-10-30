@@ -41,15 +41,7 @@ impl fmt::Display for Error {
 pub fn main(args: Args) -> ExitCode {
     let result = std::env::current_dir()
         .map_err(|error| Error::Failed(format!("cannot read the current directory: {error}")))
-        .and_then(|root| {
-            let manifest = Manifest::read(&root)
-                .map_err(|error| match error {
-                    ManifestError::Read(_) => Error::Failed(error.to_string()),
-                    _ => Error::Usage(error.to_string()),
-                })?
-                .unwrap_or_default();
-            Ok((build(&root, &manifest, &args.places, args.output.as_deref())?, root))
-        });
+        .and_then(|root| Ok((build(&root, &manifest(&root)?, &args.places, args.output.as_deref())?, root)));
     match result {
         Ok((built, root)) => {
             for (_, path) in built {
@@ -62,6 +54,15 @@ pub fn main(args: Args) -> ExitCode {
             ExitCode::from(error.code())
         }
     }
+}
+
+pub fn manifest(root: &Path) -> Result<Manifest, Error> {
+    Manifest::read(root)
+        .map_err(|error| match error {
+            ManifestError::Read(_) => Error::Failed(error.to_string()),
+            _ => Error::Usage(error.to_string()),
+        })
+        .map(Option::unwrap_or_default)
 }
 
 pub fn build(
