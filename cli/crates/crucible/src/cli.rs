@@ -10,6 +10,19 @@ pub enum Command {
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
+    /// Print a Crucible guide as Markdown. Without a topic, list the topics.
+    Docs {
+        /// The topic to print.
+        #[arg(value_parser = topics())]
+        topic: Option<String>,
+    },
+}
+fn topics() -> clap::builder::PossibleValuesParser {
+    crate::docs::TOPICS
+        .iter()
+        .map(|topic| clap::builder::PossibleValue::new(topic.name).help(topic.summary()))
+        .collect::<Vec<_>>()
+        .into()
 }
 #[derive(Args)]
 pub struct Oc {

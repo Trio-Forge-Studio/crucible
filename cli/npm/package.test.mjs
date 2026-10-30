@@ -66,6 +66,14 @@ test("npx crucible runs the installed platform binary", { skip: !supported && `n
 	assert.equal(found.status, 0, found.stderr);
 	assert.ok(JSON.parse(found.stdout).length > 0, "oc find returns operations through the shim");
 
+	const guide = run("npx", ["crucible", "docs", "logging"], app);
+	assert.equal(guide.status, 0, guide.stderr);
+	assert.equal(
+		guide.stdout,
+		readFileSync(join(cli, "..", "docs", "logging.md"), "utf8"),
+		"docs logging prints the guide",
+	);
+
 	const unknown = run("npx", ["crucible", "oc", "call", "no-such.operation"], app);
 	assert.equal(unknown.status, 2, "the shim forwards the binary's exit code");
 	assert.equal(JSON.parse(unknown.stdout).error.kind, "usage");
