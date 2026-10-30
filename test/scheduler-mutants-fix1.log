@@ -1,0 +1,26 @@
+PASS M1 one binding name for every priority
+PASS M2 carry kept when the fixed lane empties
+PASS M4 lateUpdate receives the fixed step
+PASS M5 update receives the fixed step
+PASS M6 preRender receives the fixed step
+PASS M8 fixed lane never reconnects after emptying
+PASS M10 untick short-circuits the late lane
+PASS M15 carry cleared on every untick
+PASS fixed receives frame dt
+PASS wrong render priority
+PASS fixed event
+PASS post event
+PASS late before update
+PASS descending priorities
+PASS reverse equal binds
+PASS plain PreRender before bindings
+PASS oldest plain PreRender first
+PASS server accepts render
+PASS no frame blame
+PASS no fixed cap
+PASS discard fraction
+PASS no dt clamp
+PASS no pool compaction
+PASS no untick
+PASS wrong S1 cycle
+25/25 mutants killed. Scratch restored at C:\Users\Admin\AppData\Local\Temp\crucible-r4-mutants-1r1v0X

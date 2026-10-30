@@ -61,6 +61,40 @@ test("both Studio modes retain binding render Error traceback shutdown and count
 				),
 				`${mode} ${marker}`,
 			);
+		for (const side of ["server", "client"]) {
+			const source = `Sample.${side === "server" ? "Server" : "Client"}`;
+			for (const [level, severity] of [
+				["debug", "Info"],
+				["info", "Info"],
+				["warn", "Warning"],
+				["error", "Error"],
+			]) {
+				assert(
+					native
+						.split("\n")
+						.some(
+							(line) =>
+								line.includes(`${severity} [FLog::Creator`) &&
+								line.includes(
+									`[${source}] S2 ${level === "error" ? "deliberate " : ""}game ${level} ${side}`,
+								),
+						),
+					`${mode} ${side} ${level} native output`,
+				);
+			}
+			const errorAt = native.indexOf(`[${source}] S2 deliberate game error ${side}`);
+			const compiled = fs.readFileSync(
+				path.resolve(import.meta.dirname, `../../examples/sample-game/out/${side}/main.${side}.luau`),
+				"utf8",
+			);
+			const callLine =
+				compiled.split("\n").findIndex((line) => line.includes('log:error("S2 deliberate game error')) + 1;
+			assert(callLine > 0, "sample error call exists");
+			assert.match(
+				native.slice(errorAt, errorAt + 400),
+				new RegExp(`game error ${side}\\n\\n[^\\n]+TS.main:${callLine}\\n`),
+			);
+		}
 		assert.equal(trace.match(/S2 observed render order Bind200,Crucible201,PreRender/g)?.length, 5);
 		assert.match(
 			native,
@@ -114,12 +148,18 @@ test("startup crashes wait sixty seconds and stop after three launches while oth
 
 test("transformer mutation receipts list every runner mutant as killed and restored", () => {
 	const repo = path.resolve(import.meta.dirname, "../..");
+	const scratch = path.join(repo, "build/transformer-mutants");
+	fs.mkdirSync(scratch, { recursive: true });
+	const marker = path.join(scratch, "list-read-only.txt");
+	fs.writeFileSync(marker, "listing preserves a running campaign");
 	const listed = spawnSync(
 		process.execPath,
 		[path.join(repo, "packages/crucible/transformer-src/tests/mutate.mjs"), "--list"],
 		{ encoding: "utf8" },
 	);
 	assert.equal(listed.status, 0, listed.stderr);
+	assert.equal(fs.readFileSync(marker, "utf8"), "listing preserves a running campaign");
+	fs.rmSync(marker);
 	const names = JSON.parse(listed.stdout);
 	const receipts = JSON.parse(
 		fs.readFileSync(path.join(import.meta.dirname, "results/transformer-mutants.json"), "utf8"),

@@ -37,6 +37,7 @@ function engine.new()
 	local e = {
 		deferred = {},
 		logs = {},
+		gameLogs = {},
 		instances = {},
 		tagAdded = {},
 		tagRemoved = {},
@@ -265,14 +266,26 @@ function engine.new()
 		cancel = function(thread)
 			task.cancel(thread)
 		end,
-		log = function(level, message)
-			table.insert(e.logs, { level = level, message = message })
-		end,
 		describe = function(instance)
 			return instance.Name
 		end,
 	}
 
+	e.loggingPort = {
+		isStudio = function()
+			return true
+		end,
+		now = os.clock,
+		describeInstance = function(instance)
+			return instance:GetFullName()
+		end,
+		writeGame = function(record)
+			table.insert(e.gameLogs, record)
+		end,
+		writeInternal = function(level, message)
+			table.insert(e.logs, { level = if level == "error" then 1 else 0, message = message })
+		end,
+	}
 	return e
 end
 

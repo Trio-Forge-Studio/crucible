@@ -1,0 +1,34 @@
+KILLED constructor effect | constructor that throws rejects | build 0, spec 1
+KILLED awake effect | Subsystem awake fault rejects | build 0, spec 1
+KILLED faulted shutdown | throwing shutdown logs | build 0, spec 1
+KILLED custom fixed rate | fixedRate defaults | build 0, spec 1
+KILLED frame caller swap | ignite wires all protected | build 0, spec 1
+KILLED membership leave pair | ignite wires all protected | build 0, spec 1
+KILLED wrong side guard | side entries enforce | build 0, spec 1
+KILLED watch disconnect pair | reviewer A and B rollback | build 0, spec 1
+KILLED deadline release guard | S1 deadline is 25 | build 0, spec 1
+KILLED shutdown failure output | throwing shutdown logs | build 0, spec 1
+KILLED same typed matcher argument swap | module walk resolves | build 0, spec 1
+KILLED globstar zero depth | module walk resolves | build 0, spec 1
+KILLED registration order | module walk resolves | build 0, spec 1
+KILLED rollback admission guard | reviewer A and B rollback | build 0, spec 1
+KILLED child ownership | reviewer A and B rollback | build 0, spec 1
+KILLED paired tick untick shortcut | reviewer A and B rollback | build 0, spec 1
+KILLED cap rejection | awake wave and child batch caps | build 0, spec 1
+KILLED dependency completion | shutdown waits for dependents | build 0, spec 1
+KILLED shutdown started guard | shutdown waits for dependents | build 0, spec 1
+KILLED deadline bypass | S1 deadline is 25 | build 0, spec 1
+KILLED client BindToClose | throwing shutdown logs | build 0, spec 1
+KILLED default fixed rate | fixedRate defaults | build 0, spec 1
+KILLED start traceback output | start fault output retains | build 0, spec 1
+KILLED Error output | Roblox full port maps | build 0, spec 1
+KILLED frame event swap | Roblox full port maps | build 0, spec 1
+KILLED render unbind pair | Roblox full port maps | build 0, spec 1
+KILLED client booted flag | side entries enforce | build 0, spec 1
+KILLED V1 absolute shutdown clock | S1 deadline is 25 | build 0, spec 1
+KILLED V2 post-commit rollback | post-commit Subsystem fault keeps binding live | build 0, spec 1
+KILLED V11 load-pattern segment guard | load patterns reject empty and parent segments | build 0, spec 1
+KILLED I2 tick recomputes the hooks mask from the class | K3 boot schedules from the registered hook mask | build 0, spec 1
+KILLED I3 boot never installs the binding engine | K1 boot installs its own binding engine | build 0, spec 1
+KILLED I4 boot never installs the implementer port | K2 boot installs its own implementer port | build 0, spec 1
+33/33 selected source mutants killed; restored build 0

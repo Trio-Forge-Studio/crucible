@@ -1,0 +1,167 @@
+{
+	"logicalProcessors": 16,
+	"samples": [
+		{
+			"at": "2026-10-30T04:04:29.7452422Z",
+			"cpuPercent": 4,
+			"freePhysicalMemoryKB": 3691236,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 18576,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:04:41.2492582Z",
+			"cpuPercent": 54,
+			"freePhysicalMemoryKB": 3178424,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:04:50.9965459Z",
+			"cpuPercent": 47,
+			"freePhysicalMemoryKB": 1319164,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:05:01.1075264Z",
+			"cpuPercent": 51,
+			"freePhysicalMemoryKB": 556276,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:05:11.0355244Z",
+			"cpuPercent": 32,
+			"freePhysicalMemoryKB": 351972,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:05:20.9529201Z",
+			"cpuPercent": 32,
+			"freePhysicalMemoryKB": 1299596,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:05:31.0076493Z",
+			"cpuPercent": 27,
+			"freePhysicalMemoryKB": 2023072,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				},
+				{
+					"ProcessId": 53480,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:05:40.9541858Z",
+			"cpuPercent": 23,
+			"freePhysicalMemoryKB": 721592,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				},
+				{
+					"ProcessId": 53480,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:05:50.9316509Z",
+			"cpuPercent": 27,
+			"freePhysicalMemoryKB": 384036,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 34260,
+					"Name": "RobloxStudioBeta.exe"
+				},
+				{
+					"ProcessId": 53480,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		},
+		{
+			"at": "2026-10-30T04:06:01.0576403Z",
+			"cpuPercent": 94,
+			"freePhysicalMemoryKB": 3919860,
+			"robloxProcesses": [
+				{
+					"ProcessId": 46632,
+					"Name": "RobloxPlayerBeta.exe"
+				},
+				{
+					"ProcessId": 53480,
+					"Name": "RobloxStudioBeta.exe"
+				}
+			]
+		}
+	]
+}

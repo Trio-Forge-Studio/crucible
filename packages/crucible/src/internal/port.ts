@@ -11,12 +11,6 @@ export const enum FrameEvent {
 	Heartbeat,
 }
 
-/** @internal */
-export const enum LogLevel {
-	Warning,
-	Error,
-}
-
 /**
  * @internal
  * Everything the runtime asks of the engine. Coroutine functions are not here: they are the Luau language,
@@ -46,7 +40,6 @@ export interface EnginePort {
 	/** `task.cancel`. The runtime only passes a suspended thread. */
 	readonly cancel: (thread: thread) => void;
 
-	readonly log: (level: LogLevel, message: string) => void;
 	/** `GetFullName`, for messages. */
 	readonly describe: (instance: Instance) => string;
 }

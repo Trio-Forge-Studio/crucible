@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(source, "../../..");
 const scratch = path.join(repo, "build/transformer-mutants");
-fs.rmSync(scratch, { recursive: true, force: true });
 const registration = "registration contract";
 const mutants = [
 	[
@@ -387,6 +386,7 @@ if (process.argv.includes("--list")) {
 	process.exit(0);
 }
 const receipts = [];
+fs.rmSync(scratch, { recursive: true, force: true });
 for (const [name, file, before, after, test] of mutants) {
 	const root = path.join(scratch, name);
 	const copy = path.join(root, "transformer-src");

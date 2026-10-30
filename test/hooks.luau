@@ -69,7 +69,7 @@ return {
 				spec.eq(string.gsub(text, "%s", ""), "export{};", name)
 			end
 		end
-		local graph = spec.runtime()
+		local graph = spec.runtime(nil, require("./lib/engine").new().loggingPort)
 		local root = graph.module("")
 		spec.eq(root.CrucibleObject, nil, "type only")
 		spec.eq(type(root.Subsystem), "table", "public Subsystem")

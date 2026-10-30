@@ -38,7 +38,7 @@ end
 
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
 -- that builds a runtime starts clean.
-local function graph(defaults)
+local function graph(defaults, loggingPort)
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
 	local TS = {}
@@ -65,6 +65,9 @@ local function graph(defaults)
 			end
 			local chunk = luau.load(fs.readFile(fileOf(path)), { debugName = path, environment = env })
 			loaded[path] = chunk()
+			if string.match(path, "/internal/log%-output$") and loggingPort then
+				loaded[path].installLoggingPort(loggingPort)
+			end
 		end
 		return loaded[path]
 	end
@@ -91,8 +94,8 @@ function spec.fresh(relative: string, globals: { [string]: any }?): any
 end
 
 -- A fresh graph to load several modules that must share state, such as lifecycle and its runner.
-function spec.runtime(defaults)
-	return graph(defaults)
+function spec.runtime(defaults, loggingPort)
+	return graph(defaults, loggingPort)
 end
 
 function spec.eq(actual: any, expected: any, label: string)

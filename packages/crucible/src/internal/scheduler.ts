@@ -1,8 +1,9 @@
+import { runtimeDiagnostic } from "./diagnostics";
 import { DenseList } from "./dense-list";
 import { FrameHook } from "./hooks";
 import { within } from "./lifecycle";
 import { Hook, type LifeObject, type LifeRecord, type ObjectState } from "./state";
-import { FrameEvent, LogLevel, type Disconnect, type EnginePort } from "./port";
+import { FrameEvent, type Disconnect, type EnginePort } from "./port";
 
 /** @internal */
 export interface SchedulerRecord extends LifeRecord {
@@ -83,7 +84,7 @@ export class Scheduler {
 		) {
 			if (!this.refusedClasses.has(record.id)) {
 				this.refusedClasses.add(record.id);
-				this.port.log(LogLevel.Error, `Crucible server refuses preRender and renderPriority for ${record.id}`);
+				runtimeDiagnostic("error", `Crucible server refuses preRender and renderPriority for ${record.id}`);
 			}
 			return;
 		}

@@ -1,3 +1,4 @@
+import { runtimeDiagnostic } from "./diagnostics";
 import type { BootOptions } from "../index";
 import type { CrucibleObject } from "../crucible-object";
 import { Subsystem } from "../subsystem";
@@ -6,7 +7,7 @@ import { construct, forget, reconcile, useEngine, watch } from "./binding";
 import { FrameHook, hooks, lifecycleHooks, shutdownHooks } from "./hooks";
 import { useImplementerPort } from "./implementers";
 import { admit, drain, hasEnded, request, track, useEffects } from "./lifecycle";
-import { LogLevel, type EnginePort } from "./port";
+import { type EnginePort } from "./port";
 import { records, seal, type BehaviourRecord, type ClassRecord, type SubsystemRecord } from "./registry";
 import { robloxPort, type BootPort } from "./roblox-port";
 import { Scheduler } from "./scheduler";
@@ -133,7 +134,7 @@ function shutdown(port: BootPort, order: readonly SubsystemRecord[]) {
 						() => shutdownHooks().onShutdown(object as Subsystem),
 						(err) => debug.traceback(tostring(err), 2),
 					);
-					if (!ok) port.log(LogLevel.Error, `${record.id} onShutdown failed: ${err}`);
+					if (!ok) runtimeDiagnostic("error", `${record.id} onShutdown failed: ${err}`);
 				}
 				finished.add(record);
 			});
@@ -195,17 +196,17 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 			forget(s);
 			if (s.fault === undefined) return;
 			const message = describeFault(port, s);
-			port.log(LogLevel.Error, message);
+			runtimeDiagnostic("error", message);
 			if (s.record.kind === Kind.Subsystem) reject(message);
 		},
 		defer: port.defer,
 		cancel: port.cancel,
 		failed: (message) => {
-			port.log(LogLevel.Error, message);
+			runtimeDiagnostic("error", message);
 			reject(message);
 		},
 		diagnose: (s, hook, err) =>
-			port.log(LogLevel.Error, `${where(port, s)} ${HOOK_NAMES[hook]} failed: ${tostring(err)}`),
+			runtimeDiagnostic("error", `${where(port, s)} ${HOOK_NAMES[hook]} failed: ${tostring(err)}`),
 	});
 	const [ok, err] = pcall(() => {
 		stop = watch(records().filter((r): r is BehaviourRecord => r.kind === Kind.Behaviour));

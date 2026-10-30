@@ -1,0 +1,37 @@
+KILLED L3 reversed delivery | L3 subscriptions | build 0, spec 1
+KILLED L1 filter bypass | L1 disabled | build 0, spec 1
+KILLED L2 stale aggregate | L2 aggregate | build 0, spec 1
+KILLED L3 duplicate subscription | L3 subscriptions | build 0, spec 1
+KILLED L4 failed sink retained | L4 throwing | build 0, spec 1
+KILLED L5 recursion guard removed | L5 whole | build 0, spec 1
+KILLED L6 mutable context | L6 frozen | build 0, spec 1
+KILLED L6 mutable record | L6 frozen | build 0, spec 1
+KILLED L7 escape disabled | L7 renderer | build 0, spec 1
+KILLED L8 caller traceback removed | L8 game | build 0, spec 1
+KILLED L9 mandatory diagnostics silenced | L9 private | build 0, spec 1
+KILLED L10 fallback retry | L10 native | build 0, spec 1
+KILLED L11 length bound removed | L11 names | build 0, spec 1
+KILLED L12 preboot default disabled | L12 module | build 0, spec 1
+KILLED L1 boundary filter off by one level | L1 disabled | build 0, spec 1
+KILLED L2 disconnect skips recompute | L2 aggregate | build 0, spec 1
+KILLED L2 live default is Debug | L2 aggregate | build 0, spec 1
+KILLED L3 disconnect not idempotent | L3 subscriptions | build 0, spec 1
+KILLED L4 sink report drops traceback on throw | L4 throwing | build 0, spec 1
+KILLED L4 sink report drops traceback always | L4 throwing | build 0, spec 1
+KILLED L5 guard released before fanout | L5 whole | build 0, spec 1
+KILLED L6 instance short name in Roblox adapter | L6 frozen | build 0, spec 1
+KILLED L6 non-primitive kept raw | L6 frozen | build 0, spec 1
+KILLED L7 missing key rendered empty | L7 renderer | build 0, spec 1
+KILLED L8 traceback level points inside logging | L8 game | build 0, spec 1
+KILLED L8 game error thrown synchronously | L8 game | build 0, spec 1
+KILLED L9 diagnostics routed to game port | L9 private | build 0, spec 1
+KILLED L10 logger recreated per write | L10 native | build 0, spec 1
+KILLED L10 Info drops context | L10 native | build 0, spec 1
+KILLED L10 Crucible warn unescaped | L10 native | build 0, spec 1
+KILLED L11 segment check removed | L11 names | build 0, spec 1
+KILLED L1 filter drops only Debug | L1 disabled | build 0, spec 1
+KILLED L2 added sink replaces aggregate | L2 aggregate | build 0, spec 1
+KILLED L10 Debug through Info | L10 native | build 0, spec 1
+KILLED L10 Crucible warning through Game | L10 native | build 0, spec 1
+KILLED L10 warning context omitted | L10 native | build 0, spec 1
+36/36 selected source mutants killed; restored build 0
