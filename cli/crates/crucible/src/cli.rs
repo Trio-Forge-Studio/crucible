@@ -26,6 +26,8 @@ pub enum Command {
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
+    /// Build and publish the places in a crucible.toml environment. One JSON document.
+    Publish(crate::publish::Args),
     /// Serve one Rojo project. crucible dev runs this in a child process.
     #[command(name = crate::dev::ROJO_SERVE, hide = true)]
     RojoServe {

@@ -80,3 +80,9 @@ cargo test --test live read_only_ -- --ignored
 ```
 
 `CRUCIBLE_OC_LIVE_ASSET_ID` and `CRUCIBLE_OC_LIVE_PLACE_ID` override the read fixtures. The upload test additionally needs `ROBLOX_GROUP_ID` and the user's approval before setting `CRUCIBLE_OC_ALLOW_LIVE_UPLOAD=1` and running `cargo test --test live -- --ignored`. That test creates one 1x1 PNG decal and archives it. It records the operation in `build/live-upload-receipt.json`, resolves pending work during cleanup, archives any known created asset after an assertion failure, and verifies the archive. Unknown outcomes or failed cleanup require a manual Creations check or archival of the reported asset ID.
+
+## Publish a game
+
+`crucible publish <env>` builds and uploads the places mapped by an environment in `crucible.toml`. Repeat `--place <name>` to select places, or use `--dry-run` to build and check key scopes without uploading. Publish prints one JSON document with receipts and stops at the first failed upload. It uses the Open Cloud exit codes. The command, credential precedence, and partial-failure documents are defined in [the CLI guide](../docs/cli.md#crucible-publish).
+
+A human still needs to verify a live publish to a test place. Automated tests use local HTTP servers and never upload to Roblox.

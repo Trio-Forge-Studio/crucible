@@ -12,6 +12,7 @@ mod flows;
 mod manifest;
 mod outcome;
 mod output;
+mod publish;
 
 use crate::call::{Call, Source};
 use crate::cli::{AssetCommand, AuthCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
@@ -35,11 +36,12 @@ fn main() -> ExitCode {
         Ok(Cli { command: Command::Dev(args) }) => return dev::main(args),
         Ok(Cli { command: Command::Docs { topic } }) => return docs::run(topic.as_deref()),
         Ok(Cli { command: Command::Oc(cli) }) => cli,
+        Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::RojoBuild { project, output } }) => return build::rojo_main(project, output),
         Ok(Cli { command: Command::RojoServe { project, port } }) => return dev::rojo_main(project, port),
         Ok(Cli { command: Command::WatchGuard { command } }) => return dev::guard_main(command),
         Err(error) => {
-            if std::env::args_os().nth(1).is_none_or(|word| word != "oc") {
+            if std::env::args_os().nth(1).is_none_or(|word| word != "oc" && word != "publish") {
                 error.exit();
             }
             let output = Output::new(false);
