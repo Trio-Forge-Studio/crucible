@@ -138,12 +138,18 @@ test("startup crashes wait sixty seconds and stop after three launches while oth
 
 test("transformer mutation receipts list every runner mutant as killed and restored", () => {
 	const repo = path.resolve(import.meta.dirname, "../..");
+	const scratch = path.join(repo, "build/transformer-mutants");
+	fs.mkdirSync(scratch, { recursive: true });
+	const marker = path.join(scratch, "list-read-only.txt");
+	fs.writeFileSync(marker, "listing preserves a running campaign");
 	const listed = spawnSync(
 		process.execPath,
 		[path.join(repo, "packages/crucible/transformer-src/tests/mutate.mjs"), "--list"],
 		{ encoding: "utf8" },
 	);
 	assert.equal(listed.status, 0, listed.stderr);
+	assert.equal(fs.readFileSync(marker, "utf8"), "listing preserves a running campaign");
+	fs.rmSync(marker);
 	const names = JSON.parse(listed.stdout);
 	const receipts = JSON.parse(
 		fs.readFileSync(path.join(import.meta.dirname, "results/transformer-mutants.json"), "utf8"),
