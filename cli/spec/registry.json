@@ -11693,7 +11693,7 @@
         ]
       },
       "patches": [
-        "The task finishes through its state field. updraft polls the task path it returns."
+        "The task finishes through its state field. crucible oc polls the task path it returns."
       ]
     },
     {
@@ -11779,7 +11779,7 @@
         ]
       },
       "patches": [
-        "The task finishes through its state field. updraft polls the task path it returns."
+        "The task finishes through its state field. crucible oc polls the task path it returns."
       ]
     },
     {

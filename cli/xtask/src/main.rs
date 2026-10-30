@@ -9,9 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use oc_registry::{Registry, SpecSource};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use updraft_registry::{Registry, SpecSource};
 
 const SPEC_REPOSITORY: &str = "Roblox/creator-docs";
 const SPEC_PATH: &str = "content/en-us/reference/cloud/openapi.json";
@@ -121,7 +121,7 @@ fn update(spec_path: &Path, registry_path: &Path, overlay_path: &Path) -> Result
 }
 
 fn latest_commit(url: &str, token: Option<&str>) -> Result<String, String> {
-    let mut request = ureq::get(url).header("User-Agent", "updraft-spec");
+    let mut request = ureq::get(url).header("User-Agent", "crucible-spec");
     if let Some(token) = token.filter(|token| !token.is_empty()) {
         request = request.header("Authorization", format!("Bearer {token}"));
     }

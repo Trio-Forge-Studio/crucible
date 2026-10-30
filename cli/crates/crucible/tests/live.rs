@@ -3,11 +3,12 @@ use std::process::{Command, Output};
 fn command() -> Command {
     let key = std::env::var("ROBLOX_ASSETS_API_KEY").expect("ROBLOX_ASSETS_API_KEY is required for live tests");
     assert!(!key.trim().is_empty(), "the live key must be nonempty");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_updraft"));
-    cmd.env("UPDRAFT_API_KEY", key).env_remove("UPDRAFT_PROFILE").env_remove("UPDRAFT_ORIGIN").env(
-        "UPDRAFT_CONFIG",
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_crucible"));
+    cmd.env("CRUCIBLE_OC_API_KEY", key).env_remove("CRUCIBLE_OC_PROFILE").env_remove("CRUCIBLE_OC_ORIGIN").env(
+        "CRUCIBLE_CONFIG",
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build/no-live-config.toml"),
     );
+    cmd.arg("oc");
     cmd
 }
 fn document(out: &Output) -> Value {
@@ -32,7 +33,7 @@ fn read_only_auth_check() {
 #[test]
 #[ignore = "requires a live Assets API key; read-only"]
 fn read_only_get_asset() {
-    let asset = std::env::var("UPDRAFT_LIVE_ASSET_ID").unwrap_or_else(|_| "6444320592".into());
+    let asset = std::env::var("CRUCIBLE_OC_LIVE_ASSET_ID").unwrap_or_else(|_| "6444320592".into());
     let d = success(
         command()
             .args(["call", "assets.get", &format!("assetId={asset}"), "readMask=assetType,displayName,creationContext"])
@@ -45,7 +46,7 @@ fn read_only_get_asset() {
 #[test]
 #[ignore = "public place lookup; read-only"]
 fn read_only_get_place_universe() {
-    let place = std::env::var("UPDRAFT_LIVE_PLACE_ID").unwrap_or_else(|_| "132306245523809".into());
+    let place = std::env::var("CRUCIBLE_OC_LIVE_PLACE_ID").unwrap_or_else(|_| "132306245523809".into());
     let d = success(
         command().args(["call", "universes.get-place-universe", &format!("placeId={place}")]).output().unwrap(),
     );
@@ -55,15 +56,15 @@ fn read_only_get_place_universe() {
 #[ignore = "creates and archives one group decal; explicit user approval required"]
 fn upload_then_archive_requires_explicit_approval() {
     assert_eq!(
-        std::env::var("UPDRAFT_ALLOW_LIVE_UPLOAD").as_deref(),
+        std::env::var("CRUCIBLE_OC_ALLOW_LIVE_UPLOAD").as_deref(),
         Ok("1"),
         "obtain the user's approval before enabling the live upload test"
     );
     let group = std::env::var("ROBLOX_GROUP_ID").expect("ROBLOX_GROUP_ID is required");
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("updraft-smoke.png");
+    let path = dir.path().join("crucible-smoke.png");
     std::fs::write(&path, include_bytes!("fixtures/pixel.png")).unwrap();
-    let request = json!({"assetType":"Decal","displayName":"updraft smoke cleanup required","description":"Temporary updraft live smoke fixture.","creationContext":{"creator":{"groupId":group}}});
+    let request = json!({"assetType":"Decal","displayName":"crucible smoke cleanup required","description":"Temporary crucible live smoke fixture.","creationContext":{"creator":{"groupId":group}}});
     let created = command()
         .args([
             "call",

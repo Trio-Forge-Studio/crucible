@@ -51,7 +51,7 @@ fn absent_scope_metadata_is_null_on_401_and_403() {
         let d = document(&out);
         assert!(d["error"]["requiredScopes"].is_null());
         assert_eq!(d["error"]["scopeMetadata"], "unknown");
-        assert_eq!(d["error"]["keySource"], "UPDRAFT_API_KEY");
+        assert_eq!(d["error"]["keySource"], "CRUCIBLE_OC_API_KEY");
         m.assert_calls(1);
     }
 }
@@ -166,7 +166,7 @@ fn public_operation_sends_no_key_and_needs_no_config() {
         t.json_body(json!({"universeId":13058}));
     });
     let out = command(&server.base_url())
-        .env_remove("UPDRAFT_API_KEY")
+        .env_remove("CRUCIBLE_OC_API_KEY")
         .args(["call", "universes.get-place-universe", "placeId=1818"])
         .output()
         .unwrap();
@@ -190,11 +190,11 @@ fn explicit_missing_or_empty_profile_does_not_fall_through() {
         t.status(200).json_body(json!({}));
     });
     let config = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(config.path(),"default_profile='empty'\n[profiles.empty]\nkey_env='UPDRAFT_TEST_EMPTY'\n[profiles.other]\nkey_env='UPDRAFT_API_KEY'").unwrap();
+    std::fs::write(config.path(),"[oc]\ndefault_profile='empty'\n[oc.profiles.empty]\nkey_env='CRUCIBLE_OC_TEST_EMPTY'\n[oc.profiles.other]\nkey_env='CRUCIBLE_OC_API_KEY'").unwrap();
     for name in ["missing", "empty"] {
         let out = command(&server.base_url())
-            .env("UPDRAFT_CONFIG", config.path())
-            .env("UPDRAFT_TEST_EMPTY", "")
+            .env("CRUCIBLE_CONFIG", config.path())
+            .env("CRUCIBLE_OC_TEST_EMPTY", "")
             .args(["--profile", name, "call", "assets.get", "assetId=42"])
             .output()
             .unwrap();
@@ -213,12 +213,12 @@ fn auth_rejection_never_tries_another_profile() {
     let config = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(
         config.path(),
-        "[profiles.a]\nkey_env='UPDRAFT_API_KEY'\n[profiles.b]\nkey_env='UPDRAFT_OTHER_TEST_KEY'",
+        "[oc.profiles.a]\nkey_env='CRUCIBLE_OC_API_KEY'\n[oc.profiles.b]\nkey_env='CRUCIBLE_OC_OTHER_TEST_KEY'",
     )
     .unwrap();
     let out = command(&server.base_url())
-        .env("UPDRAFT_CONFIG", config.path())
-        .env("UPDRAFT_OTHER_TEST_KEY", "another-key")
+        .env("CRUCIBLE_CONFIG", config.path())
+        .env("CRUCIBLE_OC_OTHER_TEST_KEY", "another-key")
         .args(["--profile", "a", "call", "assets.get", "assetId=42"])
         .output()
         .unwrap();
@@ -262,9 +262,25 @@ fn generic_completion_polls_the_shared_matcher() {
     poll.assert_calls(1);
 }
 #[test]
+fn only_oc_errors_are_json_documents() {
+    let bare = std::process::Command::new(env!("CARGO_BIN_EXE_crucible")).output().unwrap();
+    assert_eq!(code(&bare), 2);
+    assert!(bare.stdout.is_empty(), "bare crucible prints no document");
+    assert!(String::from_utf8_lossy(&bare.stderr).contains("oc"), "bare crucible lists its commands");
+    let outside = std::process::Command::new(env!("CARGO_BIN_EXE_crucible")).args(["find", "luau"]).output().unwrap();
+    assert_eq!(code(&outside), 2);
+    assert!(outside.stdout.is_empty(), "a command outside oc prints no document");
+    let inside = command("http://127.0.0.1:1").arg("unknown").output().unwrap();
+    assert_eq!(code(&inside), 2);
+    assert_eq!(document(&inside)["error"]["kind"], "usage");
+}
+#[test]
 fn discovery_needs_no_key() {
-    let out =
-        command("http://127.0.0.1:1").env_remove("UPDRAFT_API_KEY").args(["find", "luau", "logs"]).output().unwrap();
+    let out = command("http://127.0.0.1:1")
+        .env_remove("CRUCIBLE_OC_API_KEY")
+        .args(["find", "luau", "logs"])
+        .output()
+        .unwrap();
     assert_eq!(code(&out), 0);
     assert!(!document(&out).as_array().unwrap().is_empty());
     let out = command("http://127.0.0.1:1").args(["describe", "universes.create-place-version"]).output().unwrap();
@@ -460,7 +476,7 @@ fn auth_failures_share_scope_and_profile_metadata() {
     for missing in [true, false] {
         let mut cmd = command(&server.base_url());
         if missing {
-            cmd.env_remove("UPDRAFT_API_KEY");
+            cmd.env_remove("CRUCIBLE_OC_API_KEY");
         }
         let out = cmd.args(["call", "assets.get", "assetId=42"]).output().unwrap();
         let error = &document(&out)["error"];

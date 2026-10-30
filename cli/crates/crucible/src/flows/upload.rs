@@ -36,7 +36,7 @@ pub enum AssetType {
     Audio,
     Video,
 }
-pub fn primary<'r>(r: &'r updraft_registry::Registry, args: &Args) -> &'r updraft_registry::Op {
+pub fn primary<'r>(r: &'r oc_registry::Registry, args: &Args) -> &'r oc_registry::Op {
     super::op(r, if args.resume.is_some() { super::GET_OPERATION } else { super::CREATE_ASSET })
 }
 pub fn operation_id(s: &str) -> Result<String, String> {
@@ -103,7 +103,7 @@ pub fn run(ex: &Executor<'_>, args: Args, profile: Option<&Profile>) -> Result<V
         Upload::Create { body, display_name, asset_type } => (create(ex, body)?, Some(display_name), Some(asset_type)),
     };
     ex.note(&format!("Operation {id}: waiting"));
-    let resume = format!("updraft asset upload --resume {id}");
+    let resume = format!("crucible oc asset upload --resume {id}");
     ex.resume(resume);
     let result = ex
         .finish(super::op(ex.registry, super::GET_OPERATION), json!({"path":format!("operations/{id}"),"done":false}))
@@ -116,7 +116,7 @@ pub fn run(ex: &Executor<'_>, args: Args, profile: Option<&Profile>) -> Result<V
 }
 fn upload_hint(f: Failure) -> Failure {
     if f.code == 5 {
-        f.with("hint", json!("Check the group's Creations before uploading again. updraft never re-sends an upload."))
+        f.with("hint", json!("Check the group's Creations before uploading again. crucible never re-sends an upload."))
     } else {
         f
     }

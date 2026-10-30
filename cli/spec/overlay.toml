@@ -83,13 +83,13 @@ pagination = { token_param = "pageToken", size_param = "maxPageSize", next_field
 [[patch]]
 key = "POST /cloud/v2/universes/{universe_id}/places/{place_id}/luau-execution-session-tasks"
 expect = { completion = "absent" }
-note = "The task finishes through its state field. updraft polls the task path it returns."
+note = "The task finishes through its state field. crucible oc polls the task path it returns."
 completion = { type = "state", field = "state", success = ["COMPLETE"], failure = ["FAILED", "CANCELLED"] }
 
 [[patch]]
 key = "POST /cloud/v2/universes/{universe_id}/places/{place_id}/versions/{version_id}/luau-execution-session-tasks"
 expect = { completion = "absent" }
-note = "The task finishes through its state field. updraft polls the task path it returns."
+note = "The task finishes through its state field. crucible oc polls the task path it returns."
 completion = { type = "state", field = "state", success = ["COMPLETE"], failure = ["FAILED", "CANCELLED"] }
 
 [[patch]]

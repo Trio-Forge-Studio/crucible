@@ -1,6 +1,6 @@
 use super::*;
+use oc_registry::*;
 use std::collections::BTreeSet;
-use updraft_registry::*;
 
 fn inputs() -> (Value, overlay::Overlay, Registry) {
     (
@@ -227,7 +227,7 @@ fn every_concrete_url_resolves_except_the_documented_localization_pair() {
     let mut resolved = 0;
     let mut ambiguous = 0;
     for op in &r.ops {
-        let path = updraft_registry::path::Template::parse(&op.path).render(|_| Some("42".into())).unwrap();
+        let path = oc_registry::path::Template::parse(&op.path).render(|_| Some("42".into())).unwrap();
         match r.resolve(&OpRef::Url { method: op.method, path, query: vec![] }) {
             Ok(found) => {
                 assert_eq!(found.op.key, op.key, "the concrete URL selects {}", op.name);

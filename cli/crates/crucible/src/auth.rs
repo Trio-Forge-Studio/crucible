@@ -1,9 +1,9 @@
 use crate::outcome::Failure;
+use oc_registry::Op;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use updraft_registry::Op;
 
 pub struct Secret(String);
 #[derive(Deserialize)]
@@ -65,7 +65,7 @@ impl KeySource {
     pub fn label(&self) -> String {
         match self {
             Self::Profile(name) => format!("profile {name}"),
-            Self::Environment => "UPDRAFT_API_KEY".into(),
+            Self::Environment => "CRUCIBLE_OC_API_KEY".into(),
         }
     }
 }
@@ -106,12 +106,12 @@ pub fn choose(
         }
         return Ok(KeySource::Profile(name.clone()));
     }
-    Err("set UPDRAFT_API_KEY or select a configured profile".into())
+    Err("set CRUCIBLE_OC_API_KEY or select a configured profile".into())
 }
 pub fn load(config: &Config, source: &KeySource) -> Result<Secret, String> {
     let value = match source {
         KeySource::Environment => {
-            std::env::var("UPDRAFT_API_KEY").map_err(|_| "UPDRAFT_API_KEY is missing".to_string())?
+            std::env::var("CRUCIBLE_OC_API_KEY").map_err(|_| "CRUCIBLE_OC_API_KEY is missing".to_string())?
         }
         KeySource::Profile(name) => {
             let p = config.profiles.get(name).ok_or_else(|| format!("profile {name} does not exist"))?;
@@ -132,18 +132,24 @@ pub fn load(config: &Config, source: &KeySource) -> Result<Secret, String> {
     }
     Ok(Secret::from_string(value.into()))
 }
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigFile {
+    #[serde(default)]
+    oc: Config,
+}
 pub fn load_config() -> Result<Config, Failure> {
-    let path = std::env::var_os("UPDRAFT_CONFIG")
+    let path = std::env::var_os("CRUCIBLE_CONFIG")
         .map(PathBuf::from)
-        .or_else(|| dirs::config_dir().map(|dir| dir.join("updraft/config.toml")))
+        .or_else(|| dirs::config_dir().map(|dir| dir.join("crucible/config.toml")))
         .ok_or_else(|| Failure::usage("cannot locate the config directory"))?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
-        Err(_) => return Err(Failure::usage("cannot read the updraft config file")),
+        Err(_) => return Err(Failure::usage("cannot read the crucible config file")),
     };
-    toml::from_str(&text).map_err(|_| {
-        Failure::usage("invalid updraft config, expected default_profile and profiles with key_env or key_file")
+    toml::from_str::<ConfigFile>(&text).map(|file| file.oc).map_err(|_| {
+        Failure::usage("invalid crucible config, expected an [oc] table with default_profile and profiles that set key_env or key_file")
     })
 }
 #[cfg(test)]

@@ -1,7 +1,7 @@
+use oc_registry::{Body, Completion, Op, Pagination, Payload, RetryPolicy, Safety};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use updraft_registry::{Body, Completion, Op, Pagination, Payload, RetryPolicy, Safety};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

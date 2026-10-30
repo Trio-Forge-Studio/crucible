@@ -35,7 +35,7 @@ fn task_path(path: &str) -> Result<String, String> {
     }
 }
 const READER: &str = "GET /cloud/v2/universes/{universe_id}/places/{place_id}/versions/{version_id}/luau-execution-sessions/{luau_execution_session_id}/tasks/{task_id}";
-pub fn primary<'r>(r: &'r updraft_registry::Registry, args: &Args) -> &'r updraft_registry::Op {
+pub fn primary<'r>(r: &'r oc_registry::Registry, args: &Args) -> &'r oc_registry::Op {
     super::op(
         r,
         if args.resume.is_some() {
@@ -47,7 +47,7 @@ pub fn primary<'r>(r: &'r updraft_registry::Registry, args: &Args) -> &'r updraf
         },
     )
 }
-fn first(ex: &Executor<'_>, args: Args) -> Result<(Value, &'static updraft_registry::Op), Failure> {
+fn first(ex: &Executor<'_>, args: Args) -> Result<(Value, &'static oc_registry::Op), Failure> {
     let op = primary(ex.registry, &args);
     if let Some(path) = args.resume {
         return Ok((json!({"path":path}), op));
@@ -85,7 +85,7 @@ pub fn run(ex: &Executor<'_>, args: Args) -> Result<Value, Failure> {
     let resume = first["path"]
         .as_str()
         .filter(|path| ex.registry.reader_of(op, path).is_ok())
-        .map(|path| format!("updraft luau run --resume {path}"));
+        .map(|path| format!("crucible oc luau run --resume {path}"));
     if let Some(resume) = resume {
         ex.resume(resume);
     }
@@ -113,7 +113,7 @@ pub fn run(ex: &Executor<'_>, args: Args) -> Result<Value, Failure> {
         Ok(detail)
     }
 }
-fn logs(ex: &Executor<'_>, from: &updraft_registry::Op, path: &str) -> Result<Vec<String>, Failure> {
+fn logs(ex: &Executor<'_>, from: &oc_registry::Op, path: &str) -> Result<Vec<String>, Failure> {
     let log_path = format!("{path}/logs");
     let (op, captures) = ex
         .registry

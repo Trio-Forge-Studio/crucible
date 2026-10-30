@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use updraft_registry::path::{Template, Word};
-use updraft_registry::{Method, Op, Registry, Server};
+use oc_registry::path::{Template, Word};
+use oc_registry::{Method, Op, Registry, Server};
 
 use crate::build::{Collision, Report};
 use crate::overlay::Vocabulary;

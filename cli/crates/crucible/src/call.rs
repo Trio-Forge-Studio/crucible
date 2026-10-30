@@ -1,9 +1,9 @@
 use crate::outcome::Failure;
+use oc_registry::path::{Template, fold};
+use oc_registry::{BodyMedia, Location, Op, PartKind, ValueKind};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
-use updraft_registry::path::{Template, fold};
-use updraft_registry::{BodyMedia, Location, Op, PartKind, ValueKind};
 
 const SEGMENT: &percent_encoding::AsciiSet =
     &percent_encoding::NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
@@ -185,7 +185,7 @@ impl<'r> Call<'r> {
             }
             Some(BodyInput::Multipart { parts }) => {
                 let boundary = format!(
-                    "updraft-{}-{}",
+                    "crucible-{}-{}",
                     std::process::id(),
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -249,7 +249,7 @@ fn validate(kind: &ValueKind, text: &str) -> Result<(), ()> {
     if valid { Ok(()) } else { Err(()) }
 }
 fn validate_body(op: &Op, body: Option<&BodyInput>) -> Result<(), Failure> {
-    if matches!(op.auth, updraft_registry::Auth::BodyKey { .. }) {
+    if matches!(op.auth, oc_registry::Auth::BodyKey { .. }) {
         return if body.is_none() {
             Ok(())
         } else {
@@ -315,7 +315,7 @@ pub fn parse_pairs(args: &[String]) -> Result<Vec<(String, String)>, Failure> {
         .collect()
 }
 pub fn read_body(op: &Op, body: Option<Source>, parts: Vec<(String, Source)>) -> Result<Option<BodyInput>, Failure> {
-    if matches!(op.auth, updraft_registry::Auth::BodyKey { .. }) && (body.is_some() || !parts.is_empty()) {
+    if matches!(op.auth, oc_registry::Auth::BodyKey { .. }) && (body.is_some() || !parts.is_empty()) {
         return Err(Failure::usage("the selected key supplies this operation's body; omit --body and --part"));
     }
     let inputs = body.iter().chain(parts.iter().map(|(_, v)| v));
@@ -378,7 +378,7 @@ pub fn mime(path: &std::path::Path) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn registry() -> updraft_registry::Registry {
+    fn registry() -> oc_registry::Registry {
         serde_json::from_str(include_str!("../../../spec/registry.json")).unwrap()
     }
     #[test]

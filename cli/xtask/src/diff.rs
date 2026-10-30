@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
+use oc_registry::{Op, Registry};
 use serde::Serialize;
-use updraft_registry::{Op, Registry};
 
 #[derive(Debug, Default, Serialize, PartialEq)]
 pub struct Diff {
@@ -68,8 +68,8 @@ fn changed_fields(a: &Op, b: &Op, old: &Registry, new: &Registry) -> Vec<&'stati
     fields
 }
 
-fn reachable(op: &Op, registry: &Registry) -> BTreeMap<String, updraft_registry::Shape> {
-    fn visit(value: &serde_json::Value, registry: &Registry, found: &mut BTreeMap<String, updraft_registry::Shape>) {
+fn reachable(op: &Op, registry: &Registry) -> BTreeMap<String, oc_registry::Shape> {
+    fn visit(value: &serde_json::Value, registry: &Registry, found: &mut BTreeMap<String, oc_registry::Shape>) {
         match value {
             serde_json::Value::Object(object) => {
                 if object.get("type").and_then(|v| v.as_str()) == Some("ref")

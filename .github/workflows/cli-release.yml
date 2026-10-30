@@ -16,9 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: windows-x86_64, exe: updraft.exe }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, asset: linux-x86_64, exe: updraft }
-          - { os: macos-latest, target: aarch64-apple-darwin, asset: macos-aarch64, exe: updraft }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: windows-x86_64, exe: crucible.exe }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, asset: linux-x86_64, exe: crucible }
+          - { os: macos-latest, target: aarch64-apple-darwin, asset: macos-aarch64, exe: crucible }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -47,35 +47,35 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
       - run: cargo test --workspace --locked
-      - run: cargo build --release --locked --package updraft --target ${{ matrix.target }}
+      - run: cargo build --release --locked --package crucible --target ${{ matrix.target }}
       - name: Run the built binary
         shell: python
         env:
-          UPDRAFT_TARGET: ${{ matrix.target }}
-          UPDRAFT_EXE: ${{ matrix.exe }}
+          CRUCIBLE_TARGET: ${{ matrix.target }}
+          CRUCIBLE_EXE: ${{ matrix.exe }}
         run: |
           import json
           import os
           import subprocess
           from pathlib import Path
-          binary = Path("target") / os.environ["UPDRAFT_TARGET"] / "release" / os.environ["UPDRAFT_EXE"]
+          binary = Path("target") / os.environ["CRUCIBLE_TARGET"] / "release" / os.environ["CRUCIBLE_EXE"]
           subprocess.run([str(binary), "--version"], check=True)
-          result = subprocess.run([str(binary), "find", "asset"], check=True, capture_output=True, text=True)
+          result = subprocess.run([str(binary), "oc", "find", "asset"], check=True, capture_output=True, text=True)
           assert json.loads(result.stdout), "the built binary must find asset operations"
       - name: Zip for rokit
         shell: python
         env:
-          UPDRAFT_TARGET: ${{ matrix.target }}
-          UPDRAFT_ASSET: ${{ matrix.asset }}
-          UPDRAFT_EXE: ${{ matrix.exe }}
+          CRUCIBLE_TARGET: ${{ matrix.target }}
+          CRUCIBLE_ASSET: ${{ matrix.asset }}
+          CRUCIBLE_EXE: ${{ matrix.exe }}
         run: |
           import os
           from pathlib import Path
           from zipfile import ZipFile, ZIP_DEFLATED
           version = os.environ["GITHUB_REF_NAME"][1:]
-          binary = os.environ["UPDRAFT_EXE"]
-          source = Path("target") / os.environ["UPDRAFT_TARGET"] / "release" / binary
-          name = f"updraft-{version}-{os.environ['UPDRAFT_ASSET']}.zip"
+          binary = os.environ["CRUCIBLE_EXE"]
+          source = Path("target") / os.environ["CRUCIBLE_TARGET"] / "release" / binary
+          name = f"crucible-{version}-{os.environ['CRUCIBLE_ASSET']}.zip"
           with ZipFile(name, "w", compression=ZIP_DEFLATED) as archive:
               archive.write(source, arcname=binary)
           with ZipFile(name) as archive:
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ matrix.asset }}
-          path: cli/updraft-*.zip
+          path: cli/crucible-*.zip
           if-no-files-found: error
 
   publish:
@@ -101,4 +101,4 @@ jobs:
           path: dist
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes dist/updraft-*.zip
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes dist/crucible-*.zip

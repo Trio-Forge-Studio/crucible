@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use oc_registry::path::{Template, fold};
+use oc_registry::*;
 use serde::Serialize;
 use serde_json::Value;
-use updraft_registry::path::{Template, fold};
-use updraft_registry::*;
 
 use crate::naming;
 use crate::overlay::Overlay;

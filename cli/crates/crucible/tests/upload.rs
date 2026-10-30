@@ -176,7 +176,7 @@ fn resume_stops_at_each_api_or_protocol_failure_and_retains_recovery() {
         assert_eq!(code(&out), expected, "{}", document(&out));
         assert_eq!(server.requests().len(), requests);
         assert!(server.requests().iter().all(|c| c.head.starts_with("GET ")));
-        assert_eq!(document(&out)["error"]["resume"], "updraft asset upload --resume safe-id");
+        assert_eq!(document(&out)["error"]["resume"], "crucible oc asset upload --resume safe-id");
         assert!(!String::from_utf8_lossy(&out.stdout).contains(KEY));
     }
 }
@@ -186,7 +186,7 @@ fn deadline_retains_a_get_only_resume_and_bounded_poll_can_finish() {
     let out =
         command(&server.origin).args(["--deadline", "0", "asset", "upload", "--resume", "safe-id"]).output().unwrap();
     assert_eq!(code(&out), 8);
-    assert_eq!(document(&out)["error"]["resume"], "updraft asset upload --resume safe-id");
+    assert_eq!(document(&out)["error"]["resume"], "crucible oc asset upload --resume safe-id");
     assert!(server.requests().is_empty());
     let server = Server::new(vec![
         Response::json(json!({"done":false})),
@@ -457,7 +457,7 @@ fn accepted_upload_deadline_includes_an_inflight_poll() {
     let out =
         command(&server.base_url()).args(["--deadline", "1", "asset", "upload", "--resume", "slow"]).output().unwrap();
     assert_eq!(code(&out), 8, "a pending operation retains its deadline even while a lookup runs");
-    assert_eq!(document(&out)["error"]["resume"], "updraft asset upload --resume slow");
+    assert_eq!(document(&out)["error"]["resume"], "crucible oc asset upload --resume slow");
     assert!(
         started.elapsed() < std::time::Duration::from_secs(4),
         "the client returns before the delayed poll response"
@@ -498,7 +498,7 @@ fn luau_poll_failure_retains_the_get_resume_command() {
         .unwrap();
     assert_eq!(code(&out), 8);
     let d = document(&out);
-    assert_eq!(d["error"]["resume"], format!("updraft luau run --resume {path}"));
+    assert_eq!(d["error"]["resume"], format!("crucible oc luau run --resume {path}"));
     assert_eq!(d["error"]["last"]["path"], path);
     assert_eq!(server.requests().len(), 4);
     assert_eq!(server.requests().iter().filter(|r| r.head.starts_with("POST ")).count(), 1);
@@ -552,7 +552,7 @@ fn accepted_uploads_never_report_repeat_safe_poll_or_receipt_failures() {
         ]);
         let out = upload(&server, &file);
         assert_eq!(code(&out), 8, "accepted uploads resume after any later failure: {}", document(&out));
-        assert_eq!(document(&out)["error"]["resume"], "updraft asset upload --resume safe-id");
+        assert_eq!(document(&out)["error"]["resume"], "crucible oc asset upload --resume safe-id");
         assert_eq!(server.requests().iter().filter(|r| r.head.starts_with("POST ")).count(), 1);
     }
 }
@@ -575,7 +575,7 @@ fn generic_acceptance_maps_later_failures_and_readers_wait_on_resume() {
         assert_eq!(code(&out), 8, "{}", document(&out));
         assert_eq!(
             document(&out)["error"]["resume"],
-            "updraft call GET /cloud/v2/universes/1/memory-store/operations/x"
+            "crucible oc call GET /cloud/v2/universes/1/memory-store/operations/x"
         );
         assert_eq!(server.requests().iter().filter(|r| r.head.starts_with("POST ")).count(), 1);
     }
@@ -734,7 +734,7 @@ fn polling_keeps_server_errors_separate_from_the_last_resource() {
     assert_eq!(error["detail"], json!({"code":"NOT_FOUND"}), "the server body stays in detail");
     assert_eq!(error["last"], first, "the last resource is a separate field");
     assert_eq!(error["status"], 404);
-    assert_eq!(error["resume"], "updraft call GET /cloud/v2/universes/1/memory-store/operations/x");
+    assert_eq!(error["resume"], "crucible oc call GET /cloud/v2/universes/1/memory-store/operations/x");
 
     let server = Server::new(vec![
         Response::json(json!({"path":"operations/x"})),
@@ -749,9 +749,9 @@ fn polling_keeps_server_errors_separate_from_the_last_resource() {
     assert_eq!(code(&out), 8);
     assert_eq!(error["detail"], json!({"message":"nope"}));
     assert_eq!(error["last"], json!({"path":"operations/x","done":false}));
-    assert_eq!(error["resume"], "updraft asset upload --resume x", "the flow owns its recovery command");
+    assert_eq!(error["resume"], "crucible oc asset upload --resume x", "the flow owns its recovery command");
     assert_eq!(error["status"], 403);
-    assert_eq!(error["keySource"], "UPDRAFT_API_KEY");
+    assert_eq!(error["keySource"], "CRUCIBLE_OC_API_KEY");
     assert!(error["requiredScopes"].is_array());
 }
 
@@ -806,12 +806,12 @@ fn download_retry_waits_end_at_the_deadline() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("download");
     let start = std::time::Instant::now();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_updraft"))
-        .env("UPDRAFT_ORIGIN", server.base_url())
-        .env("UPDRAFT_API_KEY", KEY)
-        .env("UPDRAFT_CONFIG", "nonexistent-updraft-test-config.toml")
-        .env_remove("UPDRAFT_PROFILE")
-        .args(["--deadline", "0.05", "asset", "download", "42", "--out", path.to_str().unwrap()])
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_crucible"))
+        .env("CRUCIBLE_OC_ORIGIN", server.base_url())
+        .env("CRUCIBLE_OC_API_KEY", KEY)
+        .env("CRUCIBLE_CONFIG", "nonexistent-crucible-test-config.toml")
+        .env_remove("CRUCIBLE_OC_PROFILE")
+        .args(["oc", "--deadline", "0.05", "asset", "download", "42", "--out", path.to_str().unwrap()])
         .output()
         .unwrap();
     assert_eq!(code(&out), 7, "{}", document(&out));

@@ -25,8 +25,7 @@ pub enum VersionType {
 pub fn run(ex: &Executor<'_>, args: Args) -> Result<Value, Failure> {
     let bytes = super::file(&args.file, None)?;
     let op = super::op(ex.registry, super::PUBLISH);
-    let Some(updraft_registry::Body { media: updraft_registry::BodyMedia::Binary { content_type }, .. }) = &op.body
-    else {
+    let Some(oc_registry::Body { media: oc_registry::BodyMedia::Binary { content_type }, .. }) = &op.body else {
         unreachable!("publish overlay declares a binary body")
     };
     let version = match args.version_type {

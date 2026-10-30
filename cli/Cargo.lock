@@ -267,6 +267,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
+name = "crucible"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dirs",
+ "httpmock",
+ "oc-registry",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -871,6 +888,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
 
 [[package]]
+name = "oc-registry"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1471,31 +1496,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "updraft"
-version = "0.1.0"
-dependencies = [
- "clap",
- "dirs",
- "httpmock",
- "percent-encoding",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "updraft-registry",
- "ureq",
- "url",
-]
-
-[[package]]
-name = "updraft-registry"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ureq"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1691,11 +1691,11 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "oc-registry",
  "serde",
  "serde_json",
  "sha2",
  "toml",
- "updraft-registry",
  "ureq",
 ]
 

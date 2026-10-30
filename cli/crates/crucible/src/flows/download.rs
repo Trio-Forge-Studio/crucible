@@ -18,7 +18,7 @@ pub struct Args {
     #[arg(long)]
     pub overwrite: bool,
 }
-pub fn primary<'r>(r: &'r updraft_registry::Registry, args: &Args) -> &'r updraft_registry::Op {
+pub fn primary<'r>(r: &'r oc_registry::Registry, args: &Args) -> &'r oc_registry::Op {
     super::op(r, if args.version.is_some() { super::DELIVERY_VERSION } else { super::DELIVERY })
 }
 pub fn run(ex: &Executor<'_>, args: Args) -> Result<Value, Failure> {

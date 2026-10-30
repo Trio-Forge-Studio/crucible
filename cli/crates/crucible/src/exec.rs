@@ -2,10 +2,10 @@ use crate::auth::Secret;
 use crate::call::Call;
 use crate::outcome::{Acceptance, Attempt, DEFAULT_ATTEMPTS, Failure, History, Verdict, judge, judge_read};
 use crate::output::Output;
+use oc_registry::{Auth, Completion, Method, Op, Payload, Registry};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
-use updraft_registry::{Auth, Completion, Method, Op, Payload, Registry};
 use ureq::RequestExt;
 
 pub struct Executor<'a> {
@@ -46,7 +46,8 @@ impl<'a> Executor<'a> {
         acceptance: &'a std::cell::RefCell<Acceptance>,
     ) -> Result<Self, Failure> {
         if let Some(origin) = &origin {
-            let url = url::Url::parse(origin).map_err(|_| Failure::usage("UPDRAFT_ORIGIN must be an HTTP origin"))?;
+            let url =
+                url::Url::parse(origin).map_err(|_| Failure::usage("CRUCIBLE_OC_ORIGIN must be an HTTP origin"))?;
             if !matches!(url.scheme(), "http" | "https")
                 || url.host_str().is_none()
                 || !url.username().is_empty()
@@ -55,9 +56,9 @@ impl<'a> Executor<'a> {
                 || url.fragment().is_some()
                 || url.path() != "/"
             {
-                return Err(Failure::usage("UPDRAFT_ORIGIN must be an HTTP origin"));
+                return Err(Failure::usage("CRUCIBLE_OC_ORIGIN must be an HTTP origin"));
             }
-            out.note("Warning: UPDRAFT_ORIGIN overrides Roblox servers.");
+            out.note("Warning: CRUCIBLE_OC_ORIGIN overrides Roblox servers.");
         }
         let agent = ureq::Agent::config_builder()
             .max_redirects(0)
@@ -112,7 +113,7 @@ impl<'a> Executor<'a> {
             let attempt = match request.with_agent(&self.agent).configure().timeout_global(Some(timeout)).run() {
                 Ok(mut response) => {
                     let status = response.status().as_u16();
-                    if (200..300).contains(&status) && op.safety == updraft_registry::Safety::Unsafe {
+                    if (200..300).contains(&status) && op.safety == oc_registry::Safety::Unsafe {
                         self.acceptance.borrow_mut().record();
                     }
                     self.out.trace(&format!("HTTP {status}"));
@@ -129,7 +130,7 @@ impl<'a> Executor<'a> {
                                 && !body.is_empty()
                                 && serde_json::from_slice::<Value>(&body).is_err()
                             {
-                                if op.safety == updraft_registry::Safety::Unsafe {
+                                if op.safety == oc_registry::Safety::Unsafe {
                                     return Err(Failure::unknown("invalid JSON response")
                                         .with("detail", json!(String::from_utf8_lossy(&body))));
                                 }
@@ -494,7 +495,7 @@ mod tests {
         )
         .unwrap();
         for response in
-            [Payload::Empty, Payload::Json { shape: updraft_registry::Shape::Any }, Payload::Text, Payload::Binary]
+            [Payload::Empty, Payload::Json { shape: oc_registry::Shape::Any }, Payload::Text, Payload::Binary]
         {
             let mut op = crate::REGISTRY.op("universes.get-place-universe").unwrap().clone();
             op.response = response;

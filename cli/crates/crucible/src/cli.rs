@@ -1,7 +1,18 @@
 use clap::{Args, Parser, Subcommand};
 #[derive(Parser)]
-#[command(name = "updraft", version, about = "Roblox Open Cloud. One JSON document per command.", after_help = AGENT_GUIDE)]
+#[command(name = "crucible", version, about = "Tools for Crucible games.", arg_required_else_help = true)]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+}
+#[derive(Subcommand)]
+pub enum Command {
+    /// Call Roblox Open Cloud. One JSON document per command.
+    #[command(after_help = AGENT_GUIDE)]
+    Oc(Oc),
+}
+#[derive(Args)]
+pub struct Oc {
     /// Select the credential profile to use.
     #[arg(long, global = true)]
     pub profile: Option<String>,
@@ -18,7 +29,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub verbose: bool,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: OcCommand,
 }
 fn seconds(s: &str) -> Result<f64, String> {
     s.parse::<f64>()
@@ -27,7 +38,7 @@ fn seconds(s: &str) -> Result<f64, String> {
         .ok_or_else(|| "seconds must be between 0 and 86400".into())
 }
 #[derive(Subcommand)]
-pub enum Command {
+pub enum OcCommand {
     /// Find operations by words from their names and documentation.
     Find {
         /// Search words from operation names, paths, and documentation.
@@ -120,7 +131,7 @@ const AGENT_GUIDE: &str = "Agent guide:
   place publish <file>      Publish with the guarded retry policy.
   asset download <id>       Download to --out without sending the key to the CDN.
   luau run <file>           Create once, then collect results and logs.
-  Keys: --profile > UPDRAFT_PROFILE > UPDRAFT_API_KEY > default_profile.
+  Keys: --profile > CRUCIBLE_OC_PROFILE > CRUCIBLE_OC_API_KEY > default_profile.
   Exit 0  Success. Read the document.
   Exit 2  usage. Fix invalid arguments, input, files, or read-result limits.
   Exit 3  auth. Missing key, HTTP 401/403, or failed key check. Fix the key or profile.
@@ -155,17 +166,24 @@ mod tests {
     fn every_command_and_argument_has_help() {
         let mut command = Cli::command();
         command.build();
-        let missing = undocumented(&command, "updraft");
+        let missing = undocumented(&command, "crucible");
         assert!(missing.is_empty(), "missing help descriptions: {missing:?}");
-        let mut broken =
-            Cli::command().mut_subcommand("call", |call| call.mut_arg("body", |argument| argument.help("")));
+        let mut broken = Cli::command().mut_subcommand("oc", |oc| {
+            oc.mut_subcommand("call", |call| call.mut_arg("body", |argument| argument.help("")))
+        });
         broken.build();
-        assert!(undocumented(&broken, "updraft").iter().any(|path| path == "updraft call body"));
+        assert!(undocumented(&broken, "crucible").iter().any(|path| path == "crucible oc call body"));
+    }
+
+    fn oc_help() -> String {
+        let mut command = Cli::command();
+        command.build();
+        command.find_subcommand_mut("oc").expect("oc is a subcommand").render_long_help().to_string()
     }
 
     #[test]
-    fn top_level_help_teaches_the_agent_loop_and_exit_codes() {
-        let help = Cli::command().render_long_help().to_string();
+    fn oc_help_teaches_the_agent_loop_and_exit_codes() {
+        let help = oc_help();
         for text in [
             "find <words>",
             "describe <name>",
@@ -175,7 +193,7 @@ mod tests {
             "place publish",
             "asset download",
             "luau run",
-            "UPDRAFT_API_KEY",
+            "CRUCIBLE_OC_API_KEY",
         ] {
             assert!(help.contains(text), "agent help must include {text}");
         }
@@ -186,7 +204,7 @@ mod tests {
 
     #[test]
     fn agent_guide_aligns_flow_descriptions() {
-        let help = Cli::command().render_long_help().to_string();
+        let help = oc_help();
         let columns: Vec<_> = help
             .lines()
             .filter(|line| {

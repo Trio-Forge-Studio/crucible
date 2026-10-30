@@ -1,5 +1,5 @@
+use oc_registry::{Op, RetryPolicy, Safety};
 use serde_json::{Value, json};
-use updraft_registry::{Op, RetryPolicy, Safety};
 
 pub const DEFAULT_ATTEMPTS: u8 = 3;
 
@@ -172,7 +172,7 @@ fn judge_policy(safety: Safety, retry: Option<&RetryPolicy>, attempt: Attempt, h
 #[cfg(test)]
 mod tests {
     use super::*;
-    use updraft_registry::Registry;
+    use oc_registry::Registry;
     fn op(safety: Safety) -> Op {
         let r: Registry = serde_json::from_str(include_str!("../../../spec/registry.json")).unwrap();
         let mut op = r.op("assets.get").unwrap().clone();

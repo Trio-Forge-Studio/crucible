@@ -1,5 +1,5 @@
+use oc_registry::{Auth, BodyMedia, Op, Payload, Registry};
 use serde_json::{Value, json};
-use updraft_registry::{Auth, BodyMedia, Op, Payload, Registry};
 
 fn outline(registry: &Registry, value: Value, depth: usize) -> Value {
     match value {
@@ -80,9 +80,9 @@ pub fn describe(registry: &Registry, op: &Op) -> Value {
                 " {}=<{}>",
                 p.name,
                 match p.kind {
-                    updraft_registry::ValueKind::Integer => "integer",
-                    updraft_registry::ValueKind::Number => "number",
-                    updraft_registry::ValueKind::Boolean => "boolean",
+                    oc_registry::ValueKind::Integer => "integer",
+                    oc_registry::ValueKind::Number => "number",
+                    oc_registry::ValueKind::Boolean => "boolean",
                     _ => "string",
                 }
             )
@@ -96,6 +96,6 @@ pub fn describe(registry: &Registry, op: &Op) -> Value {
         Some(_) => " --body @<file>".into(),
         None => String::new(),
     };
-    doc["call"] = json!(format!("updraft call {}{params}{body}", op.name));
+    doc["call"] = json!(format!("crucible oc call {}{params}{body}", op.name));
     doc
 }
