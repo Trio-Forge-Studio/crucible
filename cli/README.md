@@ -8,7 +8,6 @@ Each file in `docs` is one topic, named by its file stem. `build.rs` embeds ever
 
 A topic starts with a `# Title` line, a blank line, and a one-line summary that ends with a period. `crucible docs` prints that summary, and `cargo test` fails for a topic without one. Use plain Markdown, because a website will render the same files. Document only what the code exports today. Keep the `## crucible <command>` sections in `docs/cli.md` in alphabetical order.
 
-
 ## Build the CLI
 
 Run this from `cli/` with the toolchain pinned in the repository's `rust-toolchain.toml`. The binary is `target/release/crucible`.

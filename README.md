@@ -20,7 +20,6 @@ Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to
 
 `cli` holds the `crucible` binary, written in Rust. `npx crucible docs cli` lists every command. See `docs/cli.md` for the commands and `cli/README.md` for building and testing the CLI.
 
-
 ## Package entries
 
 The sample server imports `@trioforge/crucible` and `@trioforge/crucible/server`. The sample client imports the root and `@trioforge/crucible/client`. Both scripts store the imported placeholders as attributes so the specs can assert their values.
