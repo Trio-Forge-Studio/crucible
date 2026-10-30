@@ -29,4 +29,4 @@ The Lune loader supplies only the engine behavior needed to execute the sample i
 - The pre-commit hook runs staged checks, and the pre-push hook refuses pushes to `main`; `pnpm install` installs both.
 - Use squash merge and delete the branch after merge. Do not merge without task authorization.
 - Comment only a non-obvious reason that the code cannot express.
-- Keep the package and the CLI private and unlicensed. Publishing, release workflows, release tags, and repository settings require a separate task. A `v*` tag triggers the CLI release workflow.
+- Keep the package and the CLI private and unlicensed. Publishing, release workflows, and repository settings require a separate task.

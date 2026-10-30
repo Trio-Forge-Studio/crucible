@@ -4,18 +4,9 @@
 
 Each `crucible oc` command writes one JSON document to stdout. Progress goes to stderr. `--help` and `--version` print plain text. Nothing prompts for input. Errors outside `crucible oc` print clap's plain-text usage.
 
-## Install with rokit
+## Build
 
-Add `crucible` to your project's `rokit.toml`.
-
-```toml
-[tools]
-crucible = "Trio-Forge-Studio/crucible@0.1.0"
-```
-
-Run `rokit install`, then `crucible --version`. The release assets support Windows x86_64, Linux x86_64 with musl, and macOS aarch64. Version 0.1.0 becomes installable after its tag and release are published. While this repository is private, rokit needs a GitHub token with read access to it. Add one with `rokit authenticate github --token <token>`.
-
-To build from source, run this from `cli/` with the toolchain pinned in `rust-toolchain.toml`.
+Run this from `cli/` with the toolchain pinned in `rust-toolchain.toml`. The binary is `target/release/crucible`.
 
 ```console
 cargo build --release --locked --package crucible
