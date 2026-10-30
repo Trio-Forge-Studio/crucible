@@ -25,6 +25,7 @@ The Lune loader supplies only the engine behavior needed to execute the sample i
 
 - Use Conventional Commits with a scope, such as `chore(repo): scaffold the workspace`.
 - Name branches `<type>/<short-description>` and open PRs into `main`.
+- A PR that resolves a Linear issue puts `Closes <ID>` in its body, such as `Closes CRU-12`. Branch names carry no issue ID, so the body links the PR to the issue.
 - Push with an explicit refspec, such as `git push origin HEAD:refs/heads/chore/scaffold`.
 - The pre-commit hook runs staged checks, and the pre-push hook refuses pushes to `main`; `pnpm install` installs both.
 - Use squash merge and delete the branch after merge. Do not merge without task authorization.
