@@ -1,15 +1,11 @@
 BASELINE sample build and compiled lifecycle specs 0
 KILLED V1 owned session matches a 12-character prefix; rebuild or syntax 0; named spec 1
-KILLED V2 fingerprint skips diagnostics.cjs; rebuild or syntax 0; named spec 1
 KILLED probe check paired command skipped; rebuild or syntax 0; named spec 1
 KILLED startup launch cap guard changed; rebuild or syntax 0; named spec 1
-KILLED fingerprint guard reset deleted; rebuild or syntax 0; named spec 1
-KILLED fingerprint paired hash update short circuited; rebuild or syntax 0; named spec 1
 KILLED fixture real declaration copy deleted; rebuild or syntax 0; named spec 1
 KILLED owned PID place guard deleted; rebuild or syntax 0; named spec 1
 KILLED owned PID same typed selector arguments swapped; rebuild or syntax 0; named spec 1
 KILLED startup retry paired wait deleted; rebuild or syntax 0; named spec 1
-KILLED fingerprint same typed receipt arguments swapped; rebuild or syntax 0; named spec 1
 KILLED fixture paired manifest copy skipped; rebuild or syntax 0; named spec 1
 KILLED fixture same typed side destinations swapped; rebuild or syntax 0; named spec 1
 KILLED owned session ambiguity check short circuited; rebuild or syntax 0; named spec 1
