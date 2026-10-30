@@ -16,8 +16,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - { os: ubuntu-latest, runner: blacksmith-4vcpu-ubuntu-2404 }
+          - { os: windows-latest, runner: blacksmith-4vcpu-windows-2025 }
+    runs-on: ${{ matrix.runner }}
     outputs:
       ubuntu-artifact: ${{ matrix.os == 'ubuntu-latest' && steps.artifact.outputs.artifact-id || '' }}
       windows-artifact: ${{ matrix.os == 'windows-latest' && steps.artifact.outputs.artifact-id || '' }}
@@ -81,7 +83,7 @@ jobs:
   pull-request:
     needs: verify
     if: ${{ always() && !cancelled() && needs.verify.outputs.ubuntu-artifact != '' && needs.verify.outputs.windows-artifact != '' && (needs.verify.result == 'success' || needs.verify.result == 'failure') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write
       pull-requests: write
