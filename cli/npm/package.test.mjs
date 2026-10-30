@@ -47,7 +47,9 @@ before(() => {
 		"Runtime output is missing. Run pnpm build from the repository root first.",
 	);
 	root = mkdtempSync(join(tmpdir(), "crucible-npm-"));
-	const staged = stage(join(root, "staged"), supported ? { [host]: binary } : {});
+	const notices = join(root, "THIRD_PARTY_NOTICES");
+	writeFileSync(notices, "Third-party notices\nexample-crate 1.0.0 MIT\n");
+	const staged = stage(join(root, "staged"), supported ? { [host]: binary } : {}, notices);
 	mkdirSync(join(root, "tarballs"));
 	[shim, platform] = staged.map((directory) => pack(directory, join(root, "tarballs")));
 });
@@ -60,6 +62,8 @@ after(async () => {
 test("the shim depends on every platform package at the CLI version", () => {
 	const manifest = JSON.parse(readFileSync(join(root, "staged", "crucible", "package.json"), "utf8"));
 	assert.equal(manifest.version, cliVersion());
+	assert.equal(manifest.license, "MIT");
+	assert.equal(manifest.private, undefined);
 	assert.deepEqual(
 		manifest.optionalDependencies,
 		Object.fromEntries(PLATFORMS.map((entry) => [platformPackageName(entry), cliVersion()])),
@@ -68,6 +72,9 @@ test("the shim depends on every platform package at the CLI version", () => {
 
 test("npx crucible runs the installed platform binary", { skip: !supported && `no package for ${host}` }, () => {
 	const app = project("app", [shim, platform]);
+	const installed = join(app, "node_modules", `@trioforge/crucible-cli-${host}`);
+	assert.match(readFileSync(join(installed, "LICENSE"), "utf8"), /^MIT License/);
+	assert.match(readFileSync(join(installed, "THIRD_PARTY_NOTICES"), "utf8"), /example-crate 1.0.0 MIT/);
 	const version = run("npx", ["crucible", "--version"], app);
 	assert.equal(version.status, 0, version.stderr);
 	assert.equal(version.stdout.trim(), `crucible ${cliVersion()} (rojo 7.7.1)`);
@@ -104,6 +111,14 @@ test(
 		assert.ok(JSON.parse(result.stdout).length > 0, "example returns operations through the packed shim");
 	},
 );
+test("release staging rejects a tag that differs from the Cargo version", () => {
+	const result = spawnSync(process.execPath, [join(cli, "npm", "release.mjs"), "missing", "missing", "missing"], {
+		encoding: "utf8",
+		env: { ...process.env, GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/v999.0.0" },
+	});
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /release tag must match cli\/Cargo.toml/);
+});
 
 test("the shim names the missing platform package", () => {
 	const app = project("bare", [shim]);
