@@ -144,15 +144,15 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 let remaining: Vec<_> = remaining.map(|(name, _)| name).collect();
                 let names: Vec<_> = remaining.iter().collect();
                 let mut state = progress(&published, Some(&name), &names);
-                let mut next = format!("crucible publish {}", args.env);
+                let mut next = vec!["crucible".to_owned(), "publish".to_owned(), args.env.clone()];
                 if let Some(profile) = &args.profile {
-                    next.push_str(&format!(" --profile {profile}"));
+                    next.extend(["--profile".to_owned(), profile.clone()]);
                 }
                 if args.verbose {
-                    next.push_str(" --verbose");
+                    next.push("--verbose".to_owned());
                 }
                 for name in std::iter::once(&name).chain(remaining.iter()) {
-                    next.push_str(&format!(" --place={name}"));
+                    next.push(format!("--place={name}"));
                 }
                 state["next"] = json!(next);
                 if failure.code == 5 {

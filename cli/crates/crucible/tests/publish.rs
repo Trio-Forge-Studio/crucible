@@ -37,6 +37,11 @@ fs.writeFileSync('out/main.luau', 'return 1');
         Self(dir)
     }
     fn command(&self, origin: &str) -> Command {
+        let mut command = self.binary(origin);
+        command.arg("publish");
+        command
+    }
+    fn binary(&self, origin: &str) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_crucible"));
         command
             .current_dir(self.0.path())
@@ -44,8 +49,7 @@ fs.writeFileSync('out/main.luau', 'return 1');
             .env("CRUCIBLE_OC_API_KEY", KEY)
             .env("CRUCIBLE_CONFIG", self.0.path().join("config.toml"))
             .env_remove("CRUCIBLE_OC_PROFILE")
-            .env_remove("FAIL_BUILD")
-            .arg("publish");
+            .env_remove("FAIL_BUILD");
         command
     }
     fn publish(&self, origin: &str, args: &[&str]) -> Output {
@@ -104,7 +108,7 @@ fn second_failure_preserves_first_receipt_and_its_own_classification() {
         assert_eq!(d["error"]["kind"], kind);
         assert_eq!(d["error"]["publish"]["published"].as_array().unwrap().len(), 1);
         assert_eq!(d["error"]["publish"]["published"][0]["versionNumber"], 7);
-        assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place=start");
+        assert_eq!(d["error"]["publish"]["next"], json!(["crucible", "publish", "production", "--place=start"]));
         if expected == 5 {
             assert!(d["error"]["hint"].as_str().unwrap().contains("versions before re-uploading"));
         }
@@ -124,7 +128,10 @@ fn first_failure_leaves_later_places_unattempted() {
     assert_eq!(d["error"]["publish"]["published"], json!([]));
     assert_eq!(d["error"]["publish"]["failed"], "arena");
     assert_eq!(d["error"]["publish"]["notAttempted"], json!(["start"]));
-    assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place=arena --place=start");
+    assert_eq!(
+        d["error"]["publish"]["next"],
+        json!(["crucible", "publish", "production", "--place=arena", "--place=start"])
+    );
     assert_eq!(server.requests().len(), 1);
 }
 
@@ -350,16 +357,17 @@ fn recovery_replays_explicit_profile_and_verbose_without_reuploading_successes()
         .unwrap();
     assert_eq!(code(&out), 4, "{}", document(&out));
     let d = document(&out);
-    let next = d["error"]["publish"]["next"].as_str().unwrap();
+    let next: Vec<String> = serde_json::from_value(d["error"]["publish"]["next"].clone()).unwrap();
+    assert_eq!(next[0], "crucible");
     let replay = game
-        .command(&server.origin)
-        .args(next.strip_prefix("crucible publish ").unwrap().split_whitespace())
+        .binary(&server.origin)
+        .args(&next[1..])
         .env_remove("CRUCIBLE_OC_API_KEY")
         .env("FLAG_KEY", "flag-key")
         .output()
         .unwrap();
     println!(
-        "next={next} replay exit={} stdout={} stderr={}",
+        "next={next:?} replay exit={} stdout={} stderr={}",
         code(&replay),
         String::from_utf8_lossy(&replay.stdout),
         String::from_utf8_lossy(&replay.stderr)
@@ -393,16 +401,17 @@ fn recovery_replays_profile_with_spaces_and_verbose_without_reuploading_successe
         .unwrap();
     assert_eq!(code(&out), 4, "{}", document(&out));
     let d = document(&out);
-    let next = d["error"]["publish"]["next"].as_str().unwrap();
+    let next: Vec<String> = serde_json::from_value(d["error"]["publish"]["next"].clone()).unwrap();
+    assert_eq!(next[0], "crucible");
     let replay = game
-        .command(&server.origin)
-        .args(next.strip_prefix("crucible publish ").unwrap().split_whitespace())
+        .binary(&server.origin)
+        .args(&next[1..])
         .env_remove("CRUCIBLE_OC_API_KEY")
         .env("FLAG_KEY", "flag-key")
         .output()
         .unwrap();
     println!(
-        "next={next} replay exit={} stdout={} stderr={}",
+        "next={next:?} replay exit={} stdout={} stderr={}",
         code(&replay),
         String::from_utf8_lossy(&replay.stdout),
         String::from_utf8_lossy(&replay.stderr)
@@ -429,13 +438,10 @@ fn recovery_replays_hyphenated_place_and_every_unattempted_place() {
     let out = game.publish(&server.origin, &["production"]);
     assert_eq!(code(&out), 4, "{}", document(&out));
     let d = document(&out);
-    let next = d["error"]["publish"]["next"].as_str().unwrap();
-    let replay = game
-        .command(&server.origin)
-        .args(next.strip_prefix("crucible publish ").unwrap().split_whitespace())
-        .output()
-        .unwrap();
-    println!("next={next} replay exit={} stdout={}", code(&replay), String::from_utf8_lossy(&replay.stdout));
+    let next: Vec<String> = serde_json::from_value(d["error"]["publish"]["next"].clone()).unwrap();
+    assert_eq!(next[0], "crucible");
+    let replay = game.binary(&server.origin).args(&next[1..]).output().unwrap();
+    println!("next={next:?} replay exit={} stdout={}", code(&replay), String::from_utf8_lossy(&replay.stdout));
     assert_eq!(code(&replay), 0, "{}", document(&replay));
     assert_eq!(document(&replay)["published"][0]["name"], "-arena");
     assert_eq!(document(&replay)["published"][1]["name"], "start");
