@@ -33,7 +33,7 @@ function project(name, tarballs) {
 	const directory = join(root, name);
 	mkdirSync(directory);
 	writeFileSync(join(directory, "package.json"), JSON.stringify({ name, private: true }));
-	const result = run("npm", ["install", "--no-audit", "--no-fund", ...tarballs], directory);
+	const result = run("npm", ["install", "--save-dev", "--no-audit", "--no-fund", ...tarballs], directory);
 	assert.equal(result.status, 0, result.stderr);
 	return directory;
 }
@@ -78,6 +78,22 @@ test("npx crucible runs the installed platform binary", { skip: !supported && `n
 	assert.equal(unknown.status, 2, "the shim forwards the binary's exit code");
 	assert.equal(JSON.parse(unknown.stdout).error.kind, "usage");
 });
+
+test(
+	"the Open Cloud Node example runs with a project devDependency",
+	{ skip: !supported && `no package for ${host}` },
+	() => {
+		const app = project("node-example", [shim, platform]);
+		const markdown = readFileSync(join(cli, "..", "docs", "oc.md"), "utf8");
+		const example = markdown.match(/^```javascript\n([\s\S]*?)^```$/m);
+		assert.ok(example, "Open Cloud guide has a Node example");
+		const script = join(app, "example.mjs");
+		writeFileSync(script, example[1]);
+		const result = spawnSync(process.execPath, [script], { cwd: app, encoding: "utf8" });
+		assert.equal(result.status, 0, result.stderr);
+		assert.ok(JSON.parse(result.stdout).length > 0, "example returns operations through the packed shim");
+	},
+);
 
 test("the shim names the missing platform package", () => {
 	const app = project("bare", [shim]);

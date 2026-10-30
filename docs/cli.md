@@ -2,7 +2,7 @@
 
 Run `crucible` commands and read their output and exit codes.
 
-`crucible` is the command line for Crucible games. Run it with `npx crucible <command>` from a project that has `crucible` in its `devDependencies`. It prints these guides and calls Roblox Open Cloud.
+`crucible` is the command line for Crucible games. Run it with `npx crucible <command>` from a project that has `crucible` in its `devDependencies`. `npx crucible docs cli` lists every command.
 
 `crucible --help` lists the commands, and `crucible <command> --help` describes one. `crucible --version` prints the version.
 

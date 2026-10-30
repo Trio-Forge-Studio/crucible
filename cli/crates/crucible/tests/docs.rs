@@ -44,7 +44,6 @@ fn unknown_topic_is_a_usage_error_naming_the_topics() {
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty());
     let stderr = String::from_utf8(out.stderr).unwrap();
-    for topic in topics() {
-        assert!(stderr.contains(&topic), "stderr names {topic}: {stderr}");
-    }
+    let valid = format!("[possible values: {}]", topics().join(", "));
+    assert!(stderr.lines().any(|line| line.trim() == valid), "{stderr}");
 }

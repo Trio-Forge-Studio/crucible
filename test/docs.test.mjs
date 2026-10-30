@@ -12,9 +12,12 @@ function codeBlocks() {
 	for (const name of fs.readdirSync(path.join(repo, "docs"))) {
 		if (!name.endsWith(".md")) continue;
 		const markdown = fs.readFileSync(path.join(repo, "docs", name), "utf8");
-		const blocks = [...markdown.matchAll(/^```ts\n([\s\S]*?)^```$/gm)];
+		const blocks = [...markdown.matchAll(/^```(ts|typescript|tsx)\n([\s\S]*?)^```$/gm)];
 		blocks.forEach((block, index) =>
-			files.set(`${sample}/src/docs/${path.basename(name, ".md")}-block-${index + 1}.ts`, block[1]),
+			files.set(
+				`${sample}/src/docs/${path.basename(name, ".md")}-block-${index + 1}.${block[1] === "tsx" ? "tsx" : "ts"}`,
+				block[2],
+			),
 		);
 	}
 	return files;

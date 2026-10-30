@@ -4,13 +4,13 @@ Call Roblox Open Cloud with `crucible oc`, which prints one JSON document per co
 
 Coding agents and Node scripts can call all 299 API-key operations in the pinned Roblox spec, plus API-key introspection and public place-to-universe lookup. Four commands handle asset upload, place publishing, asset download, and Luau execution. In a game project, run them as `npx crucible oc <command>`.
 
-Each `crucible oc` command writes one JSON document to stdout. Progress goes to stderr. `--help` and `--version` print plain text. Nothing prompts for input. `crucible oc --help` prints a short guide with the exit codes.
+Each `crucible oc` command writes one JSON document to stdout. Progress goes to stderr. `npx crucible oc --help` prints plain text. `npx crucible --version` prints the CLI version. `npx crucible oc --version` is a usage error that prints JSON and exits 2. Nothing prompts for input. `crucible oc --help` prints a short guide with the exit codes.
 
 ## Configure a key
 
 For CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Keys never belong in command arguments.
 
-Local profiles live in `%APPDATA%\crucible\config.toml` on Windows. On Unix, the file is `$XDG_CONFIG_HOME/crucible/config.toml`, or `~/.config/crucible/config.toml`. `CRUCIBLE_CONFIG` selects another file.
+Local profiles live in `%APPDATA%\crucible\config.toml` on Windows. On macOS, the file is `~/Library/Application Support/crucible/config.toml`. On Linux, the file is `$XDG_CONFIG_HOME/crucible/config.toml`, or `~/.config/crucible/config.toml`. `CRUCIBLE_CONFIG` selects another file.
 
 ```toml
 [oc]
@@ -36,8 +36,8 @@ The selection order is `--profile`, `CRUCIBLE_OC_PROFILE`, `CRUCIBLE_OC_API_KEY`
 Find operations with words from their name, path, scopes, or documentation.
 
 ```console
-crucible oc find luau logs
-crucible oc describe universes.create-place-version
+npx crucible oc find luau logs
+npx crucible oc describe universes.create-place-version
 ```
 
 `describe` returns parameters, body media, schema outlines, scopes, safety, retry policy, pagination, completion, stability, and overlay notes. Names remain attached to their operations across spec updates.
@@ -47,12 +47,12 @@ crucible oc describe universes.create-place-version
 Parameters use `name=value`. `assetId`, `asset_id`, and `asset-id` bind the same parameter. Repeat array parameters as `ids=1 ids=2`. Required parameters and value kinds are checked before sending. JSON bodies are checked for syntax, without schema validation.
 
 ```console
-crucible oc call assets.get assetId=1234567 readMask=assetType,displayName
-crucible oc call GET '/assets/v1/assets/1234567?readMask=displayName'
-crucible oc call universes.get-place-universe placeId=1818
-crucible oc call assets.list-versions assetId=1234567 --all --max-items 50
-crucible oc call universes.create-place-version universeId=13058 placeId=1818 versionType=Published --body @build/warehouse.rbxl
-crucible oc call assets.create --part request=@request.json --part 'fileContent=@sofa.fbx;type=model/fbx' --no-wait
+npx crucible oc call assets.get assetId=1234567 readMask=assetType,displayName
+npx crucible oc call GET '/assets/v1/assets/1234567?readMask=displayName'
+npx crucible oc call universes.get-place-universe placeId=1818
+npx crucible oc call assets.list-versions assetId=1234567 --all --max-items 50
+npx crucible oc call universes.create-place-version universeId=13058 placeId=1818 versionType=Published --body @build/warehouse.rbxl
+npx crucible oc call assets.create --part request=@request.json --part 'fileContent=@sofa.fbx;type=model/fbx' --no-wait
 ```
 
 `--body` accepts inline JSON, `@file`, or `@-` for stdin. Binary operations accept the file's bytes. Multipart operations use repeated `--part name=value` arguments. Use `@@` when a literal starts with `@`. A process can consume stdin once.
@@ -64,9 +64,9 @@ Long-running calls poll by default. `--no-wait` returns the first reply. A pendi
 ## Check credentials
 
 ```console
-crucible oc auth check
-crucible oc auth check --for assets.get
-crucible oc auth profiles
+npx crucible oc auth check
+npx crucible oc auth check --for assets.get
+npx crucible oc auth profiles
 ```
 
 `call api-keys.introspect` and `auth check` use the same executor path. It supplies the selected key as the `apiKey` body field and rejects caller-supplied bodies. `auth check` posts the selected key to `/api-keys/v1/introspect`. It flattens each scope's `name` and `operations` into strings such as `asset:read`. `--for` checks that the returned list contains the operation's declared scope names. Resource restrictions still apply on Roblox. `auth profiles` lists sources and whether their keys are present, without printing their values.
@@ -74,8 +74,8 @@ crucible oc auth profiles
 ## Upload an asset
 
 ```console
-crucible oc asset upload assets/sofa.fbx --group 35 --description 'Model for Fragile Delivery.'
-crucible oc asset upload --resume 9f1c
+npx crucible oc asset upload assets/sofa.fbx --group 35 --description 'Model for Fragile Delivery.'
+npx crucible oc asset upload --resume 9f1c
 ```
 
 Upload sends one create request, then polls for the asset ID. It never repeats the create request. A 5xx, lost response, malformed success body, or missing operation ID exits 5 and asks you to check the group's Creations. Rejections and unknown outcomes have different exit codes.
@@ -87,7 +87,7 @@ The display name defaults to the file stem in title case. `--name` overrides it.
 ## Publish a place
 
 ```console
-crucible oc --profile publish place publish build/warehouse.rbxl --universe 13058 --place 1818
+npx crucible oc --profile publish place publish build/warehouse.rbxl --universe 13058 --place 1818
 ```
 
 Publishing sends an `application/octet-stream` body. It retries 409 and 5xx responses for at most four attempts, with 60 seconds between attempts by default. A later success resolves earlier uncertainty. If any attempt got a 5xx or lost its response and none later succeeded, the command exits 5, including a 503 followed by a 400. `--version-type saved` saves without publishing.
@@ -95,8 +95,8 @@ Publishing sends an `application/octet-stream` body. It retries 409 and 5xx resp
 ## Download an asset
 
 ```console
-crucible oc asset download 1234567 --out build/sofa.rbxm
-crucible oc asset download 1234567 --version 2 --out build/sofa.rbxm --overwrite
+npx crucible oc asset download 1234567 --out build/sofa.rbxm
+npx crucible oc asset download 1234567 --version 2 --out build/sofa.rbxm --overwrite
 ```
 
 Asset delivery needs `legacy-asset:manage`. `crucible oc` fetches the returned URL with a separate client that never carries the API key. It accepts HTTPS URLs without credentials and follows at most five redirects. The download goes through a sibling temporary file, then a rename. Existing files require `--overwrite`. Failed transfers preserve the previous target. Downloads have a 30-second idle read timeout and no total duration cap. Upload and publish requests with file bodies get 600 seconds, while polls keep short timeouts.
@@ -104,8 +104,8 @@ Asset delivery needs `legacy-asset:manage`. `crucible oc` fetches the returned U
 ## Run Luau
 
 ```console
-crucible oc luau run scripts/probe.luau --universe 13058 --place 1818
-crucible oc luau run --resume universes/13058/places/1818/versions/7/luau-execution-sessions/e1/tasks/t1
+npx crucible oc luau run scripts/probe.luau --universe 13058 --place 1818
+npx crucible oc luau run --resume universes/13058/places/1818/versions/7/luau-execution-sessions/e1/tasks/t1
 ```
 
 Use `-` instead of a file to read UTF-8 Luau from stdin. Scripts are limited to 4 MB. `--version` selects a place version. `--timeout` sets Roblox's execution timeout in seconds.
@@ -133,16 +133,19 @@ The global options are `--profile`, `--deadline <seconds>`, `--poll-interval <se
 
 ## Call from Node
 
+Run this script from the project directory with `crucible` installed as a devDependency. The fixed command uses a shell to run the Windows `.cmd` shim as well as Unix executables.
+
 ```javascript
 import { spawnSync } from "node:child_process";
 
-const result = spawnSync("crucible", ["oc", "asset", "upload", "assets/sofa.fbx", "--group", "35"], {
+const result = spawnSync("npx crucible oc find asset", {
 	encoding: "utf8",
 	env: process.env,
+	shell: true,
 });
 if (result.error) throw result.error;
 const document = JSON.parse(result.stdout);
 if (result.status === 5) throw new Error(document.error.hint);
 if (result.status !== 0) throw new Error(JSON.stringify(document.error));
-console.log(document.assetId);
+console.log(JSON.stringify(document));
 ```

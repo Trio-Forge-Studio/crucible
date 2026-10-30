@@ -2,7 +2,7 @@
 
 Write game logs through named loggers with levels, structured context, and custom sinks.
 
-Import logging from the root of `@trioforge/crucible`. The root is safe to import on the server and the client, and logging works at module load, before `boot` runs.
+Import logging from the root of `@trioforge/crucible`. The root is safe to import on the server and the client, and logging works at module load, before `boot` runs. Logging state is per Luau VM. Server sinks never receive client records.
 
 ```ts
 import { Logging, LogLevel } from "@trioforge/crucible";
@@ -43,6 +43,8 @@ Context values become the record's `context` when the call passes the level chec
 - An `Instance` becomes its full name from `GetFullName()`, such as `Workspace.Vans.Van1`.
 - Any other value becomes `tostring(value)`. A nested table prints as its address, so pass flat values.
 
+If rendering fails, for example because a context value's `__tostring` throws, Crucible drops the record and reports `[Crucible] Logging failed`.
+
 The record keeps a frozen copy of the context. Changing the table after the call does not change the record.
 
 Keep the template constant and put the variable parts in the context. The template is the record's `template`, so sinks can group records by it. Text built into the template with `${}` can contain braces that the renderer reads as placeholders.
@@ -58,7 +60,7 @@ Keep the template constant and put the variable parts in the context. The templa
 | `Debug` | A plain line through the LogService logger `Game`, with the context attached |
 | `Info` | An info line through the logger `Game`, with the context attached |
 | `Warning` | A warning line through the logger `Game`, with the context attached |
-| `Error` | A red error with a stack traceback that starts at the `log.error` call |
+| `Error` | A red error with a stack traceback that starts at the `log.error` call, without attached context |
 
 If the LogService loggers fail, the default sink falls back to `print` and `warn` for the rest of the session.
 
@@ -127,7 +129,7 @@ These rules apply to a sink:
 - A log call made while a record is being delivered is dropped. A sink cannot log through another logger.
 - `write` must be a function property. `addSink` throws when it is missing.
 
-`addSink` with a sink object that is already connected returns its existing subscription and ignores the new minimum. Use `setMinimum` to change it. After `disconnect`, the subscription does nothing, and `addSink` with the same object returns a new subscription. `disconnect` can be called more than once.
+`addSink` with a sink object that is already connected returns its existing subscription and ignores the new minimum. Use `setMinimum` to change it. After `disconnect`, valid `setMinimum` calls have no effect, but invalid values still throw. `addSink` with the same object returns a new subscription. `disconnect` can be called more than once.
 
 `setMinimum` accepts any `LogLevel`. `LogLevel.Off` keeps the sink connected but sends it no records. `setMinimum` and `addSink` throw on a value that is not a `LogLevel`.
 

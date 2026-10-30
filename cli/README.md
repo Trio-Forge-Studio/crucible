@@ -1,12 +1,12 @@
 # Crucible CLI
 
-`crucible` is the command line for Crucible games. `crucible docs` prints the guides in the repository's `docs` folder, and `crucible oc` calls Roblox Open Cloud. This file covers building and testing the CLI. The guides cover using it: `docs/cli.md` for the commands and `docs/oc.md` for Open Cloud keys, operations, flows, and exit codes.
+`crucible` is the command line for Crucible games. `npx crucible docs cli` lists every command. This file covers building and testing the CLI. The guides cover using it: `docs/cli.md` for the commands and `docs/oc.md` for Open Cloud keys, operations, flows, and exit codes.
 
 ## Docs topics
 
 Each file in `docs` is one topic, named by its file stem. `build.rs` embeds every `docs/*.md` file in the binary and reruns when the folder changes. `crucible docs` lists the topics, and `crucible docs <topic>` prints one.
 
-A topic starts with a `# Title` line, a blank line, and a one-line summary that ends with a period. `crucible docs` prints that summary, and `cargo test` fails for a topic without one. Use plain Markdown, because a website will render the same files. Document only what the code exports today.
+A topic starts with a `# Title` line, a blank line, and a one-line summary that ends with a period. `crucible docs` prints that summary, and `cargo test` fails for a topic without one. Use plain Markdown, because a website will render the same files. Document only what the code exports today. Keep the `## crucible <command>` sections in `docs/cli.md` in alphabetical order.
 
 ## Build
 
