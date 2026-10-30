@@ -12,6 +12,18 @@ Run this from `cli/` with the toolchain pinned in `rust-toolchain.toml`. The bin
 cargo build --release --locked --package crucible
 ```
 
+## npm packages
+
+The CLI ships on npm the way oxlint does. The `crucible` package holds a Node shim and the `crucible` bin. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64`, `@trioforge/crucible-cli-linux-x64`, and `@trioforge/crucible-cli-darwin-arm64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
+
+`npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The packages stay `private` until a release task publishes them.
+
+```console
+node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
+```
+
+`npm/package.test.mjs` stages the debug binary from `cargo test`, packs the packages with `npm pack`, installs them into a temporary project, and runs `npx crucible`. Set `CRUCIBLE_BINARY` to test another binary.
+
 ## Configure a key
 
 For CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Keys never belong in command arguments.
@@ -175,6 +187,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask spec check
+node --test npm/package.test.mjs
 ```
 
 The behavior tests drive the real binary against local HTTP servers. `CRUCIBLE_OC_ORIGIN` overrides Roblox origins for these tests and always prints a warning. In that mode, the download client also permits HTTP loopback URLs. It still sends no key to a download URL. API requests never follow redirects.
