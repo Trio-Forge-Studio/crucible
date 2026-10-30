@@ -8,7 +8,7 @@ Run `crucible` commands and read their output and exit codes.
 
 ## Output and exit codes
 
-Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc` and `crucible publish` print one JSON document per command instead of text and has its own exit codes, described in `crucible docs oc`.
+Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc` and `crucible publish` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`.
 
 | Exit | Meaning |
 | --- | --- |
@@ -103,7 +103,7 @@ Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc 
 
 ## crucible publish
 
-`npx crucible publish production` builds the game, then uploads every place to the ids in `[env.production]` in `crucible.toml`. `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in alphabetical name order. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
+`npx crucible publish production` builds the game, then uploads every place to the ids in `[env.production]` in `crucible.toml`. `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. Credentials load before building. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
 
 `--dry-run` builds the selected places and runs the same key and scope check as `crucible oc auth check --for universes.create-place-version`. It sends an introspection request and no upload requests. The check verifies that the key is enabled, unexpired, and has the declared operation scopes. It does not prove access to a particular universe or place.
 
@@ -117,13 +117,13 @@ Success, exit 0, includes each confirmed upload's version number. Ids are string
 {"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"},{"name":"start","universeId":"9999","placeId":"4321","versionNumber":8,"versionType":"published"}],"failed":null,"notAttempted":[]}
 ```
 
-An upload failure keeps the existing Open Cloud error fields and puts progress under `error.publish`. `failed` names the place whose upload failed. Its outcome can be unknown. `published` contains only confirmed receipts, and `notAttempted` lists the selected places after the failed place. The exit code classifies the failed upload independently of earlier successes. Inspect the failed place before repeating an upload with an unknown outcome.
+An upload failure keeps the existing Open Cloud error fields and puts progress under `error.publish`. `failed` names the place whose upload failed. Its outcome can be unknown. `published` contains only confirmed receipts, and `notAttempted` lists the selected places after the failed place. The exit code classifies the failed upload independently of earlier successes. The `next` command selects the failed place and every unattempted place. After a partial failure, never rerun the environment without `--place`, because that uploads confirmed places again. For `outcome_unknown`, check the failed place's versions before re-uploading it. Uploads follow the [place publishing retry policy](oc.md#publish-a-place).
 
 ```json
-{"error":{"kind":"rejected","message":"HTTP 400","status":400,"detail":{},"publish":{"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"}],"failed":"start","notAttempted":[]}}}
+{"error":{"kind":"rejected","message":"HTTP 400","status":400,"detail":{},"publish":{"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"}],"failed":"start","notAttempted":[],"next":"crucible publish production --place start"}}}
 ```
 
-Build and dry-run auth failures have the same progress object, with `failed` null and all selected places in `notAttempted`. Config and target validation errors return the usual `{"error":{"kind":"usage","message":"..."}}` before building.
+Credential, build, and dry-run auth failures have the same progress object, with `failed` null and all selected places in `notAttempted`. Config and target validation errors return the usual `{"error":{"kind":"usage","message":"..."}}` before building.
 
 A successful dry run exits 0 with no published receipts. `auth` is the existing auth-check result. All selected places remain unattempted.
 

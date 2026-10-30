@@ -267,17 +267,23 @@ fn upload_error_redacts_the_key_and_signed_urls() {
 #[test]
 fn credential_failures_precede_build_and_leave_every_place_unattempted() {
     for manifest_profile in [false, true] {
-        let manifest = if manifest_profile { TWO.replace("universe=10", "universe=10\nprofile='missing'") } else { TWO.into() };
+        let manifest =
+            if manifest_profile { TWO.replace("universe=10", "universe=10\nprofile='missing'") } else { TWO.into() };
         let game = Game::new(Some(&manifest));
         let server = Server::new(vec![]);
         let mut cmd = game.command(&server.origin);
         cmd.arg("production").env_remove("CRUCIBLE_OC_API_KEY");
-        if !manifest_profile { cmd.args(["--profile", "missing"]); }
+        if !manifest_profile {
+            cmd.args(["--profile", "missing"]);
+        }
         let out = cmd.output().unwrap();
         assert_eq!(code(&out), 3);
-        assert_eq!(document(&out), json!({"error":{"kind":"auth","message":"profile missing does not exist","status":null,
-            "requiredScopes":["universe-places:write"],"scopeMetadata":"declared","keySource":null,"profiles":[],
-            "publish":{"environment":"production","dryRun":false,"published":[],"failed":null,"notAttempted":["arena","start"]}}}));
+        assert_eq!(
+            document(&out),
+            json!({"error":{"kind":"auth","message":"profile missing does not exist","status":null,
+            "requiredScopes":[{"name":"universe-places:write","target":"v1"}],"scopeMetadata":"declared","keySource":null,"profiles":[],
+            "publish":{"environment":"production","dryRun":false,"published":[],"failed":null,"notAttempted":["arena","start"]}}})
+        );
         assert!(!game.0.path().join("out").exists());
         assert!(server.requests().is_empty());
     }
@@ -286,10 +292,42 @@ fn credential_failures_precede_build_and_leave_every_place_unattempted() {
 #[test]
 fn user_default_profile_is_used_without_other_credentials() {
     let game = Game::new(Some(TWO));
-    fs::write(game.0.path().join("config.toml"), "[oc]\ndefault_profile='default'\n[oc.profiles.default]\nkey_env='DEFAULT_KEY'").unwrap();
+    fs::write(
+        game.0.path().join("config.toml"),
+        "[oc]\ndefault_profile='default'\n[oc.profiles.default]\nkey_env='DEFAULT_KEY'",
+    )
+    .unwrap();
     let server = Server::new(vec![Response::json(json!({"versionNumber":1}))]);
-    let out = game.command(&server.origin).args(["production", "--place", "start"])
-        .env_remove("CRUCIBLE_OC_API_KEY").env("DEFAULT_KEY", "default-key").output().unwrap();
+    let out = game
+        .command(&server.origin)
+        .args(["production", "--place", "start"])
+        .env_remove("CRUCIBLE_OC_API_KEY")
+        .env("DEFAULT_KEY", "default-key")
+        .output()
+        .unwrap();
     assert_eq!(code(&out), 0, "{}", document(&out));
     assert!(server.requests()[0].head.contains("x-api-key: default-key"));
+}
+
+#[test]
+fn stdout_failure_preserves_upload_uncertainty() {
+    for dry_run in [false, true] {
+        let game = Game::new(Some(TWO));
+        let reply = if dry_run {
+            introspection(json!([{"name":"universe-places","operations":["write"]}]))
+        } else {
+            Response::json(json!({"versionNumber":1}))
+        };
+        let server = Server::new(vec![reply]);
+        let mut command = game.command(&server.origin);
+        command.args(["production", "--place", "start"]);
+        if dry_run {
+            command.arg("--dry-run");
+        }
+        let mut child =
+            command.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().unwrap();
+        drop(child.stdout.take());
+        assert_eq!(child.wait().unwrap().code(), Some(if dry_run { 7 } else { 5 }));
+        assert_eq!(server.requests().len(), 1);
+    }
 }

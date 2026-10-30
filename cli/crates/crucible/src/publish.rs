@@ -1,4 +1,6 @@
-use crate::cli::{AuthCommand, Oc, OcCommand, PlaceCommand};
+use crate::auth;
+use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
+use crate::exec::{Executor, Timing};
 use crate::manifest::{Manifest, VersionType};
 use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
@@ -6,6 +8,7 @@ use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -45,6 +48,9 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         Failure::usage("publish requires crucible.toml. Example:\n[env.production]\nuniverse = 1234\nplace = 5678\n")
     })?;
     let env = manifest.envs.get(&args.env).ok_or_else(|| {
+        if manifest.envs.is_empty() {
+            return Failure::usage(format!("unknown environment {}. No environments are configured", args.env));
+        }
         Failure::usage(format!(
             "unknown environment {}. Environments: {}",
             args.env,
@@ -61,27 +67,56 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         env.places.keys().filter(|name| args.places.is_empty() || args.places.contains(name)).collect();
     let mut published = Vec::new();
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
-    let profile = effective_profile(
+    let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
+    let preflight = |failure: Failure| failure.with("publish", progress(&published, None, &targets));
+    let config = auth::load_config().map_err(preflight)?;
+    let source = auth::choose(
+        &config,
         args.profile.as_deref(),
         std::env::var("CRUCIBLE_OC_PROFILE").ok().as_deref(),
         std::env::var_os("CRUCIBLE_OC_API_KEY").is_some(),
         env.profile.as_deref(),
-    );
-    let execute = |command, output: &mut Output| {
+    )
+    .map_err(|message| preflight(auth::decorate(Failure::new(3, "auth", message), primary, None, &config)))?;
+    let key = auth::load(&config, &source).map_err(|message| {
+        preflight(auth::decorate(Failure::new(3, "auth", message), primary, Some(&source), &config))
+    })?;
+    output.redact_also(&key);
+    let execute = |file: Option<(&String, std::path::PathBuf)>, output: &mut Output| {
         let acceptance = RefCell::new(Acceptance::default());
-        let result = crate::run(
-            Oc {
-                profile: profile.clone(),
-                deadline: 300.0,
-                poll_interval: 2.0,
-                retry_delay: None,
-                verbose: args.verbose,
-                command,
-            },
-            output,
-            &acceptance,
-        );
-        acceptance.into_inner().finish(result)
+        let result = (|| {
+            let executor = Executor::new(
+                &crate::REGISTRY,
+                std::env::var("CRUCIBLE_OC_ORIGIN").ok(),
+                Some(&key),
+                Timing {
+                    deadline: Duration::from_secs_f64(DEFAULT_DEADLINE),
+                    poll_interval: Duration::from_secs_f64(DEFAULT_POLL_INTERVAL),
+                    retry_delay: None,
+                },
+                output,
+                &acceptance,
+            )?;
+            match file {
+                None => crate::check_auth(&executor, primary, Some(&source), true),
+                Some((name, file)) => crate::flows::publish::run(
+                    &executor,
+                    crate::flows::publish::Args {
+                        file,
+                        universe: env.universe.to_string(),
+                        place: env.places[name].to_string(),
+                        version_type: match env.version_type {
+                            VersionType::Saved => crate::flows::publish::VersionType::Saved,
+                            VersionType::Published => crate::flows::publish::VersionType::Published,
+                        },
+                    },
+                ),
+            }
+        })();
+        acceptance
+            .into_inner()
+            .finish(result)
+            .map_err(|failure| auth::decorate(failure, primary, Some(&source), &config))
     };
     let built = crate::build::build(root, &manifest, &args.places, None).map_err(|error| {
         let failure = match error {
@@ -91,57 +126,37 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         failure.with("publish", progress(&published, None, &targets))
     })?;
     if args.dry_run {
-        let check = execute(
-            OcCommand::Auth(AuthCommand::Check {
-                for_operation: Some(crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH).name.clone()),
-            }),
-            output,
-        )
-        .map_err(|failure| failure.with("publish", progress(&published, None, &targets)))?;
+        let check =
+            execute(None, output).map_err(|failure| failure.with("publish", progress(&published, None, &targets)))?;
         let mut document = progress(&published, None, &targets);
         document["auth"] = check;
         return Ok(document);
     }
-    for (index, (name, file)) in built.into_iter().enumerate() {
-        let result = execute(
-            OcCommand::Place(PlaceCommand::Publish(crate::flows::publish::Args {
-                file,
-                universe: env.universe.to_string(),
-                place: env.places[&name].to_string(),
-                version_type: match env.version_type {
-                    VersionType::Saved => crate::flows::publish::VersionType::Saved,
-                    VersionType::Published => crate::flows::publish::VersionType::Published,
-                },
-            })),
-            output,
-        );
+    let mut remaining = built.into_iter();
+    while let Some((name, file)) = remaining.next() {
+        let result = execute(Some((&name, file)), output);
         match result {
             Ok(mut receipt) => {
                 receipt["name"] = json!(name);
                 published.push(receipt);
             }
-            Err(failure) => {
-                return Err(failure.with("publish", progress(&published, Some(&name), &targets[index + 1..])));
+            Err(mut failure) => {
+                let remaining: Vec<_> = remaining.map(|(name, _)| name).collect();
+                let names: Vec<_> = remaining.iter().collect();
+                let mut state = progress(&published, Some(&name), &names);
+                let mut next = format!("crucible publish {}", args.env);
+                for name in std::iter::once(&name).chain(remaining.iter()) {
+                    next.push_str(&format!(" --place {name}"));
+                }
+                state["next"] = json!(next);
+                if failure.code == 5 {
+                    failure.error["hint"] = json!(
+                        "Check the failed place's versions before re-uploading it. Never rerun the environment without --place after a partial failure."
+                    );
+                }
+                return Err(failure.with("publish", state));
             }
         }
     }
     Ok(progress(&published, None, &[]))
-}
-
-fn effective_profile(explicit: Option<&str>, variable: Option<&str>, key: bool, env: Option<&str>) -> Option<String> {
-    explicit.or(variable).or(if key { None } else { env }).map(str::to_owned)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn manifest_profile_is_below_existing_explicit_credentials() {
-        assert_eq!(effective_profile(Some("flag"), Some("variable"), true, Some("env")), Some("flag".into()));
-        assert_eq!(effective_profile(None, Some("variable"), true, Some("env")), Some("variable".into()));
-        assert_eq!(effective_profile(None, None, true, Some("env")), None);
-        assert_eq!(effective_profile(None, None, false, Some("env")), Some("env".into()));
-        assert_eq!(effective_profile(None, None, false, None), None);
-    }
 }
