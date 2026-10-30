@@ -54,12 +54,18 @@ let minimum = LogLevel.Off;
 let sequence = 0;
 let emitting = false;
 
-function derive() {
+function derive(added?: Registration) {
 	const entries = new Array<Registration>();
 	minimum = LogLevel.Off;
-	for (const [, registration] of registrations) {
+	// roblox-ts Maps compile to unordered Luau tables. The array owns delivery order.
+	for (const registration of snapshot) {
+		if (!registration.connected) continue;
 		entries.push(registration);
 		minimum = math.min(minimum, registration.minimum);
+	}
+	if (added !== undefined) {
+		entries.push(added);
+		minimum = math.min(minimum, added.minimum);
 	}
 	snapshot = table.freeze(entries);
 }
@@ -89,7 +95,7 @@ function register(sink: LogSink, level: LogLevel): SinkSubscription {
 	};
 	const registration: Registration = { sink, subscription, minimum: level, connected: true };
 	registrations.set(sink, registration);
-	derive();
+	derive(registration);
 	return subscription;
 }
 

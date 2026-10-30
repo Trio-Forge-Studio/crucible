@@ -9,6 +9,13 @@ const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-logging-mutants-"));
 const mutants = [
 	[
+		"L3 reversed delivery",
+		"packages/crucible/src/logging.ts",
+		"entries.push(added);",
+		"entries.unshift(added);",
+		"L3 subscriptions",
+	],
+	[
 		"L1 filter bypass",
 		"packages/crucible/src/logging.ts",
 		"if (emitting || level < minimum) return;",

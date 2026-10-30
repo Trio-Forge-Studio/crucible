@@ -68,6 +68,18 @@ return {
 		assert(a ~= b, "fresh generation")
 		a:disconnect()
 		assert(w.log:isEnabled(0), "old disconnect cannot remove new")
+		local order = {}
+		for index = 1, 24 do
+			w.api.Logging:addSink({
+				write = function()
+					table.insert(order, index)
+				end,
+			})
+		end
+		w.log:info("ordered fanout")
+		for index = 1, 24 do
+			spec.eq(order[index], index, "registration order")
+		end
 	end,
 	["L4 throwing yielding sinks disconnect once with traceback and fanout continues"] = function()
 		for _, mode in { "throw", "yield" } do
