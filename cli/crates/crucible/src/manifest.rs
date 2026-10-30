@@ -43,6 +43,7 @@ pub enum ManifestError {
     NoPlaces,
     InvalidName { kind: &'static str, name: String },
     PlaceMapping { env: String },
+    PlaceShorthand { env: String },
     UnknownPlace { env: String, place: String },
     UnmappedPlace { env: String, place: String },
 }
@@ -57,6 +58,10 @@ impl fmt::Display for ManifestError {
                 write!(f, "{FILE}: {kind} name {name:?} must use only letters, digits, '-' and '_'")
             }
             Self::PlaceMapping { env } => write!(f, "{FILE}: env {env} must set exactly one of place or places"),
+            Self::PlaceShorthand { env } => write!(
+                f,
+                "{FILE}: env {env} sets place = <id>, which works only when {DEFAULT_PLACE} is the only place. Map each place with places = {{ <name> = <id>, ... }}"
+            ),
             Self::UnknownPlace { env, place } => write!(f, "{FILE}: env {env} maps undeclared place {place}"),
             Self::UnmappedPlace { env, place } => write!(f, "{FILE}: env {env} does not map place {place}"),
         }
@@ -112,7 +117,10 @@ impl Manifest {
         let mut envs = BTreeMap::new();
         for (name, env) in raw.env {
             let mapping = match (env.place, env.places) {
-                (Some(id), None) => BTreeMap::from([(DEFAULT_PLACE.to_owned(), id)]),
+                (Some(id), None) if places.len() == 1 && places.contains_key(DEFAULT_PLACE) => {
+                    BTreeMap::from([(DEFAULT_PLACE.to_owned(), id)])
+                }
+                (Some(_), None) => return Err(ManifestError::PlaceShorthand { env: name }),
                 (None, Some(mapping)) => mapping,
                 _ => return Err(ManifestError::PlaceMapping { env: name }),
             };
@@ -284,8 +292,22 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        let shorthand = "[places.arena]\nproject = \"arena.project.json\"\n[env.staging]\nuniverse = 1\nplace = 2\n";
-        assert!(matches!(error(shorthand), ManifestError::UnknownPlace { place, .. } if place == "start"));
+    }
+
+    #[test]
+    fn place_shorthand_needs_start_as_the_only_place() {
+        let arena = "[places.arena]\nproject = \"arena.project.json\"\n";
+        let start = "[places.start]\nproject = \"default.project.json\"\n";
+        for places in [arena.to_owned(), format!("{start}{arena}")] {
+            let failure = error(&format!("{places}[env.staging]\nuniverse = 1\nplace = 2\n"));
+            assert_eq!(
+                failure.to_string(),
+                "crucible.toml: env staging sets place = <id>, which works only when start is the only place. \
+                 Map each place with places = { <name> = <id>, ... }"
+            );
+        }
+        let manifest = Manifest::parse(&format!("{start}[env.staging]\nuniverse = 1\nplace = 2\n")).unwrap();
+        assert_eq!(manifest.envs["staging"].places, BTreeMap::from([("start".into(), id(2))]));
     }
 
     #[test]
