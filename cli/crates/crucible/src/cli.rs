@@ -1,12 +1,18 @@
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (rojo 7.7.1)");
+
 #[derive(Parser)]
-#[command(name = "crucible", version, about = "Tools for Crucible games.", arg_required_else_help = true)]
+#[command(name = "crucible", version = VERSION, about = "Tools for Crucible games.", arg_required_else_help = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 }
 #[derive(Subcommand)]
 pub enum Command {
+    /// Compile the game with roblox-ts, then build each place in crucible.toml with Rojo.
+    Build(crate::build::Args),
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
@@ -15,6 +21,14 @@ pub enum Command {
         /// The topic to print.
         #[arg(value_parser = topics())]
         topic: Option<String>,
+    },
+    /// Build one Rojo project. crucible build runs this in a child process.
+    #[command(name = crate::build::ROJO_BUILD, hide = true)]
+    RojoBuild {
+        /// The Rojo project file.
+        project: PathBuf,
+        /// The place file to write.
+        output: PathBuf,
     },
 }
 fn topics() -> clap::builder::PossibleValuesParser {
@@ -173,6 +187,20 @@ mod tests {
             missing.extend(undocumented(child, &format!("{path} {}", child.get_name())));
         }
         missing
+    }
+
+    #[test]
+    fn version_names_the_locked_rojo() {
+        let lock = include_str!("../../../Cargo.lock");
+        let rojo = VERSION.strip_suffix(')').and_then(|v| v.split_once(" (rojo ")).map(|(_, rojo)| rojo).unwrap();
+        assert!(
+            lock.contains(&format!(
+                "name = \"rojo\"
+version = \"{rojo}\"
+"
+            )),
+            "Cargo.lock locks rojo {rojo}"
+        );
     }
 
     #[test]
