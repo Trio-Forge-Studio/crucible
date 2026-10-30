@@ -56,7 +56,9 @@ The game pins the CLI and runtime at the CLI version and includes the tested rob
 
 The command detects npm, pnpm, Yarn, or Bun from `npm_config_user_agent`, with npm as the default. Yarn projects include `.yarnrc.yml` with `nodeLinker: node-modules` for roblox-ts and Rojo. `--no-install` writes files without running install. Install failures exit 1 and leave the project available for a manual retry. Progress and install output go to stderr. Success prints the project path to stdout.
 
-In the new directory, run `npm run check` to lint, check formatting, compile, and build `build/start.rbxl`. `npm run build` builds the game, and `npm run fmt` fixes formatting. Use the equivalent script commands with your package manager. Read the generated `AGENTS.md` and `npx crucible docs cli` before developing the game.
+In the new directory, run `npx crucible dev` to compile on save and sync the game to Studio.
+
+Run `npm run check` to lint, check formatting, compile, and build `build/start.rbxl`. `npm run build` builds the game, and `npm run fmt` fixes formatting. Use the equivalent script commands with your package manager. Read the generated `AGENTS.md` and `npx crucible docs cli` before developing the game.
 
 ## crucible dev
 
