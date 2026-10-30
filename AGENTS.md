@@ -17,7 +17,7 @@ Run `pnpm install --pm-on-fail=download` and `rokit install`. Keep the lockfile 
 
 Run `pnpm check` before calling a change complete. It must exit 0. It checks formatting and lint, compiles the runtime and sample, builds `build/sample-game.rbxl`, and runs the Lune specs. `pnpm fmt` fixes TypeScript, configuration, and Luau formatting. Fix failures at their cause.
 
-For changes under `cli`, also run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask spec check`, and `cargo test --workspace` from `cli`. CI runs them on Ubuntu and Windows.
+For changes under `cli`, also run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask spec check`, `cargo test --workspace`, and `node --test npm/package.test.mjs` from `cli`. CI runs them on Ubuntu and Windows.
 
 The Lune loader supplies only the engine behavior needed to execute the sample imports. A passing Lune spec does not prove gameplay behavior in Studio.
 

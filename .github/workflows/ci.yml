@@ -54,3 +54,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
       - run: cargo test --workspace --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test npm/package.test.mjs
