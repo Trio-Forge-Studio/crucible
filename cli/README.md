@@ -1,57 +1,58 @@
-# updraft
+# Crucible CLI
 
-updraft is a Rust CLI for Roblox Open Cloud. Coding agents and Node scripts can call all 299 API-key operations in the pinned Roblox spec, plus API-key introspection and public place-to-universe lookup. Four commands handle asset upload, place publishing, asset download, and Luau execution.
+`crucible` is the command line for Crucible games. Today it has one command group. `crucible oc` calls Roblox Open Cloud. Coding agents and Node scripts can call all 299 API-key operations in the pinned Roblox spec, plus API-key introspection and public place-to-universe lookup. Four commands handle asset upload, place publishing, asset download, and Luau execution.
 
-Each command writes one JSON document to stdout. Progress goes to stderr. `--help` and `--version` print plain text. Nothing prompts for input.
+Each `crucible oc` command writes one JSON document to stdout. Progress goes to stderr. `--help` and `--version` print plain text. Nothing prompts for input. Errors outside `crucible oc` print clap's plain-text usage.
 
 ## Install with rokit
 
-Add updraft to your project's `rokit.toml`.
+Add `crucible` to your project's `rokit.toml`.
 
 ```toml
 [tools]
-updraft = "Trio-Forge-Studio/updraft@0.1.0"
+crucible = "Trio-Forge-Studio/crucible@0.1.0"
 ```
 
-Run `rokit install`, then `updraft --version`. The release assets support Windows x86_64, Linux x86_64 with musl, and macOS aarch64. Version 0.1.0 becomes installable after its tag and release are published.
+Run `rokit install`, then `crucible --version`. The release assets support Windows x86_64, Linux x86_64 with musl, and macOS aarch64. Version 0.1.0 becomes installable after its tag and release are published. While this repository is private, rokit needs a GitHub token with read access to it. Add one with `rokit authenticate github --token <token>`.
 
-To build from source, use the toolchain pinned in `rust-toolchain.toml`.
+To build from source, run this from `cli/` with the toolchain pinned in `rust-toolchain.toml`.
 
 ```console
-cargo build --release --locked --package updraft
+cargo build --release --locked --package crucible
 ```
 
 ## Configure a key
 
-For CI, set `UPDRAFT_API_KEY` in the command's environment. Keys never belong in command arguments.
+For CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Keys never belong in command arguments.
 
-Local profiles live in `%APPDATA%\updraft\config.toml` on Windows. On Unix, the file is `$XDG_CONFIG_HOME/updraft/config.toml`, or `~/.config/updraft/config.toml`. `UPDRAFT_CONFIG` selects another file.
+Local profiles live in `%APPDATA%\crucible\config.toml` on Windows. On Unix, the file is `$XDG_CONFIG_HOME/crucible/config.toml`, or `~/.config/crucible/config.toml`. `CRUCIBLE_CONFIG` selects another file.
 
 ```toml
+[oc]
 default_profile = "assets"
 
-[profiles.assets]
+[oc.profiles.assets]
 key_env = "ROBLOX_ASSETS_API_KEY"
 group = 35
 
-[profiles.publish]
+[oc.profiles.publish]
 key_env = "ROBLOX_API_KEY"
 
-[profiles.luau]
+[oc.profiles.luau]
 key_file = "C:/Users/Admin/.secrets/roblox-luau.key"
 ```
 
-A profile requires exactly one of `key_env` and `key_file`. Its optional `group` or `user` sets the default asset creator. Put `default_profile` before the profile tables, as shown above.
+Open Cloud settings live in the `[oc]` table. A profile requires exactly one of `key_env` and `key_file`. Its optional `group` or `user` sets the default asset creator.
 
-The selection order is `--profile`, `UPDRAFT_PROFILE`, `UPDRAFT_API_KEY`, then `default_profile`. A missing or empty selected source fails with exit 3. updraft never falls through to another source or retries with another key. Public calls send no key. Auth errors include the configured profile names and the operation's declared scopes. Missing scope metadata appears as `requiredScopes: null` and `scopeMetadata: "unknown"`.
+The selection order is `--profile`, `CRUCIBLE_OC_PROFILE`, `CRUCIBLE_OC_API_KEY`, then `default_profile`. A missing or empty selected source fails with exit 3. `crucible oc` never falls through to another source or retries with another key. Public calls send no key. Auth errors include the configured profile names and the operation's declared scopes. Missing scope metadata appears as `requiredScopes: null` and `scopeMetadata: "unknown"`.
 
 ## Find and describe operations
 
 Find operations with words from their name, path, scopes, or documentation.
 
 ```console
-updraft find luau logs
-updraft describe universes.create-place-version
+crucible oc find luau logs
+crucible oc describe universes.create-place-version
 ```
 
 `describe` returns parameters, body media, schema outlines, scopes, safety, retry policy, pagination, completion, stability, and overlay notes. Names remain attached to their operations across spec updates.
@@ -61,26 +62,26 @@ updraft describe universes.create-place-version
 Parameters use `name=value`. `assetId`, `asset_id`, and `asset-id` bind the same parameter. Repeat array parameters as `ids=1 ids=2`. Required parameters and value kinds are checked before sending. JSON bodies are checked for syntax, without schema validation.
 
 ```console
-updraft call assets.get assetId=1234567 readMask=assetType,displayName
-updraft call GET '/assets/v1/assets/1234567?readMask=displayName'
-updraft call universes.get-place-universe placeId=1818
-updraft call assets.list-versions assetId=1234567 --all --max-items 50
-updraft call universes.create-place-version universeId=13058 placeId=1818 versionType=Published --body @build/warehouse.rbxl
-updraft call assets.create --part request=@request.json --part 'fileContent=@sofa.fbx;type=model/fbx' --no-wait
+crucible oc call assets.get assetId=1234567 readMask=assetType,displayName
+crucible oc call GET '/assets/v1/assets/1234567?readMask=displayName'
+crucible oc call universes.get-place-universe placeId=1818
+crucible oc call assets.list-versions assetId=1234567 --all --max-items 50
+crucible oc call universes.create-place-version universeId=13058 placeId=1818 versionType=Published --body @build/warehouse.rbxl
+crucible oc call assets.create --part request=@request.json --part 'fileContent=@sofa.fbx;type=model/fbx' --no-wait
 ```
 
 `--body` accepts inline JSON, `@file`, or `@-` for stdin. Binary operations accept the file's bytes. Multipart operations use repeated `--part name=value` arguments. Use `@@` when a literal starts with `@`. A process can consume stdin once.
 
-`--all` follows pagination and returns one page-shaped document. `--max-pages` defaults to 100 and retains the next token when the cap is reached. `--max-items` bounds its item count and retains the next token when it stops early. updraft keeps the endpoint's default page size and reduces a declared size when the remaining item limit needs it. If a default page is too large, the outcome table permits one smaller-page read. A server that ignores the requested size produces exit 2. An unsafe operation is never re-sent for this adjustment.
+`--all` follows pagination and returns one page-shaped document. `--max-pages` defaults to 100 and retains the next token when the cap is reached. `--max-items` bounds its item count and retains the next token when it stops early. `crucible oc` keeps the endpoint's default page size and reduces a declared size when the remaining item limit needs it. If a default page is too large, the outcome table permits one smaller-page read. A server that ignores the requested size produces exit 2. An unsafe operation is never re-sent for this adjustment.
 
 Long-running calls poll by default. `--no-wait` returns the first reply. A pending result includes a GET-only command in `error.resume`. GET readers wait for terminal state by default too.
 
 ## Check credentials
 
 ```console
-updraft auth check
-updraft auth check --for assets.get
-updraft auth profiles
+crucible oc auth check
+crucible oc auth check --for assets.get
+crucible oc auth profiles
 ```
 
 `call api-keys.introspect` and `auth check` use the same executor path. It supplies the selected key as the `apiKey` body field and rejects caller-supplied bodies. `auth check` posts the selected key to `/api-keys/v1/introspect`. It flattens each scope's `name` and `operations` into strings such as `asset:read`. `--for` checks that the returned list contains the operation's declared scope names. Resource restrictions still apply on Roblox. `auth profiles` lists sources and whether their keys are present, without printing their values.
@@ -88,8 +89,8 @@ updraft auth profiles
 ## Upload an asset
 
 ```console
-updraft asset upload assets/sofa.fbx --group 35 --description 'Model for Fragile Delivery.'
-updraft asset upload --resume 9f1c
+crucible oc asset upload assets/sofa.fbx --group 35 --description 'Model for Fragile Delivery.'
+crucible oc asset upload --resume 9f1c
 ```
 
 Upload sends one create request, then polls for the asset ID. It never repeats the create request. A 5xx, lost response, malformed success body, or missing operation ID exits 5 and asks you to check the group's Creations. Rejections and unknown outcomes have different exit codes.
@@ -101,7 +102,7 @@ The display name defaults to the file stem in title case. `--name` overrides it.
 ## Publish a place
 
 ```console
-updraft --profile publish place publish build/warehouse.rbxl --universe 13058 --place 1818
+crucible oc --profile publish place publish build/warehouse.rbxl --universe 13058 --place 1818
 ```
 
 Publishing sends an `application/octet-stream` body. It retries 409 and 5xx responses for at most four attempts, with 60 seconds between attempts by default. A later success resolves earlier uncertainty. If any attempt got a 5xx or lost its response and none later succeeded, the command exits 5, including a 503 followed by a 400. `--version-type saved` saves without publishing.
@@ -109,22 +110,22 @@ Publishing sends an `application/octet-stream` body. It retries 409 and 5xx resp
 ## Download an asset
 
 ```console
-updraft asset download 1234567 --out build/sofa.rbxm
-updraft asset download 1234567 --version 2 --out build/sofa.rbxm --overwrite
+crucible oc asset download 1234567 --out build/sofa.rbxm
+crucible oc asset download 1234567 --version 2 --out build/sofa.rbxm --overwrite
 ```
 
-Asset delivery needs `legacy-asset:manage`. updraft fetches the returned URL with a separate client that never carries the API key. It accepts HTTPS URLs without credentials and follows at most five redirects. The download goes through a sibling temporary file, then a rename. Existing files require `--overwrite`. Failed transfers preserve the previous target. Downloads have a 30-second idle read timeout and no total duration cap. Upload and publish requests with file bodies get 600 seconds, while polls keep short timeouts.
+Asset delivery needs `legacy-asset:manage`. `crucible oc` fetches the returned URL with a separate client that never carries the API key. It accepts HTTPS URLs without credentials and follows at most five redirects. The download goes through a sibling temporary file, then a rename. Existing files require `--overwrite`. Failed transfers preserve the previous target. Downloads have a 30-second idle read timeout and no total duration cap. Upload and publish requests with file bodies get 600 seconds, while polls keep short timeouts.
 
 ## Run Luau
 
 ```console
-updraft luau run scripts/probe.luau --universe 13058 --place 1818
-updraft luau run --resume universes/13058/places/1818/versions/7/luau-execution-sessions/e1/tasks/t1
+crucible oc luau run scripts/probe.luau --universe 13058 --place 1818
+crucible oc luau run --resume universes/13058/places/1818/versions/7/luau-execution-sessions/e1/tasks/t1
 ```
 
 Use `-` instead of a file to read UTF-8 Luau from stdin. Scripts are limited to 4 MB. `--version` selects a place version. `--timeout` sets Roblox's execution timeout in seconds.
 
-updraft creates once, polls to COMPLETE, FAILED, or CANCELLED, then reads up to 100 log pages. Results come from `output.results`. FAILED and CANCELLED exit 6 with logs. If reading logs fails or exceeds 100 pages, the result includes `logsComplete: false`, the read error, and a stderr warning. A COMPLETE task still exits 0. An accepted task with an unmatched path exits 5 and retains the path without a resume command. A resume requires exactly one matching GET reader. A missing task identity for unfinished work exits 5. Poll failures retain `updraft luau run --resume <task path>` in `error.resume`. Resume sends GETs only, waits for terminal state, reads logs, and exits 6 on FAILED or CANCELLED.
+`crucible oc` creates once, polls to COMPLETE, FAILED, or CANCELLED, then reads up to 100 log pages. Results come from `output.results`. FAILED and CANCELLED exit 6 with logs. If reading logs fails or exceeds 100 pages, the result includes `logsComplete: false`, the read error, and a stderr warning. A COMPLETE task still exits 0. An accepted task with an unmatched path exits 5 and retains the path without a resume command. A resume requires exactly one matching GET reader. A missing task identity for unfinished work exits 5. Poll failures retain `crucible oc luau run --resume <task path>` in `error.resume`. Resume sends GETs only, waits for terminal state, reads logs, and exits 6 on FAILED or CANCELLED.
 
 ## Exit codes
 
@@ -150,7 +151,7 @@ The global options are `--profile`, `--deadline <seconds>`, `--poll-interval <se
 ```javascript
 import { spawnSync } from "node:child_process";
 
-const result = spawnSync("updraft", ["asset", "upload", "assets/sofa.fbx", "--group", "35"], {
+const result = spawnSync("crucible", ["oc", "asset", "upload", "assets/sofa.fbx", "--group", "35"], {
 	encoding: "utf8",
 	env: process.env,
 });
@@ -176,6 +177,8 @@ After an overlay edit, run `cargo xtask spec build`. Keep the previous registry 
 
 ## Verify changes
 
+Run these from `cli/`.
+
 ```console
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -183,7 +186,7 @@ cargo test --workspace
 cargo xtask spec check
 ```
 
-The behavior tests drive the real binary against local HTTP servers. `UPDRAFT_ORIGIN` overrides Roblox origins for these tests and always prints a warning. In that mode, the download client also permits HTTP loopback URLs. It still sends no key to a download URL. API requests never follow redirects.
+The behavior tests drive the real binary against local HTTP servers. `CRUCIBLE_OC_ORIGIN` overrides Roblox origins for these tests and always prints a warning. In that mode, the download client also permits HTTP loopback URLs. It still sends no key to a download URL. API requests never follow redirects.
 
 The live suite is ignored by default. Set `ROBLOX_ASSETS_API_KEY` and run its read-only tests explicitly.
 
@@ -191,4 +194,4 @@ The live suite is ignored by default. Set `ROBLOX_ASSETS_API_KEY` and run its re
 cargo test --test live read_only_ -- --ignored
 ```
 
-`UPDRAFT_LIVE_ASSET_ID` and `UPDRAFT_LIVE_PLACE_ID` override the read fixtures. The upload test additionally needs `ROBLOX_GROUP_ID` and the user's approval before setting `UPDRAFT_ALLOW_LIVE_UPLOAD=1` and running `cargo test --test live -- --ignored`. That test creates one 1x1 PNG decal and archives it. It records the operation in `build/live-upload-receipt.json`, resolves pending work during cleanup, archives any known created asset after an assertion failure, and verifies the archive. Unknown outcomes or failed cleanup require a manual Creations check or archival of the reported asset ID.
+`CRUCIBLE_OC_LIVE_ASSET_ID` and `CRUCIBLE_OC_LIVE_PLACE_ID` override the read fixtures. The upload test additionally needs `ROBLOX_GROUP_ID` and the user's approval before setting `CRUCIBLE_OC_ALLOW_LIVE_UPLOAD=1` and running `cargo test --test live -- --ignored`. That test creates one 1x1 PNG decal and archives it. It records the operation in `build/live-upload-receipt.json`, resolves pending work during cleanup, archives any known created asset after an assertion failure, and verifies the archive. Unknown outcomes or failed cleanup require a manual Creations check or archival of the reported asset ID.
