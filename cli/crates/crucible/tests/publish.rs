@@ -331,3 +331,75 @@ fn stdout_failure_preserves_upload_uncertainty() {
         assert_eq!(server.requests().len(), 1);
     }
 }
+
+#[test]
+fn recovery_replays_explicit_profile_and_verbose_without_reuploading_successes() {
+    let game = Game::new(Some(TWO));
+    fs::write(game.0.path().join("config.toml"), "[oc.profiles.flag]\nkey_env='FLAG_KEY'\n").unwrap();
+    let server = Server::new(vec![
+        Response::json(json!({"versionNumber":7})),
+        Response::Body(400, "bad request".into()),
+        Response::json(json!({"versionNumber":8})),
+    ]);
+    let out = game
+        .command(&server.origin)
+        .args(["production", "--profile", "flag", "--verbose"])
+        .env_remove("CRUCIBLE_OC_API_KEY")
+        .env("FLAG_KEY", "flag-key")
+        .output()
+        .unwrap();
+    assert_eq!(code(&out), 4, "{}", document(&out));
+    let d = document(&out);
+    let next = d["error"]["publish"]["next"].as_str().unwrap();
+    let replay = game
+        .command(&server.origin)
+        .args(next.strip_prefix("crucible publish ").unwrap().split_whitespace())
+        .env_remove("CRUCIBLE_OC_API_KEY")
+        .env("FLAG_KEY", "flag-key")
+        .output()
+        .unwrap();
+    println!(
+        "next={next} replay exit={} stdout={} stderr={}",
+        code(&replay),
+        String::from_utf8_lossy(&replay.stdout),
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    assert_eq!(code(&replay), 0, "{}", document(&replay));
+    assert_eq!(document(&replay)["published"][0]["name"], "start");
+    assert!(String::from_utf8_lossy(&replay.stderr).contains("POST"));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3);
+    for (request, id) in requests.iter().zip(["20", "30", "30"]) {
+        assert!(request.head.contains(&format!("/places/{id}/versions?")), "{}", request.head);
+        assert!(request.head.contains("x-api-key: flag-key"), "{}", request.head);
+    }
+}
+
+#[test]
+fn recovery_replays_hyphenated_place_and_every_unattempted_place() {
+    let game = Game::new(Some(&TWO.replace("arena", "-arena")));
+    let server = Server::new(vec![
+        Response::Body(400, "bad request".into()),
+        Response::json(json!({"versionNumber":7})),
+        Response::json(json!({"versionNumber":8})),
+    ]);
+    let out = game.publish(&server.origin, &["production"]);
+    assert_eq!(code(&out), 4, "{}", document(&out));
+    let d = document(&out);
+    let next = d["error"]["publish"]["next"].as_str().unwrap();
+    let replay = game
+        .command(&server.origin)
+        .args(next.strip_prefix("crucible publish ").unwrap().split_whitespace())
+        .output()
+        .unwrap();
+    println!("next={next} replay exit={} stdout={}", code(&replay), String::from_utf8_lossy(&replay.stdout));
+    assert_eq!(code(&replay), 0, "{}", document(&replay));
+    assert_eq!(document(&replay)["published"][0]["name"], "-arena");
+    assert_eq!(document(&replay)["published"][1]["name"], "start");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3);
+    for (request, id) in requests.iter().zip(["20", "20", "30"]) {
+        assert!(request.head.contains(&format!("/places/{id}/versions?")), "{}", request.head);
+        assert!(request.head.contains(&format!("x-api-key: {KEY}")), "{}", request.head);
+    }
+}
