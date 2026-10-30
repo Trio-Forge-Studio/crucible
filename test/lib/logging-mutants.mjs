@@ -95,6 +95,177 @@ const mutants = [
 		"L12 module",
 	],
 ];
+const L = "packages/crucible/src/logging.ts";
+const O = "packages/crucible/src/internal/log-output.ts";
+const D = "packages/crucible/src/internal/diagnostics.ts";
+const verifierMutants = [
+	[
+		"1",
+		"boundary filter off by one level",
+		[[L, "if (emitting || level < minimum) return;", "if (emitting || level + 1 < minimum) return;"]],
+		"L1 disabled",
+	],
+	[
+		"2",
+		"disconnect skips recompute",
+		[[L, "registrations.delete(sink);\n\t\t\t\tderive();", "registrations.delete(sink);"]],
+		"L2 aggregate",
+	],
+	[
+		"2",
+		"live default is Debug",
+		[[L, "loggingPort().isStudio() ? LogLevel.Debug : LogLevel.Info", "LogLevel.Debug"]],
+		"L2 aggregate",
+	],
+	[
+		"3",
+		"disconnect not idempotent",
+		[[L, "disconnect() {\n\t\t\t\tif (!registration.connected) return;\n", "disconnect() {\n"]],
+		"L3 subscriptions",
+	],
+	[
+		"4",
+		"sink report drops traceback on throw",
+		[
+			[
+				L,
+				'runtimeDiagnostic("error", `Log sink failed: ${tostring(err)}`);',
+				'runtimeDiagnostic("error", `Log sink failed: ${status === CallResult.Threw ? tostring(err).split("\\n")[0] : tostring(err)}`);',
+			],
+		],
+		"L4 throwing",
+	],
+	[
+		"4",
+		"sink report drops traceback always",
+		[
+			[
+				L,
+				'runtimeDiagnostic("error", `Log sink failed: ${tostring(err)}`);',
+				'runtimeDiagnostic("error", `Log sink failed: ${tostring(err).split("\\n")[0]}`);',
+			],
+		],
+		"L4 throwing",
+	],
+	[
+		"5",
+		"guard released before fanout",
+		[
+			[
+				L,
+				"for (const registration of accepted) {",
+				"emitting = false;\n\t\t\tfor (const registration of accepted) {",
+			],
+		],
+		"L5 whole",
+	],
+	[
+		"6",
+		"instance short name in Roblox adapter",
+		[
+			[
+				O,
+				"describeInstance: (instance) => instance.GetFullName(),",
+				"describeInstance: (instance) => instance.Name,",
+			],
+		],
+		"L6 frozen",
+	],
+	[
+		"6",
+		"non-primitive kept raw",
+		[[L, "\t\t\t\t\t: tostring(value);", "\t\t\t\t\t: (value as never);"]],
+		"L6 frozen",
+	],
+	[
+		"7",
+		"missing key rendered empty",
+		[
+			[
+				L,
+				"value === undefined ? template.sub(index, close) : tostring(value)",
+				'value === undefined ? "" : tostring(value)',
+			],
+		],
+		"L7 renderer",
+	],
+	[
+		"8",
+		"traceback level points inside logging",
+		[[L, 'debug.traceback("", 3)', 'debug.traceback("", 1)']],
+		"L8 game",
+	],
+	[
+		"8",
+		"game error thrown synchronously",
+		[
+			[
+				O,
+				'task.spawn(() => error(`${text}\\n${record.traceback ?? ""}`, 0));',
+				'error(`${text}\\n${record.traceback ?? ""}`, 0);',
+			],
+		],
+		"L8 game",
+	],
+	[
+		"9",
+		"diagnostics routed to game port",
+		[
+			[
+				D,
+				"loggingPort().writeInternal(level, message)",
+				'loggingPort().writeGame({ sequence: 0, time: 0, source: "Crucible", level: level === "error" ? 3 : 2, template: message, context: {}, message } as never)',
+			],
+		],
+		"L9 private",
+	],
+	[
+		"10",
+		"logger recreated per write",
+		[[O, 'gameLogger ??= service.GetLogger("Game");', 'gameLogger = service.GetLogger("Game");']],
+		"L10 native",
+	],
+	[
+		"10",
+		"Info drops context",
+		[[O, "logger.Info(escape(text), record.context);", "logger.Info(escape(text));"]],
+		"L10 native",
+	],
+	[
+		"10",
+		"Crucible warn unescaped",
+		[
+			[
+				O,
+				"() => crucibleLogger!.Warn(escape(`[Crucible] ${message}`), {}),",
+				"() => crucibleLogger!.Warn(`[Crucible] ${message}`),",
+			],
+		],
+		"L10 native",
+	],
+	[
+		"11",
+		"segment check removed",
+		[
+			[
+				L,
+				'for (const segment of source.split(".")) assert(segment.size() > 0, "Invalid logger name segment");',
+				"",
+			],
+		],
+		"L11 names",
+	],
+];
+for (const [rule, name, [[file, before, after]], target] of verifierMutants) {
+	mutants.push([`L${rule} ${name}`, file, before, after, target]);
+}
+mutants.push([
+	"L10 warning context omitted",
+	O,
+	"Warn(escape(`[Crucible] ${message}`), {})",
+	"Warn(escape(`[Crucible] ${message}`))",
+	"L10 native",
+]);
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 180000 });
 	assert.equal(result.error, undefined, String(result.error));

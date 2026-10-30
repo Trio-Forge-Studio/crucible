@@ -27,9 +27,22 @@ end
 
 return {
 	["L1 disabled calls do no record render native or sink work"] = function()
-		local w = world()
-		w.api.Logging.defaultSink:setMinimum(4)
+		local w = world(false)
 		local touched = 0
+		w.log:debug(
+			"{x}",
+			{ x = setmetatable({}, {
+				__tostring = function()
+					touched += 1
+					return "x"
+				end,
+			}) }
+		)
+		spec.eq(touched, 0, "Info filters Debug before normalization")
+		spec.eq(w.clocks(), 0, "Info filters Debug before record creation")
+		spec.eq(#w.e.gameLogs, 0, "Info filters Debug before output")
+		w.api.Logging.defaultSink:setMinimum(4)
+		touched = 0
 		local context =
 			{ x = setmetatable({}, {
 				__tostring = function()
@@ -59,7 +72,12 @@ return {
 	end,
 	["L3 subscriptions are identity idempotent and reconnect is fresh"] = function()
 		local w = world()
-		local sink = { write = function() end }
+		local delivered = 0
+		local sink = {
+			write = function()
+				delivered += 1
+			end,
+		}
 		local a = w.api.Logging:addSink(sink, 2)
 		spec.eq(w.api.Logging:addSink(sink, 0), a, "same active subscription")
 		a:disconnect()
@@ -68,6 +86,9 @@ return {
 		assert(a ~= b, "fresh generation")
 		a:disconnect()
 		assert(w.log:isEnabled(0), "old disconnect cannot remove new")
+		spec.eq(w.api.Logging:addSink(sink), b, "stale disconnect preserves live registration")
+		w.log:info("once")
+		spec.eq(delivered, 1, "one live delivery")
 		local order = {}
 		for index = 1, 24 do
 			w.api.Logging:addSink({
@@ -105,7 +126,7 @@ return {
 			spec.eq(calls, 1, "disconnected")
 			spec.eq(later, 2, "caller and other sinks continue")
 			spec.eq(#w.e.logs, 1, "one diagnostic")
-			spec.has(w.e.logs[1].message, "logging:", "sink traceback")
+			assert(w.e.logs[1].message:gsub("\\", "/"):match("\n[^\n]*test/logging:%d+"), "sink traceback frame")
 		end
 	end,
 	["L5 whole emission guard survives cross logger remove and readd"] = function()
@@ -132,6 +153,15 @@ return {
 		local w = world()
 		local instance = require("@lune/roblox").Instance.new("Folder")
 		instance.Name = "Normalized"
+		local parent = require("@lune/roblox").Instance.new("Folder")
+		parent.Name = "Parent"
+		instance.Parent = parent
+		local p = platform()
+		spec.eq(
+			p.graph.module("internal/log-output").createRobloxLoggingPort().describeInstance(instance),
+			"Parent.Normalized",
+			"real adapter full name"
+		)
 		local original = { number = 42, flag = false, instance = instance, nested = {}, fn = function() end }
 		local retained
 		w.api.Logging:addSink({
@@ -151,7 +181,7 @@ return {
 		assert(table.isfrozen(retained), "retained record frozen")
 		assert(table.isfrozen(retained.context), "retained context frozen")
 		spec.eq(retained.context.number, 42, "snapshot")
-		spec.eq(retained.context.instance, "Normalized", "instance full name")
+		spec.eq(retained.context.instance, "Parent.Normalized", "instance full name")
 		spec.eq(type(retained.context.nested), "string", "table accepted")
 		spec.eq(type(retained.context.fn), "string", "function accepted")
 		spec.eq(retained.context.flag, false, "boolean preserved")
@@ -165,10 +195,16 @@ return {
 	["L8 game error is one spawned error with source and caller traceback"] = function()
 		local p = platform()
 		local api = p.graph.module("logging")
+		local callerLine = debug.info(1, "l") + 1
 		api.Logging:getLogger("Game.Error"):error("failed {id}", { id = 7 })
 		spec.eq(#p.errors, 1, "one spawned error")
 		spec.has(p.errors[1], "[Game.Error] failed 7", "source rendered")
-		spec.has(p.errors[1], "logging:", "caller traceback")
+		assert(p.errors[1]:sub(1, 1) == "[", "game error is not a sink failure")
+		local firstFrame = p.errors[1]:match("\n+([^\n]+)")
+		spec.has(firstFrame:gsub("\\", "/"), "test/logging:" .. callerLine, "exact game call site")
+		api.Logging:getLogger("Game.Error"):error("later")
+		spec.eq(#p.errors, 2, "default sink still connected")
+		spec.has(p.errors[2], "[Game.Error] later", "later game output")
 	end,
 	["L9 private diagnostics bypass game sinks and disconnected default"] = function()
 		local w = world()
@@ -197,7 +233,8 @@ return {
 					if fail then
 						error("native unavailable")
 					end
-					table.insert(writes, { text = text, context = context })
+					local displayed = if context then text:gsub("{{", "{"):gsub("}}", "}") else text
+					table.insert(writes, { text = text, context = context, displayed = displayed })
 				end
 				return { Output = write, Info = write, Warn = write }
 			end,
@@ -222,8 +259,13 @@ return {
 		end
 		port.writeInternal("warning", "braces {literal}")
 		spec.list(created, { "Game", "Crucible" }, "two native loggers")
-		spec.eq(writes[1].text, "[Native] {{literal}}", "brace escaping")
-		spec.eq(writes[1].context, context, "structured context")
+		for index = 1, 3 do
+			spec.eq(writes[index].text, "[Native] {{literal}}", "brace escaping")
+			spec.eq(writes[index].context, context, "structured context")
+		end
+		spec.eq(writes[4].text, "[Crucible] braces {{literal}}", "warning escaping")
+		assert(type(writes[4].context) == "table", "warning context supplied")
+		spec.eq(writes[4].displayed, "[Crucible] braces {literal}", "warning displayed verbatim")
 		fail = true
 		port.writeGame({ level = 1, source = "Native", message = "failed", context = context })
 		fail = false
@@ -238,7 +280,7 @@ return {
 		end
 		assert(w.api.Logging:getLogger("Delivery.Van"), "valid name")
 	end,
-	["L12 module load logging precedes boot and fixture evaluation"] = function()
+	["L12 module load logging precedes startup and fixture evaluation"] = function()
 		local w = world()
 		w.log:info("before boot")
 		spec.eq(w.e.gameLogs[1].message, "before boot", "module log")

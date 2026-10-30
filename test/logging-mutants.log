@@ -28,3 +28,6 @@ KILLED L9 diagnostics routed to game port | L9 private | build 0, spec 1
 KILLED L10 logger recreated per write | L10 native | build 0, spec 1
 KILLED L10 Info drops context | L10 native | build 0, spec 1
 KILLED L10 Crucible warn unescaped | L10 native | build 0, spec 1
+KILLED L11 segment check removed | L11 names | build 0, spec 1
+KILLED L10 warning context omitted | L10 native | build 0, spec 1
+32/32 selected source mutants killed; restored build 0
