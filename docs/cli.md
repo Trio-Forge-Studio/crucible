@@ -59,11 +59,13 @@ npx crucible dev --place arena --port 34873
 
 - `--place <name>` serves that place from `crucible.toml`. The default is `start`.
 - `--port <port>` sets the port. Without it, Rojo uses the project's `servePort`, or 34872.
-- Every line from roblox-ts starts with `[rbxtsc]`, and every line from Rojo starts with `[rojo]`. All output goes to stderr.
+- Every line from roblox-ts starts with `[rbxtsc]`, and every line from Rojo starts with `[rojo]`. All output goes to stderr. When stderr is not a terminal, colour codes are removed.
 - roblox-ts resolves the same way as in `crucible build`. A changed `@trioforge/crucible` transformer makes the first compile start from clean.
+- After the first compile, `crucible dev` writes `out/transformer.sha256`, even when that compile reports errors. The receipt records which transformer produced `out`, not whether the game compiles.
 - Ctrl+C stops roblox-ts and Rojo, including any processes they started, and exits 0.
+- If `crucible dev` itself is killed, roblox-ts, Rojo, and the processes roblox-ts started stop with it. On macOS and Linux, a process that roblox-ts starts in a new process group or session escapes this.
 - If roblox-ts or Rojo stops on its own, `crucible dev` stops the other and exits 1. A port in use is the common cause.
-- An unknown place or a `crucible.toml` error exits 2 before anything starts.
+- An unknown place or an invalid `crucible.toml` exits 2 before anything starts. A `crucible.toml` that cannot be read exits 1.
 
 ## crucible docs
 
