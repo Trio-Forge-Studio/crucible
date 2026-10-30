@@ -20,7 +20,7 @@ cargo build --release --locked --package crucible
 
 The CLI ships on npm the way oxlint does. The `crucible` package holds a Node shim and the `crucible` bin. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64`, `@trioforge/crucible-cli-linux-x64`, and `@trioforge/crucible-cli-darwin-arm64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
 
-`npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The packages stay `private` until a release task publishes them.
+`npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
 
 ```console
 node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
@@ -28,7 +28,20 @@ node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 
 `npm/package.test.mjs` stages the debug binary from `cargo test`, packs the packages with `npm pack`, installs them into a temporary project, and runs `npx crucible`. Set `CRUCIBLE_BINARY` to test another binary.
 
+## Release packages
+
+`.github/workflows/release.yml` runs on pull requests and `v*` tag pushes. It builds MSVC Windows x64, static musl Linux x64, and native Apple Silicon macOS binaries on Blacksmith. The Mac job uses `blacksmith-6vcpu-macos-15`, documented in [Blacksmith runner types](https://docs.blacksmith.sh/blacksmith-runners/overview). It ad-hoc signs the Mach-O binary, verifies its signature and architecture, and executes it through the npm shim on a real Mac. Ad-hoc signing does not provide Apple notarization or a Developer ID identity. Linux checks `file` and `ldd` and executes the static binary.
+
+The packaging job builds the runtime and transformer, generates `THIRD_PARTY_NOTICES` with cargo-about from the locked dependency graph, and stages all five packages at the version in `cli/Cargo.toml`. The platform packages include the notices and MIT license. Notices include dependency license texts and the Rojo source location for its MPL-2.0 license when Rojo is bundled. New dependency licenses outside `cli/about.toml` fail the job for review.
+
+`node cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64`, `win32-x64`, and `darwin-arm64`. It checks `npm pack --dry-run` for runtime output, transformer, and side entries, then packs five tarballs. CI runs `npm publish --dry-run` on each tarball without credentials. Tags must match `v` plus the Cargo version.
+
+Only the tag push job can access `NPM_TOKEN` and request an OIDC token. It publishes the verified tarballs with npm provenance, platform packages and runtime first, then the shim. npm does not provide an atomic transaction across five packages. A failed release can leave some packages published and needs operator recovery.
+
+Actual publishing requires separate authorization, the `NPM_TOKEN` repository secret, and a public source repository. This repository is currently private. [npm provenance requirements](https://docs.npmjs.com/generating-provenance-statements/) require public source and document GitHub-hosted runners; provenance support on Blacksmith remains unproven until an authorized release. The workflow fails before publishing while the repository is private and never falls back to a publication without provenance. No tag, secret, publication, or repository setting is created by this PR.
+
 ## Create a game
+
 
 `npx crucible create my-game [path]` writes the embedded game template and installs dependencies. `--no-install` skips install. See `docs/cli.md` for arguments and exit codes.
 

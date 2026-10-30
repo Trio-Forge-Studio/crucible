@@ -1,0 +1,18 @@
+Third-party notices Generated from cli/Cargo.lock by cargo-about at release time. This distribution includes the crates
+listed below under their respective licenses. When bundled, Rojo is MPL-2.0. Its source is available at
+https://github.com/rojo-rbx/rojo and https://crates.io/crates/rojo. The exact bundled version appears in the crate list
+below.
+
+{{#each licenses}}
+	================================================================================
+	{{name}}
+	{{#each used_by}}
+		{{crate.name}}
+		{{crate.version}}
+		-
+		{{crate.repository}}
+	{{/each}}
+
+	{{{text}}}
+
+{{/each}}

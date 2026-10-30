@@ -11,7 +11,7 @@ export const PLATFORMS = [
 ];
 
 const repository = { type: "git", url: "git+https://github.com/Trio-Forge-Studio/crucible.git", directory: "cli" };
-const shared = { license: "UNLICENSED", private: true, repository };
+const shared = { license: "MIT", repository };
 
 export function cliVersion() {
 	const manifest = readFileSync(join(cli, "Cargo.toml"), "utf8");
@@ -30,7 +30,7 @@ function writeJson(path, value) {
 	writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`);
 }
 
-export function stage(out, binaries) {
+export function stage(out, binaries, notices) {
 	const version = cliVersion();
 	rmSync(out, { recursive: true, force: true });
 	const staged = [];
@@ -48,6 +48,7 @@ export function stage(out, binaries) {
 		engines: { node: ">=18" },
 		optionalDependencies: Object.fromEntries(PLATFORMS.map((platform) => [platformPackageName(platform), version])),
 	});
+	copyFileSync(join(cli, "..", "LICENSE"), join(shim, "LICENSE"));
 	staged.push(shim);
 
 	for (const [key, binary] of Object.entries(binaries)) {
@@ -69,9 +70,13 @@ export function stage(out, binaries) {
 			...shared,
 			os: [platform.os],
 			cpu: [platform.cpu],
-			files: [executable],
+			files: [executable, "THIRD_PARTY_NOTICES"],
 			preferUnplugged: true,
 		});
+		copyFileSync(join(cli, "..", "LICENSE"), join(directory, "LICENSE"));
+		if (notices) {
+			copyFileSync(notices, join(directory, "THIRD_PARTY_NOTICES"));
+		}
 		staged.push(directory);
 	}
 	return staged;
