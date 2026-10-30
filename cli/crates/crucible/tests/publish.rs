@@ -102,7 +102,12 @@ fn second_failure_preserves_first_receipt_and_its_own_classification() {
         assert_eq!(code(&out), expected, "{}", document(&out));
         let d = document(&out);
         assert_eq!(d["error"]["kind"], kind);
+        assert_eq!(d["error"]["publish"]["published"].as_array().unwrap().len(), 1);
         assert_eq!(d["error"]["publish"]["published"][0]["versionNumber"], 7);
+        assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place start");
+        if expected == 5 {
+            assert!(d["error"]["hint"].as_str().unwrap().contains("versions before re-uploading"));
+        }
         assert_eq!(d["error"]["publish"]["failed"], "start");
         assert_eq!(d["error"]["publish"]["notAttempted"], json!([]));
         assert_eq!(server.requests().len(), 2);
@@ -119,6 +124,7 @@ fn first_failure_leaves_later_places_unattempted() {
     assert_eq!(d["error"]["publish"]["published"], json!([]));
     assert_eq!(d["error"]["publish"]["failed"], "arena");
     assert_eq!(d["error"]["publish"]["notAttempted"], json!(["start"]));
+    assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place arena --place start");
     assert_eq!(server.requests().len(), 1);
 }
 
@@ -162,6 +168,7 @@ fn invalid_targets_and_arguments_are_json_usage_errors_without_requests() {
     for (manifest, args, message) in [
         (None, vec!["production"], "[env.production]"),
         (Some(TWO), vec!["unknown"], "Environments: production"),
+        (Some(""), vec!["production"], "No environments are configured"),
         (Some(TWO), vec!["production", "--place", "unknown"], "Places: arena, start"),
         (Some("unexpected=1"), vec!["production"], "unknown field"),
         (Some(TWO), vec![], "required"),
@@ -255,4 +262,34 @@ fn upload_error_redacts_the_key_and_signed_urls() {
     assert!(!combined.contains(KEY));
     assert!(!combined.contains("signature=secret"));
     assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn credential_failures_precede_build_and_leave_every_place_unattempted() {
+    for manifest_profile in [false, true] {
+        let manifest = if manifest_profile { TWO.replace("universe=10", "universe=10\nprofile='missing'") } else { TWO.into() };
+        let game = Game::new(Some(&manifest));
+        let server = Server::new(vec![]);
+        let mut cmd = game.command(&server.origin);
+        cmd.arg("production").env_remove("CRUCIBLE_OC_API_KEY");
+        if !manifest_profile { cmd.args(["--profile", "missing"]); }
+        let out = cmd.output().unwrap();
+        assert_eq!(code(&out), 3);
+        assert_eq!(document(&out), json!({"error":{"kind":"auth","message":"profile missing does not exist","status":null,
+            "requiredScopes":["universe-places:write"],"scopeMetadata":"declared","keySource":null,"profiles":[],
+            "publish":{"environment":"production","dryRun":false,"published":[],"failed":null,"notAttempted":["arena","start"]}}}));
+        assert!(!game.0.path().join("out").exists());
+        assert!(server.requests().is_empty());
+    }
+}
+
+#[test]
+fn user_default_profile_is_used_without_other_credentials() {
+    let game = Game::new(Some(TWO));
+    fs::write(game.0.path().join("config.toml"), "[oc]\ndefault_profile='default'\n[oc.profiles.default]\nkey_env='DEFAULT_KEY'").unwrap();
+    let server = Server::new(vec![Response::json(json!({"versionNumber":1}))]);
+    let out = game.command(&server.origin).args(["production", "--place", "start"])
+        .env_remove("CRUCIBLE_OC_API_KEY").env("DEFAULT_KEY", "default-key").output().unwrap();
+    assert_eq!(code(&out), 0, "{}", document(&out));
+    assert!(server.requests()[0].head.contains("x-api-key: default-key"));
 }
