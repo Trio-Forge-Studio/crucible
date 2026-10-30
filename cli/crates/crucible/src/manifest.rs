@@ -187,9 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn readme_example_parses() {
-        let readme = include_str!("../../../README.md").replace("\r\n", "\n");
-        let (_, rest) = readme.split_once("```toml\n[places.start]").expect("README shows a crucible.toml");
+    fn cli_guide_example_parses() {
+        let guide = include_str!("../../../../docs/cli.md").replace("\r\n", "\n");
+        let (_, rest) = guide.split_once("```toml\n[places.start]").expect("CLI guide shows a crucible.toml");
         let (body, _) = rest.split_once("```").unwrap();
         let manifest = Manifest::parse(&format!("[places.start]{body}")).unwrap();
         assert_eq!(manifest.envs.len(), 2);
