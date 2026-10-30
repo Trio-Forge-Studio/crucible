@@ -48,6 +48,23 @@ places = { start = 4321, arena = 4322 }
 
 Every env must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
 
+## crucible dev
+
+Run `npx crucible dev` from the game's root to compile on every save and sync one place to Studio. It starts the project's roblox-ts as `rbxtsc --watch --type game`. After the first compile, it serves the place with the Rojo it embeds. Connect the Rojo plugin in Studio to the port that Rojo prints.
+
+```console
+npx crucible dev
+npx crucible dev --place arena --port 34873
+```
+
+- `--place <name>` serves that place from `crucible.toml`. The default is `start`.
+- `--port <port>` sets the port. Without it, Rojo uses the project's `servePort`, or 34872.
+- Every line from roblox-ts starts with `[rbxtsc]`, and every line from Rojo starts with `[rojo]`. All output goes to stderr.
+- roblox-ts resolves the same way as in `crucible build`. A changed `@trioforge/crucible` transformer makes the first compile start from clean.
+- Ctrl+C stops roblox-ts and Rojo, including any processes they started, and exits 0.
+- If roblox-ts or Rojo stops on its own, `crucible dev` stops the other and exits 1. A port in use is the common cause.
+- An unknown place or a `crucible.toml` error exits 2 before anything starts.
+
 ## crucible docs
 
 Prints a guide as Markdown. Read the guide for a module before you write code that uses it.
