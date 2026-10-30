@@ -124,13 +124,13 @@ fn validate_target(path: &Path) -> Result<(), Error> {
         return Err(Error::Usage("target path cannot be empty".into()));
     }
     for component in path.components() {
-        if let Component::Normal(name) = component {
-            if !name.to_str().is_some_and(portable_component) {
-                return Err(Error::Usage(format!(
-                    "invalid target component {}: trailing dots, trailing spaces, Windows device names and reserved characters are not allowed",
-                    name.to_string_lossy()
-                )));
-            }
+        if let Component::Normal(name) = component
+            && !name.to_str().is_some_and(portable_component)
+        {
+            return Err(Error::Usage(format!(
+                "invalid target component {}: trailing dots, trailing spaces, Windows device names and reserved characters are not allowed",
+                name.to_string_lossy()
+            )));
         }
     }
     for ancestor in path.ancestors().filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>().into_iter().rev() {
