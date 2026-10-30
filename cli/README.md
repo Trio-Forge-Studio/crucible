@@ -55,7 +55,7 @@ After an overlay edit, run `cargo xtask spec build`. Keep the previous registry 
 
 Run these from `cli/`.
 
-Publish tests use local HTTP servers and never upload to Roblox.
+Publish tests use local HTTP servers and never upload to Roblox. Recovery tests replay the emitted `next` command and check place ids and credentials. Recovery preserves explicit `--profile` and `--verbose` flags and selects each remaining place with `--place=<name>`, including names that start with `-`.
 
 ```console
 cargo fmt --all --check

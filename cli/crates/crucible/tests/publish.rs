@@ -104,7 +104,7 @@ fn second_failure_preserves_first_receipt_and_its_own_classification() {
         assert_eq!(d["error"]["kind"], kind);
         assert_eq!(d["error"]["publish"]["published"].as_array().unwrap().len(), 1);
         assert_eq!(d["error"]["publish"]["published"][0]["versionNumber"], 7);
-        assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place start");
+        assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place=start");
         if expected == 5 {
             assert!(d["error"]["hint"].as_str().unwrap().contains("versions before re-uploading"));
         }
@@ -124,7 +124,7 @@ fn first_failure_leaves_later_places_unattempted() {
     assert_eq!(d["error"]["publish"]["published"], json!([]));
     assert_eq!(d["error"]["publish"]["failed"], "arena");
     assert_eq!(d["error"]["publish"]["notAttempted"], json!(["start"]));
-    assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place arena --place start");
+    assert_eq!(d["error"]["publish"]["next"], "crucible publish production --place=arena --place=start");
     assert_eq!(server.requests().len(), 1);
 }
 
