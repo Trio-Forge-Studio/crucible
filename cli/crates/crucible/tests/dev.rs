@@ -127,17 +127,15 @@ impl Dev {
         assert!(self.try_interrupt(), "Ctrl+C reaches crucible dev");
     }
 
+    #[cfg(unix)]
     fn try_interrupt(&self) -> bool {
-        #[cfg(unix)]
-        return Command::new("kill")
-            .args(["-INT", &self.pid().to_string()])
-            .status()
-            .is_ok_and(|status| status.success());
-        #[cfg(windows)]
-        unsafe {
-            use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
-            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid()) != 0
-        }
+        Command::new("kill").args(["-INT", &self.pid().to_string()]).status().is_ok_and(|status| status.success())
+    }
+
+    #[cfg(windows)]
+    fn try_interrupt(&self) -> bool {
+        use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+        unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid()) != 0 }
     }
 
     fn wait(&mut self, timeout: Duration) -> ExitStatus {
