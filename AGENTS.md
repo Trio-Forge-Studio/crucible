@@ -14,9 +14,9 @@ Crucible is Trio Forge's roblox-ts game framework. It replaces Flamework and wil
 
 ## Checks
 
-Run `pnpm install --pm-on-fail=download` and `rokit install`. Keep the lockfile after dependency changes. Rokit pins the Roblox tools. Vite+ configures TypeScript lint and formatting in `vite.config.ts`.
+Run `pnpm install --pm-on-fail=download` and `rokit install`. Keep the lockfile after dependency changes. Rokit pins the Roblox tools, and the root `rust-toolchain.toml` pins Rust. Vite+ configures TypeScript lint and formatting in `vite.config.ts`.
 
-Run `pnpm check` before calling a change complete. It must exit 0. It checks formatting and lint, compiles the runtime and sample, builds `build/sample-game.rbxl`, and runs the Lune specs. `pnpm fmt` fixes TypeScript, configuration, and Luau formatting. Fix failures at their cause.
+Run `pnpm check` before calling a change complete. It must exit 0. It checks formatting and lint, compiles the runtime, builds the sample into `build/sample-game.rbxl` with `crucible build` through `cargo run`, and runs the Lune specs. `pnpm fmt` fixes TypeScript, configuration, and Luau formatting. Fix failures at their cause.
 
 For changes under `cli`, also run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask spec check`, `cargo test --workspace`, and `node --test npm/package.test.mjs` from `cli`. CI runs them on Ubuntu and Windows.
 

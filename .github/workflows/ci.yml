@@ -30,6 +30,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.99.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          workspaces: cli
+
+      - name: Build the crucible CLI
+        working-directory: cli
+        run: cargo build --locked
+
       - name: Run checks and tests
         run: pnpm run check
 
@@ -53,8 +65,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
-      - run: cargo test --workspace --locked
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - run: cargo test --workspace --locked
       - run: node --test npm/package.test.mjs

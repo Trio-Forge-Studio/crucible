@@ -8,14 +8,24 @@ const lune = () => spawnSync("lune", ["run", "test", "compiled sample"], { cwd: 
 const rebuild = () => {
 	const sample = path.join(root, "examples/sample-game");
 	fs.rmSync(path.join(sample, "out"), { recursive: true, force: true });
-	const compiled = node([path.join(sample, "build.mjs")]);
-	if (compiled.status !== 0) throw Error(compiled.stdout + compiled.stderr);
-	const place = spawnSync(
-		"rojo",
-		["build", "examples/sample-game/default.project.json", "-o", "build/sample-game.rbxl"],
-		{ cwd: root, encoding: "utf8" },
+	const built = spawnSync(
+		"cargo",
+		[
+			"run",
+			"--quiet",
+			"--locked",
+			"--manifest-path",
+			"../../cli/Cargo.toml",
+			"--bin",
+			"crucible",
+			"--",
+			"build",
+			"--output",
+			"../../build/sample-game.rbxl",
+		],
+		{ cwd: sample, encoding: "utf8" },
 	);
-	if (place.status !== 0) throw Error(place.stdout + place.stderr);
+	if (built.status !== 0) throw Error(built.stdout + built.stderr);
 };
 const mutants = [
 	[
@@ -24,13 +34,6 @@ const mutants = [
 		"studio.name === placeName",
 		"studio.name.startsWith(placeName.slice(0, 12))",
 		() => node(["--test", "--test-name-pattern=owned PID selection", "test/studio/verification.test.mjs"]),
-	],
-	[
-		"V2 fingerprint skips diagnostics.cjs",
-		"examples/sample-game/build.mjs",
-		".filter((name) => /\\.(cjs|mjs)$/.test(name))",
-		'.filter((name) => /\\.(cjs|mjs)$/.test(name) && name !== "diagnostics.cjs")',
-		() => node(["--test", "test/sample-build.test.mjs"]),
 	],
 	[
 		"probe check paired command skipped",
@@ -45,20 +48,6 @@ const mutants = [
 		"attempt <= 3",
 		"attempt <= 2",
 		() => node(["--test", "test/studio/verification.test.mjs"]),
-	],
-	[
-		"fingerprint guard reset deleted",
-		"examples/sample-game/build.mjs",
-		'fs.rmSync(path.join(sample, "out"), { recursive: true, force: true });',
-		"{}",
-		() => node(["--test", "test/sample-build.test.mjs"]),
-	],
-	[
-		"fingerprint paired hash update short circuited",
-		"examples/sample-game/build.mjs",
-		"hash.update(fs.readFileSync(path.join(transformer, name)));",
-		"{}",
-		() => node(["--test", "test/sample-build.test.mjs"]),
 	],
 	[
 		"fixture real declaration copy deleted",
@@ -92,13 +81,6 @@ const mutants = [
 		"await wait(60000);",
 		"{}",
 		() => node(["--test", "test/studio/verification.test.mjs"]),
-	],
-	[
-		"fingerprint same typed receipt arguments swapped",
-		"examples/sample-game/build.mjs",
-		"fs.writeFileSync(receipt, fingerprint);",
-		"fs.writeFileSync(fingerprint, receipt);",
-		() => node(["--test", "test/sample-build.test.mjs"]),
 	],
 	[
 		"fixture paired manifest copy skipped",

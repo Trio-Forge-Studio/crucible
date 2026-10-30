@@ -2,7 +2,7 @@
 	"name": "@trioforge/crucible-sample-game",
 	"private": true,
 	"scripts": {
-		"build": "node build.mjs"
+		"build": "cargo run --quiet --locked --manifest-path ../../cli/Cargo.toml --bin crucible -- build --output ../../build/sample-game.rbxl"
 	},
 	"dependencies": {
 		"@trioforge/crucible": "workspace:*"
