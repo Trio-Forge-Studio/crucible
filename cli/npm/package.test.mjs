@@ -101,3 +101,52 @@ test("the shim names the missing platform package", () => {
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, new RegExp(`@trioforge/crucible-cli-${host} is not installed`));
 });
+
+test(
+	"an installed create produces a standalone game whose check passes",
+	{ skip: !supported && `no package for ${host}` },
+	() => {
+		const runtimeDir = join(cli, "..", "packages", "crucible");
+		const runtime = pack(runtimeDir, join(root, "tarballs"));
+		const contents = run("npm", ["pack", "--dry-run", "--json"], runtimeDir);
+		assert.equal(contents.status, 0, contents.stderr);
+		const files = JSON.parse(contents.stdout)[0].files.map(({ path }) => path);
+		for (const file of [
+			"out/init.luau",
+			"out/index.d.ts",
+			"transformer/index.js",
+			"server/package.json",
+			"client/package.json",
+		]) {
+			assert.ok(files.includes(file), `runtime tarball includes ${file}`);
+		}
+		const app = project("creator", [shim, platform]);
+		const game = join(root, "my-game");
+		const created = run("npx", ["crucible", "create", "my-game", game, "--no-install"], app);
+		assert.equal(created.status, 0, created.stderr);
+		assert.equal(created.stdout.trim(), game);
+		const manifestPath = join(game, "package.json");
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+		assert.equal(manifest.dependencies["@trioforge/crucible"], cliVersion());
+		assert.equal(manifest.devDependencies.crucible, cliVersion());
+		assert.equal(manifest.scripts.check, "vp check && crucible build");
+		manifest.dependencies["@trioforge/crucible"] = runtime;
+		manifest.devDependencies.crucible = shim;
+		manifest.devDependencies[platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host))] =
+			platform;
+		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
+		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
+		assert.equal(installed.status, 0, installed.stderr);
+		const checked = run("npm", ["run", "check"], game);
+		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
+		assert.match(checked.stdout, /vp check/);
+		assert.ok(
+			readFileSync(join(game, "build", "start.rbxl"))
+				.subarray(0, 8)
+				.equals(Buffer.from("<roblox!")),
+		);
+		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
+		const unformatted = run("npm", ["run", "check"], game);
+		assert.notEqual(unformatted.status, 0, "the generated check actually rejects Vite+ formatting or lint errors");
+	},
+);

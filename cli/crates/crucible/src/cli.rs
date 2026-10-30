@@ -13,17 +13,19 @@ pub struct Cli {
 pub enum Command {
     /// Compile the game with roblox-ts, then build each place in crucible.toml with Rojo.
     Build(crate::build::Args),
+    /// Create a game and install its dependencies.
+    Create(crate::create::Args),
     /// Watch and compile the game with roblox-ts, and serve one place to Studio with Rojo.
     Dev(crate::dev::Args),
-    /// Call Roblox Open Cloud. One JSON document per command.
-    #[command(after_help = AGENT_GUIDE)]
-    Oc(Oc),
     /// Print a Crucible guide as Markdown. Without a topic, list the topics.
     Docs {
         /// The topic to print.
         #[arg(value_parser = topics())]
         topic: Option<String>,
     },
+    /// Call Roblox Open Cloud. One JSON document per command.
+    #[command(after_help = AGENT_GUIDE)]
+    Oc(Oc),
     /// Serve one Rojo project. crucible dev runs this in a child process.
     #[command(name = crate::dev::ROJO_SERVE, hide = true)]
     RojoServe {

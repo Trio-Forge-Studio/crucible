@@ -1,0 +1,27 @@
+{
+	"compilerOptions": {
+		"allowSyntheticDefaultImports": true,
+		"downlevelIteration": true,
+		"module": "commonjs",
+		"moduleResolution": "Node",
+		"noLib": true,
+		"resolveJsonModule": true,
+		"forceConsistentCasingInFileNames": true,
+		"moduleDetection": "force",
+		"strict": true,
+		"target": "ESNext",
+		"declaration": false,
+		"incremental": true,
+		"typeRoots": ["node_modules/@rbxts", "node_modules/@trioforge"],
+		"types": ["compiler-types", "types"],
+		"rootDir": "src",
+		"outDir": "out",
+		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
+		"plugins": [
+			{
+				"transform": "@trioforge/crucible/transformer"
+			}
+		]
+	},
+	"include": ["src"]
+}
