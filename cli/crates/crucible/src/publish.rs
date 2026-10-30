@@ -129,7 +129,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
 }
 
 fn effective_profile(explicit: Option<&str>, variable: Option<&str>, key: bool, env: Option<&str>) -> Option<String> {
-    explicit.or(variable).or_else(|| if key { None } else { env }).map(str::to_owned)
+    explicit.or(variable).or(if key { None } else { env }).map(str::to_owned)
 }
 
 #[cfg(test)]

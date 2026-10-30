@@ -208,3 +208,51 @@ fn dry_run_reuses_oc_auth_check_validation() {
     assert_eq!(failure, document(&oc));
     assert_eq!(server.requests().len(), 2);
 }
+
+#[test]
+fn credentials_follow_the_documented_precedence_without_fallthrough() {
+    let game = Game::new(Some(&TWO.replace("universe=10", "universe=10\nprofile='manifest'")));
+    fs::write(game.0.path().join("config.toml"), "[oc]\ndefault_profile='default'\n[oc.profiles.flag]\nkey_env='FLAG_KEY'\n[oc.profiles.variable]\nkey_env='VARIABLE_KEY'\n[oc.profiles.manifest]\nkey_env='MANIFEST_KEY'\n[oc.profiles.default]\nkey_env='DEFAULT_KEY'\n").unwrap();
+    for (flag, variable, direct, expected) in [
+        (Some("flag"), Some("variable"), true, "flag-key"),
+        (None, Some("variable"), true, "variable-key"),
+        (None, None, true, KEY),
+        (None, None, false, "manifest-key"),
+    ] {
+        let server = Server::new(vec![Response::json(json!({"versionNumber":1}))]);
+        let mut cmd = game.command(&server.origin);
+        cmd.args(["production", "--place", "start"])
+            .env("FLAG_KEY", "flag-key")
+            .env("VARIABLE_KEY", "variable-key")
+            .env("MANIFEST_KEY", "manifest-key")
+            .env("DEFAULT_KEY", "default-key");
+        if let Some(profile) = flag {
+            cmd.args(["--profile", profile]);
+        }
+        if let Some(profile) = variable {
+            cmd.env("CRUCIBLE_OC_PROFILE", profile);
+        }
+        if !direct {
+            cmd.env_remove("CRUCIBLE_OC_API_KEY");
+        }
+        let out = cmd.output().unwrap();
+        assert_eq!(code(&out), 0, "{}", document(&out));
+        assert!(server.requests()[0].head.contains(&format!("x-api-key: {expected}")));
+    }
+    let server = Server::new(vec![]);
+    let out = game.publish(&server.origin, &["production", "--profile", "missing"]);
+    assert_eq!(code(&out), 3);
+    assert!(server.requests().is_empty());
+}
+
+#[test]
+fn upload_error_redacts_the_key_and_signed_urls() {
+    let game = Game::new(Some(TWO));
+    let server = Server::new(vec![Response::Body(400, format!("{KEY} https://cdn.test/file?signature=secret"))]);
+    let out = game.publish(&server.origin, &["production", "--verbose"]);
+    assert_eq!(code(&out), 4);
+    let combined = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(!combined.contains(KEY));
+    assert!(!combined.contains("signature=secret"));
+    assert_eq!(server.requests().len(), 1);
+}

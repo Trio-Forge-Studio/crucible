@@ -109,7 +109,7 @@ Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc 
 
 `--profile <name>` overrides credentials. Selection order is `--profile`, `CRUCIBLE_OC_PROFILE`, `CRUCIBLE_OC_API_KEY`, the environment's `profile`, then the user config's `default_profile`. A selected missing or invalid credential fails without falling through. `--verbose` writes redacted request diagnostics to stderr. `version_type` defaults to `Saved`; set `Published` in the environment to publish the new versions.
 
-Publish prints exactly one JSON document on stdout. Build progress and compiler diagnostics go to stderr. It uses the [Open Cloud exit codes](oc.md#output-and-exit-codes), including usage 2, auth 3, rejected 4, outcome_unknown 5, remote_failure 6, unavailable 7, and pending 8. Build failures are unavailable, exit 7. Missing `crucible.toml` is usage 2 with an example. Unknown environments or places are usage 2 with valid names.
+Publish prints exactly one JSON document on stdout. Build progress and compiler diagnostics go to stderr. It uses the [Open Cloud exit codes](oc.md#exit-codes), including usage 2, auth 3, rejected 4, outcome_unknown 5, remote_failure 6, unavailable 7, and pending 8. Build failures are unavailable, exit 7. Missing `crucible.toml` is usage 2 with an example. Unknown environments or places are usage 2 with valid names.
 
 Success, exit 0, includes each confirmed upload's version number. Ids are strings and version numbers are integers.
 
