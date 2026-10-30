@@ -9,3 +9,6 @@ export interface BootOptions {
 	readonly load: readonly string[];
 	readonly fixedRate?: number;
 }
+
+export { Logging, LogLevel } from "./logging";
+export type { Logger, LogRecord, LogSink, SinkSubscription, LogContext, LogProperties } from "./logging";

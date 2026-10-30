@@ -30,8 +30,8 @@ local HOOK_NAMES = {
 }
 
 function world.new()
-	local graph = spec.runtime()
 	local engine = Engine.new()
+	local graph = spec.runtime(nil, engine.loggingPort)
 	local w = {
 		graph = graph,
 		life = graph.module("internal/lifecycle"),

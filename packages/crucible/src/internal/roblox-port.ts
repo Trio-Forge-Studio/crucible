@@ -1,4 +1,4 @@
-import { FrameEvent, LogLevel, type EnginePort } from "./port";
+import { FrameEvent, type EnginePort } from "./port";
 
 /** @internal */
 export interface BootPort extends EnginePort {
@@ -41,10 +41,6 @@ export function robloxPort(): BootPort {
 			task.wait();
 		},
 		bindToClose: (callback) => game.BindToClose(callback),
-		log: (level, message) => {
-			if (level === LogLevel.Error) task.spawn(() => error(`[Crucible] ${message}`, 0));
-			else warn(`[Crucible] ${message}`);
-		},
 	};
 }
 

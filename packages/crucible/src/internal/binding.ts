@@ -1,7 +1,8 @@
+import { runtimeDiagnostic } from "./diagnostics";
 import type { CrucibleObject } from "../crucible-object";
 import { clearClaim, setClaim } from "./construction-claim";
 import { drain, fault, hasEnded, isDraining, isLive, notePairs, request, track } from "./lifecycle";
-import { LogLevel, type Disconnect, type EnginePort } from "./port";
+import { type Disconnect, type EnginePort } from "./port";
 import { recordOf, type BehaviourRecord, type ClassRecord } from "./registry";
 import { call, CallResult } from "./runner";
 import { Hook, Kind, Phase, Want, type ObjectState } from "./state";
@@ -118,7 +119,7 @@ function disconnect(pair: Pair) {
 function warning(pair: Pair, field: string, condition: string, message: string) {
 	if (pair.warnings.get(field) === condition) return;
 	pair.warnings.set(field, condition);
-	port().log(LogLevel.Warning, message);
+	runtimeDiagnostic("warning", message);
 }
 function valueFor(pair: Pair, field: string, state?: ObjectState): LuaTuple<[boolean, unknown]> {
 	const descriptor = pair.record.attributes?.get(field);
@@ -189,7 +190,7 @@ function accepted(pair: Pair, state?: ObjectState): boolean {
 	if (result === CallResult.Ok) return value === true;
 	pair.record.suppressed.add(pair.instance);
 	if (state !== undefined) fault(state, Hook.Accepts, value);
-	else port().log(LogLevel.Error, `${pair.record.id}.accepts failed on ${port().describe(pair.instance)}: ${value}`);
+	else runtimeDiagnostic("error", `${pair.record.id}.accepts failed on ${port().describe(pair.instance)}: ${value}`);
 	return false;
 }
 function evaluate(pair: Pair): ObjectState | undefined {
@@ -242,8 +243,8 @@ function evaluate(pair: Pair): ObjectState | undefined {
 			}
 			warned.add(instance);
 			const className = record.id.split(":").pop() ?? record.id;
-			engine.log(
-				LogLevel.Warning,
+			runtimeDiagnostic(
+				"warning",
 				`${engine.describe(instance)} is a ${instance.ClassName}; ${className} needs a ${record.instanceClasses.join(" or ")}`,
 			);
 		}
@@ -359,7 +360,7 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 			const site = `${source}:${line}`;
 			if (!getWarnings.has(site)) {
 				getWarnings.add(site);
-				port().log(LogLevel.Warning, `Crucible get pending at ${site}`);
+				runtimeDiagnostic("warning", `Crucible get pending at ${site}`);
 			}
 		}
 		const rejected = pair.rejected;

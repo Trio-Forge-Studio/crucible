@@ -140,8 +140,9 @@ return {
 		local close = function() end
 		port.bindToClose(close)
 		spec.eq(p.closed[1], close, "BindToClose")
-		port.log(0, "warning sentinel")
-		port.log(1, "error sentinel")
+		local output = p.graph.module("internal/log-output").createRobloxLoggingPort()
+		output.writeInternal("warning", "warning sentinel")
+		output.writeInternal("error", "error sentinel")
 		spec.eq(#p.warnings, 1, "only warning uses warn")
 		spec.has(p.errors[1], "error sentinel", "Error output")
 	end,

@@ -1,8 +1,9 @@
 local spec = require("./load")
 local Engine = require("./engine")
 return function(beforeBinding)
-	local graph = spec.runtime()
-	local w = { engine = Engine.new(), events = {}, graph = graph }
+	local engine = Engine.new()
+	local graph = spec.runtime(nil, engine.loggingPort)
+	local w = { engine = engine, events = {}, graph = graph }
 	w.emit = graph.module("emit")
 	w.registry = graph.module("internal/registry")
 	w.life = graph.module("internal/lifecycle")
@@ -45,16 +46,16 @@ return function(beforeBinding)
 		ended = function(s)
 			w.binding.forget(s)
 			if s.fault then
-				w.engine.port.log(1, tostring(s.fault.error))
+				w.engine.loggingPort.writeInternal("error", tostring(s.fault.error))
 			end
 		end,
 		defer = w.engine.port.defer,
 		cancel = w.engine.port.cancel,
 		failed = function(message)
-			w.engine.port.log(1, message)
+			w.engine.loggingPort.writeInternal("error", message)
 		end,
 		diagnose = function(_, _, message)
-			w.engine.port.log(1, tostring(message))
+			w.engine.loggingPort.writeInternal("error", tostring(message))
 		end,
 	})
 	function w.define(id, methods, options)

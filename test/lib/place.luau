@@ -83,6 +83,9 @@ return function(client: boolean?)
 				},
 			})
 			loaded[module] = { value = chunk() }
+			if module.Name == "log-output" and module.Parent.Name == "internal" then
+				loaded[module].value.installLoggingPort(e.loggingPort)
+			end
 		end
 		return loaded[module].value
 	end

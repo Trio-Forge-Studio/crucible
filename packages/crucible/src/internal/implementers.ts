@@ -1,8 +1,9 @@
+import { runtimeDiagnostic } from "./diagnostics";
 import type { All } from "../all";
 import { DenseList } from "./dense-list";
 import { current, hasEnded, stateOf, within } from "./lifecycle";
 import { Hook, type ObjectState } from "./state";
-import { LogLevel, type EnginePort } from "./port";
+import { type EnginePort } from "./port";
 import { CallResult } from "./runner";
 import type { TypeId, ClassRecord } from "./registry";
 
@@ -79,7 +80,7 @@ export class ImplementerSet<T extends object> implements All<T> {
 		if (result !== CallResult.Ok) {
 			const message = `Crucible All<${this.id}> subscriber ${label(owner)}, member ${label(stateOf(member))}: ${tostring(failure)}`;
 			if (port === undefined) error("All callback failed before useImplementerPort: " + message);
-			port.log(LogLevel.Error, message);
+			runtimeDiagnostic("error", message);
 		}
 	}
 }

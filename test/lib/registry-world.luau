@@ -2,7 +2,8 @@ local spec = require("./load")
 local Engine = require("./engine")
 
 return function()
-	local graph = spec.runtime()
+	local engine = Engine.new()
+	local graph = spec.runtime(nil, engine.loggingPort)
 	local w = {
 		graph = graph,
 		emit = graph.module("emit"),
@@ -12,7 +13,7 @@ return function()
 		base = graph.module("crucible-object").CrucibleObject,
 		subsystem = graph.module("subsystem").Subsystem,
 		hooks = graph.module("internal/hooks"),
-		engine = Engine.new(),
+		engine = engine,
 	}
 	graph.module("internal/implementers").useImplementerPort(w.engine.port)
 	w.life.useEffects({

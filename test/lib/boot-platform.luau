@@ -57,6 +57,9 @@ return function(client)
 		end,
 	}
 	local run = {
+		IsStudio = function()
+			return true
+		end,
 		IsClient = function()
 			return client == true
 		end,
