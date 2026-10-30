@@ -34,7 +34,7 @@ node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 
 `crates/crucible/template` holds the real template files. `src/create.rs` embeds an explicit file table. Tokens use `__NAME__`, `__VERSION__`, and uppercase dependency names with punctuation replaced by underscores. Versions come from the Cargo package and repository manifests. The runtime and CLI version equality is checked by a Rust test.
 
-The npm package test builds and packs the runtime, creates a project through the packed CLI, replaces its dependency pins with local test tarballs, installs it, and runs its full `check` script. Shipped templates contain no tarball paths.
+Run `pnpm build` from the repository root first. The npm package test packs the built runtime, creates a project through the packed CLI, replaces its dependency pins with local test tarballs, installs it, and runs its full `check` script. Shipped templates contain no tarball paths.
 
 ## Update the spec
 

@@ -50,11 +50,11 @@ Every env must map every declared place, and only declared places. A game whose 
 
 ## crucible create
 
-Run `npx crucible create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx crucible create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files.
+Run `npx crucible create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx crucible create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files. Names and path components cannot end in a dot or space or use Windows device names, including names with extensions such as `con.txt`. A target below an existing file also exits 2.
 
 The game pins the CLI and runtime at the CLI version and includes the tested roblox-ts toolchain, Vite+, side entry scripts, transformer config, and a Rojo project. Template files use MIT-0. No separate Rojo or Rokit install is needed.
 
-The command detects npm, pnpm, Yarn, or Bun from `npm_config_user_agent`, with npm as the default. `--no-install` writes files without running install. Install failures exit 1 and leave the project available for a manual retry. Progress and install output go to stderr. Success prints the project path to stdout.
+The command detects npm, pnpm, Yarn, or Bun from `npm_config_user_agent`, with npm as the default. Yarn projects include `.yarnrc.yml` with `nodeLinker: node-modules` for roblox-ts and Rojo. `--no-install` writes files without running install. Install failures exit 1 and leave the project available for a manual retry. Progress and install output go to stderr. Success prints the project path to stdout.
 
 In the new directory, run `npm run check` to lint, check formatting, compile, and build `build/start.rbxl`. `npm run build` builds the game, and `npm run fmt` fixes formatting. Use the equivalent script commands with your package manager. Read the generated `AGENTS.md` and `npx crucible docs cli` before developing the game.
 
