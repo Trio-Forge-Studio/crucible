@@ -1,62 +1,70 @@
-2026-10-28T23:01:10.136Z,21.136559,8a44,6,Info [FLog::CreatorOutput] S2 store awake
-2026-10-28T23:01:10.136Z,21.136559,8a44,6,Info [FLog::CreatorOutput] S2 controller awake
-2026-10-28T23:01:10.136Z,21.136559,8a44,6,Info [FLog::CreatorOutput] S2 controller start
-2026-10-28T23:01:10.137Z,21.137552,8a44,6,Info [FLog::CreatorOutput] S2 server booted
-2026-10-28T23:01:10.287Z,21.287678,9068,6,Info [FLog::CreatorOutput] S2 member awake studio-83 17
-2026-10-28T23:01:10.288Z,21.288677,9068,6,Info [FLog::CreatorOutput] S2 member enable
-2026-10-28T23:01:10.288Z,21.288677,9068,6,Info [FLog::CreatorOutput] S2 member start
-2026-10-28T23:01:10.341Z,21.341320,8a44,6,Info [FLog::CreatorOutput] S2 observed tag added bound identity=studio-83 speed=17
-2026-10-28T23:01:10.341Z,21.341320,8a44,6,Info [FLog::CreatorOutput] S2 member disable
-2026-10-28T23:01:10.341Z,21.341320,8a44,6,Info [FLog::CreatorOutput] S2 member destroy
-2026-10-28T23:01:10.377Z,21.377216,8a44,6,Info [FLog::CreatorOutput] S2 observed tag removed unbound
-2026-10-28T23:01:10.378Z,21.378212,8a44,6,Info [FLog::CreatorOutput] S2 member awake studio-83 17
-2026-10-28T23:01:10.378Z,21.378212,8a44,6,Info [FLog::CreatorOutput] S2 member enable
-2026-10-28T23:01:10.378Z,21.378212,8a44,6,Info [FLog::CreatorOutput] S2 member start
-2026-10-28T23:01:10.393Z,21.393169,75ec,6,Info [FLog::CreatorOutput] S2 observed tag readded new generation
-2026-10-28T23:01:10.394Z,21.394167,75ec,6,Info [FLog::CreatorOutput] S2 member disable
-2026-10-28T23:01:10.394Z,21.394167,75ec,6,Info [FLog::CreatorOutput] S2 member destroy
-2026-10-28T23:01:10.415Z,21.415106,6b00,6,Info [FLog::CreatorOutput] S2 observed Parent=nil unbound tag retained
-2026-10-28T23:01:10.415Z,21.415106,6b00,6,Info [FLog::CreatorOutput] S2 member awake studio-83 17
-2026-10-28T23:01:10.415Z,21.415106,6b00,6,Info [FLog::CreatorOutput] S2 member enable
-2026-10-28T23:01:10.416Z,21.416103,6b00,6,Info [FLog::CreatorOutput] S2 member start
-2026-10-28T23:01:10.425Z,21.425808,6b00,6,Info [FLog::CreatorOutput] S2 observed reparent bound new generation
-2026-10-28T23:01:10.425Z,21.425808,6b00,6,Info [FLog::CreatorOutput] S2 server observations complete
-2026-10-28T23:01:10.438Z,21.438864,6b00,6,Info [FLog::CreatorOutput] S2 member disable
-2026-10-28T23:01:10.438Z,21.438864,6b00,6,Info [FLog::CreatorOutput] S2 member destroy
-2026-10-28T23:01:10.485Z,21.485058,7fa4,6,Info [FLog::CreatorOutput] S2 renderer awake
-2026-10-28T23:01:10.485Z,21.485058,7fa4,6,Info [FLog::CreatorOutput] S2 renderer start
-2026-10-28T23:01:10.485Z,21.485058,7fa4,6,Info [FLog::CreatorOutput] S2 client booted
-2026-10-28T23:01:10.534Z,21.534002,7fa4,6,Info [FLog::CreatorOutput] S2 observed BOOTED_ATTRIBUTE=true on LocalPlayer
-2026-10-28T23:01:14.117Z,25.117981,19d8,6,Info [FLog::CreatorOutput] S2 render 1
-2026-10-28T23:01:14.117Z,25.117981,19d8,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
-2026-10-28T23:01:14.211Z,25.211685,19d8,6,Info [FLog::CreatorOutput] S2 render 2
-2026-10-28T23:01:14.211Z,25.211685,19d8,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
-2026-10-28T23:01:14.305Z,25.305790,19d8,6,Info [FLog::CreatorOutput] S2 render 3
-2026-10-28T23:01:14.306Z,25.306791,19d8,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
-2026-10-28T23:01:14.337Z,25.337955,19d8,6,Info [FLog::CreatorOutput] S2 render 4
-2026-10-28T23:01:14.337Z,25.337955,19d8,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
-2026-10-28T23:01:14.400Z,25.400072,19d8,6,Info [FLog::CreatorOutput] S2 render 5
-2026-10-28T23:01:14.400Z,25.400072,19d8,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
-2026-10-28T23:01:14.440Z,25.440207,19d8,6,Error [FLog::CreatorError] Error: [Crucible] @trioforge/crucible-sample-game/client/systems/renderer:Renderer faulted in a frame hook: Players.Hezaerd.PlayerScripts.S2ClientObserver:28: S2 intentional frame fault
-2026-10-28T23:01:14.503Z,25.503357,19d8,6,Info [FLog::CreatorOutput] S2 client observations complete
-2026-10-28T23:01:16.213Z,27.213627,6b00,6,Info [FLog::CreatorOutput] S2 profile pool totalMs=464.831500 walkMs=5.284100 lifecycleMs=459.547399 hookBodyMs=29.896092
-2026-10-28T23:01:16.240Z,27.240023,c658,6,Info [FLog::CreatorOutput] S2 profile MAX_BATCHES totalMs=22.182700 hookBodyMs=0.225501 hookCalls=2048
-2026-10-28T23:01:16.345Z,27.345705,c658,6,Info [FLog::CreatorOutput] S2 profile MAX_CHAINED_REQUESTS totalMs=104.590700 hookBodyMs=25.726700 hookCalls=65543
-2026-10-28T23:01:18.531Z,29.531384,c658,6,Info [FLog::CreatorOutput] S2 measure pool trial=1 ms/frame=4.825306 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
-2026-10-28T23:01:18.557Z,29.557348,c658,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=1 ms=24.705000 starts=1024 expectedFailures=1
-2026-10-28T23:01:18.695Z,29.695906,c658,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=1 ms=132.595800 requests=65539 expectedFailures=1
-2026-10-28T23:01:20.444Z,31.444977,7fa4,6,Info [FLog::CreatorOutput] S2 measure pool trial=2 ms/frame=4.512256 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
-2026-10-28T23:01:20.460Z,31.460943,7fa4,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=2 ms=13.357800 starts=1024 expectedFailures=1
-2026-10-28T23:01:20.559Z,31.559242,7fa4,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=2 ms=95.868000 requests=65539 expectedFailures=1
-2026-10-28T23:01:22.309Z,33.309158,c658,6,Info [FLog::CreatorOutput] S2 measure pool trial=3 ms/frame=4.216626 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
-2026-10-28T23:01:22.326Z,33.326492,c658,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=3 ms=13.840200 starts=1024 expectedFailures=1
-2026-10-28T23:01:22.415Z,33.415653,c658,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=3 ms=87.648800 requests=65539 expectedFailures=1
-2026-10-28T23:01:24.198Z,35.198612,9068,6,Info [FLog::CreatorOutput] S2 measure pool trial=4 ms/frame=4.681622 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
-2026-10-28T23:01:24.226Z,35.226669,9068,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=4 ms=24.318300 starts=1024 expectedFailures=1
-2026-10-28T23:01:24.332Z,35.332203,9068,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=4 ms=104.249100 requests=65539 expectedFailures=1
-2026-10-28T23:01:26.082Z,37.082661,9068,6,Info [FLog::CreatorOutput] S2 measure pool trial=5 ms/frame=4.574201 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
-2026-10-28T23:01:26.109Z,37.109871,9068,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=5 ms=24.440100 starts=1024 expectedFailures=1
-2026-10-28T23:01:26.242Z,37.242020,8a44,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=5 ms=130.779600 requests=65539 expectedFailures=1
-2026-10-28T23:01:26.243Z,37.243027,8a44,6,Info [FLog::CreatorOutput] S2 measurements complete
-2026-10-28T23:01:30.356Z,41.356087,75ec,6,Info [FLog::CreatorOutput] S2 controller shutdown
-2026-10-28T23:01:30.519Z,41.519112,c130,6,Info [FLog::CreatorOutput] S2 store shutdown
+2026-10-30T02:17:28.909Z,73.909073,7b90,6,Info [FLog::CreatorOutput] [Sample.Server] S2 game debug server
+2026-10-30T02:17:28.909Z,73.909073,7b90,6,Info [FLog::CreatorOutput] Info: [Sample.Server] S2 game info server
+2026-10-30T02:17:28.910Z,73.910080,7b90,6,Warning [FLog::CreatorWarning] Warning: [Sample.Server] S2 game warn server
+2026-10-30T02:17:28.910Z,73.910080,7b90,6,Error [FLog::CreatorError] Error: [Sample.Server] S2 game error server
+2026-10-30T02:17:28.920Z,73.920105,7b90,6,Info [FLog::CreatorOutput] S2 store awake
+2026-10-30T02:17:28.920Z,73.920105,7b90,6,Info [FLog::CreatorOutput] S2 controller awake
+2026-10-30T02:17:28.921Z,73.921104,7b90,6,Info [FLog::CreatorOutput] S2 controller start
+2026-10-30T02:17:28.921Z,73.921104,7b90,6,Info [FLog::CreatorOutput] S2 server booted
+2026-10-30T02:17:29.146Z,74.146355,6e58,6,Info [FLog::CreatorOutput] S2 member awake studio-83 17
+2026-10-30T02:17:29.146Z,74.146355,6e58,6,Info [FLog::CreatorOutput] S2 member enable
+2026-10-30T02:17:29.147Z,74.147362,6e58,6,Info [FLog::CreatorOutput] S2 member start
+2026-10-30T02:17:29.151Z,74.151382,7b90,6,Info [FLog::CreatorOutput] S2 observed tag added bound identity=studio-83 speed=17
+2026-10-30T02:17:29.152Z,74.152382,7b90,6,Info [FLog::CreatorOutput] S2 member disable
+2026-10-30T02:17:29.152Z,74.152382,7b90,6,Info [FLog::CreatorOutput] S2 member destroy
+2026-10-30T02:17:29.460Z,74.460915,49c8,6,Info [FLog::CreatorOutput] S2 observed tag removed unbound
+2026-10-30T02:17:29.462Z,74.462929,49c8,6,Info [FLog::CreatorOutput] S2 member awake studio-83 17
+2026-10-30T02:17:29.462Z,74.462929,49c8,6,Info [FLog::CreatorOutput] S2 member enable
+2026-10-30T02:17:29.463Z,74.463936,49c8,6,Info [FLog::CreatorOutput] S2 member start
+2026-10-30T02:17:29.536Z,74.536499,0b64,6,Info [FLog::CreatorOutput] S2 observed tag readded new generation
+2026-10-30T02:17:29.537Z,74.537514,0b64,6,Info [FLog::CreatorOutput] S2 member disable
+2026-10-30T02:17:29.538Z,74.538521,0b64,6,Info [FLog::CreatorOutput] S2 member destroy
+2026-10-30T02:17:29.563Z,74.563606,7b90,6,Info [FLog::CreatorOutput] S2 observed Parent=nil unbound tag retained
+2026-10-30T02:17:29.564Z,74.564606,7b90,6,Info [FLog::CreatorOutput] S2 member awake studio-83 17
+2026-10-30T02:17:29.564Z,74.564606,7b90,6,Info [FLog::CreatorOutput] S2 member enable
+2026-10-30T02:17:29.565Z,74.565605,7b90,6,Info [FLog::CreatorOutput] S2 member start
+2026-10-30T02:17:29.594Z,74.594536,49c8,6,Info [FLog::CreatorOutput] S2 observed reparent bound new generation
+2026-10-30T02:17:29.595Z,74.595535,49c8,6,Info [FLog::CreatorOutput] S2 server observations complete
+2026-10-30T02:17:29.634Z,74.634445,49c8,6,Info [FLog::CreatorOutput] S2 member disable
+2026-10-30T02:17:29.634Z,74.634445,49c8,6,Info [FLog::CreatorOutput] S2 member destroy
+2026-10-30T02:17:29.840Z,74.840729,6e58,6,Info [FLog::CreatorOutput] [Sample.Client] S2 game debug client
+2026-10-30T02:17:29.840Z,74.840729,6e58,6,Info [FLog::CreatorOutput] Info: [Sample.Client] S2 game info client
+2026-10-30T02:17:29.840Z,74.840729,6e58,6,Warning [FLog::CreatorWarning] Warning: [Sample.Client] S2 game warn client
+2026-10-30T02:17:29.840Z,74.840729,6e58,6,Error [FLog::CreatorError] Error: [Sample.Client] S2 game error client
+2026-10-30T02:17:29.848Z,74.848740,6e58,6,Info [FLog::CreatorOutput] S2 renderer awake
+2026-10-30T02:17:29.848Z,74.848740,6e58,6,Info [FLog::CreatorOutput] S2 renderer start
+2026-10-30T02:17:29.848Z,74.848740,6e58,6,Info [FLog::CreatorOutput] S2 client booted
+2026-10-30T02:17:29.872Z,74.872932,6e58,6,Info [FLog::CreatorOutput] S2 observed BOOTED_ATTRIBUTE=true on LocalPlayer
+2026-10-30T02:17:38.043Z,83.043381,6924,6,Info [FLog::CreatorOutput] S2 render 1
+2026-10-30T02:17:38.043Z,83.043381,6924,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
+2026-10-30T02:17:38.187Z,83.187798,6924,6,Info [FLog::CreatorOutput] S2 render 2
+2026-10-30T02:17:38.188Z,83.188797,6924,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
+2026-10-30T02:17:38.341Z,83.341789,6924,6,Info [FLog::CreatorOutput] S2 render 3
+2026-10-30T02:17:38.342Z,83.342789,6924,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
+2026-10-30T02:17:38.482Z,83.482010,6924,6,Info [FLog::CreatorOutput] S2 render 4
+2026-10-30T02:17:38.482Z,83.482010,6924,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
+2026-10-30T02:17:38.625Z,83.625580,6924,6,Info [FLog::CreatorOutput] S2 render 5
+2026-10-30T02:17:38.625Z,83.625580,6924,6,Info [FLog::CreatorOutput] S2 observed render order Bind200,Crucible201,PreRender
+2026-10-30T02:17:38.681Z,83.681114,6924,6,Error [FLog::CreatorError] Error: [Crucible] @trioforge/crucible-sample-game/client/systems/renderer:Renderer faulted in a frame hook: Players.Hezaerd.PlayerScripts.S2ClientObserver:28: S2 intentional frame fault
+2026-10-30T02:17:38.808Z,83.808350,6924,6,Info [FLog::CreatorOutput] S2 client observations complete
+2026-10-30T02:17:40.904Z,85.904610,6e58,6,Info [FLog::CreatorOutput] S2 profile pool totalMs=718.789800 walkMs=9.004301 lifecycleMs=709.785499 hookBodyMs=61.530106
+2026-10-30T02:17:40.951Z,85.951256,6e58,6,Info [FLog::CreatorOutput] S2 profile MAX_BATCHES totalMs=42.394000 hookBodyMs=0.349800 hookCalls=2048
+2026-10-30T02:17:41.145Z,86.145599,6e58,6,Info [FLog::CreatorOutput] S2 profile MAX_CHAINED_REQUESTS totalMs=188.646400 hookBodyMs=39.478303 hookCalls=65543
+2026-10-30T02:17:44.388Z,89.388199,9cc0,6,Info [FLog::CreatorOutput] S2 measure pool trial=1 ms/frame=8.154839 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
+2026-10-30T02:17:44.437Z,89.437630,7b90,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=1 ms=44.663000 starts=1024 expectedFailures=1
+2026-10-30T02:17:44.688Z,89.688644,7b90,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=1 ms=247.838000 requests=65539 expectedFailures=1
+2026-10-30T02:17:46.703Z,91.703423,7b90,6,Info [FLog::CreatorOutput] S2 measure pool trial=2 ms/frame=7.956588 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
+2026-10-30T02:17:46.749Z,91.749146,7b90,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=2 ms=41.791800 starts=1024 expectedFailures=1
+2026-10-30T02:17:46.944Z,91.944565,7b90,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=2 ms=188.233000 requests=65539 expectedFailures=1
+2026-10-30T02:17:49.319Z,94.319839,7b90,6,Info [FLog::CreatorOutput] S2 measure pool trial=3 ms/frame=7.767589 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
+2026-10-30T02:17:49.382Z,94.382393,7b90,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=3 ms=56.679300 starts=1024 expectedFailures=1
+2026-10-30T02:17:49.580Z,94.580757,7b90,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=3 ms=195.809500 requests=65539 expectedFailures=1
+2026-10-30T02:17:51.770Z,96.770004,6bf4,6,Info [FLog::CreatorOutput] S2 measure pool trial=4 ms/frame=7.460562 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
+2026-10-30T02:17:51.817Z,96.817642,6bf4,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=4 ms=44.298500 starts=1024 expectedFailures=1
+2026-10-30T02:17:52.029Z,97.029976,6bf4,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=4 ms=206.353300 requests=65539 expectedFailures=1
+2026-10-30T02:17:54.087Z,99.087158,6bf4,6,Info [FLog::CreatorOutput] S2 measure pool trial=5 ms/frame=7.756720 frames=100 members=1000 disables=500 enables=500 joins=53500 leaves=52500 visits=105000 errors=0
+2026-10-30T02:17:54.140Z,99.140625,6bf4,6,Info [FLog::CreatorOutput] S2 measure MAX_BATCHES trial=5 ms=48.025500 starts=1024 expectedFailures=1
+2026-10-30T02:17:54.354Z,99.354523,6bf4,6,Info [FLog::CreatorOutput] S2 measure MAX_CHAINED_REQUESTS trial=5 ms=211.834600 requests=65539 expectedFailures=1
+2026-10-30T02:17:54.355Z,99.355507,6bf4,6,Info [FLog::CreatorOutput] S2 measurements complete
+2026-10-30T02:18:01.161Z,106.161911,7b90,6,Info [FLog::CreatorOutput] S2 controller shutdown
+2026-10-30T02:18:01.537Z,106.537849,6e58,6,Info [FLog::CreatorOutput] S2 store shutdown

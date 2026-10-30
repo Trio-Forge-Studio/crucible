@@ -74,7 +74,7 @@ const mutants = [
 	[
 		"shutdown failure output",
 		"packages/crucible/src/internal/boot.ts",
-		"if (!ok) port.log(LogLevel.Error, `${record.id} onShutdown failed: ${err}`);",
+		'if (!ok) runtimeDiagnostic("error", `${record.id} onShutdown failed: ${err}`);',
 		"",
 		"throwing shutdown logs",
 	],
@@ -171,7 +171,7 @@ const mutants = [
 	],
 	[
 		"Error output",
-		"packages/crucible/src/internal/roblox-port.ts",
+		"packages/crucible/src/internal/log-output.ts",
 		"task.spawn(() => error(`[Crucible] ${message}`, 0))",
 		"warn(`[Crucible] ${message}`)",
 		"Roblox full port maps",

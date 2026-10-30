@@ -61,6 +61,28 @@ test("both Studio modes retain binding render Error traceback shutdown and count
 				),
 				`${mode} ${marker}`,
 			);
+		for (const side of ["server", "client"]) {
+			const source = `Sample.${side === "server" ? "Server" : "Client"}`;
+			for (const [level, severity] of [
+				["debug", "Info"],
+				["info", "Info"],
+				["warn", "Warning"],
+				["error", "Error"],
+			]) {
+				assert(
+					native
+						.split("\n")
+						.some(
+							(line) =>
+								line.includes(`${severity} [FLog::Creator`) &&
+								line.includes(`[${source}] S2 game ${level} ${side}`),
+						),
+					`${mode} ${side} ${level} native output`,
+				);
+			}
+			const errorAt = native.indexOf(`[${source}] S2 game error ${side}`);
+			assert.match(native.slice(errorAt, errorAt + 400), /game error (server|client)\n\n[^\n]+TS.main:\d+/);
+		}
 		assert.equal(trace.match(/S2 observed render order Bind200,Crucible201,PreRender/g)?.length, 5);
 		assert.match(
 			native,

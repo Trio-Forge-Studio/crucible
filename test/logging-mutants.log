@@ -1,0 +1,14 @@
+KILLED L1 filter bypass | L1 disabled | build 0, spec 1
+KILLED L2 stale aggregate | L2 aggregate | build 0, spec 1
+KILLED L3 duplicate subscription | L3 subscriptions | build 0, spec 1
+KILLED L4 failed sink retained | L4 throwing | build 0, spec 1
+KILLED L5 recursion guard removed | L5 whole | build 0, spec 1
+KILLED L6 mutable context | L6 frozen | build 0, spec 1
+KILLED L6 mutable record | L6 frozen | build 0, spec 1
+KILLED L7 escape disabled | L7 renderer | build 0, spec 1
+KILLED L8 caller traceback removed | L8 game | build 0, spec 1
+KILLED L9 mandatory diagnostics silenced | L9 private | build 0, spec 1
+KILLED L10 fallback retry | L10 native | build 0, spec 1
+KILLED L11 length bound removed | L11 names | build 0, spec 1
+KILLED L12 preboot default disabled | L12 module | build 0, spec 1
+13/13 selected source mutants killed; restored build 0
