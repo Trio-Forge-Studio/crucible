@@ -71,6 +71,9 @@ jobs:
           codesign --verify --strict --verbose=2 "$binary"
           file "$binary" | tee binary-file.txt
           grep 'Mach-O 64-bit executable arm64' binary-file.txt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
       - name: Exercise release binary through npm
         run: |
           export CRUCIBLE_BINARY="$PWD/target/${{ matrix.target }}/release/${{ matrix.binary }}"
@@ -108,7 +111,7 @@ jobs:
         working-directory: cli
         run: |
           cargo install cargo-about --version 0.8.4 --locked
-          cargo about generate --locked notices.hbs -o ../build/THIRD_PARTY_NOTICES
+          cargo about generate --locked --fail --manifest-path crates/crucible/Cargo.toml --config about.toml notices.hbs -o ../build/THIRD_PARTY_NOTICES
       - name: Stage five packages at the Cargo version
         run: |
           for platform in linux-x64 win32-x64 darwin-arm64; do

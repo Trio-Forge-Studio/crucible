@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliVersion, PLATFORMS, stage } from "./stage.mjs";
@@ -39,6 +39,7 @@ copyFileSync(join(root, "LICENSE"), join(runtime, "LICENSE"));
 writeFileSync(join(runtime, "package.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
 packages.push(runtime);
 const tarballs = join(output, "tarballs");
+rmSync(tarballs, { recursive: true, force: true });
 mkdirSync(tarballs, { recursive: true });
 for (const directory of packages) {
 	const pkg = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
