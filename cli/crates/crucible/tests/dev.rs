@@ -8,7 +8,11 @@ use std::time::{Duration, Instant};
 
 const FAKE_RBXTSC: &str = r#"
 const fs = require("node:fs");
-fs.writeFileSync("rbxtsc.pid", String(process.pid));
+const shimmed = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+	stdio: "ignore",
+	windowsHide: true,
+});
+fs.writeFileSync("rbxtsc.pids", `${process.pid} ${shimmed.pid}`);
 console.log(JSON.stringify(process.argv.slice(2)));
 if (process.env.FAKE_RBXTSC_EXIT) process.exit(Number(process.env.FAKE_RBXTSC_EXIT));
 fs.mkdirSync("out", { recursive: true });
@@ -120,12 +124,19 @@ impl Dev {
     }
 
     fn interrupt(&self) {
+        assert!(self.try_interrupt(), "Ctrl+C reaches crucible dev");
+    }
+
+    fn try_interrupt(&self) -> bool {
         #[cfg(unix)]
-        assert!(Command::new("kill").args(["-INT", &self.pid().to_string()]).status().unwrap().success());
+        return Command::new("kill")
+            .args(["-INT", &self.pid().to_string()])
+            .status()
+            .is_ok_and(|status| status.success());
         #[cfg(windows)]
         unsafe {
             use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
-            assert_ne!(GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid()), 0, "Ctrl+Break reaches crucible dev");
+            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid()) != 0
         }
     }
 
@@ -141,11 +152,10 @@ impl Dev {
 
 impl Drop for Dev {
     fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            self.interrupt();
-            if wait_until_exit(&mut self.child, Duration::from_secs(10)).is_none() {
-                let _ = self.child.kill();
-            }
+        if self.child.try_wait().ok().flatten().is_none()
+            && (!self.try_interrupt() || wait_until_exit(&mut self.child, Duration::from_secs(10)).is_none())
+        {
+            let _ = self.child.kill();
         }
     }
 }
@@ -161,14 +171,30 @@ fn wait_until_exit(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
     None
 }
 
-fn children(pid: u32) -> Vec<u32> {
+fn descendants(pid: u32) -> Vec<u32> {
     let output = if cfg!(windows) {
-        let filter = format!("(Get-CimInstance Win32_Process -Filter 'ParentProcessId={pid}').ProcessId");
-        Command::new("powershell").args(["-NoProfile", "-Command", &filter]).output()
+        let list = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }";
+        Command::new("powershell").args(["-NoProfile", "-Command", list]).output()
     } else {
-        Command::new("ps").args(["-o", "pid=", "--ppid", &pid.to_string()]).output()
+        Command::new("ps").args(["-e", "-o", "pid=,ppid="]).output()
     };
-    String::from_utf8_lossy(&output.unwrap().stdout).split_whitespace().map(|pid| pid.parse().unwrap()).collect()
+    let output = String::from_utf8_lossy(&output.unwrap().stdout).into_owned();
+    let pairs: Vec<(u32, u32)> = output
+        .lines()
+        .filter_map(|line| {
+            let mut ids = line.split_whitespace().map(|id| id.parse().unwrap());
+            Some((ids.next()?, ids.next()?))
+        })
+        .collect();
+    let mut found = vec![pid];
+    let mut next = 0;
+    while next < found.len() {
+        let parent = found[next];
+        found.extend(pairs.iter().filter(|(child, ppid)| *ppid == parent && *child != parent).map(|(child, _)| *child));
+        next += 1;
+    }
+    found.remove(0);
+    found
 }
 
 fn alive(pid: u32) -> bool {
@@ -184,8 +210,28 @@ fn port_is_free(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
-fn rbxtsc_pid(dir: &Path) -> u32 {
-    fs::read_to_string(dir.join("rbxtsc.pid")).unwrap().parse().unwrap()
+fn rbxtsc_pids(dir: &Path) -> Vec<u32> {
+    fs::read_to_string(dir.join("rbxtsc.pids")).unwrap().split(' ').map(|pid| pid.parse().unwrap()).collect()
+}
+
+fn assert_all_stop(pids: &[u32], port: u16) {
+    let deadline = Instant::now() + STOP;
+    while Instant::now() < deadline {
+        if pids.iter().all(|pid| !alive(*pid)) && port_is_free(port) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let survivors: Vec<_> = pids.iter().copied().filter(|pid| alive(*pid)).collect();
+    // Survivors hold this test's output handles, so the run would hang on them.
+    for pid in &survivors {
+        let _ = if cfg!(windows) {
+            Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output()
+        } else {
+            Command::new("kill").args(["-9", &pid.to_string()]).output()
+        };
+    }
+    panic!("{survivors:?} outlived crucible dev by {STOP:?}. Port {port} free: {}", port_is_free(port));
 }
 
 const START: Duration = Duration::from_secs(30);
@@ -202,14 +248,29 @@ fn ctrl_c_stops_roblox_ts_and_rojo() {
     assert!(stderr.contains("[rbxtsc] 10:00:00 AM - Found 0 errors. Watching for file changes."), "{stderr}");
     assert!(stderr.contains(&format!("[rojo]   Port:    {port}")), "{stderr}");
     assert!(game.path().join("out/transformer.sha256").is_file(), "the first compile writes the receipt");
-    let mut spawned = children(dev.pid());
-    assert!(spawned.len() >= 2, "crucible dev runs roblox-ts and Rojo: {spawned:?}");
-    spawned.push(rbxtsc_pid(game.path()));
+    let spawned = descendants(dev.pid());
+    let rbxtsc = rbxtsc_pids(game.path());
+    assert!(rbxtsc.iter().all(|pid| spawned.contains(pid)), "{rbxtsc:?} in {spawned:?}");
+    assert!(spawned.len() >= 4, "a guard, roblox-ts, its child and Rojo: {spawned:?}");
     dev.interrupt();
     let status = dev.wait(STOP);
     assert_eq!(status.code(), Some(0), "{}", dev.stderr());
     assert!(spawned.iter().all(|pid| !alive(*pid)), "no child outlives crucible dev: {spawned:?}");
     assert!(port_is_free(port), "Rojo released port {port}");
+}
+
+#[test]
+fn killing_only_crucible_dev_stops_its_children() {
+    let game = fixture();
+    let port = free_port();
+    let mut dev = Dev::start(game.path(), &["--port", &port.to_string()], &[]);
+    dev.wait_for_stderr("Rojo server listening", START);
+    let spawned = descendants(dev.pid());
+    assert!(spawned.len() >= 4, "a guard, roblox-ts, its child and Rojo: {spawned:?}");
+    assert!(rbxtsc_pids(game.path()).iter().all(|pid| spawned.contains(pid)), "{spawned:?}");
+    dev.child.kill().unwrap();
+    dev.child.wait().unwrap();
+    assert_all_stop(&spawned, port);
 }
 
 #[test]
@@ -222,7 +283,7 @@ fn rojo_failure_stops_roblox_ts() {
     let stderr = dev.stderr();
     assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("[rojo] ") && stderr.contains("crucible dev: Rojo stopped"), "{stderr}");
-    assert!(!alive(rbxtsc_pid(game.path())), "roblox-ts stops when Rojo does");
+    assert!(rbxtsc_pids(game.path()).iter().all(|pid| !alive(*pid)), "roblox-ts stops when Rojo does");
 }
 
 #[test]
@@ -243,7 +304,7 @@ fn unknown_place_exits_2_before_starting() {
     let status = dev.wait(START);
     assert_eq!(status.code(), Some(2));
     assert!(dev.stderr().contains("crucible dev: unknown place arena. Places: start"), "{}", dev.stderr());
-    assert!(!game.path().join("rbxtsc.pid").exists(), "nothing started");
+    assert!(!game.path().join("rbxtsc.pids").exists(), "nothing started");
 }
 
 struct Restore {
@@ -253,7 +314,9 @@ struct Restore {
 
 impl Drop for Restore {
     fn drop(&mut self) {
-        fs::write(&self.path, &self.original).unwrap();
+        if let Err(error) = fs::write(&self.path, &self.original) {
+            eprintln!("cannot restore {}: {error}", self.path.display());
+        }
     }
 }
 
@@ -286,17 +349,17 @@ fn sample_game_edit_reaches_rojo() {
     let source = sample.join("src/server/main.server.ts");
     let original = fs::read(&source).unwrap();
     let probe = format!("crucible dev probe {}", std::process::id());
+    let served = || get(&read).map(|bytes| bytes.windows(probe.len()).any(|window| window == probe.as_bytes()));
     let restore = Restore { path: source.clone(), original: original.clone() };
-    assert!(!get(&read).unwrap().windows(probe.len()).any(|window| window == probe.as_bytes()));
+    assert_eq!(served(), Some(false));
     let mut edited = original.clone();
     edited.extend_from_slice(format!("print(\"{probe}\");\n").as_bytes());
     fs::write(&source, edited).unwrap();
-    wait_until("the edit to reach Rojo", Duration::from_secs(60), || {
-        get(&read)?.windows(probe.len()).any(|window| window == probe.as_bytes()).then_some(())
-    });
+    wait_until("the edit to reach Rojo", Duration::from_secs(60), || served()?.then_some(()));
     drop(restore);
-    let spawned = children(dev.pid());
-    assert!(spawned.len() >= 2, "crucible dev runs roblox-ts and Rojo: {spawned:?}");
+    wait_until("the restored source to reach Rojo", Duration::from_secs(60), || (!served()?).then_some(()));
+    let spawned = descendants(dev.pid());
+    assert!(spawned.len() >= 3, "a guard, roblox-ts and Rojo: {spawned:?}");
     dev.interrupt();
     let status = dev.wait(STOP);
     assert_eq!(status.code(), Some(0), "{}", dev.stderr());
