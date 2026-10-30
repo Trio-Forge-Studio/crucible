@@ -12,7 +12,15 @@ export default defineConfig({
 		useTabs: true,
 		trailingComma: "all",
 		sortPackageJson: false,
-		ignorePatterns: ["**/out/**", "**/include/**", "build/**", "pnpm-lock.yaml", "**/*.md"],
+		ignorePatterns: [
+			"**/out/**",
+			"**/include/**",
+			"build/**",
+			"pnpm-lock.yaml",
+			"**/*.md",
+			"cli/spec/**",
+			"cli/target/**",
+		],
 		overrides: [
 			{
 				files: ["**/*.yml", "**/*.yaml"],
@@ -24,6 +32,6 @@ export default defineConfig({
 		categories: { correctness: "error", suspicious: "error" },
 		plugins: ["typescript", "node"],
 		rules: { "no-shadow": "off" },
-		ignorePatterns: ["**/out/**", "**/include/**", "build/**"],
+		ignorePatterns: ["**/out/**", "**/include/**", "build/**", "cli/target/**"],
 	},
 });
