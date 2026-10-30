@@ -1,0 +1,61 @@
+KILLED R4 evaluate retains rejection | Y4 j first | build 0, spec 1
+KILLED R4 queue clears every reason | Y2 wrong class | build 0, spec 1
+KILLED R4 scope recorded as accepts | Y2b default scope | build 0, spec 1
+KILLED R4 scope never pending | Y2e corrected default scope | build 0, spec 1
+KILLED M1 queue retains rejection | R3 refresh clears | build 0, spec 1
+KILLED M3 attribute rejection omitted | X7 hook get | build 0, spec 1
+KILLED M5 queue membership means pending | X6 two hook gets | build 0, spec 1
+KILLED R3 get clears rejection | X3 two hook gets | build 0, spec 1
+KILLED R3 corrected attributes stay rejected | X2 invalid attribute | build 0, spec 1
+KILLED R3 ignores current attribute checks | X7 hook get | build 0, spec 1
+KILLED R3 required absence allowed | R3 attribute pending checks | build 0, spec 1
+KILLED R3 optional absence rejected | R3 attribute pending checks | build 0, spec 1
+KILLED R3 get runs user accepts | R3 accepts rejection | build 0, spec 1
+KILLED G1 pending ignores rejection | F1 residual: | build 0, spec 1
+KILLED N1 parked flag not cleared after restore | PN1 restored parked pair | build 0, spec 1
+KILLED N2 pending ignores suppression | PN2 hook get | build 0, spec 1
+KILLED N4 restore re-adds unparked pairs | PN4 refreshed parked pair | build 0, spec 1
+KILLED N5 queue leaves parked flag set | PN4 refreshed parked pair | build 0, spec 1
+KILLED V1 Roblox StarterPlayer exclusion | Roblox binding port maps | build 0, spec 1
+KILLED V4 wrong class warns only once per record | wrong class warns once | build 0, spec 1
+KILLED V5 warning reset | invalid valid same invalid | build 0, spec 1
+KILLED V6 parked pairs lost | outside get reconciles only | build 0, spec 1
+KILLED V8 reset pair not requeued | RemoveTag then AddTag and Parent nil | build 0, spec 1
+KILLED F1 false pending warning | untagged instance does not warn pending | build 0, spec 1
+KILLED F2 parked refresh ignored | outside get runs a parked pair | build 0, spec 1
+KILLED F8 record id in class warning | wrong class warns once | build 0, spec 1
+KILLED no leave-world admission | Parent nil fires removed | build 0, spec 1
+KILLED no tag admission | AddTag then get outside | build 0, spec 1
+KILLED Roblox tag mapping | Roblox binding port maps | build 0, spec 1
+KILLED public root export | rule 3 and 4 | build 0, spec 1
+KILLED instance assignment | rule 3 and 4 | build 0, spec 1
+KILLED disable request | rule 3 and 4 | build 0, spec 1
+KILLED C1 all pairs | outside get reconciles only | build 0, spec 1
+KILLED C1 no outside reconcile | AddTag then get outside | build 0, spec 1
+KILLED C1 no pending warning | get inside a hook never | build 0, spec 1
+KILLED C3 default scope | default accepts excludes | build 0, spec 1
+KILLED bound get skips accepts | override replaces accepts | build 0, spec 1
+KILLED C4 remove suppression | remove and fault suppression | build 0, spec 1
+KILLED C4 fault suppression | remove and fault suppression | build 0, spec 1
+KILLED C4 no suppression reset | remove and fault suppression | build 0, spec 1
+KILLED required missing | required absent and any present | build 0, spec 1
+KILLED present invalid | required absent and any present | build 0, spec 1
+KILLED field update | valid attribute writes update | build 0, spec 1
+KILLED warning dedup | valid attribute writes update | build 0, spec 1
+KILLED admission watchers | admission installs watchers | build 0, spec 1
+KILLED reconnect snapshot | reconnect snapshots fields | build 0, spec 1
+KILLED running pair queued | accepts refreshing and getting | build 0, spec 1
+KILLED claim cleanup | caller clears the constructing worker | build 0, spec 1
+KILLED claim thread scope | yielding constructor clears its claim | build 0, spec 1
+KILLED wrong class admission | wrong class warns once | build 0, spec 1
+KILLED wrong class warning dedup | wrong class warns once | build 0, spec 1
+KILLED ancestry watcher | default accepts excludes | build 0, spec 1
+KILLED no admission recheck after accepts | binding rereads tag changes | build 0, spec 1
+KILLED W3 scope flag not reset before accepts | Z5b scope rejection at boot | build 0, spec 1
+KILLED W4 default accepts raises scope flag in scope | Z4 user accepts calls default scope | build 0, spec 1
+KILLED R5 bound branch drops rejection reason | Z1 bound pair re-evaluated | build 0, spec 1
+KILLED R5 default scope flag ignores target | Z3 user accepts consults default scope | build 0, spec 1
+KILLED A1 bound branch never updates scopeTarget | Q2 Q1 after another instance was evaluated last | build 0, spec 1
+KILLED A2 bound branch records accepts for a scope rejection | Q1 bound pair moved into ServerStorage, hook moves it back unsignalled, then get | build 0, spec 1
+KILLED A3 bound branch does not reset the scope flag | Q3 scope rejection then a bound user accepts rejection in one reconcile, then get | build 0, spec 1
+60/60 selected source mutants killed; restored build 0

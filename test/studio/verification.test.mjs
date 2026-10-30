@@ -83,7 +83,17 @@ test("both Studio modes retain binding render Error traceback shutdown and count
 				);
 			}
 			const errorAt = native.indexOf(`[${source}] S2 deliberate game error ${side}`);
-			assert.match(native.slice(errorAt, errorAt + 400), /game error (server|client)\n\n[^\n]+TS.main:\d+/);
+			const compiled = fs.readFileSync(
+				path.resolve(import.meta.dirname, `../../examples/sample-game/out/${side}/main.${side}.luau`),
+				"utf8",
+			);
+			const callLine =
+				compiled.split("\n").findIndex((line) => line.includes('log:error("S2 deliberate game error')) + 1;
+			assert(callLine > 0, "sample error call exists");
+			assert.match(
+				native.slice(errorAt, errorAt + 400),
+				new RegExp(`game error ${side}\\n\\n[^\\n]+TS.main:${callLine}\\n`),
+			);
 		}
 		assert.equal(trace.match(/S2 observed render order Bind200,Crucible201,PreRender/g)?.length, 5);
 		assert.match(
