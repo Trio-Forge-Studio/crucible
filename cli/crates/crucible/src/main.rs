@@ -1,6 +1,7 @@
 mod auth;
 mod build;
 mod call;
+mod child;
 mod cli;
 mod discover;
 mod docs;

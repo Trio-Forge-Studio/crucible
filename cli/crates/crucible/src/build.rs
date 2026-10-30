@@ -1,4 +1,5 @@
-use crate::manifest::Manifest;
+use crate::child;
+use crate::manifest::{Manifest, ManifestError};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -41,7 +42,12 @@ pub fn main(args: Args) -> ExitCode {
     let result = std::env::current_dir()
         .map_err(|error| Error::Failed(format!("cannot read the current directory: {error}")))
         .and_then(|root| {
-            let manifest = Manifest::read(&root).map_err(|error| Error::Usage(error.to_string()))?.unwrap_or_default();
+            let manifest = Manifest::read(&root)
+                .map_err(|error| match error {
+                    ManifestError::Read(_) => Error::Failed(error.to_string()),
+                    _ => Error::Usage(error.to_string()),
+                })?
+                .unwrap_or_default();
             Ok((build(&root, &manifest, &args.places, args.output.as_deref())?, root))
         });
     match result {
@@ -92,9 +98,9 @@ pub fn build(
 
 pub fn compile(root: &Path) -> Result<(), Error> {
     let receipt = Receipt::prepare(root)?;
-    let status = rbxtsc(root)?
-        .args(["--type", "game"])
-        .status()
+    let mut command = rbxtsc(root)?;
+    command.args(["--type", "game"]);
+    let status = child::status_on_stderr(command)
         .map_err(|error| Error::Failed(format!("cannot run node: {error}. Install Node.js and put node on PATH")))?;
     if !status.success() {
         return Err(Error::Failed("roblox-ts failed".into()));
@@ -115,7 +121,7 @@ pub fn rbxtsc(root: &Path) -> Result<Command, Error> {
         .or(manifest["bin"].as_str())
         .ok_or_else(|| Error::Failed(format!("{} declares no rbxtsc bin", package.display())))?;
     let mut command = Command::new("node");
-    command.arg(package.join(bin)).current_dir(root).stdin(Stdio::null()).stdout(std::io::stderr());
+    command.arg(package.join(bin)).current_dir(root).stdin(Stdio::null());
     Ok(command)
 }
 
@@ -129,20 +135,7 @@ impl Receipt {
         let Some(package) = node_package(root, "@trioforge/crucible") else {
             return Ok(None);
         };
-        let transformer = package.join("transformer");
-        let mut files: Vec<_> = std::fs::read_dir(&transformer)
-            .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.path())).collect())
-            .map_err(|error| Error::Failed(format!("cannot read {}: {error}", transformer.display())))?;
-        files.sort();
-        let mut hash = Sha256::new();
-        for file in files.iter().filter(|file| file.is_file()) {
-            let bytes = std::fs::read(file)
-                .map_err(|error| Error::Failed(format!("cannot read {}: {error}", file.display())))?;
-            hash.update(file.file_name().unwrap_or_default().as_encoded_bytes());
-            hash.update((bytes.len() as u64).to_le_bytes());
-            hash.update(bytes);
-        }
-        let fingerprint = format!("{:x}", hash.finalize());
+        let fingerprint = fingerprint(&package.join("transformer"))?;
         let out = root.join("out");
         let path = out.join("transformer.sha256");
         if out.exists() && std::fs::read_to_string(&path).ok().as_deref() != Some(&fingerprint) {
@@ -160,6 +153,35 @@ impl Receipt {
     }
 }
 
+fn fingerprint(root: &Path) -> Result<String, Error> {
+    let unreadable =
+        |path: &Path, error: std::io::Error| Error::Failed(format!("cannot read {}: {error}", path.display()));
+    let mut files = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(|error| unreadable(&dir, error))? {
+            let path = entry.map_err(|error| unreadable(&dir, error))?.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.is_file() {
+                let relative = path.strip_prefix(root).unwrap_or(&path).components();
+                let name = relative.map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+                files.push((name, path));
+            }
+        }
+    }
+    files.sort();
+    let mut hash = Sha256::new();
+    for (name, path) in files {
+        let bytes = std::fs::read(&path).map_err(|error| unreadable(&path, error))?;
+        hash.update((name.len() as u64).to_le_bytes());
+        hash.update(name);
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 fn node_package(root: &Path, name: &str) -> Option<PathBuf> {
     root.ancestors()
         .map(|dir| dir.join("node_modules").join(name))
@@ -173,24 +195,28 @@ fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
-    let status = Command::new(exe)
-        .arg(ROJO_BUILD)
-        .arg(project)
-        .arg(output)
-        .stdin(Stdio::null())
-        .stdout(std::io::stderr())
-        .status()
-        .map_err(|error| format!("cannot start Rojo: {error}"))?;
+    let status =
+        child::spawn_tied(Command::new(exe).arg(ROJO_BUILD).arg(project).arg(output).stdout(std::io::stderr()))
+            .and_then(|mut tied| tied.child.wait())
+            .map_err(|error| format!("cannot start Rojo: {error}"))?;
     if status.success() { Ok(()) } else { Err(format!("Rojo could not build {}", project.display())) }
 }
 
 pub const ROJO_BUILD: &str = "__rojo-build";
 
 pub fn rojo_main(project: PathBuf, output: PathBuf) -> ExitCode {
+    child::exit_with_parent();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_module_path(false)
         .format_timestamp(None)
         .init();
+    #[cfg(debug_assertions)]
+    if std::env::var_os("CRUCIBLE_TEST_HOLD_ROJO").is_some() {
+        eprintln!("rojo child {} holding", std::process::id());
+        loop {
+            std::thread::park();
+        }
+    }
     let command = librojo::cli::BuildCommand { project, output: Some(output), plugin: None, watch: false };
     match command.run() {
         Ok(()) => ExitCode::SUCCESS,

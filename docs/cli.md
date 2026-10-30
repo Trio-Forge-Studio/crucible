@@ -20,11 +20,11 @@ Commands print text. The result goes to stdout, and progress and errors go to st
 
 Run `npx crucible build` from the game's root. It runs the project's roblox-ts once as `rbxtsc --type game`, then builds every place in `crucible.toml` to `build/<name>.rbxl` with the Rojo it embeds. `crucible --version` names that Rojo version. Projects need no separate Rojo install.
 
-- roblox-ts resolves the way Node resolves `roblox-ts` from the game's root, through each parent `node_modules`. It runs with the `node` on `PATH`. Its diagnostics reach stderr unchanged.
+- roblox-ts resolves the way Node resolves `roblox-ts` from the game's root, through each parent `node_modules`. It runs with the `node` on `PATH`. Its diagnostics reach stderr with their file and line positions. When stderr is not a terminal, their colour codes are removed.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.
 - When the installed `@trioforge/crucible` transformer differs from the one recorded in `out/transformer.sha256`, `out` is deleted and the game compiles from clean.
-- Exit 0 means every place built. Exit 1 means roblox-ts or Rojo failed. Exit 2 means a usage or `crucible.toml` error, reported before anything compiles.
+- Exit 0 means every place built. Exit 1 means `crucible.toml` could not be read, or roblox-ts or Rojo failed. Exit 2 means a usage error or an invalid `crucible.toml`, reported before anything compiles.
 
 `crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `default.project.json`.
 
@@ -46,7 +46,7 @@ version_type = "Published"   # default "Saved"
 places = { start = 4321, arena = 4322 }
 ```
 
-Every env must map every declared place, and only declared places. A single-place game can omit `[places]` and write `place = 4321` in an env, which maps `start`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
+Every env must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
 
 ## crucible docs
 
