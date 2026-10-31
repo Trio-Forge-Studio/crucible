@@ -39,7 +39,7 @@ export function stage(out, binaries, notices) {
 	mkdirSync(join(shim, "bin"), { recursive: true });
 	copyFileSync(join(cli, "npm", "crucible.cjs"), join(shim, "bin", "crucible.cjs"));
 	writeJson(join(shim, "package.json"), {
-		name: "crucible",
+		name: "@trioforge/crucible-cli",
 		version,
 		description: "The command line for Crucible games.",
 		...shared,

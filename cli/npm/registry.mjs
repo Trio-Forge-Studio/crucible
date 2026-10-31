@@ -5,22 +5,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const burned = new Set([
-	"0.0.0",
-	"0.0.1",
-	"0.3.0",
-	"0.3.1",
-	"0.3.2",
-	"0.3.3",
-	"0.3.4",
-	"0.3.5",
-	"0.4.0",
-	"0.4.1",
-	"9.0.0",
-]);
+export const SHIM = "@trioforge/crucible-cli";
 
 export function unused(document, name, version) {
-	assert.ok(!(name === "crucible" && burned.has(version)), `${name}@${version} is burned`);
 	assert.ok(
 		!Object.hasOwn(document.versions ?? {}, version) && !Object.hasOwn(document.time ?? {}, version),
 		`${name}@${version} was already used`,
@@ -54,13 +41,13 @@ export async function main(
 			);
 			return { path, name, version };
 		})
-		.sort((a, b) => Number(a.name === "crucible") - Number(b.name === "crucible") || a.name.localeCompare(b.name));
+		.sort((a, b) => Number(a.name === SHIM) - Number(b.name === SHIM) || a.name.localeCompare(b.name));
 	assert.equal(packages.length, 5);
 	assert.equal(new Set(packages.map(({ version }) => version)).size, 1);
 	assert.deepEqual(
 		new Set(packages.map(({ name }) => name)),
 		new Set([
-			"crucible",
+			SHIM,
 			"@trioforge/crucible",
 			"@trioforge/crucible-cli-linux-x64",
 			"@trioforge/crucible-cli-win32-x64",

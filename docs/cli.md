@@ -2,7 +2,7 @@
 
 Run `crucible` commands and read their output and exit codes.
 
-`crucible` is the command line for Crucible games. Run it with `npx crucible <command>` from a project that has `crucible` in its `devDependencies`. `npx crucible docs cli` lists every command.
+`crucible` is the command line for Crucible games. It ships as the `@trioforge/crucible-cli` npm package. Run it with `npx crucible <command>` from a project that has `@trioforge/crucible-cli` in its `devDependencies`. `npx crucible docs cli` lists every command.
 
 `crucible --help` lists the commands, and `crucible <command> --help` describes one. `crucible --version` prints the CLI version and the embedded Rojo version.
 
@@ -50,7 +50,7 @@ Every env must map every declared place, and only declared places. A game whose 
 
 ## crucible create
 
-Run `npx crucible create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx crucible create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files. Names and path components cannot end in a dot or space or use Windows device names, including names with extensions such as `con.txt`. A target below an existing file also exits 2.
+Run `npx @trioforge/crucible-cli create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx @trioforge/crucible-cli create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files. Names and path components cannot end in a dot or space or use Windows device names, including names with extensions such as `con.txt`. A target below an existing file also exits 2.
 
 The game pins the CLI and runtime at the CLI version and includes the tested roblox-ts toolchain, Vite+, side entry scripts, transformer config, and a Rojo project. Template files use MIT-0. No separate Rojo or Rokit install is needed.
 
@@ -135,14 +135,14 @@ A successful dry run exits 0 with no published receipts. `auth` is the existing 
 
 ## crucible upgrade
 
-Run `npx crucible upgrade` from the game's root to move `crucible` and `@trioforge/crucible` to the latest version in the registry. Pass a version, such as `npx crucible upgrade 0.2.0`, to pick one.
+Run `npx crucible upgrade` from the game's root to move `@trioforge/crucible-cli` and `@trioforge/crucible` to the latest version in the registry. Pass a version, such as `npx crucible upgrade 0.2.0`, to pick one.
 
 ```console
 npx crucible upgrade
 npx crucible upgrade 0.2.0
 ```
 
-- The latest version comes from `npm view crucible version` in the game's root, so the registry and credentials in `.npmrc` apply. A game where either package is already newer, such as a prerelease, exits 0 and changes nothing.
+- The latest version comes from `npm view @trioforge/crucible-cli version` in the game's root, so the registry and credentials in `.npmrc` apply. A game where either package is already newer, such as a prerelease, exits 0 and changes nothing.
 - Both packages move to the same exact version in `package.json`. Only their version strings change, so the file keeps its formatting and line endings. A `workspace:`, `file:`, `link:`, `npm:` alias, Git, URL, path, or tag spec exits 2, because only a registry version or range can be rewritten. Any npm range is accepted, such as `^0.1.0 || ^0.2.0`, `>=0.1.0 <0.2.0`, or `0.1.0 - 0.2.0`.
 - The game's package manager installs them. The nearest lockfile in the game's root or a parent directory picks the manager, so a workspace member installs with its workspace's manager: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, or `package-lock.json`. Without one, `npm_config_user_agent` picks it, with npm as the default. pnpm runs with `--no-frozen-lockfile` and Yarn Berry with `--no-immutable`, because under CI both refuse a changed `package.json` by default.
 - A version older than either installed package exits 2 unless you pass `--allow-downgrade`. When both pins and both installed packages are already at the version, it exits 0 and changes nothing. Otherwise it installs again, so a retry after a failed install finishes the job.

@@ -12,7 +12,7 @@
 		"@trioforge/crucible": "__VERSION__"
 	},
 	"devDependencies": {
-		"crucible": "__VERSION__",
+		"@trioforge/crucible-cli": "__VERSION__",
 		"roblox-ts": "__ROBLOX_TS__",
 		"typescript": "__TYPESCRIPT__",
 		"@rbxts/compiler-types": "__RBXTS_COMPILER_TYPES__",
