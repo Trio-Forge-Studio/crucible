@@ -32,7 +32,7 @@ local function threeEffects(r, events)
 end
 
 return {
-	["limits the graph and flush ceilings and the T13 render commit priority are the contract's"] = function()
+	["rule 27 rule 34 rule 38 limits the graph and flush ceilings and the T13 render commit priority are the contract's"] = function()
 		local r = realm()
 		spec.eq(r.limits.MAX_RUNS_PER_EFFECT, 64, "MAX_RUNS_PER_EFFECT")
 		spec.eq(r.limits.MAX_EFFECT_RUNS_PER_FLUSH, 65536, "MAX_EFFECT_RUNS_PER_FLUSH")
@@ -40,7 +40,7 @@ return {
 		spec.eq(r.limits.OWNER_CHILDREN_WARNING, 4096, "OWNER_CHILDREN_WARNING")
 		spec.eq(r.limits.RENDER_COMMIT_PRIORITY, 2001, "RENDER_COMMIT_PRIORITY")
 	end,
-	["rule 34 T9 the per-effect bound stops only the feedback loop"] = function()
+	["rule 34 rule 79 T9 the per-effect bound stops only the feedback loop, reported once"] = function()
 		local r = realm()
 		local a, b, other = r.api.state(0), r.api.state(0), r.api.state(0)
 		local runs = { first = 0, second = 0, healthy = 0 }
@@ -166,7 +166,7 @@ return {
 		r.flush()
 		spec.eq(r.logged(`reached {r.limits.MAX_FLUSH_ROUNDS} rounds`), 2, "reported again after a flush within bounds")
 	end,
-	["rule 35 T15 an internal error stops only the culprit and loses no queued entry"] = function()
+	["rule 35 rule 79 T15 an internal error stops only the culprit, is reported once and loses no queued entry"] = function()
 		local armed = {}
 		local r = realm(function(graph)
 			inject(graph, "internal/reactive/ownership", "endLifetime", armed, "end", true)

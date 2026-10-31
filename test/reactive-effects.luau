@@ -194,7 +194,7 @@ return {
 		spec.eq(runs, 1, "stopped after the bad return")
 		spec.eq(r.logged("returned a boolean"), 1, "one diagnostic names the return")
 	end,
-	["rule 18 a failing run releases what it acquired and stops; the flush continues"] = function()
+	["rule 18 rule 79 a failing run releases what it acquired, stops and is reported once; the flush continues"] = function()
 		local r = realm()
 		local s = r.api.state(1)
 		local events = {}
@@ -352,7 +352,7 @@ return {
 			"S release",
 		}, "nothing released under the running body; then rule 25's order")
 	end,
-	["rule 31 before a port is installed an enqueue only queues"] = function()
+	["rule 31 rule 80 before a port is installed an enqueue only queues; installing it and releasing the barrier flushes"] = function()
 		local engine = Engine.new()
 		local graph = spec.runtime(nil, engine.loggingPort)
 		local api = graph.module("")

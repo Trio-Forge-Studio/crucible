@@ -186,7 +186,7 @@ return {
 		}, "the extra segment ran under an ended generation")
 		spec.eq(runs, 0, "its effect was never created")
 	end,
-	["rule 27 a child that ends early unlinks, and a generation warns once at the children bound"] = function()
+	["rule 27 rule 79 a child that ends early unlinks, and a generation warns once at the children bound"] = function()
 		local w = life()
 		local limits = w.graph.module("internal/reactive/limits")
 		local object = w.make("Busy", {

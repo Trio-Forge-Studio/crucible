@@ -79,7 +79,7 @@ export function track(label: TextLabel) {
 - The first run, like every later one, happens on the reactive flush, never inside the call that created the effect.
 - It runs again after anything its last run read changed. Several writes before the flush reach it as one run with the final values.
 - Dependencies are rebuilt each run, so a branch that stops reading a value stops depending on it.
-- Before the next run, and when the effect ends, the previous run ends: effects and scopes it created end first, then its cleanups run, newest first. The cleanup the body returned runs first among them.
+- Before the next run, and when the effect ends, the previous run ends. Effects and scopes it created end first. Then its cleanups run, newest first, starting with the cleanup the body returned.
 - A run that throws, yields, or returns anything other than nothing or a function stops the effect for good. What the run created is released, the failure is reported once through Crucible's diagnostics, and other effects keep running. Nothing is rethrown into the code that wrote the state.
 
 `effect` needs an owner, described below. Without one it throws `effect() needs an owner: create it in a Subsystem or behaviour, or inside scope()`.
@@ -148,13 +148,13 @@ export class Lamp extends CrucibleBehaviour<"Lamp", BasePart> {
 		effect(() => {
 			light.Enabled = this.lit();
 		});
-	} // at disable: the effect ends, then the light is destroyed
+	} // At disable the effect ends, then the light is destroyed.
 }
 ```
 
 A Subsystem has no `onEnable`, so its reactions live for the session. A disabled behaviour's object-owned effects keep running.
 
-`All<T>.observe` keeps its own lifetime: a subscription made in `onEnable` lasts until destroy. Its deliveries for members that exist already run during `onEnable` and join the interval. To end the subscription at disable, register its disconnect: `onCleanup(members.observe(added, removed))`.
+`All<T>.observe` keeps its own lifetime. A subscription made in `onEnable` lasts until destroy. Its deliveries for members that exist already run during `onEnable` and join the interval. To end the subscription at disable, register its disconnect with `onCleanup(members.observe(added, removed))`.
 
 ### Scopes
 
@@ -168,7 +168,7 @@ A Subsystem has no `onEnable`, so its reactions live for the session. A disabled
 
 `onCleanup(release)` registers `release` with the current owner. Register it right after you acquire the resource, so a later throw in the same hook or run leaks nothing.
 
-Ending an owner ends its child effects and scopes first, newest first, then runs its cleanups, newest first. Each cleanup runs at once, protected: a throw or yield is reported and the next cleanup still runs. A lifecycle request a cleanup makes, such as `setEnabled`, applies after the current lifecycle step.
+Ending an owner ends its child effects and scopes first, newest first, then runs its cleanups, newest first. Each cleanup runs at once and protected. A throw or yield is reported, and the next cleanup still runs. A lifecycle request a cleanup makes, such as `setEnabled`, applies after the current lifecycle step.
 
 Under an owner that has already ended, `effect` and `watch` create nothing, `scope` returns a dispose without running `setup`, and `onCleanup` runs `release` at once.
 
@@ -190,7 +190,7 @@ The flush bounds its own work:
 
 | Bound | Value | When reached |
 | --- | --- | --- |
-| Runs of one effect in one flush | 64 | The effect stops and is reported: it is a feedback loop |
+| Runs of one effect in one flush | 64 | The effect stops and is reported as a feedback loop |
 | Effect runs in one flush | 65,536 | The rest waits for the next flush, unstopped |
 | Rounds in one flush | 256 | The rest waits for the next flush, unstopped |
 | Live effects and scopes one object owns directly | 4,096 | One warning names the object |
