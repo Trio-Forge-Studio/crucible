@@ -1,0 +1,16 @@
+{
+	"behavior": "Deferred",
+	"shutdown": "short",
+	"pid": 23428,
+	"place": "C:\\Users\\Admin\\.t3\\worktrees\\crucible\\t3-91034806\\build\\modules\\s0-deferred-short-18188-a27c9707-f7bb-4bf5-9cb4-ca98df4e3117.rbxl",
+	"launchedAt": "2026-10-31T18:08:01.670Z",
+	"freePhysicalMemoryKB": 4623180,
+	"studioId": "0a4401c6-5412-43ac-a23b-862680f61597",
+	"version": "0.745.0.7451137",
+	"nativeLog": "0.745.0.7451137_20261031T180801Z_Studio_79A33_last.log",
+	"stopRequestedAt": "2026-10-31T18:09:37.038Z",
+	"editConfirmedAt": "2026-10-31T18:09:48.971Z",
+	"closeMethod": "Stop-Process",
+	"closed": true,
+	"processRemaining": false
+}

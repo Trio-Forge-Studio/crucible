@@ -1,0 +1,27 @@
+{
+	"name": "CrucibleModuleProbes",
+	"tree": {
+		"$className": "DataModel",
+		"Workspace": {
+			"$className": "Workspace",
+			"$properties": {
+				"SignalBehavior": "Deferred",
+				"StreamingEnabled": true,
+				"StreamingMinRadius": 64,
+				"StreamingTargetRadius": 128
+			}
+		},
+		"ServerScriptService": {
+			"Probe": {
+				"$path": "server.server.luau"
+			}
+		},
+		"StarterPlayer": {
+			"StarterPlayerScripts": {
+				"Probe": {
+					"$path": "client.client.luau"
+				}
+			}
+		}
+	}
+}

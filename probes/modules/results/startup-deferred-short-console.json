@@ -1,0 +1,9 @@
+{
+	"content": [
+		{
+			"type": "text",
+			"text": "S0|ready|instrument startup\nS0|complete|instrument startup\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type"
+		}
+	],
+	"isError": false
+}
