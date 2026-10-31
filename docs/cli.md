@@ -48,6 +48,25 @@ places = { start = 4321, arena = 4322 }
 
 Every env must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
 
+## crucible dev
+
+Run `npx crucible dev` from the game's root to compile on every save and sync one place to Studio. It starts the project's roblox-ts as `rbxtsc --watch --type game`. After the first compile, it serves the place with the Rojo it embeds. Connect the Rojo plugin in Studio to the port that Rojo prints.
+
+```console
+npx crucible dev
+npx crucible dev --place arena --port 34873
+```
+
+- `--place <name>` serves that place from `crucible.toml`. The default is `start`.
+- `--port <port>` sets the port. Without it, Rojo uses the project's `servePort`, or 34872.
+- Every line from roblox-ts starts with `[rbxtsc]`, and every line from Rojo starts with `[rojo]`. All output goes to stderr. When stderr is not a terminal, colour codes are removed.
+- roblox-ts resolves the same way as in `crucible build`. A changed `@trioforge/crucible` transformer makes the first compile start from clean.
+- After the first compile, `crucible dev` writes `out/transformer.sha256`, even when that compile reports errors. The receipt records which transformer produced `out`, not whether the game compiles.
+- Ctrl+C stops roblox-ts and Rojo, including any processes they started, and exits 0.
+- If `crucible dev` itself is killed, roblox-ts, Rojo, and the processes roblox-ts started stop with it. On macOS and Linux, a process that roblox-ts starts in a new process group or session escapes this.
+- If roblox-ts or Rojo stops on its own, `crucible dev` stops the other and exits 1. A port in use is the common cause.
+- An unknown place or an invalid `crucible.toml` exits 2 before anything starts. A `crucible.toml` that cannot be read exits 1.
+
 ## crucible docs
 
 Prints a guide as Markdown. Read the guide for a module before you write code that uses it.

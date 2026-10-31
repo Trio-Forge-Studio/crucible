@@ -55,6 +55,14 @@ node --test npm/package.test.mjs
 
 The behavior tests drive the real binary against local HTTP servers. `CRUCIBLE_OC_ORIGIN` overrides Roblox origins for these tests and always prints a warning. In that mode, the download client also permits HTTP loopback URLs. It still sends no key to a download URL. API requests never follow redirects.
 
+`tests/dev.rs` runs `crucible dev` on `examples/sample-game` with the real roblox-ts. It appends a line to `src/server/main.server.ts`, waits for that line in Rojo's `/api/read` response, and restores the file. The test needs the workspace's Node dependencies and the built runtime. Run these from the repository root first.
+
+```console
+pnpm install
+pnpm --filter @trioforge/crucible build:transformer
+pnpm --filter @trioforge/crucible build
+```
+
 The live suite is ignored by default. Set `ROBLOX_ASSETS_API_KEY` and run its read-only tests explicitly.
 
 ```console

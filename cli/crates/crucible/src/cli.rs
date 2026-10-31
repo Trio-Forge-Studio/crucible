@@ -13,6 +13,8 @@ pub struct Cli {
 pub enum Command {
     /// Compile the game with roblox-ts, then build each place in crucible.toml with Rojo.
     Build(crate::build::Args),
+    /// Watch and compile the game with roblox-ts, and serve one place to Studio with Rojo.
+    Dev(crate::dev::Args),
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
@@ -21,6 +23,22 @@ pub enum Command {
         /// The topic to print.
         #[arg(value_parser = topics())]
         topic: Option<String>,
+    },
+    /// Serve one Rojo project. crucible dev runs this in a child process.
+    #[command(name = crate::dev::ROJO_SERVE, hide = true)]
+    RojoServe {
+        /// The Rojo project file.
+        project: PathBuf,
+        /// The port to listen on.
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Run roblox-ts and stop it with every process it started. crucible dev runs this in a child process.
+    #[command(name = crate::dev::WATCH_GUARD, hide = true)]
+    WatchGuard {
+        /// The command to run.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<std::ffi::OsString>,
     },
     /// Build one Rojo project. crucible build runs this in a child process.
     #[command(name = crate::build::ROJO_BUILD, hide = true)]

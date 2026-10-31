@@ -41,15 +41,7 @@ impl fmt::Display for Error {
 pub fn main(args: Args) -> ExitCode {
     let result = std::env::current_dir()
         .map_err(|error| Error::Failed(format!("cannot read the current directory: {error}")))
-        .and_then(|root| {
-            let manifest = Manifest::read(&root)
-                .map_err(|error| match error {
-                    ManifestError::Read(_) => Error::Failed(error.to_string()),
-                    _ => Error::Usage(error.to_string()),
-                })?
-                .unwrap_or_default();
-            Ok((build(&root, &manifest, &args.places, args.output.as_deref())?, root))
-        });
+        .and_then(|root| Ok((build(&root, &manifest(&root)?, &args.places, args.output.as_deref())?, root)));
     match result {
         Ok((built, root)) => {
             for (_, path) in built {
@@ -62,6 +54,15 @@ pub fn main(args: Args) -> ExitCode {
             ExitCode::from(error.code())
         }
     }
+}
+
+pub fn manifest(root: &Path) -> Result<Manifest, Error> {
+    Manifest::read(root)
+        .map_err(|error| match error {
+            ManifestError::Read(_) => Error::Failed(error.to_string()),
+            _ => Error::Usage(error.to_string()),
+        })
+        .map(Option::unwrap_or_default)
 }
 
 pub fn build(
@@ -139,7 +140,7 @@ impl Receipt {
         let out = root.join("out");
         let path = out.join("transformer.sha256");
         if out.exists() && std::fs::read_to_string(&path).ok().as_deref() != Some(&fingerprint) {
-            eprintln!("crucible build: the installed Crucible transformer changed, compiling from clean");
+            eprintln!("crucible: the installed Crucible transformer changed, compiling from clean");
             std::fs::remove_dir_all(&out)
                 .map_err(|error| Error::Failed(format!("cannot remove {}: {error}", out.display())))?;
         }
@@ -204,12 +205,16 @@ fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
 
 pub const ROJO_BUILD: &str = "__rojo-build";
 
-pub fn rojo_main(project: PathBuf, output: PathBuf) -> ExitCode {
-    child::exit_with_parent();
+pub fn rojo_logger() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_module_path(false)
         .format_timestamp(None)
         .init();
+}
+
+pub fn rojo_main(project: PathBuf, output: PathBuf) -> ExitCode {
+    child::exit_with_parent();
+    rojo_logger();
     #[cfg(debug_assertions)]
     if std::env::var_os("CRUCIBLE_TEST_HOLD_ROJO").is_some() {
         eprintln!("rojo child {} holding", std::process::id());
