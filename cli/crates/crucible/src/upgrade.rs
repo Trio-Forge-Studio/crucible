@@ -445,3 +445,32 @@ mod tests {
         assert_eq!(detect_manager(dir.path()), "pnpm");
     }
 }
+
+#[cfg(test)]
+mod reproductions {
+    use super::*;
+
+    #[test]
+    fn tilde_and_indented_fences_hide_headings() {
+        let text = "## Crucible\n\n~~~sh\n## not a heading\n~~~\n\n   ```\n# nor this\n   ```\n\nend\n\n## Mine\n";
+        let range = section(text, "## Crucible").unwrap();
+        assert!(text[range].ends_with("end"));
+    }
+
+    #[test]
+    fn bump_refuses_non_registry_specs() {
+        for spec in ["workspace:*", "file:../crucible", "link:../crucible", "npm:other@0.1.0"] {
+            let text = format!("{{\"devDependencies\":{{\"crucible\":\"{spec}\"}}}}");
+            assert!(matches!(bump(&text, "0.2.0"), Err(Error::Usage(message)) if message.contains(spec)), "{spec}");
+        }
+    }
+
+    #[test]
+    fn a_workspace_lockfile_above_the_game_picks_the_manager() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+        let game = dir.path().join("games").join("one");
+        fs::create_dir_all(&game).unwrap();
+        assert_eq!(detect_manager(&game), "pnpm");
+    }
+}
