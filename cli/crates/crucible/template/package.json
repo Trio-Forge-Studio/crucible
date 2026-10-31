@@ -1,0 +1,22 @@
+{
+	"name": "__NAME__",
+	"version": "0.0.0",
+	"private": true,
+	"license": "MIT-0",
+	"scripts": {
+		"build": "crucible build",
+		"check": "vp check && crucible build",
+		"fmt": "vp fmt"
+	},
+	"dependencies": {
+		"@trioforge/crucible": "__VERSION__"
+	},
+	"devDependencies": {
+		"crucible": "__VERSION__",
+		"roblox-ts": "__ROBLOX_TS__",
+		"typescript": "__TYPESCRIPT__",
+		"@rbxts/compiler-types": "__RBXTS_COMPILER_TYPES__",
+		"@rbxts/types": "__RBXTS_TYPES__",
+		"vite-plus": "__VITE_PLUS__"
+	}
+}

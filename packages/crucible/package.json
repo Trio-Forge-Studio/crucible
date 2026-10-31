@@ -1,6 +1,6 @@
 {
 	"name": "@trioforge/crucible",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"license": "UNLICENSED",
 	"main": "out/init.luau",
@@ -35,5 +35,12 @@
 	},
 	"peerDependencies": {
 		"typescript": "5.5.3"
-	}
+	},
+	"files": [
+		"out",
+		"transformer",
+		"server",
+		"client",
+		"emit"
+	]
 }

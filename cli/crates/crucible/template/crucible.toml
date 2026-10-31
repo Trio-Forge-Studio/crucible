@@ -1,0 +1,11 @@
+[places.start]
+project = "default.project.json"
+
+# [env.staging]
+# universe = 1234
+# places = { start = 5678 }
+
+# [env.production]
+# universe = 9999
+# version_type = "Published"
+# places = { start = 4321 }
