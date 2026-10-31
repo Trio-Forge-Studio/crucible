@@ -20,6 +20,7 @@ export const G = toServer<{ Kind: "Leave" } | { Kind: "Join"; UserId: number }>(
 export const H = toServer<"z" | "a" | 7 | 2 | false>("X.Literals");
 export const Kinds = toServer<number | string | Vector3>("X.Kinds");
 export const Choice = toServer<{z:"Z1";a:"A1";left:number}|{z:"Z2";a:"A2";right:string}>("X.Choice");
+export const Tagged = toServer<{Kind:"A";Tag:"A";x:number}|{Kind:"A";Tag:"B";y:string}>("X.Tagged");
 `,
 	});
 	const result = inspect(game);
@@ -44,6 +45,10 @@ export const Choice = toServer<{z:"Z1";a:"A1";left:number}|{z:"Z2";a:"A2";right:
 		"__crucible.n.union([__crucible.n.vector3, __crucible.n.f64, __crucible.n.string])",
 	);
 	assert.match(d.get("X.Choice")[0], /n.variant\("a", "A1"/);
+	assert.equal(
+		d.get("X.Tagged")[0],
+		'__crucible.n.union([__crucible.n.variant("Tag", "A", __crucible.n.object([["Kind", __crucible.n.literal("A")], ["x", __crucible.n.f64]])), __crucible.n.variant("Tag", "B", __crucible.n.object([["Kind", __crucible.n.literal("A")], ["y", __crucible.n.string]]))])',
+	);
 	assert.equal(
 		d.get("X.Literals")[0],
 		'__crucible.n.union([__crucible.n.literal(false), __crucible.n.literal(2), __crucible.n.literal(7), __crucible.n.literal("a"), __crucible.n.literal("z")])',
@@ -102,7 +107,6 @@ const negatives = [
 		"Map<f32, string>",
 		"Map<f64, string>",
 		"Map<number, string>",
-		"{1: string}",
 		'{"-1": string}',
 		"{2.5: string}",
 		"{a: number} | {b: string}",
@@ -111,6 +115,28 @@ const negatives = [
 		"string[] | number[]",
 		"string & {x: number}",
 	].map((type) => [`unsupported ${type}`, "CRU019", declaration(type)]),
+	["numeric property path", "CRU019: X.Test payload.1: numeric property names", declaration("{1: string}")],
+	[
+		"nested property path",
+		"CRU019: X.Test payload.inner.bad: any cannot be checked",
+		declaration("{inner: {bad: any}}"),
+	],
+	["undefined field", "CRU019: X.Test payload.a: ", declaration("{a: undefined; b: string}")],
+	["optional discriminant", "CRU019", declaration('{Kind?:"A";a:number}|{Kind:"B";b:string}')],
+	["shared discriminant literal", "CRU019", declaration('{Kind:"A";a:number}|{Kind:"A";b:string}')],
+	["array beside variants", "CRU019", declaration('string[]|{Kind:"A"}|{Kind:"B"}')],
+	["nonfinite key literal", "CRU019", declaration("Map<1e400, string>")],
+	[
+		"width part with another property",
+		"CRU019",
+		"type Brand = u8 extends number & infer B ? B : never; type Flat<T> = { [K in keyof T]: T[K] }; " +
+			declaration("number & Flat<Brand & { extra: string }>"),
+	],
+	[
+		"extra declaration argument",
+		"CRU017: Unexpected declaration arguments.",
+		'export const X = toServer<string>("X.Test", {} as never);',
+	],
 	["empty interface", "CRU019", "interface Empty {} " + declaration("Empty")],
 	["recursive interface", "CRU019", "interface Recursive { next?: Recursive } " + declaration("Recursive")],
 	["numeric enum properties", "CRU019", "const enum Slot { A, B } " + declaration("Record<Slot,string>")],
@@ -133,6 +159,11 @@ const negatives = [
 	["template type", "CRU019", "type T = `a${string}`; " + declaration("T")],
 	["generic payload", "CRU019", 'function f<T>() { return toServer<T>("X.Test"); }'],
 	["required client instance", "CRU020", declaration("BasePart", "toClient")],
+	[
+		"client instance path",
+		"CRU020: X.Test payload.part: a client may not",
+		declaration("{part: BasePart}", "toClient"),
+	],
 	["client array", "CRU020", declaration("BasePart[]", "toClient")],
 	["client tuple", "CRU020", declaration("[BasePart]", "toClient")],
 	["client map", "CRU020", declaration("Map<string, BasePart>", "toClient")],
@@ -152,30 +183,35 @@ test("network diagnostic catalogue rejects every unsupported declaration with re
 	for (let i = 0; i < negatives.length; i++) {
 		const [name, code] = negatives[i];
 		assert.ok(
-			result.diagnostics.some((d) => d.file.fileName.endsWith(`/n${i}.ts`) && d.messageText.includes(code)),
+			result.diagnostics.some((d) => d.file.fileName.endsWith(`/n${i}.ts`) && d.messageText.startsWith(code)),
 			`${name} reports ${code}: ${result.diagnostics.map((d) => d.messageText).join("\n")}`,
 		);
 	}
 	const log = compile(game, 1);
 	for (const side of ["server", "client", "neutral"])
 		assert.ok(result.diagnostics.some((d) => d.file.fileName.endsWith(`/${side}/wrong.ts`) && d.code === 90017));
-	for (const code of new Set(negatives.map((n) => n[1]))) assert.match(log, new RegExp(code));
+	for (const code of new Set(negatives.map((n) => n[1].slice(0, 6)))) assert.match(log, new RegExp(code));
 });
 
 test("network receives rewrite owner field target callback and enforce placement sides and own callback returns", () => {
 	const files = {
 		"src/shared/messages.ts":
 			imports +
-			`export const Event = toServer<string>("X.Event"); export const Out = toClient<string>("X.Out"); export const Ask = askServer<string, number>("X.Ask");`,
+			`export const Event = toServer<string>("X.Event"); export const Out = toClient<string>("X.Out"); export const Ask = askServer<string, number>("X.Ask"); export const AskAny = askServer<string, unknown>("X.AskAny");`,
 	};
-	const pre = imports + 'import {Event, Out, Ask} from "../shared/messages";\n';
+	const pre = imports + 'import {Event, Out, Ask, AskAny} from "../shared/messages";\n';
 	files["src/server/good.ts"] =
 		pre +
 		`
 declare const cond: boolean;
 function factory(): (p: Player, v: string) => void { return () => {}; }
-export abstract class Base extends Subsystem { readonly input = receive(Event, (p, s) => { print(p.Name, s); }); }
+function stop(): never { throw "stop"; }
+let mutable: (p: Player, v: string) => void = () => 5;
+export abstract class Base extends Subsystem { readonly input = receive(Event, (p, s) => { print(p.Name, s); }); readonly plain: unknown = 1; }
 export class Good extends Base {
+ override readonly plain = receive(Event, () => {});
+ readonly stops = receive(Event, () => stop());
+ readonly loose = receive(Event, mutable);
  readonly ready = receive(ClientReady, p => cond ? () => print(p.Name) : undefined);
  readonly readyBlock = receive(ClientReady, p => { if(cond) return () => print(p.Name); });
  readonly request = receive(Ask, (p, s) => s.size());
@@ -238,6 +274,11 @@ export class Good extends Base {
 			"const helper = { cb() { return 7; } }; class X extends Subsystem { readonly r = receive(Event, helper.cb); }",
 		],
 		["CRU012", "class X extends Subsystem { readonly r = receive(Ask, async () => 5); }"],
+		["CRU012", "class X extends Subsystem { readonly r = receive(Event, () => () => {}); }"],
+		[
+			"CRU012",
+			"function later(): Promise<number> { return undefined as never; } class X extends Subsystem { readonly r = receive(AskAny, () => later()); }",
+		],
 	];
 	const cases = Object.fromEntries(bad.map(([, code], i) => [`src/server/b${i}.ts`, pre + code]));
 	for (const [side, token] of [
@@ -266,7 +307,7 @@ export class Good extends Base {
 test("network duplicate names and transitive global or merged payloads fail at the transformed file", () => {
 	const game = project({
 		"src/shared/a.ts": imports + declaration("string"),
-		"src/shared/b.ts": imports + declaration("number"),
+		"src/shared/b.ts": imports + declaration("string, number", "askServer"),
 		"src/global.d.ts": "interface ScriptPayload { value: string }\n",
 		"src/alias.d.ts": 'type GlobalString = string; type GlobalTag = "A";',
 		"src/shared/alias.ts": imports + declaration("{ name: GlobalString }", "toServer", "X.Alias"),
@@ -281,18 +322,49 @@ test("network duplicate names and transitive global or merged payloads fail at t
 			imports + 'import { Payload } from "./type"; ' + declaration("Payload", "toServer", "X.Merge"),
 		"src/augment.ts":
 			'import "./shared/type"; declare module "./shared/type" { interface Payload { extra: string } }',
-		"src/global.ts": "export {}; declare global { interface GlobalPayload { flag: boolean } }",
+		"src/global-augment.ts": "export {}; declare global { interface GlobalPayload { flag: boolean } }",
 		"src/shared/declared-global.ts": imports + declaration("GlobalPayload", "toServer", "X.DeclaredGlobal"),
+		"src/shared/ns.ts": "export namespace Doors { export interface State { open: boolean } }",
+		"src/shared/ns-message.ts":
+			imports + 'import { Doors } from "./ns"; ' + declaration("Doors.State", "toServer", "X.Namespaced"),
+		"src/ns-augment.ts":
+			'import "./shared/ns"; declare module "./shared/ns" { namespace Doors { interface State { extra: string } } }',
 	});
 	const result = inspect(game);
-	for (const file of ["a.ts", "b.ts"])
-		assert.ok(result.diagnostics.some((d) => d.file.fileName.endsWith(file) && d.code === 90018));
-	for (const file of ["global.ts", "merged.ts", "augment.ts", "declared-global.ts", "alias.ts", "global-variant.ts"])
-		assert.ok(
-			result.diagnostics.some((d) => d.file.fileName.endsWith(file) && d.code === 90010),
-			file,
-		);
+	const at = (code) =>
+		result.diagnostics
+			.filter((d) => d.code === code)
+			.map((d) => [path.relative(game, d.file.fileName).replaceAll("\\", "/"), d.messageText]);
+	assert.deepEqual(at(90018).sort(), [
+		["src/shared/a.ts", "CRU018: X.Test is already declared at src/shared/b.ts:2."],
+		["src/shared/b.ts", "CRU018: X.Test is already declared at src/shared/a.ts:2."],
+	]);
+	assert.deepEqual([...new Set(at(90010).map(([file]) => file))].sort(), [
+		"src/augment.ts",
+		"src/global-augment.ts",
+		"src/ns-augment.ts",
+		"src/shared/alias.ts",
+		"src/shared/declared-global.ts",
+		"src/shared/global-variant.ts",
+		"src/shared/global.ts",
+		"src/shared/merged.ts",
+		"src/shared/ns-message.ts",
+	]);
 	compile(game, 1);
+});
+
+test("network augmentations that add no declaration to a reached payload symbol compile", () => {
+	const game = project({
+		"src/shared/model.ts": "export interface Other { x: number }",
+		"src/shared/messages.ts": imports + declaration("{ door: Model }", "toServer", "Doors.Toggle"),
+		"src/workspace.ts": "export {}; declare global { interface Workspace { Lobby: Model } }",
+		"src/other.ts": 'import "./shared/model"; declare module "./shared/model" { interface Other { door: Model } }',
+	});
+	assert.deepEqual(
+		inspect(game).diagnostics.map((d) => d.messageText),
+		[],
+	);
+	compile(game);
 });
 
 test("network side entry references follow named and star barrels namespace aliases type imports and dynamic imports", () => {
@@ -304,6 +376,7 @@ test("network side entry references follow named and star barrels namespace alia
 		"src/shared/type.ts":
 			'import type { Network } from "@trioforge/crucible/client"; export type T = typeof Network;',
 		"src/server/dynamic.ts": 'export const N = import("@trioforge/crucible/client");',
+		"src/server/import-type.ts": 'export type N = typeof import("@trioforge/crucible/client");',
 		"src/client/good.ts": 'import { Network as N } from "@trioforge/crucible/client"; export const M = N;',
 		"src/server/good.ts":
 			'import { Network, boot } from "@trioforge/crucible/server"; export const N = Network; export const B = boot;',
@@ -316,6 +389,7 @@ test("network side entry references follow named and star barrels namespace alia
 		"server/ns.ts",
 		"shared/type.ts",
 		"server/dynamic.ts",
+		"server/import-type.ts",
 	])
 		assert.ok(
 			result.diagnostics.some((d) => d.file.fileName.endsWith(file) && d.code === 90024),

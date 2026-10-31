@@ -75,3 +75,37 @@ Network.send(ClientReady);
 	assert.deepEqual(codes, [2322, 2322, 2349, 2554]);
 	compile(game, 1);
 });
+
+test("K2 rule 25 unknown responses accept an empty callback and typed responses report TS2345 only before the receive rewrite", () => {
+	const messages =
+		'import { askServer } from "@trioforge/crucible"; export const Query = askServer<undefined, unknown>("X.Query"); export const Typed = askServer<undefined, string | undefined>("X.Typed");';
+	const receiver = (token) =>
+		`import { receive, Subsystem } from "@trioforge/crucible"; import { ${token} } from "../shared/messages"; export class Q extends Subsystem { readonly r = receive(${token}, () => {}); }`;
+	const check = (token) => {
+		const game = project({ "src/shared/messages.ts": messages, "src/server/receiver.ts": receiver(token) });
+		const { program, diagnostics } = inspect(game);
+		assert.deepEqual(
+			diagnostics.map((d) => d.messageText),
+			[],
+		);
+		const source = program.getSourceFile(path.join(game, "src/server/receiver.ts"));
+		return {
+			game,
+			semantic: program
+				.getSemanticDiagnostics(source)
+				.map((d) => [d.code, ts.flattenDiagnosticMessageText(d.messageText, " ")]),
+		};
+	};
+	const unknown = check("Query");
+	assert.deepEqual(unknown.semantic, []);
+	compile(unknown.game);
+	const typed = check("Typed");
+	assert.deepEqual(typed.semantic, [
+		[
+			2345,
+			"Argument of type '() => void' is not assignable to parameter of type '(player: Player) => string | undefined'.   Type 'void' is not assignable to type 'string | undefined'.",
+		],
+	]);
+	// rbxtsc rechecks the transformed text, where the emit receive takes an untyped callback.
+	compile(typed.game, 0);
+});
