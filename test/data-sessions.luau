@@ -530,6 +530,25 @@ return {
 		end
 		assert(#gaps >= 4, "a clean session keeps renewing")
 	end,
+	["rule 32 a session's saves coalesce into one pending operation"] = function()
+		local backend, a = world()
+		local pa = loaded(backend, a)
+		backend:advance(1)
+		local gate = backend:gate("response", { key = KEY })
+		set(a, pa, 1)
+		save(a, pa, 0)
+		backend:advance(0.2)
+		local before = #backend:callsTo({ key = KEY })
+		for coins = 2, 4 do
+			set(a, pa, coins)
+			save(a, pa, 0)
+		end
+		backend:advance(0.2)
+		gate.release()
+		backend:advance(1)
+		spec.eq(#backend:callsTo({ key = KEY }), before + 1, "three requests behind a flight cost one more call")
+		spec.eq(stored(backend).payload.coins, 4, "carrying the newest revision")
+	end,
 	["rule 44 a renewal for a departed player releases instead"] = function()
 		local backend, a = world()
 		local pa = loaded(backend, a)
