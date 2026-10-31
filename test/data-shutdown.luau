@@ -275,6 +275,13 @@ return {
 		backend:advance(5)
 		spec.eq(loading.value, false, "the load was abandoned")
 		spec.eq(realm.store:writable(pending), false, "never writable")
+		local late = realm.join(78)
+		local lateLoad = realm.run(function()
+			return realm.store:load(late, "join")
+		end)
+		backend:advance(1)
+		spec.eq(lateLoad.value, false, "a load after hook start closes at once")
+		spec.eq(#backend:callsTo({ key = "78" }), 0, "and sends nothing")
 	end,
 	["rule 50 with no visible sweep the window is SHUTDOWN_FALLBACK_SECONDS"] = function()
 		local backend, realm = world()
