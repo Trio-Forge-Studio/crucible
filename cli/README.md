@@ -44,7 +44,7 @@ Trusted publishing needs packages that already exist, and staging creates a miss
 
 1. Make the source repository public. [npm provenance](https://docs.npmjs.com/generating-provenance-statements/) requires public source and a supported hosted runner.
 2. Create the `npm-release` GitHub Environment and limit its deployment tags to `v*`. It holds no secrets.
-3. Log in to npm as a member of the `@trioforge` organization. For each of the five names, stage a throwaway version (for example `0.0.1-bootstrap.0` with `--tag bootstrap`) from a directory that holds only a `package.json`, then reject it in npmjs.com > Staged Packages.
+3. Log in to npm as a member of the `@trioforge` organization. For each of the five names, stage a throwaway version (for example `0.0.1-bootstrap.0` with `--tag bootstrap`) from a directory that holds only a `package.json`. Leave it pending. Rejecting a package's only staged version deletes the package and its trusted publisher, so reject the bootstrap stages only after the first real release is approved.
 4. For each name, run `npm trust github <name> --file release.yml --repo Trio-Forge-Studio/crucible --env npm-release --allow-stage-publish --yes`. Leave out `--allow-publish`, so CI can only stage.
 
 ### Cut a release
