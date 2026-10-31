@@ -6,6 +6,28 @@ import { createPlaceName, selectStudio } from "./session.mjs";
 const trace = fs.readFileSync(process.env.S0_TRACE || new URL("results/deferred-short.log", import.meta.url), "utf8");
 const lines = trace.trim().split(/\r?\n/);
 
+test("NET 67 and 68 a previously visible streamed-out part can retain its Instance slot", () => {
+	const streaming = fs.readFileSync(
+		process.env.S0_STREAM_TRACE || new URL("results/deferred-short-r2.log", import.meta.url),
+		"utf8",
+	);
+	const observations = [
+		"|1a-transition|visible=Workspace.PreviouslyVisiblePart",
+		"|1a-transition|client confirmed visible; moving character beyond target radius",
+		"|1a-transition|server part still present=true",
+		"|1a-transition|previously visible part removed locally",
+		"|1a-transition|client confirmed stream-out; server part present=true",
+		"|1a-transition|FireClient ok=true error=nil",
+		"|1a-transition|received local=nil part=PreviouslyVisiblePart keep=intact number=42",
+	];
+	let previous = -1;
+	for (const observation of observations) {
+		const index = streaming.indexOf(observation);
+		assert.ok(index > previous, `missing or out-of-order observation ${observation}`);
+		previous = index;
+	}
+});
+
 test("NET 67 missing Instance slots preserve sibling fields in both directions", () => {
 	assert.ok(trace.includes("local-far=nil part=nil keep=intact number=42"));
 	assert.ok(trace.includes("|1b|part=nil keep=intact"));

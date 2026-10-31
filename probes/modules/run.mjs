@@ -8,10 +8,11 @@ import { createPlaceName, selectStudio } from "./session.mjs";
 const root = path.resolve(import.meta.dirname, "../..");
 const build = path.join(root, "build/modules");
 fs.mkdirSync(build, { recursive: true });
-const [behavior = "Deferred", shutdown = "short"] = process.argv.slice(2);
+const [behavior = "Deferred", shutdown = "short", suffix = ""] = process.argv.slice(2);
 if (!["Deferred", "Immediate"].includes(behavior) || !["short", "long"].includes(shutdown))
-	throw Error("Usage: node probes/modules/run.mjs [Deferred|Immediate] [short|long]");
-const label = `${behavior.toLowerCase()}-${shutdown}`;
+	throw Error("Usage: node probes/modules/run.mjs [Deferred|Immediate] [short|long] [result-suffix]");
+if (!/^[a-z0-9-]*$/.test(suffix)) throw Error("Invalid result suffix");
+const label = `${behavior.toLowerCase()}-${shutdown}${suffix ? `-${suffix}` : ""}`;
 const results = path.join(root, "probes/modules/results");
 fs.mkdirSync(results, { recursive: true });
 const ps = (script) =>
@@ -160,6 +161,14 @@ try {
 	if (!fs.readFileSync(path.join(logDir, logFile.file), "utf8").includes("|complete|"))
 		throw Error("Client did not record 35 render frames");
 	await delay(65000);
+	const streamDeadline = Date.now() + 120000;
+	while (
+		!fs.readFileSync(path.join(logDir, logFile.file), "utf8").includes("|1a-transition|received") &&
+		Date.now() < streamDeadline
+	)
+		await delay(1000);
+	if (!fs.readFileSync(path.join(logDir, logFile.file), "utf8").includes("|1a-transition|received"))
+		throw Error("Previously visible part did not produce a streaming payload within the observation window");
 	await call("execute_luau", {
 		datamodel_type: "Client",
 		code: 'game:GetService("ReplicatedStorage"):WaitForChild("ProbeRemote"):FireServer("kick")',

@@ -1,8 +1,6 @@
 # Module engine probes
 
-These plain Luau instruments measure Roblox behavior for the networking, reactive, and data contracts. S0 remains incomplete. Question 1c has no surviving-client observation. Questions 5 and 6 are parked on unpublished-place API errors.
-
-The full repository check exits 1. It builds the sample, then reports 243 Lune cases passed and two existing consumer-compilation cases failed because roblox-ts cannot find compiler-types and types. See [check output](results/repository-check.log). Their files are outside this unit's write scope.
+These plain Luau instruments measure Roblox behavior for the networking, reactive, and data contracts. Question 1c remains parked because local Play supplies no surviving second client. Questions 5 and 6 remain parked on the unpublished-place API errors recorded in r1. The r2 run adds the previously visible streaming transition.
 
 ## Rerun
 
@@ -11,16 +9,16 @@ Use Windows with Studio signed in and Assistant MCP enabled. Run from the reposi
 ```powershell
 pnpm install --pm-on-fail=download
 rokit install
-node probes/modules/run.mjs Deferred short
+node probes/modules/run.mjs Deferred short r2
 pnpm exec vp fmt probes/modules
 node --test probes/modules/verification.test.mjs
 node probes/modules/mutate.mjs
 pnpm check
 ```
 
-Archive existing `deferred-short*` results before rerunning. The driver replaces them. It builds under the already ignored `build/modules/`. Each place name includes a UUID and driver PID. It selects only that exact MCP name, rejects ambiguity, and checks the owned PID's command line. It logs free physical memory and refuses a launch while a previously recorded PID exists.
+Archive existing `deferred-short-r2*` results before rerunning. The driver replaces them. Its optional third argument supplies a result suffix. It builds under the already ignored `build/modules/`. Each place name includes a UUID and driver PID. It selects only that exact MCP name, rejects ambiguity, and checks the owned PID's command line. It logs free physical memory and refuses a launch while a previously recorded PID exists.
 
-The first Play records streaming, catalog, handler order, deferred callbacks, and API errors. It waits 65 seconds after client completion for config reads, fires the handler kick, observes five seconds, and stops. The second Play sets the startup-kick attribute and observes 15 seconds. The driver then saves console output, the native log, extracted S0 rows, and session metadata. It calls CloseMainWindow on its PID, waits up to 30 seconds, then uses Stop-Process only on that PID if needed. Check `processRemaining` in the session record.
+The first Play records streaming, catalog, handler order, deferred callbacks, and API errors. For the streaming transition, the client waits for PreviouslyVisiblePart, then asks the server to move its character to 10,000 studs. StreamOutBehavior is Opportunistic, with minimum radius 64 and target radius 128. The client retains its Luau reference until it observes Parent=nil, then asks the server to send that same part. The server logs that the part still exists in Workspace. The driver waits for the payload observation before the handler kick. It also waits 65 seconds after client completion for config reads, observes the kick for five seconds, and stops. The second Play sets the startup-kick attribute and observes 15 seconds. The driver saves console output, the native log, extracted S0 rows, and session metadata. It calls CloseMainWindow on its PID, waits up to 30 seconds, then uses Stop-Process only on that PID if needed. Check `processRemaining` in the session record.
 
 Run one driver at a time. If startup crashes, preserve the native log and session, wait 60 seconds, and retry with at most three launches total. A failed MCP connection is a blocker. Do not select another place.
 
@@ -30,9 +28,9 @@ All measured rows use Deferred SignalBehavior and Studio 0.745.0.7451137. These 
 
 | Question | Answer and contract | SignalBehavior | Studio version | Evidence |
 | --- | --- | --- | --- | --- |
-| 1a | NET 67, 68. The distant part was absent locally and its field arrived nil. String and number siblings survived. FireClient succeeded. This part never streamed in; a previously visible part streaming out remains unmeasured. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L52-54, L486-486 |
+| 1a | NET 67, 68. The never-visible distant part arrived nil. In r2 the client saw PreviouslyVisiblePart, then observed its removal after character relocation. Workspace lookup was nil at reception, but the payload field contained PreviouslyVisiblePart. The client held a Luau reference across removal. Both siblings survived and FireClient succeeded. Stream-out did not make this slot absent in this run. | Deferred | 0.745.0.7451137 | [r1 trace](results/deferred-short.log) L52-54, L486; [r2 trace](results/deferred-short-r2.log) L558, L576-577, L1010-1013 |
 | 1b | NET 67. The client-created part field arrived nil on the server. Its sibling survived. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L54-54 |
-| 1c | Unmeasured for surviving clients. FireAllClients ran inside PlayerRemoving with Parent=nil. Local Play had only the departing player and logged no left-packet delivery. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L1008-1013, L1502-1503 |
+| 1c | Parked for surviving clients. FireAllClients ran inside PlayerRemoving with Parent=nil. Local Play had only the departing player and logged no left-packet delivery. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L1008-1013, L1502-1503 |
 | 2a | NET 12, 13. Published=true was readable immediately after WaitForChild returned. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L37-39 |
 | 2b | NET 12. Both 867 and 66,559 ASCII bytes arrived intact with the exact lengths. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L38-39 |
 | 2c | The fallback search was unnecessary because 66,559 bytes succeeded. That is the largest tested size, not an established maximum. | Deferred | 0.745.0.7451137 | [trace](results/deferred-short.log) L39-39 |
@@ -50,14 +48,16 @@ All measured rows use Deferred SignalBehavior and Studio 0.745.0.7451137. These 
 
 ## Evidence checks and limits
 
-`verification.test.mjs` checks NET 67's missing slots, NET 12 and 13's catalog observations, NET 48 and 52's ordering and yielding, RX 31's observed order in at least 30 complete render intervals, NET 35 and 77's kick sequence, and DATA 58, 97 and 100's environment failures. It also checks unique launch names and exact session selection. These validate the recorded observations. Rerun Studio to detect engine changes.
+`verification.test.mjs` checks NET 67's missing slots, NET 12 and 13's catalog observations, NET 48 and 52's ordering and yielding, RX 31's observed order in at least 30 complete render intervals, NET 35 and 77's kick sequence, and DATA 58, 97 and 100's environment failures. The r2 spec checks visibility, removal, server presence, successful send, and the retained payload slot in observation order. It also checks unique launch names and exact session selection. These validate the recorded observations. Rerun Studio to detect engine changes.
 
-`mutate.mjs` changes a disposable trace copy in `build/modules/`. All six mutations caused the verifier to exit 1. The runner exited 0. See [mutation output](results/mutations.log).
+`mutate.mjs` changes a disposable trace copy in `build/modules/`. The six r1 mutations and three r2 streaming mutations each caused the verifier to exit 1. The runner exited 0. See [r1 output](results/mutations.log) and [r2 output](results/mutations-r2.log).
 
 Question 1c needs a multi-client run. The available MCP start tool exposes local Play only. This unit did not launch extra Studio processes under the one-Studio rule. A permitted multi-client mode is needed before that acceptance item closes. The script already broadcasts from PlayerRemoving.
 
-Question 1a measures a streaming-excluded part that was never visible. A previously visible part streaming out still needs an observation. The startup kick runs on PlayerAdded, not inside a Crucible boot drain. Successful preceding FAIL delivery remains best-effort evidence.
+Question 1a now covers both the never-visible part and a previously visible part that streams out. It does not establish the result without a retained Luau reference, or a guarantee of either nil or non-nil delivery. NET 68 requires optional non-Player Instance positions and does not require every streamed-out position to arrive nil. This observation does not contradict that rule. The startup kick runs on PlayerAdded, not inside a Crucible boot drain. Successful preceding FAIL delivery remains best-effort evidence.
 
 No measured answer establishes a contract contradiction. DATA 58's hold and DATA 97 and 100's decode and refresh remain unverified. No approved contract changed. Build the Lever produced the driver and mutation runner. Model the Domain kept ownership in the session record. Prove It Works required Studio traces and explicit gaps.
 
 The initial run precedes the kick extension. The startup-only run checks driver connectivity. All three successful launches retain separate native logs and session records. None crashed. All owned PIDs exited after the recorded CloseMainWindow timeout and PID-specific Stop-Process. No other Studio was driven or closed.
+
+The r2 launch used PID 7068 and recorded 1,787,724 KB of free physical memory. Its unique place, exact MCP session, version, and close sequence are in [the session record](results/deferred-short-r2-session.json). The driver's immediate CIM check still reported the process after Stop-Process. The later [closure check](results/closure-r2.json) confirms that neither Get-Process nor CIM found PID 7068. The original session record is preserved unchanged. No startup crash occurred.

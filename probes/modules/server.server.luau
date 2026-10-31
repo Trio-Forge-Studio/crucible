@@ -16,6 +16,11 @@ far.Name = "FarPart"
 far.Anchored = true
 far.Position = Vector3.new(100000, 0, 100000)
 far.Parent = workspace
+local near = Instance.new("Part")
+near.Name = "PreviouslyVisiblePart"
+near.Anchored = true
+near.Position = Vector3.new(0, 5, 0)
+near.Parent = workspace
 local signal = Instance.new("BindableEvent")
 signal.Event:Connect(function()
 	if frame <= 35 then
@@ -66,6 +71,19 @@ remote.OnServerEvent:Connect(function(player, kind, payload)
 			remote:FireClient(player, "far", { part = far, keep = "intact", number = 42 })
 		end)
 		log("1a", "FireClient ok=" .. tostring(ok) .. " error=" .. tostring(err))
+	elseif kind == "stream-visible" then
+		log("1a-transition", "client confirmed visible; moving character beyond target radius")
+		local character = player.Character or player.CharacterAdded:Wait()
+		local root = character:WaitForChild("HumanoidRootPart")
+		root.Anchored = true
+		character:PivotTo(CFrame.new(10000, 100, 0))
+		log("1a-transition", "server part still present=" .. tostring(near.Parent == workspace))
+	elseif kind == "stream-absent" then
+		log("1a-transition", "client confirmed stream-out; server part present=" .. tostring(near.Parent == workspace))
+		local ok, err = pcall(function()
+			remote:FireClient(player, "streamed-out", { part = near, keep = "intact", number = 42 })
+		end)
+		log("1a-transition", "FireClient ok=" .. tostring(ok) .. " error=" .. tostring(err))
 	elseif kind == "local-part" then
 		log("1b", "part=" .. tostring(payload.part) .. " keep=" .. tostring(payload.keep))
 	elseif kind == "load" then

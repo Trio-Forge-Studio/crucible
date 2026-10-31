@@ -7,6 +7,7 @@
 			"$properties": {
 				"SignalBehavior": "Deferred",
 				"StreamingEnabled": true,
+				"StreamOutBehavior": "Opportunistic",
 				"StreamingMinRadius": 64,
 				"StreamingTargetRadius": 128
 			}

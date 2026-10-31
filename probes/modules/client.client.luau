@@ -33,6 +33,18 @@ remote.OnClientEvent:Connect(function(kind, payload)
 				.. " number="
 				.. tostring(payload.number)
 		)
+	elseif kind == "streamed-out" then
+		log(
+			"1a-transition",
+			"received local="
+				.. tostring(workspace:FindFirstChild("PreviouslyVisiblePart"))
+				.. " part="
+				.. tostring(payload.part)
+				.. " keep="
+				.. tostring(payload.keep)
+				.. " number="
+				.. tostring(payload.number)
+		)
 	elseif kind == "fail" then
 		log("3kick", "FAIL received " .. payload)
 	elseif kind == "left" then
@@ -40,6 +52,25 @@ remote.OnClientEvent:Connect(function(kind, payload)
 	end
 end)
 remote:FireServer("ready")
+task.spawn(function()
+	local visible = workspace:WaitForChild("PreviouslyVisiblePart", 30)
+	if not visible then
+		log("1a-transition", "timeout waiting for initial visibility")
+		return
+	end
+	log("1a-transition", "visible=" .. visible:GetFullName())
+	remote:FireServer("stream-visible")
+	local deadline = os.clock() + 150
+	repeat
+		task.wait(0.1)
+	until visible.Parent == nil or os.clock() >= deadline
+	if visible.Parent ~= nil then
+		log("1a-transition", "timeout waiting for stream-out")
+		return
+	end
+	log("1a-transition", "previously visible part removed locally")
+	remote:FireServer("stream-absent")
+end)
 local part = Instance.new("Part")
 part.Name = "ClientOnly"
 part.Parent = workspace
