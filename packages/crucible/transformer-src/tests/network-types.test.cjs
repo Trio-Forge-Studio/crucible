@@ -72,6 +72,6 @@ Network.send(ClientReady);
 		.getSemanticDiagnostics(source)
 		.map((d) => d.code)
 		.sort();
-	assert.deepEqual(codes, [2322, 2322, 2345, 2349]);
+	assert.deepEqual(codes, [2322, 2322, 2349, 2554]);
 	compile(game, 1);
 });
