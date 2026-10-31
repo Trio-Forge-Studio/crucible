@@ -195,9 +195,11 @@ export function emptyEnvelope(kind: EnvelopeKind): Envelope {
 	};
 }
 
+const SHORT_ESCAPES = new Set(['"', "\\", "\b", "\f", "\n", "\r", "\t"]);
+
 function stringBytes(value: string): number {
 	let bytes = value.size() + 2;
-	for (const [special] of value.gmatch('[%c"\\]')) bytes += (special as string).byte()[0] < 32 ? 5 : 1;
+	for (const [special] of value.gmatch('[%c"\\]')) bytes += SHORT_ESCAPES.has(special as string) ? 1 : 5;
 	return bytes;
 }
 

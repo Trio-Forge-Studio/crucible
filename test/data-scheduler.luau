@@ -111,6 +111,8 @@ return {
 		submit(realm, scheduler, "release2", RELEASE, { safeUntil = realm.clock() + 60 })
 		backend:advance(1)
 		spec.eq(dispatched(backend, "release2"), 1, "owned writes keep dispatching while ordinary stalls")
+		backend:advance(80)
+		spec.eq(dispatched(backend, "load2"), 1, "shared slots return when the stalls do")
 	end,
 	["rule 35 an unresolved request holds its lane past its caller's deadline"] = function()
 		local backend, realm, scheduler = world()

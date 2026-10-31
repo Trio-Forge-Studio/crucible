@@ -402,6 +402,63 @@ return {
 		end)
 		backend:advance(1)
 		spec.eq(left.value, false, "false when the player leaves")
+		local idle = a.join(66)
+		local never = a.run(function()
+			return a.store:await(idle)
+		end)
+		backend:advance(1)
+		a.leave(idle)
+		a.run(function()
+			a.store:leave(idle)
+		end)
+		backend:advance(0.1)
+		spec.eq(never.value, false, "false when a player with no load leaves")
+		a.run(function()
+			a.store:handoff(pa)
+		end)
+		local sealed = a.run(function()
+			return a.store:await(pa)
+		end)
+		spec.eq(sealed.value, false, "false at once for a sealed session")
+	end,
+	["rule 18 an onLoad change saves at once and a throwing onLoad fails the load with nothing saved"] = function()
+		local backend = Backend.new()
+		local a = backend:realm()
+		local mode = "change"
+		a.store = a.data:profile({ name = STORE, version = 0, defaults = { coins = 0 } }, {
+			onLoad = function(_, value)
+				if mode == "throw" then
+					error("claim failed")
+				end
+				local changed = table.clone(value)
+				changed.coins = 1
+				return changed
+			end,
+			onRelease = function(_, value)
+				return value
+			end,
+			publish = function() end,
+			delivered = function() end,
+		})
+		local pa = a.join(USER)
+		a.run(function()
+			a.store:load(pa, "join")
+		end)
+		backend:advance(0.4)
+		spec.eq(session(a, pa).revision, 1, "the change is one revision")
+		spec.eq(stored(backend).payload.coins, 1, "saved at once")
+		mode = "throw"
+		local other = a.join(88)
+		local failed = a.run(function()
+			return a.store:load(other, "join")
+		end)
+		backend:advance(1)
+		spec.eq(failed.value, false, "the load failed")
+		spec.eq(a.kicked(other), a.limits.LOAD_FAILED_MESSAGE, "kicked")
+		local envelope = backend:envelope(STORE, "88")
+		spec.eq(envelope.lease, nil, "the acquisition was abandoned")
+		spec.eq(envelope.payload, nil, "nothing saved")
+		spec.eq(a.engine.logged("onLoad failed"), 1, "diagnosed")
 	end,
 	["rule 16 writes never wait for storage"] = function()
 		local backend, a = world()
