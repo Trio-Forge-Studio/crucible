@@ -1,6 +1,9 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+pub const DEFAULT_DEADLINE: f64 = 300.0;
+pub const DEFAULT_POLL_INTERVAL: f64 = 2.0;
+
 pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (rojo 7.7.1)");
 
 #[derive(Parser)]
@@ -26,6 +29,8 @@ pub enum Command {
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
+    /// Build and publish the places in a crucible.toml environment. One JSON document.
+    Publish(crate::publish::Args),
     /// Serve one Rojo project. crucible dev runs this in a child process.
     #[command(name = crate::dev::ROJO_SERVE, hide = true)]
     RojoServe {
@@ -64,10 +69,10 @@ pub struct Oc {
     #[arg(long, global = true)]
     pub profile: Option<String>,
     /// Stop polling after this many seconds.
-    #[arg(long,global=true,default_value_t=300.0,value_parser=seconds)]
+    #[arg(long,global=true,default_value_t=DEFAULT_DEADLINE,value_parser=seconds)]
     pub deadline: f64,
     /// Wait this many seconds between polls.
-    #[arg(long,global=true,default_value_t=2.0,value_parser=seconds)]
+    #[arg(long,global=true,default_value_t=DEFAULT_POLL_INTERVAL,value_parser=seconds)]
     pub poll_interval: f64,
     /// Override retry delays in seconds.
     #[arg(long,global=true,value_parser=seconds)]

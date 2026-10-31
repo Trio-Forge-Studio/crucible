@@ -12,6 +12,7 @@ mod flows;
 mod manifest;
 mod outcome;
 mod output;
+mod publish;
 
 use crate::call::{Call, Source};
 use crate::cli::{AssetCommand, AuthCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
@@ -35,11 +36,12 @@ fn main() -> ExitCode {
         Ok(Cli { command: Command::Dev(args) }) => return dev::main(args),
         Ok(Cli { command: Command::Docs { topic } }) => return docs::run(topic.as_deref()),
         Ok(Cli { command: Command::Oc(cli) }) => cli,
+        Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::RojoBuild { project, output } }) => return build::rojo_main(project, output),
         Ok(Cli { command: Command::RojoServe { project, port } }) => return dev::rojo_main(project, port),
         Ok(Cli { command: Command::WatchGuard { command } }) => return dev::guard_main(command),
         Err(error) => {
-            if std::env::args_os().nth(1).is_none_or(|word| word != "oc") {
+            if std::env::args_os().nth(1).is_none_or(|word| word != "oc" && word != "publish") {
                 error.exit();
             }
             let output = Output::new(false);
@@ -115,6 +117,7 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
                     cli.profile.as_deref(),
                     std::env::var("CRUCIBLE_OC_PROFILE").ok().as_deref(),
                     std::env::var_os("CRUCIBLE_OC_API_KEY").is_some(),
+                    None,
                 )
                 .map_err(|message| Failure::new(3, "auth", message))?,
             )
@@ -176,28 +179,7 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
                 }
             }
             OcCommand::Auth(AuthCommand::Check { for_operation }) => {
-                let introspect = registry.by_key("POST /api-keys/v1/introspect").expect("introspection is registered");
-                let reply = executor.send(&Call::new(introspect, vec![], vec![], None)?)?.json()?;
-                let reply = auth::Introspection::parse(reply)?;
-                let scopes = reply.scopes();
-                if !reply.enabled || reply.expired {
-                    return Err(Failure::new(3, "auth", "the key is disabled or expired"));
-                }
-                if for_operation.is_some()
-                    && let Auth::ApiKey { scopes: Some(required) } = &primary.auth
-                {
-                    let missing: Vec<_> = required
-                        .iter()
-                        .filter(|scope| !scopes.contains(&scope.name))
-                        .map(|scope| scope.name.as_str())
-                        .collect();
-                    if !missing.is_empty() {
-                        return Err(Failure::new(3, "auth", format!("the selected key lacks {}", missing.join(", "))));
-                    }
-                }
-                Ok(
-                    json!({"keySource":source.as_ref().map(auth::KeySource::label),"name":reply.name,"enabled":reply.enabled,"expired":reply.expired,"scopes":scopes}),
-                )
+                check_auth(&executor, primary, source.as_ref(), for_operation.is_some())
             }
             _ => unreachable!("discovery and profiles returned before execution"),
         }
@@ -250,4 +232,30 @@ fn op_ref<'r>(registry: &'r Registry, words: &[String]) -> Result<(Resolved<'r>,
         }
     }
     Ok((resolved, used))
+}
+
+fn check_auth(
+    executor: &Executor<'_>,
+    primary: &oc_registry::Op,
+    source: Option<&auth::KeySource>,
+    for_operation: bool,
+) -> Result<Value, Failure> {
+    let registry = &*REGISTRY;
+    let introspect = registry.by_key("POST /api-keys/v1/introspect").expect("introspection is registered");
+    let reply = executor.send(&Call::new(introspect, vec![], vec![], None)?)?.json()?;
+    let reply = auth::Introspection::parse(reply)?;
+    let scopes = reply.scopes();
+    if !reply.enabled || reply.expired {
+        return Err(Failure::new(3, "auth", "the key is disabled or expired"));
+    }
+    if for_operation && let Auth::ApiKey { scopes: Some(required) } = &primary.auth {
+        let missing: Vec<_> =
+            required.iter().filter(|scope| !scopes.contains(&scope.name)).map(|scope| scope.name.as_str()).collect();
+        if !missing.is_empty() {
+            return Err(Failure::new(3, "auth", format!("the selected key lacks {}", missing.join(", "))));
+        }
+    }
+    Ok(
+        json!({"keySource":source.map(auth::KeySource::label),"name":reply.name,"enabled":reply.enabled,"expired":reply.expired,"scopes":scopes}),
+    )
 }

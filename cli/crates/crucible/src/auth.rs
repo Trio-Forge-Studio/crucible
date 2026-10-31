@@ -90,6 +90,7 @@ pub fn choose(
     explicit: Option<&str>,
     env_profile: Option<&str>,
     env_key_present: bool,
+    manifest_profile: Option<&str>,
 ) -> Result<KeySource, String> {
     if let Some(name) = explicit.or(env_profile) {
         if !config.profiles.contains_key(name) {
@@ -99,6 +100,12 @@ pub fn choose(
     }
     if env_key_present {
         return Ok(KeySource::Environment);
+    }
+    if let Some(name) = manifest_profile {
+        if !config.profiles.contains_key(name) {
+            return Err(format!("profile {name} does not exist"));
+        }
+        return Ok(KeySource::Profile(name.into()));
     }
     if let Some(name) = &config.default_profile {
         if !config.profiles.contains_key(name) {
@@ -159,10 +166,11 @@ mod tests {
     fn precedence_and_no_fallthrough() {
         let c: Config =
             toml::from_str("default_profile='a'\n[profiles.a]\nkey_env='A'\n[profiles.b]\nkey_env='B'").unwrap();
-        assert_eq!(choose(&c, Some("a"), Some("b"), true).unwrap(), KeySource::Profile("a".into()));
-        assert_eq!(choose(&c, None, Some("b"), true).unwrap(), KeySource::Profile("b".into()));
-        assert_eq!(choose(&c, None, None, true).unwrap(), KeySource::Environment);
-        assert_eq!(choose(&c, None, None, false).unwrap(), KeySource::Profile("a".into()));
-        assert!(choose(&c, Some("missing"), None, true).is_err());
+        assert_eq!(choose(&c, Some("a"), Some("b"), true, Some("manifest")).unwrap(), KeySource::Profile("a".into()));
+        assert_eq!(choose(&c, None, Some("b"), true, Some("manifest")).unwrap(), KeySource::Profile("b".into()));
+        assert_eq!(choose(&c, None, None, true, Some("manifest")).unwrap(), KeySource::Environment);
+        assert_eq!(choose(&c, None, None, false, None).unwrap(), KeySource::Profile("a".into()));
+        assert_eq!(choose(&c, None, None, false, Some("b")).unwrap(), KeySource::Profile("b".into()));
+        assert!(choose(&c, Some("missing"), None, true, Some("manifest")).is_err());
     }
 }
