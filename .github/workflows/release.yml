@@ -74,6 +74,13 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Build runtime for installed package tests
+        working-directory: .
+        run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build
       - name: Exercise release binary through npm
         run: |
           export CRUCIBLE_BINARY="$PWD/target/${{ matrix.target }}/release/${{ matrix.binary }}"
@@ -105,8 +112,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build runtime and transformer
         run: |
-          pnpm --filter @trioforge/crucible build:transformer
-          pnpm --filter @trioforge/crucible build
+          pnpm build
       - name: Generate notices from locked dependencies
         working-directory: cli
         run: |

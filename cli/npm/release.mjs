@@ -29,7 +29,7 @@ mkdirSync(runtime);
 const source = join(root, "packages", "crucible");
 const manifest = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
 assert.equal(manifest.private, undefined);
-manifest.version = version;
+assert.equal(manifest.version, version, "runtime and CLI versions must match");
 delete manifest.scripts;
 delete manifest.devDependencies;
 for (const entry of manifest.files) {
@@ -54,6 +54,10 @@ for (const directory of packages) {
 	assert.equal(packed.status, 0, packed.stderr);
 	const files = JSON.parse(packed.stdout)[0].files.map(({ path }) => path);
 	assert.ok(files.includes("LICENSE"), `${pkg.name} must ship LICENSE`);
+	assert.ok(
+		files.every((file) => !file.endsWith(".tsbuildinfo") && !file.endsWith(".tgz")),
+		`${pkg.name} must exclude build receipts and tarballs`,
+	);
 	if (pkg.name === "@trioforge/crucible") {
 		for (const required of [
 			"out/init.luau",
@@ -61,6 +65,7 @@ for (const directory of packages) {
 			"transformer/index.js",
 			"server/package.json",
 			"client/package.json",
+			"emit/package.json",
 		]) {
 			assert.ok(files.includes(required), `runtime must pack ${required}`);
 		}
