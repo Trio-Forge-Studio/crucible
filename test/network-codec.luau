@@ -56,7 +56,7 @@ end
 
 tests["59 UTF-8 rejects malformed strings in every string position"] = function()
 	local r = h.realm()
-	for _, text in { "ed a0 80", "c0 80", "f4 90 80 80", "e2 82" } do
+	for _, text in { "ed a0 80", "c0 80", "e0 80 80", "f0 80 80 80", "f4 90 80 80", "e2 82" } do
 		local invalid = buffer.tostring(h.bytes(text))
 		for _, fixture in
 			{

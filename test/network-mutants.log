@@ -1,0 +1,104 @@
+3 swap: not applicable, validName's only multi-argument calls pair a condition with its message
+4 swap: not applicable, registration takes a name and a definition, which differ in type
+9 swap: not applicable, seal's calls take one argument; indices.set pairs a string name with a number index
+10 swap: not applicable, the seal check pairs one condition with its message
+12 guard: not applicable, attributes and parenting are the session's (unit N2); seal only returns the text
+12 swap: not applicable, the text is one join of one list
+14 swap: not applicable, an index is looked up by one name
+15 swap: not applicable, the bounds check compares one index with one size
+57 swap: not applicable, a builder copies one argument list into one frozen node
+62 guard: not applicable, unsupported types are CRU019 in the transformer (unit T1); no runtime node exists for them
+62 swap: not applicable, no runtime site
+62 pair: not applicable, no runtime site
+64 swap: not applicable, selection compares a value with a literal, which is symmetric
+68 swap: not applicable, the client's drop and settle outcomes are the session's (unit N2)
+68 pair: not applicable, the client's drop and settle outcomes are the session's (unit N2)
+72 guard: not applicable, the codec reads no sender; the session supplies the engine sender (unit N2)
+72 swap: not applicable, no runtime site
+72 pair: not applicable, no runtime site
+73 swap: not applicable, a failure carries a path and a fixed reason; nothing pairs
+73 pair: not applicable, the codec never logs, so nothing pairs with a log call
+Limits guard: not applicable, constants hold no guard; the value mutants below break the parity table
+Limits swap: not applicable, constants take no arguments
+Limits pair: not applicable, constants pair with nothing
+KILLED 3 guard | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 3 pair | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 4 guard | catalog.ts | first failure: network-catalog.luau: 3 4 5 runtime declaration validation and token identity
+KILLED 4 pair | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 5 guard | catalog.ts | first failure: network-catalog.luau: 3 4 5 runtime declaration validation and token identity
+KILLED 5 swap | catalog.ts | first failure: network-catalog.luau: 3 4 5 runtime declaration validation and token identity
+KILLED 5 pair | catalog.ts | first failure: network-catalog.luau: 3 4 5 runtime declaration validation and token identity
+KILLED 9 guard | catalog.ts | first failure: network-fd.luau: 9 12 FD names seal into one realm catalog in byte order
+KILLED 9 pair | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 10 guard | catalog.ts | first failure: network-catalog.luau: 9 10 catalog seals in byte order and rejects late declarations
+KILLED 10 pair | catalog.ts | first failure: network-catalog.luau: 9 10 catalog seals in byte order and rejects late declarations
+KILLED 11 guard | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 11 swap | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 11 pair | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 12 pair | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
+KILLED 13 guard | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 13 swap | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 13 pair | catalog.ts | first failure: network-catalog.luau: 11 13 catalog count grammar and ascending order are bounded
+KILLED 14 guard | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
+KILLED 14 pair | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
+KILLED 15 guard | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
+KILLED 15 pair | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
+KILLED 57 guard | schema.ts | first failure: network-codec.luau: 57 62 descriptors freeze copy and reject malformed or oversized graphs
+KILLED 57 pair | schema.ts | first failure: network-codec.luau: 57 62 descriptors freeze copy and reject malformed or oversized graphs
+KILLED 58 guard | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 58 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 58 pair | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
+KILLED 59 guard | codec.ts | first failure: network-codec.luau: 59 UTF-8 rejects malformed strings in every string position
+KILLED 59 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 59 pair | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 60 guard | codec.ts | first failure: network-codec.luau: 60 Vector3 Color3 and CFrame preserve all finite components
+KILLED 60 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 60 pair | codec.ts | first failure: network-codec.luau: 60 Vector3 Color3 and CFrame preserve all finite components
+KILLED 61 guard | schema.ts | first failure: network-codec.luau: 61 objects ignore undeclared fields and reject empty and numeric shapes
+KILLED 61 swap | schema.ts | first failure: network-catalog.luau: 3 4 5 runtime declaration validation and token identity
+KILLED 61 pair | codec.ts | first failure: network-codec.luau: 61 objects ignore undeclared fields and reject empty and numeric shapes
+KILLED 63 guard | schema.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED 63 swap | schema.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 63 pair | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 64 guard | schema.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED 64 pair | codec.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED 65 guard | schema.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED 65 swap | schema.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED 65 pair | schema.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED 66 guard | codec.ts | first failure: network-codec.luau: 66 zero-byte arrays charge counts and maps enforce key order
+KILLED 66 swap | codec.ts | first failure: network-codec.luau: 59 UTF-8 rejects malformed strings in every string position
+KILLED 66 pair | codec.ts | first failure: network-codec.luau: 61 66 static tables admit metatables while 69 dynamic tables reject them
+KILLED 67 guard | codec.ts | first failure: network-codec.luau: 67 slots preserve occurrences and missing optional Instances
+KILLED 67 swap | codec.ts | first failure: network-codec.luau: 67 slots preserve occurrences and missing optional Instances
+KILLED 67 pair | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 68 guard | codec.ts | first failure: network-codec.luau: 67 slots preserve occurrences and missing optional Instances
+KILLED 69 guard | codec.ts | first failure: network-codec.luau: 69 dynamic tags patches copies and hostile tables
+KILLED 69 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 69 pair | codec.ts | first failure: network-codec.luau: 69 dynamic tags patches copies and hostile tables
+KILLED 70 guard | codec.ts | first failure: network-codec.luau: 66 zero-byte arrays charge counts and maps enforce key order
+KILLED 70 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 70 pair | codec.ts | first failure: network-codec.luau: 66 zero-byte arrays charge counts and maps enforce key order
+KILLED 71 guard | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED 71 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED 71 pair | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED 73 guard | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
+KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
+KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
+KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 70 shared budgets enforce exact visits depth entries bytes and slots
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 61 objects ignore undeclared fields and reject empty and numeric shapes
+KILLED Extra guard | schema.ts | first failure: network-codec.luau: 57 62 descriptors freeze copy and reject malformed or oversized graphs
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 60 Vector3 Color3 and CFrame preserve all finite components
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 59 UTF-8 rejects malformed strings in every string position
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 59 UTF-8 rejects malformed strings in every string position
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 59 UTF-8 rejects malformed strings in every string position
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
+KILLED Extra guard | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED Extra pair | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
+KILLED Extra pair | codec.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
+80/80 source mutants killed; 23 operators not applicable; restored build 0
