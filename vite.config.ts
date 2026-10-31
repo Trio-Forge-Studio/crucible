@@ -19,6 +19,7 @@ export default defineConfig({
 			"pnpm-lock.yaml",
 			"**/*.md",
 			"cli/spec/**",
+			"cli/notices.hbs",
 			"cli/target/**",
 		],
 		overrides: [
