@@ -572,10 +572,14 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			}
 			return name;
 		};
+		const isCallee = (expression) => {
+			while (ts.isParenthesizedExpression(expression.parent)) expression = expression.parent;
+			return ts.isCallExpression(expression.parent) && expression.parent.expression === expression;
+		};
 		const inspect = (node) => {
 			if (ts.isElementAccessExpression(node)) {
 				const name = api(checker.getTypeAtLocation(node).getSymbol());
-				if (macros.includes(name) && !(ts.isCallExpression(node.parent) && node.parent.expression === node))
+				if (macros.includes(name) && !isCallee(node))
 					report(node, "CRU023", `${name} is a declaration macro and cannot be used as a value.`);
 			}
 			if (
@@ -620,11 +624,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				if (macros.includes(name)) {
 					const p = node.parent;
 					const expression = ts.isPropertyAccessExpression(p) && p.name === node ? p : node;
-					if (
-						!(ts.isCallExpression(expression.parent) && expression.parent.expression === expression) &&
-						!ts.isImportSpecifier(p) &&
-						!ts.isExportSpecifier(p)
-					)
+					if (!isCallee(expression) && !ts.isImportSpecifier(p) && !ts.isExportSpecifier(p))
 						report(node, "CRU023", `${name} is a declaration macro and cannot be used as a value.`);
 				}
 			}

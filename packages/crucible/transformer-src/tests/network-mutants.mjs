@@ -15,6 +15,18 @@ const sides = "network side entry references";
 const limits = "network schema boundaries";
 const mutations = [
 	[
+		"parenthesized macro callee",
+		"while (ts.isParenthesizedExpression(expression.parent)) expression = expression.parent;",
+		"",
+		"network declaration and receiver aliases",
+	],
+	[
+		"rule 63 typed kind argument swap",
+		'Buffer.from(a.runtime ?? ""), Buffer.from(b.runtime ?? "")',
+		'Buffer.from(b.runtime ?? ""), Buffer.from(a.runtime ?? "")',
+		descriptors,
+	],
+	[
 		"rule 61 variant property name guard",
 		'ts.isNumericLiteralName(discriminant) || discriminant.startsWith("__@")',
 		"false",

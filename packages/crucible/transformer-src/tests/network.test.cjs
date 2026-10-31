@@ -18,6 +18,8 @@ export const E = toServer<[string, u32]>("X.Tuple");
 export const F = toClient<{ maybe: BasePart | undefined; player: Player }>("X.Stream");
 export const G = toServer<{ Kind: "Leave" } | { Kind: "Join"; UserId: number }>("X.Variant");
 export const H = toServer<"z" | "a" | 7 | 2 | false>("X.Literals");
+export const Kinds = toServer<number | string | Vector3>("X.Kinds");
+export const Choice = toServer<{z:"Z1";a:"A1";left:number}|{z:"Z2";a:"A2";right:string}>("X.Choice");
 `,
 	});
 	const result = inspect(game);
@@ -37,6 +39,11 @@ export const H = toServer<"z" | "a" | 7 | 2 | false>("X.Literals");
 		'__crucible.n.map(__crucible.n.union([__crucible.n.literal("a"), __crucible.n.literal("z")]), __crucible.n.f64)',
 	);
 	assert.equal(d.get("X.Tuple")[0], "__crucible.n.tuple([__crucible.n.string, __crucible.n.u32])");
+	assert.equal(
+		d.get("X.Kinds")[0],
+		"__crucible.n.union([__crucible.n.vector3, __crucible.n.f64, __crucible.n.string])",
+	);
+	assert.match(d.get("X.Choice")[0], /n.variant\("a", "A1"/);
 	assert.equal(
 		d.get("X.Literals")[0],
 		'__crucible.n.union([__crucible.n.literal(false), __crucible.n.literal(2), __crucible.n.literal(7), __crucible.n.literal("a"), __crucible.n.literal("z")])',
@@ -108,6 +115,15 @@ const negatives = [
 	["recursive interface", "CRU019", "interface Recursive { next?: Recursive } " + declaration("Recursive")],
 	["numeric enum properties", "CRU019", "const enum Slot { A, B } " + declaration("Record<Slot,string>")],
 	["numeric discriminant", "CRU019", declaration('{1:"A";value:number}|{1:"B"}')],
+	["conflicting widths", "CRU019", declaration("u8 & u16")],
+	["nonfinite literal", "CRU019", declaration("1e400")],
+	["null", "CRU019", declaration("null")],
+	["invalid key kind", "CRU019", declaration("Map<boolean,string>")],
+	["mixed record", "CRU019", declaration("{[key:string]:number;named:number}")],
+	["construct signature", "CRU019", declaration("new()=>{value:string}")],
+	["interface method", "CRU019", "interface MethodPayload { run():void } " + declaration("MethodPayload")],
+	["class method", "CRU019", "class MethodPayload { value=1; run() {} } " + declaration("MethodPayload")],
+	["bracket macro escape", "CRU023", 'import * as C from "@trioforge/crucible"; export const f=C["toServer"];'],
 	[
 		"symbol discriminant",
 		"CRU019",
@@ -404,7 +420,7 @@ test("network declaration and receiver aliases and namespaces preserve macro sym
 	const game = project({
 		"src/shared/macros.ts": 'export {toServer as message, receive as claim} from "@trioforge/crucible";',
 		"src/shared/messages.ts":
-			'import {message} from "./macros"; import * as C from "@trioforge/crucible"; export const Named=message<string>("X.Named"); export const Namespace=C.toServer<number>("X.Namespace");',
+			'import {message} from "./macros"; import * as C from "@trioforge/crucible"; export const Named=message<string>("X.Named"); export const Namespace=C.toServer<number>("X.Namespace"); export const Bracket=C["toServer"]<boolean>("X.Bracket"); export const Paren=(C.toServer)<undefined>("X.Paren");',
 		"src/server/service.ts":
 			'import {Subsystem as Base} from "@trioforge/crucible"; import {claim} from "../shared/macros"; import {Named} from "../shared/messages"; export class Service extends Base { readonly r=claim<typeof Named>(Named,(p,value)=>{print(p.Name,value);}); }',
 		"src/client/caller.ts":
