@@ -452,3 +452,15 @@ fn recovery_replays_hyphenated_place_and_every_unattempted_place() {
         assert!(request.head.contains(&format!("x-api-key: {KEY}")), "{}", request.head);
     }
 }
+
+#[test]
+fn unreadable_manifest_is_a_json_usage_error() {
+    let game = Game::new(None);
+    fs::create_dir(game.0.path().join("crucible.toml")).unwrap();
+    let out = game.publish("http://127.0.0.1:1", &["production"]);
+    assert_eq!(code(&out), 2);
+    let d = document(&out);
+    assert_eq!(d["error"]["kind"], "usage");
+    assert!(d["error"]["message"].as_str().unwrap().contains("cannot read crucible.toml"));
+    assert!(!game.0.path().join("build").exists());
+}

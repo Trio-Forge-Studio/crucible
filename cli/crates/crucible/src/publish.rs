@@ -1,7 +1,7 @@
 use crate::auth;
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
 use crate::exec::{Executor, Timing};
-use crate::manifest::{Manifest, VersionType};
+use crate::manifest::VersionType;
 use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
 use serde_json::{Value, json};
@@ -44,9 +44,12 @@ pub fn main(args: Args) -> ExitCode {
 }
 
 fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
-    let manifest = Manifest::read(root).map_err(|error| Failure::usage(error.to_string()))?.ok_or_else(|| {
-        Failure::usage("publish requires crucible.toml. Example:\n[env.production]\nuniverse = 1234\nplace = 5678\n")
-    })?;
+    let manifest = crate::build::manifest(root).map_err(|error| Failure::usage(error.to_string()))?;
+    if !root.join(crate::manifest::FILE).exists() {
+        return Err(Failure::usage(
+            "publish requires crucible.toml. Example:\n[env.production]\nuniverse = 1234\nplace = 5678\n",
+        ));
+    }
     let env = manifest.envs.get(&args.env).ok_or_else(|| {
         if manifest.envs.is_empty() {
             return Failure::usage(format!("unknown environment {}. No environments are configured", args.env));
