@@ -110,10 +110,14 @@ return {
 				w.log("module root")
 			end)
 		end)
+		local deferredAtRollback
 		w.service("Good", {
 			awake = function()
 				api.effect(function()
 					w.log("rolled back")
+				end)
+				api.onCleanup(function()
+					deferredAtRollback = #w.engine.deferred
 				end)
 			end,
 		})
@@ -125,6 +129,8 @@ return {
 		local ok, err = pcall(w.boot)
 		spec.eq(ok, false, "boot failed")
 		spec.has(err, "bad awake", "with the fault")
+		spec.eq(type(deferredAtRollback), "number", "the rollback ended the rolled-back service")
+		spec.eq(#w.engine.deferred, deferredAtRollback + 1, "the flush is requested after the rollback")
 		w.engine.flush()
 		spec.list(w.events, { "module root" }, "only the module root's effect ran")
 	end,

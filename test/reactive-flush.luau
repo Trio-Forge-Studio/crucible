@@ -166,6 +166,52 @@ return {
 		r.flush()
 		spec.eq(r.logged(`reached {r.limits.MAX_FLUSH_ROUNDS} rounds`), 2, "reported again after a flush within bounds")
 	end,
+	["rule 34 rule 79 T9 the bound diagnostic names the origins that ran most, busiest first"] = function()
+		local r = realm()
+		local depth = r.api.state(0)
+		local runs = {}
+		local origins = {}
+		local function busy(name, settledAt)
+			local done = false
+			runs[name] = 0
+			local function body()
+				runs[name] += 1
+				if done then
+					return
+				end
+				done = depth() >= settledAt
+			end
+			local source, line = debug.info(body, "sl")
+			origins[name] = `{source}:{line}`
+			return body
+		end
+		local function grow(k)
+			r.api.effect(function()
+				depth:set(k)
+				grow(k + 1)
+			end)
+		end
+		r.root(function()
+			r.api.effect(busy("least", 10))
+			r.api.effect(busy("most", 40))
+			r.api.effect(busy("middle", 25))
+			grow(1)
+		end)
+		table.remove(r.engine.deferred, 1)()
+		spec.eq(depth(), r.limits.MAX_FLUSH_ROUNDS, "the flush ended at the round bound")
+		spec.eq(runs.most > runs.middle and runs.middle > runs.least and runs.least > 1, true, "distinct run counts")
+		spec.eq(runs.most < r.limits.MAX_RUNS_PER_EFFECT, true, "no effect reached the per-effect bound")
+		local reports = {}
+		for _, entry in r.engine.logs do
+			local busiest = string.match(entry.message, "Most runs: (.*)$")
+			if busiest then
+				table.insert(reports, busiest)
+			end
+		end
+		spec.list(reports, {
+			`{origins.most} ({runs.most}), {origins.middle} ({runs.middle}), {origins.least} ({runs.least})`,
+		}, "one report names the three busiest origins in descending order")
+	end,
 	["rule 35 rule 79 T15 an internal error stops only the culprit, is reported once and loses no queued entry"] = function()
 		local armed = {}
 		local r = realm(function(graph)

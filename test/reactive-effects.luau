@@ -312,6 +312,7 @@ return {
 		dispose()
 		spec.list(events, { "last registered", "first registered" }, "newest first, past the failure")
 		spec.eq(r.logged("release failed"), 1, "reported once")
+		spec.eq(r.logged("failed:"), 1, "the cleanups that returned are not reported")
 		dispose()
 		spec.eq(r.logged("release failed"), 1, "dispose is idempotent")
 	end,

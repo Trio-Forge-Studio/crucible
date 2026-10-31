@@ -199,6 +199,26 @@ return {
 		local ok2 = pcall(c)
 		spec.eq(ok2, false, "cached")
 	end,
+	["rule 12 rule 13 rule 32 a yield in a nested computed suspends the outer evaluation, and its boundary completes both"] = function()
+		local r = realm()
+		local reached = false
+		local inner = r.api.computed(function()
+			coroutine.yield()
+			return 1
+		end)
+		local outer = r.api.computed(function()
+			local ok = pcall(inner)
+			reached = true
+			return ok
+		end)
+		local ok, err = pcall(outer)
+		spec.eq(ok, false, "the outer evaluation failed")
+		spec.has(err, "yielded", "with the runner's yield message")
+		spec.eq(reached, false, "the yield suspended the outer read, so its pcall never returned")
+		local innerOk, innerErr = pcall(inner)
+		spec.eq(innerOk, false, "the nested computed was completed too")
+		spec.has(innerErr, "yielded", "with the same message")
+	end,
 	["rule 7 X.get inside a computed takes the inside-drain branch"] = function()
 		local w = world()
 		local api = w.graph.module("")
