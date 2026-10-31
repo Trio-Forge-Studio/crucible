@@ -272,7 +272,7 @@ const mutants = [
 		"guard",
 		D + "lease.ts",
 		"if (lease !== undefined && sealed === undefined && wall <= lease.expiresAt + TAKEOVER_GRACE_SECONDS) {",
-		"if (false as boolean) {",
+		"if (lease !== undefined && (false as boolean)) {",
 		"rule 24 one winner",
 	],
 	[
