@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn escape_aborts_control_strings() {
-        for introducer in [b']', b'P'] {
+        for &introducer in b"]P" {
             let mut input = vec![0x1b, introducer];
             input.extend_from_slice(b"payload\x1b[31mvisible\nnext\n");
             assert_plain_at_every_split(&input, b"visible\nnext\n");
