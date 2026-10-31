@@ -236,6 +236,13 @@ return {
 						end)
 					end)
 					spawned = { ok = ok, err = err }
+					for _, name in { "handoff", "resume" } do
+						local okCall, errCall = pcall(function()
+							return a.store[name](a.store, pa)
+						end)
+						spawned[name] = okCall == false
+							and string.find(errCall, "inside a data callback", 1, true) ~= nil
+					end
 				end)
 				local value = table.clone(current)
 				value.coins = 3
@@ -245,6 +252,8 @@ return {
 		spec.eq(result.ok, true, "the callback's write succeeded")
 		spec.eq(spawned.ok, false, "the spawned write threw")
 		spec.has(spawned.err, "FD.Players: 4120's profile is inside a data callback", "busy message")
+		spec.eq(spawned.handoff, true, "a handoff of the busy session throws")
+		spec.eq(spawned.resume, true, "a resume of the busy session throws")
 		spec.eq(session(a, pa).value.coins, 3, "the callback's result stands")
 		spec.eq(session(a, pa).revision, 1, "one revision")
 	end,
@@ -439,6 +448,9 @@ return {
 					error("claim failed")
 				end
 				local changed = table.clone(value)
+				if mode == "oversized" then
+					changed.blob = string.rep("x", 270000)
+				end
 				changed.coins = 1
 				return changed
 			end,
@@ -448,6 +460,15 @@ return {
 			publish = function() end,
 			delivered = function() end,
 		})
+		mode = "oversized"
+		local big = a.join(77)
+		local refused = a.run(function()
+			return a.store:load(big, "join")
+		end)
+		backend:advance(1)
+		spec.eq(refused.value, false, "an onLoad result over the payload cap fails the load")
+		spec.eq(backend:envelope(STORE, "77").payload, nil, "nothing of it was saved")
+		mode = "change"
 		local pa = a.join(USER)
 		a.run(function()
 			a.store:load(pa, "join")
@@ -466,7 +487,7 @@ return {
 		local envelope = backend:envelope(STORE, "88")
 		spec.eq(envelope.lease, nil, "the acquisition was abandoned")
 		spec.eq(envelope.payload, nil, "nothing saved")
-		spec.eq(a.engine.logged("onLoad failed"), 1, "diagnosed")
+		spec.eq(a.engine.logged("onLoad failed"), 2, "each failed load is diagnosed")
 	end,
 	["rule 16 writes never wait for storage"] = function()
 		local backend, a = world()
@@ -542,6 +563,63 @@ return {
 		end)
 		backend:advance(1)
 		spec.eq(bad.value.kind, "unavailable", "unreadable is unavailable")
+	end,
+	["rule 49 and rule 35 inspect settles at its call deadline"] = function()
+		local backend, a, b = world(2)
+		local pa = loaded(backend, a)
+		save(a, pa)
+		backend:advance(1)
+		local gate = backend:gate("response", { kind = "read" })
+		local stalled = b.run(function()
+			return b.store:inspect(USER)
+		end)
+		backend:advance(b.limits.CALL_DEADLINE_SECONDS - 1)
+		spec.eq(stalled.done, false, "inspect waits for its read")
+		backend:advance(1.5)
+		spec.eq(stalled.value and stalled.value.kind, "uncertain", "a dispatched read with no answer is uncertain")
+		gate.release()
+		backend:advance(1)
+		b.budget.read = 0
+		local queued = b.run(function()
+			return b.store:inspect(USER)
+		end)
+		backend:advance(b.limits.CALL_DEADLINE_SECONDS + 0.5)
+		spec.eq(queued.value and queued.value.kind, "timeout", "a read never dispatched is timeout")
+	end,
+	["rule 43 a throwing or oversized onRelease is skipped, keeping its input, and diagnosed"] = function()
+		local backend = Backend.new()
+		local a = backend:realm()
+		local mode = "throw"
+		a.store = a.data:profile({ name = STORE, version = 0, defaults = { coins = 0 } }, {
+			onLoad = function(_, value)
+				return value
+			end,
+			onRelease = function(_, value)
+				if mode == "throw" then
+					error("claim failed")
+				end
+				local changed = table.clone(value)
+				changed.blob = string.rep("x", 270000)
+				return changed
+			end,
+			publish = function() end,
+			delivered = function() end,
+		})
+		for _, case in { { mode = "throw", user = USER }, { mode = "oversized", user = 88 } } do
+			mode = case.mode
+			local player = loaded(backend, a, case.user)
+			set(a, player, 6)
+			a.leave(player)
+			a.run(function()
+				a.store:leave(player)
+			end)
+			backend:advance(1)
+			local envelope = backend:envelope(STORE, tostring(case.user))
+			spec.eq(envelope.lease, nil, `{case.mode}: the release still ran`)
+			spec.eq(envelope.payload.coins, 6, `{case.mode}: the claim's input was kept`)
+			spec.eq(envelope.payload.blob, nil, `{case.mode}: the claim's result was skipped`)
+		end
+		spec.eq(a.engine.logged("onRelease (leave) was skipped"), 2, "diagnosed once per session")
 	end,
 	["rule 26 authority loss is diagnosed once per session"] = function()
 		local backend, a = world()

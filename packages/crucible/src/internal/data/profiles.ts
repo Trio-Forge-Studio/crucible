@@ -316,11 +316,14 @@ export class ProfileRuntime {
 		session.revision = loaded.migrated ? 1 : 0;
 		for (const id of envelope.receipts) session.stage(id);
 		session.durable = new Set(envelope.receipts);
-		const [ok, claimed] = pcall(() => this.hooks.onLoad(session, session.value, reason));
+		const [ok, claimed] = pcall(() => {
+			const result = this.hooks.onLoad(session, session.value, reason);
+			return rawequal(result, session.value) ? result : session.prepare(result);
+		});
 		if (!ok) {
 			this.engine.diagnose(
 				`onLoad:${this.schema.name}:${session.token}`,
-				`${this.schema.name}: ${userId}'s onLoad failed: ${claimed}`,
+				`${this.schema.name}: ${userId}'s onLoad failed (${reason})`,
 			);
 			return this.end(session, true, LOAD_FAILED_MESSAGE);
 		}
@@ -522,8 +525,16 @@ export class ProfileRuntime {
 	}
 
 	private releaseClaims(session: Session, reason: ReleaseReason) {
-		const [ok, claimed] = pcall(() => this.hooks.onRelease(session, session.value, reason));
-		if (ok && !rawequal(claimed, session.value)) session.commit(claimed);
+		const [ok, claimed] = pcall(() => {
+			const result = this.hooks.onRelease(session, session.value, reason);
+			return rawequal(result, session.value) ? result : session.prepare(result);
+		});
+		if (!ok)
+			this.engine.diagnose(
+				`onRelease:${this.schema.name}:${session.token}`,
+				`${this.schema.name}: ${session.userId}'s onRelease (${reason}) was skipped`,
+			);
+		else if (!rawequal(claimed, session.value)) session.commit(claimed);
 	}
 
 	/** Rule 43 on PlayerRemoving, rule 44's self-healing, and rule 53's final phase. */
@@ -611,16 +622,16 @@ export class ProfileRuntime {
 	inspect(userId: number): StoreResult<object | undefined> {
 		for (const [, session] of this.sessions)
 			if (session.userId === userId && this.accept(session)) return { kind: "ok", value: session.value };
-		const settled = this.engine.scheduler
-			.submit({
-				store: this.schema.name,
-				key: this.key(userId),
-				priority: Priority.Ordinary,
-				kind: "read",
-				dispatchDeadline: bootClock() + CALL_DEADLINE_SECONDS,
-				bytes: 1024,
-			})
-			.wait()!;
+		const deadline = bootClock() + CALL_DEADLINE_SECONDS;
+		const ticket = this.engine.scheduler.submit({
+			store: this.schema.name,
+			key: this.key(userId),
+			priority: Priority.Ordinary,
+			kind: "read",
+			dispatchDeadline: deadline,
+			bytes: 1024,
+		});
+		const settled = ticket.wait(deadline) ?? { kind: ticket.dispatched ? "uncertain" : "timeout" };
 		if (settled.kind !== "done") return { kind: settled.kind };
 		if (settled.outcome.kind === "error") return { kind: "unavailable" };
 		const parsed = parseEnvelope(settled.outcome.value?.value, "profiles");
