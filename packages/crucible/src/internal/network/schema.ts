@@ -26,8 +26,15 @@ export type Node =
 	| { readonly kind: "union"; readonly branches: readonly Node[] }
 	| { readonly kind: "variant"; readonly key: string; readonly value: Literal; readonly body: Node };
 
+const descriptors = new Set<object>();
+
+function descriptor<T extends object>(node: T): Readonly<T> {
+	descriptors.add(node);
+	return table.freeze(node);
+}
+
 function leaf<K extends Node["kind"]>(kind: K): { readonly kind: K } {
-	return table.freeze({ kind });
+	return descriptor({ kind });
 }
 
 function literal(value: Literal): Node {
@@ -37,7 +44,7 @@ function literal(value: Literal): Node {
 			(typeIs(value, "number") && value === value && math.abs(value) < math.huge),
 		"invalid literal",
 	);
-	return table.freeze({ kind: "literal", value });
+	return descriptor({ kind: "literal", value });
 }
 
 export function admitsNil(node: Node): boolean {
@@ -45,7 +52,7 @@ export function admitsNil(node: Node): boolean {
 }
 
 function assertNode(node: Node) {
-	assert(typeIs(node, "table") && table.isfrozen(node), "expected a descriptor constructor result");
+	assert(typeIs(node, "table") && descriptors.has(node), "expected a descriptor constructor result");
 }
 
 export function runtimeKind(node: Node): string {
@@ -105,7 +112,7 @@ export const n = table.freeze({
 				typeIs(copy[i], "string") && (i === 0 || copy[i - 1] < copy[i]),
 				"Instance classes must be sorted and unique",
 			);
-		return table.freeze({ kind: "instance", classes: table.freeze(copy) });
+		return descriptor({ kind: "instance", classes: table.freeze(copy) });
 	},
 	object: (fields: readonly (readonly [string, Node])[]): Node => {
 		const copy = fields.map(([name, node]) => {
@@ -114,19 +121,19 @@ export const n = table.freeze({
 			return table.freeze([name, node] as [string, Node]);
 		});
 		for (let i = 1; i < copy.size(); i++) assert(copy[i - 1][0] < copy[i][0], "fields must be sorted and unique");
-		return table.freeze({ kind: "object", fields: table.freeze(copy) });
+		return descriptor({ kind: "object", fields: table.freeze(copy) });
 	},
 	array: (element: Node): Node => {
 		assertNode(element);
 		assert(!admitsNil(element), "nil array element");
-		return table.freeze({ kind: "array", element });
+		return descriptor({ kind: "array", element });
 	},
 	tuple: (elements: readonly Node[]): Node => {
 		for (const node of elements) {
 			assertNode(node);
 			assert(!admitsNil(node), "nil tuple element");
 		}
-		return table.freeze({ kind: "tuple", elements: table.freeze([...elements]) });
+		return descriptor({ kind: "tuple", elements: table.freeze([...elements]) });
 	},
 	map: (key: Node, value: Node): Node => {
 		assertNode(key);
@@ -141,7 +148,7 @@ export const n = table.freeze({
 			"invalid map key",
 		);
 		assert(!admitsNil(value), "nil map value");
-		return table.freeze({ kind: "map", key, value });
+		return descriptor({ kind: "map", key, value });
 	},
 	union: (branches: readonly Node[]): Node => {
 		assert(branches.size() > 0 && branches.size() <= MAX_UNION_BRANCHES, "invalid union size");
@@ -189,7 +196,7 @@ export const n = table.freeze({
 				previousKind = kind;
 			}
 		}
-		return table.freeze({ kind: "union", branches: table.freeze([...branches]) });
+		return descriptor({ kind: "union", branches: table.freeze([...branches]) });
 	},
 	variant: (key: string, value: Literal, body: Node): Node => {
 		assertNode(body);
@@ -201,7 +208,7 @@ export const n = table.freeze({
 				body.fields.every(([name]) => name !== key),
 			"invalid variant",
 		);
-		return table.freeze({ kind: "variant", key, value, body });
+		return descriptor({ kind: "variant", key, value, body });
 	},
 });
 

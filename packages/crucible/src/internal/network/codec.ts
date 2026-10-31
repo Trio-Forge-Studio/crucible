@@ -64,25 +64,34 @@ export class Budget {
 export class Writer {
 	readonly budget = new Budget();
 	readonly slots = new Array<Instance>();
-	private readonly data = buffer.create(L.MAX_PACKET_BYTES);
+	private data = buffer.create(64);
 	private cursor = 0;
 	private reserve(size: number): number {
 		assert(size <= L.MAX_PACKET_BYTES - this.cursor, "packet too large");
+		if (size > buffer.len(this.data) - this.cursor) {
+			const capacity = math.min(L.MAX_PACKET_BYTES, math.max(buffer.len(this.data) * 2, this.cursor + size));
+			const grown = buffer.create(capacity);
+			buffer.copy(grown, 0, this.data, 0, this.cursor);
+			this.data = grown;
+		}
 		const offset = this.cursor;
 		this.cursor += size;
 		return offset;
 	}
 	u8(value: number) {
 		uint(value, 255);
-		buffer.writeu8(this.data, this.reserve(1), value);
+		const offset = this.reserve(1);
+		buffer.writeu8(this.data, offset, value);
 	}
 	u16(value: number) {
 		uint(value, 65535);
-		buffer.writeu16(this.data, this.reserve(2), value);
+		const offset = this.reserve(2);
+		buffer.writeu16(this.data, offset, value);
 	}
 	u32(value: number) {
 		uint(value, 4294967295);
-		buffer.writeu32(this.data, this.reserve(4), value);
+		const offset = this.reserve(4);
+		buffer.writeu32(this.data, offset, value);
 	}
 	varuint(value: number) {
 		uint(value, 4294967295);
@@ -100,12 +109,14 @@ export class Writer {
 	}
 	f64(value: number) {
 		finite(value, "payload");
-		buffer.writef64(this.data, this.reserve(8), value);
+		const offset = this.reserve(8);
+		buffer.writef64(this.data, offset, value);
 	}
 	bytes(text: string) {
 		validString(text);
 		this.varuint(text.size());
-		buffer.writestring(this.data, this.reserve(text.size()), text);
+		const offset = this.reserve(text.size());
+		buffer.writestring(this.data, offset, text);
 	}
 	slot(instance: Instance) {
 		assert(this.slots.size() < L.MAX_INSTANCE_SLOTS, "slot budget exhausted");
@@ -537,6 +548,8 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 				encode = (w, v, p) => encodeDynamic(w, v, p, new Set<object>());
 				decode = (r, p) => decodeDynamic(r, p, true);
 				break;
+			default:
+				error("unknown descriptor kind");
 		}
 		active.delete(node);
 		const container =
