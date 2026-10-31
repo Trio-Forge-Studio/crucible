@@ -47,3 +47,31 @@ test("K1 K16 R5 pinned rbxtsc type fixtures retain literal inference invariance 
 		compile(game, expected ? 1 : 0);
 	}
 });
+
+test("network token types reject both variance directions receiver calls and ClientReady sends", () => {
+	const game = project({
+		"src/client/tokens.ts": `
+import {ToServer,Receiver,ClientReady} from "@trioforge/crucible";
+import {Network} from "@trioforge/crucible/client";
+declare const narrow: ToServer<{x:number}>;
+declare const wide: ToServer<{x:number|string}>;
+declare const receiver: Receiver;
+export const covariant: typeof wide = narrow;
+export const contravariant: typeof narrow = wide;
+receiver();
+Network.send(ClientReady);
+`,
+	});
+	const { program, diagnostics } = inspect(game);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	const source = program.getSourceFile(path.join(game, "src/client/tokens.ts"));
+	const codes = program
+		.getSemanticDiagnostics(source)
+		.map((d) => d.code)
+		.sort();
+	assert.deepEqual(codes, [2322, 2322, 2345, 2349]);
+	compile(game, 1);
+});
