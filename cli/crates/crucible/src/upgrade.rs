@@ -943,6 +943,101 @@ mod tests {
     }
 
     #[test]
+    fn npm_ranges_are_registry_specs() {
+        for spec in ["^0.1.0 || ^0.2.0", ">=0.1.0 <0.2.0", "0.1.0 - 0.2.0", "1.2", "*", "", "x", "v0.1.0"] {
+            let manifest =
+                serde_json::json!({ "dependencies": { RUNTIME: spec }, "devDependencies": { "crucible": spec } });
+            assert!(read_pins(&manifest).is_ok(), "{spec:?} is a registry range");
+        }
+        assert!(!satisfies("1.2", &version("1.3.0")), "npm reads 1.2 as 1.2.x");
+    }
+
+    #[test]
+    fn a_newer_runtime_is_newer_than_latest() {
+        let installed = Installed { crucible: version("0.2.0"), runtime: Some(version("0.3.0-rc.1")) };
+        assert_eq!(
+            plan(&pins("0.3.0-rc.1", "0.3.0-rc.1"), &installed, &version("0.2.0"), false, false).unwrap(),
+            Plan::NewerThanLatest
+        );
+        assert!(matches!(
+            plan(&pins("0.3.0-rc.1", "0.3.0-rc.1"), &installed, &version("0.2.0"), true, false),
+            Err(Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn the_new_binary_cuts_the_old_section_and_never_rewrites_the_license() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let new = snapshot("game");
+        let agents = render(FILES.iter().find(|(path, _)| *path == "AGENTS.md").unwrap().1, &tokens("game"));
+        let old_agents = format!("{}\n\nAn old line.\n", agents.trim_end());
+        let license = &new.owned.iter().find(|part| part.path == "LICENSE").unwrap().content;
+        let old_license = format!("{license}An older license.\n");
+        let mut old = serde_json::to_value(&new).unwrap();
+        for part in old["owned"].as_array_mut().unwrap() {
+            match part["path"].as_str().unwrap() {
+                "AGENTS.md" => part["content"] = old_agents.clone().into(),
+                "LICENSE" => part["content"] = old_license.clone().into(),
+                _ => {}
+            }
+        }
+        fs::write(root.join("package.json"), "{\"name\":\"game\"}").unwrap();
+        fs::create_dir_all(root.join("node_modules/crucible")).unwrap();
+        fs::write(root.join("node_modules/crucible/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
+        fs::write(root.join("AGENTS.md"), &old_agents).unwrap();
+        fs::write(root.join("LICENSE"), &old_license).unwrap();
+        let report = apply(root, env!("CARGO_PKG_VERSION"), &old.to_string()).unwrap();
+        assert!(report.contains("Refreshed from the new template:\n  AGENTS.md (## Crucible)\n"), "{report}");
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), agents);
+        assert!(
+            report.contains("  LICENSE\n") && !report.contains("Refreshed from the new template:\n  LICENSE"),
+            "{report}"
+        );
+        assert_eq!(fs::read_to_string(root.join("LICENSE")).unwrap(), old_license, "the license is never rewritten");
+    }
+
+    #[test]
+    fn write_atomic_cleans_up_and_writes_through_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocked = dir.path().join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("inside"), "x").unwrap();
+        assert!(write_atomic(&blocked, "text").is_err());
+        assert!(!dir.path().join("blocked.crucible-upgrade").exists(), "a failed write leaves no temporary file");
+
+        let target = dir.path().join("target.json");
+        let link = dir.path().join("link.json");
+        fs::write(&target, "old").unwrap();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&target, &link);
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&target, &link);
+        if linked.is_ok() {
+            write_atomic(&link, "new").unwrap();
+            assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link survives");
+            assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_atomic_waits_out_a_sharing_violation() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        fs::write(&path, "old").unwrap();
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        write_atomic(&path, "new").unwrap();
+        release.join().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
     fn a_hung_child_times_out() {
         let mut command = if cfg!(windows) { Command::new("cmd") } else { Command::new("sh") };
         command.args(if cfg!(windows) { ["/d", "/c", "ping -n 30 127.0.0.1 >nul"] } else { ["-c", "sleep 30", ""] });
