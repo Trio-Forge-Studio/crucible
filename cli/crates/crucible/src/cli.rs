@@ -57,11 +57,11 @@ pub enum Command {
         /// The place file to write.
         output: PathBuf,
     },
-    /// Print this version's template and docs hashes as JSON. crucible upgrade runs this.
-    #[command(name = crate::upgrade::SNAPSHOT, hide = true)]
-    UpgradeSnapshot {
-        /// The game's package name.
-        name: String,
+    /// Refresh template files after crucible upgrade installs this version. Reads the old template on stdin.
+    #[command(name = crate::upgrade::APPLY, hide = true)]
+    UpgradeApply {
+        /// The crucible version installed before the upgrade.
+        from: String,
     },
 }
 fn topics() -> clap::builder::PossibleValuesParser {
