@@ -1,0 +1,365 @@
+local spec = require("./lib/load")
+local Backend = require("./lib/data-backend")
+
+local STORE = "FD.Players"
+local USER = 4120
+local KEY = tostring(USER)
+local SEALED, ENDED = 2, 3
+
+local function world(count: number?, options)
+	local backend = Backend.new()
+	local realms = {}
+	for index = 1, count or 2 do
+		local realm = backend:realm(options and options[index])
+		realm.store = realm.profile(STORE, { coins = 0 })
+		table.insert(realms, realm)
+	end
+	return backend, realms[1], realms[2]
+end
+
+local function load(realm, player)
+	return realm.run(function()
+		return realm.store:load(player, "join")
+	end)
+end
+
+local function write(realm, player, coins)
+	local result
+	realm.run(function()
+		result = realm.store:write(player, function(current)
+			local value = table.clone(current)
+			value.coins = coins
+			return value
+		end)
+	end)
+	return result
+end
+
+local function save(realm, player)
+	return realm.run(function()
+		return realm.store:save(player)
+	end)
+end
+
+local function session(realm, player)
+	return realm.store.sessions[player]
+end
+
+local function stored(backend)
+	return backend:envelope(STORE, KEY)
+end
+
+local function snapshot(revision: number, coins: number)
+	return { revision = revision, schemaVersion = 0, payload = { coins = coins }, receipts = {} }
+end
+
+return {
+	["rule 24 one winner under simultaneous acquisition"] = function()
+		local backend, a, b = world()
+		local pa, pb = a.join(USER), b.join(USER)
+		local la, lb = load(a, pa), load(b, pb)
+		backend:advance(1)
+		spec.eq(la.value, true, "first acquisition wins")
+		spec.eq(lb.done, false, "second acquisition polls")
+		spec.eq(stored(backend).lease.serverId, a.id, "stored lease is the winner's")
+		spec.eq(stored(backend).epoch, 1, "one acquisition committed")
+		backend:advance(125)
+		spec.eq(lb.value, false, "loser never takes a live lease")
+		spec.eq(b.kicked(pb), b.limits.LOAD_BUSY_MESSAGE, "loser kicked busy at the deadline")
+		spec.eq(a.store:writable(pa), true, "winner kept renewing")
+		spec.eq(stored(backend).lease.serverId, a.id, "lease never stolen")
+	end,
+	["rule 24 takeover at expiry plus grace and rule 22 expiry"] = function()
+		local backend, a, b = world()
+		local pa = a.join(USER)
+		load(a, pa)
+		backend:advance(0.5)
+		local expiresAt = stored(backend).lease.expiresAt
+		spec.eq(expiresAt, a.wallOffset + 0.05 + 90, "expiry is the transform's wall clock plus 90")
+		a.crash()
+		local pb = b.join(USER)
+		local lb = load(b, pb)
+		backend:advance(99)
+		spec.eq(lb.done, false, "no takeover before expiry plus grace")
+		spec.eq(stored(backend).lease.serverId, a.id, "crashed lease still stored")
+		backend:advance(20)
+		spec.eq(lb.value, true, "takeover after expiry plus grace")
+		local lease = stored(backend).lease
+		spec.eq(lease.serverId, b.id, "new owner")
+		assert(lease.expiresAt - 90 > expiresAt + 10, "taken only past expiresAt + TAKEOVER_GRACE_SECONDS")
+		spec.eq(stored(backend).epoch, 2, "epoch rose once per acquisition")
+	end,
+	["rule 21 polls follow the schedule and never wait past expiry plus grace"] = function()
+		local backend, a, b = world()
+		load(a, a.join(USER))
+		backend:advance(0.5)
+		local expiresAt = stored(backend).lease.expiresAt
+		a.crash()
+		local start = backend.now
+		load(b, b.join(USER))
+		backend:advance(119)
+		local times = {}
+		for _, call in backend:callsTo({ server = b.id }) do
+			table.insert(times, call.at)
+			if call.committed then
+				break
+			end
+		end
+		local schedule = { 1, 1, 2, 2, 3, 5, 5, 5 }
+		for index = 2, #schedule + 1 do
+			local gap = times[index] - times[index - 1] - 0.1
+			local base = schedule[index - 1]
+			assert(
+				gap >= base * 0.75 - 1e-6 and gap <= base * 1.25 + 1e-6,
+				`poll {index - 1} waited {gap}, base {base}`
+			)
+		end
+		assert(times[1] == start, "first attempt at once")
+		for _, at in times do
+			assert(at + b.wallOffset <= expiresAt + 10 + 0.35, "a poll never waits past expiry plus grace")
+		end
+		spec.eq(stored(backend).lease.serverId, b.id, "first poll past expiry plus grace takes the lease")
+	end,
+	["rule 20 a crash then rejoin loads within LOAD_DEADLINE_SECONDS"] = function()
+		local backend, a, b = world()
+		load(a, a.join(USER))
+		backend:advance(25)
+		assert(#backend:callsTo({ server = a.id }) >= 2, "crashed right after a renewal")
+		a.crash()
+		local start = backend.now
+		local pb = b.join(USER)
+		local lb = load(b, pb)
+		backend:advance(a.limits.LOAD_DEADLINE_SECONDS)
+		spec.eq(lb.value, true, "loaded before the deadline")
+		spec.eq(b.kicked(pb), nil, "never kicked")
+		assert(backend.now - start <= 120, "within LOAD_DEADLINE_SECONDS")
+	end,
+	["rule 27 a stale origin save is fenced"] = function()
+		local backend, a, b = world()
+		local pa = a.join(USER)
+		load(a, pa)
+		backend:advance(1)
+		local gate = backend:gate("transform", { server = a.id })
+		spec.eq(write(a, pa, 5), true, "origin writes locally")
+		backend:advance(75)
+		spec.eq(session(a, pa).phase >= SEALED, true, "origin sealed at its bound")
+		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "origin kicked")
+		local pb = b.join(USER)
+		local lb = load(b, pb)
+		backend:advance(40)
+		spec.eq(lb.value, true, "contender took the expired lease")
+		spec.eq(write(b, pb, 9), true, "new owner writes")
+		local saved = save(b, pb)
+		backend:advance(1)
+		spec.eq(saved.value, "ok", "new owner saved")
+		gate.release()
+		backend:advance(5)
+		local envelope = stored(backend)
+		spec.eq(envelope.payload.coins, 9, "the origin's stale write never landed")
+		spec.eq(envelope.lease.serverId, b.id, "the new owner's lease stands")
+		local fenced = false
+		for _, call in backend:callsTo({ server = a.id }) do
+			fenced = fenced
+				or (call.parked == nil and call.outcome and call.outcome.kind == "ok" and not call.committed)
+		end
+		assert(fenced, "the parked origin write ran and cancelled")
+	end,
+	["rule 30 same-server ABA is fenced by token and epoch"] = function()
+		local backend, a = world(1)
+		local first = a.join(USER)
+		load(a, first)
+		backend:advance(1)
+		local old = session(a, first)
+		a.leave(first)
+		a.run(function()
+			a.store:leave(first)
+		end)
+		backend:advance(1)
+		spec.eq(old.phase, ENDED, "old session released")
+		local second = a.join(USER)
+		load(a, second)
+		backend:advance(1)
+		local current = session(a, second)
+		spec.eq(stored(backend).epoch, 2, "same server acquisition increments the epoch")
+		assert(current.token ~= old.token, "fresh token")
+		local function replay(token, epoch)
+			local decision
+			local result = a.lease.ownedWrite(backend:stored(STORE, KEY), {
+				userId = USER,
+				token = token,
+				epoch = epoch,
+				op = 99,
+				snapshot = snapshot(9, 666),
+				release = false,
+				wall = a.wall,
+			}, function(d)
+				decision = d
+			end)
+			return decision.kind, result
+		end
+		local kind, result = replay(old.token, old.epoch)
+		spec.eq(kind, "fenced", "old token fenced")
+		spec.eq(result, nil, "nothing written")
+		spec.eq(replay(current.token, old.epoch), "fenced", "old epoch fenced")
+		spec.eq(replay(current.token, current.epoch), "written", "current token and epoch write")
+	end,
+	["rule 19 acquisition committed then errored finds its own commit"] = function()
+		local backend, a = world(1)
+		backend:fail("committed", { server = a.id }, 1)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		backend:advance(3)
+		spec.eq(la.value, true, "loaded")
+		spec.eq(stored(backend).epoch, 1, "the retry did not acquire again")
+		local calls = backend:callsTo({ server = a.id })
+		spec.eq(calls[1].plan, "committed", "first attempt committed then errored")
+		spec.eq(calls[2].committed, nil, "the retry wrote nothing")
+	end,
+	["rule 19 an ambiguous acquisition loop dates authority from its earliest attempt"] = function()
+		local backend, a = world(1)
+		backend:fail("committed", { server = a.id }, 1)
+		backend:fail("transient", { server = a.id }, 2)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		backend:advance(10)
+		spec.eq(la.value, true, "loaded")
+		local calls = backend:callsTo({ server = a.id })
+		assert(#calls >= 4 and calls[4].at > calls[1].at, "later attempts")
+		spec.eq(session(a, pa).safeUntil, calls[1].at + a.mono + 70, "authority from the first attempt's send")
+	end,
+	["rule 20 abandon after an ambiguous acquisition removes only its lease"] = function()
+		local backend, a = world(1)
+		backend:fail("committed", { server = a.id }, 1)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		backend:advance(0.1)
+		a.leave(pa)
+		backend:advance(5)
+		spec.eq(la.value, false, "load ended by the leave")
+		local envelope = stored(backend)
+		spec.eq(envelope.lease, nil, "the acquisition's own lease removed")
+		spec.eq(envelope.epoch, 1, "nothing acquired again")
+		spec.eq(envelope.payload, nil, "nothing but the abandonment written")
+		spec.eq(a.kicked(pa), nil, "a departed player is not kicked")
+	end,
+	["rule 23 a late response past safeUntil grants nothing"] = function()
+		local backend, a = world(1)
+		local pa = a.join(USER)
+		load(a, pa)
+		backend:advance(1)
+		local bound = session(a, pa).safeUntil
+		local gate = backend:gate("response", { server = a.id })
+		backend:advance(bound - a.clock() + 1)
+		spec.eq(a.store:writable(pa), false, "sealed at the bound")
+		gate.release()
+		backend:advance(1)
+		spec.eq(session(a, pa).safeUntil, bound, "the late confirmation did not extend authority")
+		spec.eq(write(a, pa, 3), false, "writes stay refused")
+		spec.eq(session(a, pa).phase >= SEALED, true, "no resurrection")
+	end,
+	["rule 25 skew of 5 s either way keeps the 20 s margin"] = function()
+		for _, skew in { 5, -5 } do
+			local backend, a, b = world(2, { {}, { wall = 1700000000 + skew } })
+			local pa = a.join(USER)
+			load(a, pa)
+			backend:advance(0.5)
+			local expiresAt = stored(backend).lease.expiresAt
+			local bound = session(a, pa).safeUntil - a.mono
+			a.crash()
+			local pb = b.join(USER)
+			local lb = load(b, pb)
+			backend:advance(119)
+			spec.eq(lb.value, true, `skew {skew}: loaded within the deadline`)
+			local taken
+			for _, call in backend:callsTo({ server = b.id }) do
+				if call.committed then
+					taken = taken or call.at + 0.05
+				end
+			end
+			assert(taken + b.wallOffset > expiresAt + 10, `skew {skew}: taken past expiry plus grace by its own clock`)
+			assert(taken - bound >= 20, `skew {skew}: at least 20 s after the owner's bound`)
+		end
+	end,
+	["rule 23 a suspended writer resuming seals and its writes are fenced"] = function()
+		local backend, a, b = world()
+		local pa = a.join(USER)
+		load(a, pa)
+		backend:advance(1)
+		a.suspended = true
+		local pb = b.join(USER)
+		local lb = load(b, pb)
+		backend:advance(110)
+		spec.eq(lb.value, true, "contender took over")
+		write(b, pb, 7)
+		save(b, pb)
+		backend:advance(1)
+		a.suspended = false
+		backend:advance(0.01)
+		spec.eq(write(a, pa, 99), false, "first authority check after resuming fails")
+		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "kicked")
+		backend:advance(30)
+		spec.eq(stored(backend).payload.coins, 7, "nothing of the suspended writer merged")
+		spec.eq(stored(backend).lease.serverId, b.id, "lease kept by the new owner")
+	end,
+	["rule 25 a common wall-clock step fences the old owner and nothing merges"] = function()
+		local backend, a, b = world()
+		local pa = a.join(USER)
+		load(a, pa)
+		backend:advance(30)
+		a.wallOffset += 200
+		b.wallOffset += 200
+		local pb = b.join(USER)
+		local lb = load(b, pb)
+		backend:advance(0.5)
+		spec.eq(lb.value, true, "contender takes over at once after the common step")
+		spec.eq(write(a, pa, 41), true, "the old owner still accepts writes inside its monotonic bound")
+		write(b, pb, 8)
+		backend:advance(40)
+		spec.eq(a.store:writable(pa), false, "the old owner's next owned write was fenced")
+		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "old owner kicked")
+		save(b, pb)
+		backend:advance(1)
+		spec.eq(stored(backend).payload.coins, 8, "the old owner's write was lost, never merged")
+		spec.eq(stored(backend).lease.serverId, b.id, "new owner keeps the lease")
+	end,
+	["rule 26 an owned write that finds its own lease expired seals"] = function()
+		local backend, a = world(1)
+		local pa = a.join(USER)
+		load(a, pa)
+		backend:advance(1)
+		a.wallOffset += 100
+		backend:advance(25)
+		spec.eq(a.store:writable(pa), false, "sealed")
+		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "kicked")
+		spec.eq(stored(backend).lease.serverId, a.id, "an expired lease is never renewed")
+	end,
+	["rule 40 an unreadable record fails closed at once"] = function()
+		local backend, a = world(1)
+		local bad = { format = 2, kind = "profiles", schemaVersion = 0, epoch = 4, payload = { coins = 3 } }
+		backend:seed(STORE, KEY, bad)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		backend:advance(1)
+		spec.eq(la.value, false, "not loaded")
+		spec.eq(a.kicked(pa), a.limits.LOAD_FAILED_MESSAGE, "kicked at once")
+		spec.eq(stored(backend).format, 2, "never repaired")
+		spec.eq(stored(backend).epoch, 4, "never overwritten")
+		spec.eq(#backend:callsTo({ server = a.id }), 1, "no retry")
+		spec.eq(a.engine.logged("unreadable"), 1, "diagnosed")
+	end,
+	["rule 77 a newer stored version is never acquired"] = function()
+		local backend, a = world(1)
+		local newer = a.envelope.emptyEnvelope("profiles")
+		newer.schemaVersion = 3
+		newer.payload = { coins = 12 }
+		newer.epoch = 6
+		backend:seed(STORE, KEY, newer)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		backend:advance(1)
+		spec.eq(la.value, false, "not loaded")
+		spec.eq(a.kicked(pa), a.limits.SERVER_UPDATING_MESSAGE, "kicked at once")
+		spec.eq(stored(backend).epoch, 6, "epoch untouched")
+		spec.eq(stored(backend).lease, nil, "no lease taken")
+	end,
+}

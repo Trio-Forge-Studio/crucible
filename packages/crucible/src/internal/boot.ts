@@ -34,6 +34,50 @@ export const SHUTDOWN_DEADLINE_SECONDS = 25;
 /** @internal */
 export const SHUTDOWN_TIMEOUT_SECONDS = 28;
 
+let clock: (() => number) | undefined;
+let sweep:
+	| {
+			readonly startTime: number;
+			readonly order: readonly SubsystemRecord[];
+			readonly started: ReadonlySet<SubsystemRecord>;
+			readonly finished: ReadonlySet<SubsystemRecord>;
+	  }
+	| undefined;
+
+/** @internal */
+export interface ShutdownProgress {
+	readonly startedAt: number;
+	readonly forceStartAt: number;
+	readonly deadline: number;
+	/** Hooks in the sweep that have not finished, the caller's own excluded, counting those not yet started. */
+	readonly pending: number;
+	readonly notStarted: number;
+}
+
+/** @internal The one monotonic clock, core's and data's (data rules 25, 105). */
+export function bootClock(): number {
+	return (clock ?? os.clock)();
+}
+
+/** @internal Undefined until the sweep has begun. */
+export function shutdownProgress(subsystem: Subsystem): ShutdownProgress | undefined {
+	if (sweep === undefined) return undefined;
+	let pending = 0;
+	let notStarted = 0;
+	for (const record of sweep.order) {
+		if (sweep.finished.has(record) || record.state?.object === subsystem) continue;
+		pending += 1;
+		if (!sweep.started.has(record)) notStarted += 1;
+	}
+	return {
+		startedAt: sweep.startTime,
+		forceStartAt: sweep.startTime + SHUTDOWN_DEADLINE_SECONDS,
+		deadline: sweep.startTime + SHUTDOWN_TIMEOUT_SECONDS,
+		pending,
+		notStarted,
+	};
+}
+
 /** @internal */
 export function parsePattern(pattern: string): readonly string[] {
 	if (pattern.sub(1, PATTERN_PREFIX.size()) !== PATTERN_PREFIX)
@@ -126,6 +170,7 @@ function shutdown(port: BootPort, order: readonly SubsystemRecord[]) {
 	for (const record of order)
 		for (const dep of record.resolved) if (!dep.all) dependents.get(dep.record)!.push(record);
 	const startTime = port.clock();
+	sweep = { startTime, order, started, finished };
 	while (finished.size() < order.size()) {
 		const expired = port.clock() - startTime >= SHUTDOWN_DEADLINE_SECONDS;
 		for (const record of order) {
@@ -150,6 +195,8 @@ function shutdown(port: BootPort, order: readonly SubsystemRecord[]) {
 
 /** @internal */
 export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "fixedRate">) {
+	clock = port.clock;
+	sweep = undefined;
 	const singletons = seal({ renders: side.renders });
 	const frame = hooks().frame;
 	const scheduler = new Scheduler(
