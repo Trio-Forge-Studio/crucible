@@ -372,6 +372,24 @@ return {
 		engine.flush()
 		spec.eq(runs, 1, "the queued first run happened")
 	end,
+	["rule 31 with the barrier released and no port, an enqueue still only queues"] = function()
+		local engine = Engine.new()
+		local graph = spec.runtime(nil, engine.loggingPort)
+		local api = graph.module("")
+		local reactive = graph.module("internal/reactive/flush")
+		reactive.releaseBarrier()
+		local runs = 0
+		api.scope(function()
+			api.effect(function()
+				runs += 1
+			end)
+		end)
+		spec.eq(#engine.deferred, 0, "nothing requested without a port")
+		reactive.useReactivePort(engine.port)
+		reactive.releaseBarrier()
+		engine.flush()
+		spec.eq(runs, 1, "the queued run happened once a port existed")
+	end,
 	["rule 33 T7 a diamond reaches an effect once, with only new values"] = function()
 		local r = realm()
 		local a = r.api.state(1)

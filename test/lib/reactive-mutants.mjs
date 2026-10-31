@@ -481,6 +481,7 @@ const mutants = [
 				"if (requested || flushing || held || port === undefined) return;",
 				"if (requested || flushing || held) return;",
 			],
+			["const [ok] = pcall(port.defer, flush);", "const [ok] = pcall(port!.defer, flush);"],
 		],
 	],
 	["batch unsorted", "pair", [33], FLUSH, [["		batch.sort(createdBefore);\n", ""]]],
@@ -580,7 +581,7 @@ const mutants = [
 	[
 		"enabling mark saved after set",
 		"swap",
-		[75],
+		[21, 75],
 		LIFECYCLE,
 		[
 			[
@@ -641,8 +642,9 @@ const mutants = [
 	],
 ];
 
-function run(command, args) {
-	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 300000, shell: false });
+function run(command, args, timeout = 300000) {
+	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout, shell: false });
+	if (result.error?.code === "ETIMEDOUT") return { ...result, status: "timeout", error: undefined };
 	assert.equal(result.error, undefined, String(result.error));
 	return result;
 }
@@ -697,14 +699,16 @@ try {
 		fs.writeFileSync(path.join(scratch, file), mutated);
 		const compiled = build();
 		assert.equal(compiled.status, 0, `${name} build failed\n${compiled.stdout}${compiled.stderr}`);
-		const tested = run("lune", ["run", "test", ...rules.map((rule) => `rule ${rule} `)]);
-		const failed = failing(tested.stdout + tested.stderr);
+		const tested = run("lune", ["run", "test", ...rules.map((rule) => `rule ${rule} `)], 120000);
+		const failed = failing(`${tested.stdout ?? ""}${tested.stderr ?? ""}`);
 		const owned = failed.filter((spec) => rules.some((rule) => names(rule).test(spec)));
 		fs.writeFileSync(path.join(scratch, file), original);
 		assert.notEqual(tested.status, 0, `${name} survived\n${tested.stdout}${tested.stderr}`);
-		// Unbounded recursion can abort Lune before it reports. Only the rule's specs ran, so the abort is theirs.
-		const crashed = !/\d+ passed, \d+ failed/.test(tested.stdout);
-		if (crashed) owned.push(`crashed while running the specs for rule ${rules.join(", ")}`);
+		// Unbounded recursion can abort Lune, and an unbounded flush can hang it, before it reports. Only the rule's
+		// specs ran, so the abort or the hang is theirs.
+		const crashed = !/\d+ passed, \d+ failed/.test(tested.stdout ?? "");
+		if (crashed)
+			owned.push(`${tested.status === "timeout" ? "hung" : "crashed"} in the specs for rule ${rules.join(", ")}`);
 		assert.ok(
 			owned.length > 0,
 			`${name} was not caught by a spec for rule ${rules.join(", ")}: ${failed.join("; ")}`,

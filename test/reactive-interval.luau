@@ -125,10 +125,22 @@ return {
 			end,
 		})
 		w.boot(object)
+		w.life.within(object, object, w.Hook.Frame, function()
+			w.api.scope(function()
+				w.api.onCleanup(function()
+					w.log("later generation release")
+				end)
+			end)
+		end)
 		failing = true
+		local mark = #w.events
 		w.life.request(object, w.Want.Disabled)
 		spec.eq(table.find(w.events, "onDisable:Door"), nil, "onDisable never ran")
-		spec.eq(table.find(w.events, "interval release") ~= nil, true, "the interval ended anyway")
+		spec.list(
+			w.since(mark),
+			{ "interval release", "later generation release", "ended:Door" },
+			"the interval ended first, before the generation's subscriptions"
+		)
 		spec.eq(object.phase, 5, "force-ended")
 	end,
 	["rule 21 T5 onEnable then onDisable on the same pooled worker: onDisable's creations are the generation's"] = function()
