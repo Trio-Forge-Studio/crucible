@@ -30,10 +30,12 @@ export class Waiters {
 		if (timer !== undefined && !fired) this.port.cancel(timer);
 	}
 
+	/** Resumes in park order. */
 	wake() {
-		const threads = new Array<thread>();
-		for (const [thread] of this.parked) threads.push(thread);
+		const threads = new Array<[thread, number]>();
+		for (const [thread, id] of this.parked) threads.push([thread, id]);
 		this.parked.clear();
-		for (const thread of threads) this.port.resume(thread);
+		threads.sort((a, b) => a[1] < b[1]);
+		for (const [thread] of threads) this.port.resume(thread);
 	}
 }
