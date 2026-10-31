@@ -186,13 +186,18 @@ return {
 		local s2 = r2.data.scheduler
 		r2.budget.update = 0
 		submit(r2, s2, "ordinary", ORDINARY, { deadline = 60 })
+		submit(r2, s2, "load-old", LOAD)
 		aged:advance(6)
 		submit(r2, s2, "load", LOAD)
 		submit(r2, s2, "renew", RENEW, { renewal = true, safeUntil = r2.clock() + 60 })
 		submit(r2, s2, "receipt", RECEIPT)
 		r2.budget.update = 1000
 		aged:advance(1)
-		spec.list(order(aged), { "receipt", "ordinary", "renew", "load" }, "aged Ordinary ahead of Renew and Load only")
+		spec.list(
+			order(aged),
+			{ "receipt", "ordinary", "renew", "load-old", "load" },
+			"aged Ordinary ahead of Renew and Load only"
+		)
 		spec.eq(LEASE_CRITICAL, 0, "priority values")
 	end,
 	["rule 36 retries with jitter and diagnoses a non-retryable error once per store and code"] = function()

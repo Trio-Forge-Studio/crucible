@@ -130,6 +130,9 @@ return {
 			emptyId = function(e)
 				e.seen = { "" }
 			end,
+			payload = function(e)
+				e.payload = "text"
+			end,
 			holes = function(e)
 				e.receipts = { "a", nil, "c" }
 			end,
