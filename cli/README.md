@@ -20,7 +20,7 @@ cargo build --release --locked --package crucible
 
 The CLI ships on npm the way oxlint does. The `crucible` package holds a Node shim and the `crucible` bin. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64`, `@trioforge/crucible-cli-linux-x64`, and `@trioforge/crucible-cli-darwin-arm64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
 
-`npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The packages stay `private` until a release task publishes them.
+`npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
 
 ```console
 node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
@@ -28,13 +28,50 @@ node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 
 `npm/package.test.mjs` stages the debug binary from `cargo test`, packs the packages with `npm pack`, installs them into a temporary project, and runs `npx crucible`. Set `CRUCIBLE_BINARY` to test another binary.
 
+## Release packages
+
+`.github/workflows/release.yml` runs on pull requests and `v*` tag pushes. It builds MSVC Windows x64, static musl Linux x64, and native Apple Silicon macOS binaries on Blacksmith. The Mac job uses `blacksmith-6vcpu-macos-15`, documented in [Blacksmith runner types](https://docs.blacksmith.sh/blacksmith-runners/overview). It ad-hoc signs the Mach-O binary, verifies its signature and architecture, and executes it through the npm shim on a real Mac. Ad-hoc signing does not provide Apple notarization or a Developer ID identity. Linux checks `file` and `ldd` and executes the static binary.
+
+The packaging job builds the runtime and transformer, generates `THIRD_PARTY_NOTICES` with cargo-about from the locked dependency graph, and stages all five packages at the version in `cli/Cargo.toml`. The platform packages include the notices and MIT license. Notices include dependency license texts and the Rojo source location for its MPL-2.0 license when Rojo is bundled. New dependency licenses outside `cli/about.toml` fail the job for review.
+
+`node cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64`, `win32-x64`, and `darwin-arm64`. It checks `npm pack --dry-run` for runtime output, transformer, and side entries, then packs five tarballs. CI runs `npm publish --dry-run` on each tarball without credentials. Tags must match `v` plus the Cargo version.
+
+The publish job runs on GitHub-hosted `ubuntu-latest`. npm provenance rejects self-hosted runners, including Blacksmith. Build jobs stay on Blacksmith. The publish job uses the `npm-release` GitHub Environment and its `NPM_TOKEN` secret. Environment protection gates access. A repository secret would also be available to other authorized workflows that reference it, so the event condition alone is not a secret access boundary.
+
+### Prepare the first release
+
+1. Confirm with npm that the operator's account can claim the unscoped `crucible` name. npm's security team held that name until 2025-11-20. The elapsed date does not prove claim rights. The account also needs publish access to the `@trioforge` organization and all four scoped packages.
+2. Make the source repository public before publishing. [npm provenance](https://docs.npmjs.com/generating-provenance-statements/) requires public source and a supported hosted runner. Keep the publish job on GitHub-hosted Ubuntu even if builds use Blacksmith.
+3. Create the `npm-release` GitHub Environment. Limit its deployment tags to `v*`, require reviewers, and restrict who can approve releases. Store `NPM_TOKEN` there, not as a repository secret. Use an expiring granular token with package read/write permission for unscoped `crucible` and the four `@trioforge` packages. For new names, include permission to create the packages in those scopes. Enable bypass 2FA for noninteractive publication where npm account policy permits it. An organization permission alone does not grant package publication.
+4. This workflow keeps token authentication for the first publication because the package names must exist before their [trusted publisher](https://docs.npmjs.com/trusted-publishers/) records can be configured. After claiming all five names, prefer OIDC. Configure each package's GitHub publisher for `Trio-Forge-Studio/crucible`, `release.yml`, and environment `npm-release`. Then remove the token requirement and `NODE_AUTH_TOKEN` from the workflow and revoke the token. Keep `id-token: write` and use npm 11.5.1 or newer. These setup actions belong to the operator.
+
+### Cut a release
+
+1. Bump `[workspace.package].version` in `cli/Cargo.toml` and `version` in `packages/crucible/package.json` together. Run Cargo to refresh `cli/Cargo.lock` and retain it. Generated npm packages inherit the Cargo version.
+2. Choose a version never used by any of the five packages. The registry preflight checks both `versions` and `time` keys before publication. Known burned versions of `crucible` are `0.0.0`, `0.0.1`, `0.3.0`, `0.3.1`, `0.3.2`, `0.3.3`, `0.3.4`, `0.3.5`, `0.4.0`, `0.4.1`, and `9.0.0`. Unpublishing does not make a version reusable. The local denylist also catches these versions if registry history disappears.
+3. Run the repository checks and review the five package dry runs in CI. Commit and land the version change before tagging.
+4. Create and push the exact version tag, replacing `X.Y.Z` below.
+
+```console
+git tag vX.Y.Z && git push origin refs/tags/vX.Y.Z
+```
+
+The tag must match the Cargo version. Approve the protected environment deployment after inspecting build, notices, preflight, and dry-run logs. Prerelease versions require `npm publish --tag next` or another non-`latest` dist-tag. This workflow selects `next` for versions containing a hyphen and `latest` for stable versions.
+
+### Recover and verify
+
+npm cannot publish five packages atomically. After a partial publication, rerun **failed jobs only** in the same Actions run. The successful packaging job's unused-version preflight and tarballs stay intact. The publish job reads each tarball's name and version, skips already-published tarballs only when registry integrity matches, and publishes missing platform packages and runtime before the shim. A full workflow rerun repeats preflight and rejects the partly used version. If tarballs differ or the artifacts have expired, investigate and release a fresh shared version. Never delete and recreate a tag or try to reuse an unpublished version.
+
+After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestations` for all five names. Check the provenance badge and linked source on each npm package page. On Windows x64, Linux x64, and macOS arm64, run `npx crucible@X.Y.Z --version` and confirm the shared version and embedded Rojo version.
+
 ## Create a game
+
 
 `npx crucible create my-game [path]` writes the embedded game template and installs dependencies. `--no-install` skips install. See `docs/cli.md` for arguments and exit codes.
 
 In the generated game, run `npx crucible dev` to compile on save and sync the game to Studio.
 
-`crates/crucible/template` holds the real template files. `src/create.rs` embeds an explicit file table. Tokens use `__NAME__`, `__VERSION__`, and uppercase dependency names with punctuation replaced by underscores. Versions come from the Cargo package and repository manifests. The runtime and CLI version equality is checked by a Rust test.
+`crates/crucible/template` holds the real template files. `src/create.rs` embeds an explicit file table. Tokens use `__NAME__`, `__VERSION__`, and uppercase dependency names with punctuation replaced by underscores. Versions come from the Cargo package and repository manifests. The runtime and CLI version equality is checked by a Rust test. Generated template files use MIT-0 and include their own `LICENSE`, independent of the MIT-licensed CLI.
 
 Run `pnpm build` from the repository root first. The npm package test packs the built runtime, creates a project through the packed CLI, replaces its dependency pins with local test tarballs, installs it, and runs its full `check` script. Shipped templates contain no tarball paths.
 
