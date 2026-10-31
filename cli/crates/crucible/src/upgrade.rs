@@ -323,7 +323,10 @@ fn owned_labels() -> String {
 }
 
 fn reported_version(stdout: &str) -> Option<&str> {
-    stdout.strip_prefix("crucible ")?.split_whitespace().next()
+    let line = stdout.lines().next()?.strip_prefix("crucible ")?;
+    let version = line.split_once(' ').map_or(line, |(version, _)| version);
+    Version::parse(version).ok()?;
+    Some(version)
 }
 
 fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<String, Error> {
@@ -991,6 +994,10 @@ mod tests {
     fn the_hand_off_reads_the_binary_version() {
         assert_eq!(reported_version("crucible 0.2.0 (rojo 7.7.1)\n"), Some("0.2.0"));
         assert_eq!(reported_version("something else"), None);
+        for invalid in ["crucible \n0.1.1", "crucible", "crucible 0.1", "\ncrucible 0.1.1"] {
+            assert_eq!(reported_version(invalid), None, "{invalid:?}");
+        }
+        assert_eq!(reported_version("crucible 0.1.0 (rojo 7.7.1)"), Some("0.1.0"));
         use clap::CommandFactory;
         let real = crate::cli::Cli::command().render_version();
         assert_eq!(reported_version(&real), Some(env!("CARGO_PKG_VERSION")), "{real:?} keeps the hand-off format");
