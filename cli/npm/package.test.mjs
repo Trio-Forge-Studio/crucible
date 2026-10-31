@@ -154,10 +154,10 @@ test(
 		const manifestPath = join(game, "package.json");
 		const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 		assert.equal(manifest.dependencies["@trioforge/crucible"], cliVersion());
-		assert.equal(manifest.devDependencies.crucible, cliVersion());
+		assert.equal(manifest.devDependencies["@trioforge/crucible-cli"], cliVersion());
 		assert.equal(manifest.scripts.check, "vp check && crucible build");
 		manifest.dependencies["@trioforge/crucible"] = runtime;
-		manifest.devDependencies.crucible = shim;
+		manifest.devDependencies["@trioforge/crucible-cli"] = shim;
 		manifest.devDependencies[platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host))] =
 			platform;
 		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
@@ -243,7 +243,7 @@ function launchUpgradeRegistry() {
 	const platformName = platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host));
 	const runtimeDir = join(cli, "..", "packages", "crucible");
 	const sources = {
-		crucible: join(root, "staged", "crucible"),
+		"@trioforge/crucible-cli": join(root, "staged", "crucible"),
 		"@trioforge/crucible": join(root, "upgrade-runtime"),
 		[platformName]: join(root, "staged", `crucible-cli-${host}`),
 	};
@@ -263,7 +263,7 @@ function launchUpgradeRegistry() {
 			cpSync(source, directory, { recursive: true });
 			const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
 			manifest.version = version;
-			if (name === "crucible") {
+			if (name === "@trioforge/crucible-cli") {
 				manifest.optionalDependencies = { [platformName]: version };
 				if (version === next) {
 					renameSync(join(directory, "bin", "crucible.cjs"), join(directory, "bin", "real.cjs"));
@@ -294,9 +294,9 @@ function installedVersion(game, name) {
 
 function assertPinned(game, version) {
 	const manifest = JSON.parse(readFileSync(join(game, "package.json"), "utf8"));
-	assert.equal(manifest.devDependencies.crucible, version);
+	assert.equal(manifest.devDependencies["@trioforge/crucible-cli"], version);
 	assert.equal(manifest.dependencies["@trioforge/crucible"], version);
-	assert.equal(installedVersion(game, "crucible"), version);
+	assert.equal(installedVersion(game, "@trioforge/crucible-cli"), version);
 	assert.equal(installedVersion(game, "@trioforge/crucible"), version);
 }
 
@@ -373,11 +373,15 @@ test(
 			assert.match(
 				failed.stderr,
 				new RegExp(
-					`package\\.json is restored to crucible ${next} and @trioforge/crucible ${next}\\. Run \`npm install\``,
+					`package\\.json is restored to @trioforge/crucible-cli ${next} and @trioforge/crucible ${next}\\. Run \`npm install\``,
 				),
 			);
 			assert.equal(readFileSync(manifestFile, "utf8"), failing, `${attempt} restores package.json byte for byte`);
-			assert.equal(installedVersion(game, "crucible"), cliVersion(), "npm runs preinstall after it reifies");
+			assert.equal(
+				installedVersion(game, "@trioforge/crucible-cli"),
+				cliVersion(),
+				"npm runs preinstall after it reifies",
+			);
 		}
 		delete manifest.scripts.preinstall;
 		writeFileSync(manifestFile, `${JSON.stringify(manifest, null, "\t")}\n`);
@@ -417,7 +421,7 @@ test(
 		assertPinned(game, setup.next);
 		assert.match(
 			readFileSync(join(game, "pnpm-lock.yaml"), "utf8"),
-			new RegExp(`crucible@${setup.next.replaceAll(".", "\\.")}`),
+			new RegExp(`crucible-cli@${setup.next.replaceAll(".", "\\.")}`),
 		);
 	},
 );

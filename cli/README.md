@@ -18,7 +18,7 @@ cargo build --release --locked --package crucible
 
 ## npm packages
 
-The CLI ships on npm the way oxlint does. The `crucible` package holds a Node shim and the `crucible` bin. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64`, `@trioforge/crucible-cli-linux-x64`, and `@trioforge/crucible-cli-darwin-arm64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
+The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package holds a Node shim and the `crucible` bin. npm reserves the unscoped `crucible` name, so the CLI ships in the `@trioforge` scope. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64`, `@trioforge/crucible-cli-linux-x64`, and `@trioforge/crucible-cli-darwin-arm64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
 
 `npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
 
@@ -50,7 +50,7 @@ Trusted publishing needs packages that already exist, and staging creates a miss
 ### Cut a release
 
 1. Bump `[workspace.package].version` in `cli/Cargo.toml` and `version` in `packages/crucible/package.json` together. Run Cargo to refresh `cli/Cargo.lock` and retain it. Generated npm packages inherit the Cargo version.
-2. Choose a version never used by any of the five packages. The registry preflight checks both `versions` and `time` keys before publication. Known burned versions of `crucible` are `0.0.0`, `0.0.1`, `0.3.0`, `0.3.1`, `0.3.2`, `0.3.3`, `0.3.4`, `0.3.5`, `0.4.0`, `0.4.1`, and `9.0.0`. Unpublishing does not make a version reusable. The local denylist also catches these versions if registry history disappears.
+2. Choose a version never used by any of the five packages. The registry preflight checks both `versions` and `time` keys before staging. Unpublishing does not make a version reusable.
 3. Run the repository checks and review the five package dry runs in CI. Commit and land the version change before tagging.
 4. Create and push the exact version tag, replacing `X.Y.Z` below.
 
@@ -58,7 +58,7 @@ Trusted publishing needs packages that already exist, and staging creates a miss
 git tag vX.Y.Z && git push origin refs/tags/vX.Y.Z
 ```
 
-The tag must match the Cargo version. The workflow stages all five packages. Inspect build, notices, preflight, and dry-run logs, then approve the staged packages on npmjs.com > Staged Packages or with `npm stage approve <stage-id>`. Approve the three platform packages and `@trioforge/crucible` before `crucible`, because the shim's optional dependencies must resolve when it goes live. Prerelease versions require `npm publish --tag next` or another non-`latest` dist-tag. This workflow selects `next` for versions containing a hyphen and `latest` for stable versions.
+The tag must match the Cargo version. The workflow stages all five packages. Inspect build, notices, preflight, and dry-run logs, then approve the staged packages on npmjs.com > Staged Packages or with `npm stage approve <stage-id>`. Approve the three platform packages and `@trioforge/crucible` before `@trioforge/crucible-cli`, because the shim's optional dependencies must resolve when it goes live. Prerelease versions require `npm publish --tag next` or another non-`latest` dist-tag. This workflow selects `next` for versions containing a hyphen and `latest` for stable versions.
 
 ### Recover and verify
 
@@ -69,7 +69,7 @@ After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestatio
 ## Create a game
 
 
-`npx crucible create my-game [path]` writes the embedded game template and installs dependencies. `--no-install` skips install. See `docs/cli.md` for arguments and exit codes.
+`npx @trioforge/crucible-cli create my-game [path]` writes the embedded game template and installs dependencies. `--no-install` skips install. See `docs/cli.md` for arguments and exit codes.
 
 In the generated game, run `npx crucible dev` to compile on save and sync the game to Studio.
 
@@ -79,7 +79,7 @@ Run `pnpm build` from the repository root first. The npm package test packs the 
 
 ## Upgrade a game
 
-`npx crucible upgrade [version]` moves a game's `crucible` and `@trioforge/crucible` to one version, reinstalls, and refreshes the template files the game has not edited. See `docs/cli.md` for the rules and exit codes.
+`npx crucible upgrade [version]` moves a game's `@trioforge/crucible-cli` and `@trioforge/crucible` to one version, reinstalls, and refreshes the template files the game has not edited. See `docs/cli.md` for the rules and exit codes.
 
 `npx crucible upgrade` runs the game's installed, older binary. It resolves the version, bumps `package.json`, and installs. Then it hands off to the newly installed binary, which compares the old template with its own, writes the files, and prints the report. The reconcile rules live in the newer binary, so a fix to them reaches games still on an older version. The install step stays in the old binary, so a fix to how a released version installs reaches only later upgrades.
 
@@ -89,8 +89,8 @@ The npm package test stages the current binary at the CLI version and again at t
 
 Every released binary keeps this contract with every other, because an old binary hands off to whatever version a game installs, newer or older. `src/upgrade.rs` implements it.
 
-1. The old binary runs `node <bin> --version` in the game's root, where `<bin>` is the `crucible` bin of the installed `crucible` package. The first line of stdout must start with `crucible <semver>`, followed by a space or the end of the line. That output is frozen. The old binary stops if the version is not the target.
-2. The old binary runs `node <bin> __upgrade-apply <old version> <old crucible spec> <old runtime spec>` in the game's root. `<old version>` is the `crucible` package version installed before the upgrade. The two specs are the `crucible` and `@trioforge/crucible` strings from `package.json` before the bump.
+1. The old binary runs `node <bin> --version` in the game's root, where `<bin>` is the `crucible` bin of the installed `@trioforge/crucible-cli` package. The first line of stdout must start with `crucible <semver>`, followed by a space or the end of the line. That output is frozen. The old binary stops if the version is not the target.
+2. The old binary runs `node <bin> __upgrade-apply <old version> <old crucible spec> <old runtime spec>` in the game's root. `<old version>` is the `@trioforge/crucible-cli` package version installed before the upgrade. The two specs are the `crucible` and `@trioforge/crucible` strings from `package.json` before the bump.
 3. Stdin is one JSON snapshot of the old binary's template, then EOF.
 
    ```json

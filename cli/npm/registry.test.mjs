@@ -5,13 +5,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { burned, main, unused } from "./registry.mjs";
+import { SHIM, main, unused } from "./registry.mjs";
 
-test("preflight rejects live, unpublished, and known burned versions", () => {
-	unused({}, "crucible", "1.2.3");
+test("preflight rejects live and unpublished versions", () => {
+	unused({}, SHIM, "1.2.3");
 	assert.throws(() => unused({ versions: { "1.2.3": {} } }, "@trioforge/crucible", "1.2.3"), /already used/);
-	assert.throws(() => unused({ time: { "1.2.3": "past" } }, "crucible", "1.2.3"), /already used/);
-	for (const version of burned) assert.throws(() => unused({}, "crucible", version), /burned/);
+	assert.throws(() => unused({ time: { "1.2.3": "past" } }, SHIM, "1.2.3"), /already used/);
 });
 
 test("partial staging skips identical published tarballs, stages the shim last, and reports stage failures", async () => {
@@ -19,7 +18,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 	try {
 		mkdirSync(join(directory, "package"));
 		const names = [
-			"crucible",
+			SHIM,
 			"@trioforge/crucible",
 			...["linux-x64", "win32-x64", "darwin-arm64"].map((platform) => `@trioforge/crucible-cli-${platform}`),
 		];
@@ -55,7 +54,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		assert.deepEqual(published, []);
 		await main("stage", directory, async (name) => documents[name] ?? {}, publish);
 		assert.equal(published.length, 4);
-		assert.equal(published.at(-1), "crucible");
+		assert.equal(published.at(-1), SHIM);
 		assert.ok(!published.includes(names[2]));
 		published.length = 0;
 		await assert.rejects(
@@ -71,7 +70,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 			/Not staged by this run: @trioforge\/crucible@1\.2\.3-beta\.1\. If npmjs\.com > Staged Packages/,
 		);
 		assert.equal(published.length, 3);
-		assert.equal(published.at(-1), "crucible");
+		assert.equal(published.at(-1), SHIM);
 		documents[names[2]].versions["1.2.3-beta.1"].dist.integrity = "different";
 		await assert.rejects(
 			main("stage", directory, async (name) => documents[name] ?? {}, publish),

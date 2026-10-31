@@ -18,7 +18,7 @@ fn creates_default_and_explicit_targets_without_installing() {
             serde_json::from_str(&fs::read_to_string(root.join("package.json")).unwrap()).unwrap();
         assert_eq!(package["name"], args[0]);
         assert_eq!(package["dependencies"]["@trioforge/crucible"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(package["devDependencies"]["crucible"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(package["devDependencies"]["@trioforge/crucible-cli"], env!("CARGO_PKG_VERSION"));
         for file in [
             "tsconfig.json",
             "default.project.json",

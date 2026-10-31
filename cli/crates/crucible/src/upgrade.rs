@@ -26,6 +26,7 @@ pub const APPLY: &str = "__upgrade-apply";
 // The hand-off contract in cli/README.md says when to raise this.
 const FORMAT: u32 = 1;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
+const CLI: &str = "@trioforge/crucible-cli";
 const RUNTIME: &str = "@trioforge/crucible";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -184,7 +185,7 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     let manager = detect_manager(root, &std::env::var("npm_config_user_agent").unwrap_or_default());
     let install = manager.install_line();
     let installed = Installed {
-        crucible: installed_version(root, "crucible")?.ok_or_else(|| {
+        crucible: installed_version(root, CLI)?.ok_or_else(|| {
             Error::Failed(format!("crucible is not installed in {}. Run `{install}` first", root.display()))
         })?,
         runtime: installed_version(root, RUNTIME)?,
@@ -214,7 +215,7 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
         "crucible upgrade: running `{install}` for crucible {target}. If it is interrupted, restore package.json and run `{install}`"
     );
     if let Err(error) = run_install(root, manager) {
-        let pinned = format!("crucible {} and {RUNTIME} {}", pins.crucible, pins.runtime);
+        let pinned = format!("{CLI} {} and {RUNTIME} {}", pins.crucible, pins.runtime);
         return Err(Error::Failed(match restore(&manifest_path, &manifest_text) {
             Ok(()) => format!(
                 "{error}. package.json is restored to {pinned}. Run `{install}` to return node_modules to those versions"
@@ -268,7 +269,7 @@ fn refresh(
 ) -> Result<(), Error> {
     hand_off(root, target, from, pins, old, install).map_err(|error| {
         Error::Failed(format!(
-            "{error}. package.json and node_modules are at {target}, but the template was not refreshed, and running crucible upgrade again reports crucible as already at {target}. To compare by hand, run `npx crucible create {name} <empty-dir> --no-install` and diff {} with this game's",
+            "{error}. package.json and node_modules are at {target}, but the template was not refreshed, and running crucible upgrade again reports {CLI} as already at {target}. To compare by hand, run `npx crucible create {name} <empty-dir> --no-install` and diff {} with this game's",
             owned_labels()
         ))
     })
@@ -283,11 +284,11 @@ fn hand_off(
     old: String,
     install: &str,
 ) -> Result<(), Error> {
-    let now = [installed_version(root, "crucible")?, installed_version(root, RUNTIME)?];
+    let now = [installed_version(root, CLI)?, installed_version(root, RUNTIME)?];
     if now.iter().any(|version| version.as_ref() != Some(target)) {
         let [crucible, runtime] = now.map(|version| version.map_or("nothing".into(), |version| version.to_string()));
         return Err(Error::Failed(format!(
-            "after `{install}`, crucible is at {crucible} and {RUNTIME} at {runtime}, not {target}. Delete node_modules and run `{install}`"
+            "after `{install}`, {CLI} is at {crucible} and {RUNTIME} at {runtime}, not {target}. Delete node_modules and run `{install}`"
         )));
     }
     let shim = shim(root).ok_or_else(|| Error::Failed("the installed crucible package has no crucible bin".into()))?;
@@ -336,7 +337,7 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<String
         .inspect_err(|reason| eprintln!("crucible upgrade: {reason}, so the old template is unknown"))
         .ok();
     let new = snapshot(&name);
-    let to = installed_version(root, "crucible")?
+    let to = installed_version(root, CLI)?
         .ok_or_else(|| Error::Failed(format!("crucible is not installed in {}", root.display())))?;
     let mut written = Vec::new();
     let mut edited = Vec::new();
@@ -543,7 +544,7 @@ fn package_name(manifest: &serde_json::Value) -> Result<String, Error> {
 fn read_pins(manifest: &serde_json::Value) -> Result<Pins, Error> {
     let mut found = [None, None];
     for group in ["dependencies", "devDependencies"] {
-        for (slot, package) in found.iter_mut().zip(["crucible", RUNTIME]) {
+        for (slot, package) in found.iter_mut().zip([CLI, RUNTIME]) {
             let Some(spec) = manifest[group].get(package) else { continue };
             let spec = spec.as_str().filter(|spec| registry_spec(spec)).ok_or_else(|| {
                 Error::Usage(format!(
@@ -557,10 +558,7 @@ fn read_pins(manifest: &serde_json::Value) -> Result<Pins, Error> {
     let missing = |package: &str| {
         Error::Failed(format!("package.json does not list {package} in dependencies or devDependencies"))
     };
-    Ok(Pins {
-        crucible: crucible.ok_or_else(|| missing("crucible"))?,
-        runtime: runtime.ok_or_else(|| missing(RUNTIME))?,
-    })
+    Ok(Pins { crucible: crucible.ok_or_else(|| missing(CLI))?, runtime: runtime.ok_or_else(|| missing(RUNTIME))? })
 }
 
 // npm reads a spec as a version range unless a protocol, URL, path, Git shorthand, or tag name says otherwise.
@@ -593,7 +591,7 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
     let mut expected: serde_json::Value = serde_json::from_str(text).expect("package.json was parsed before");
     let mut result = text.to_owned();
     for group in ["dependencies", "devDependencies"] {
-        for package in ["crucible", RUNTIME] {
+        for package in [CLI, RUNTIME] {
             let Some(spec) = expected[group].get_mut(package) else { continue };
             let Some(old) = spec.as_str() else { continue };
             let key = serde_json::to_string(package).expect("strings serialize");
@@ -716,16 +714,16 @@ fn installed_version(root: &Path, package: &str) -> Result<Option<Version>, Erro
 }
 
 fn shim(root: &Path) -> Option<PathBuf> {
-    let package = node_package(root, "crucible")?;
+    let package = node_package(root, CLI)?;
     let manifest: serde_json::Value = serde_json::from_slice(&fs::read(package.join("package.json")).ok()?).ok()?;
     let bin = manifest["bin"]["crucible"].as_str().or(manifest["bin"].as_str())?;
     Some(package.join(bin))
 }
 
 fn latest(root: &Path) -> Result<Version, Error> {
-    eprintln!("crucible upgrade: finding the latest crucible with npm view");
+    eprintln!("crucible upgrade: finding the latest {CLI} with npm view");
     let output = package_manager_command("npm")
-        .args(["view", "crucible", "version"])
+        .args(["view", CLI, "version"])
         .current_dir(root)
         .stdin(Stdio::null())
         .stderr(Stdio::inherit())
@@ -871,10 +869,10 @@ mod tests {
 
     #[test]
     fn bump_edits_only_the_two_versions() {
-        let text = "{\n\t\"name\": \"crucible-game\",\n\t\"scripts\": { \"crucible\": \"^0.1.0\" },\n\t\"dependencies\": {\n\t\t\"@trioforge/crucible\": \"0.1.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"crucible\" :  \"^0.1.0\"\n\t}\n}\n";
+        let text = "{\n\t\"name\": \"crucible-game\",\n\t\"scripts\": { \"@trioforge/crucible-cli\": \"^0.1.0\" },\n\t\"dependencies\": {\n\t\t\"@trioforge/crucible\": \"0.1.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"@trioforge/crucible-cli\" :  \"^0.1.0\"\n\t}\n}\n";
         let bumped = bump(text, "0.2.0");
         assert!(bumped.is_err(), "an ambiguous script entry is not rewritten silently");
-        let text = text.replace("{ \"crucible\": \"^0.1.0\" }", "{}");
+        let text = text.replace("{ \"@trioforge/crucible-cli\": \"^0.1.0\" }", "{}");
         let bumped = bump(&text, "0.2.0").unwrap();
         assert_eq!(bumped, text.replace("\"0.1.0\"", "\"0.2.0\"").replace("\"^0.1.0\"", "\"0.2.0\""));
         let crlf = text.replace('\n', "\r\n");
@@ -897,18 +895,18 @@ mod tests {
             "next",
         ] {
             let manifest =
-                serde_json::json!({ "dependencies": { RUNTIME: "0.1.0" }, "devDependencies": { "crucible": spec } });
+                serde_json::json!({ "dependencies": { RUNTIME: "0.1.0" }, "devDependencies": { CLI: spec } });
             assert!(
                 matches!(read_pins(&manifest), Err(Error::Usage(message)) if message.contains(spec)),
                 "{spec} is refused with a usage error naming it"
             );
         }
         let manifest =
-            serde_json::json!({ "dependencies": { RUNTIME: "~0.1.0" }, "devDependencies": { "crucible": "^0.1.0" } });
+            serde_json::json!({ "dependencies": { RUNTIME: "~0.1.0" }, "devDependencies": { CLI: "^0.1.0" } });
         let pins = read_pins(&manifest).unwrap();
         assert_eq!((pins.crucible.as_str(), pins.runtime.as_str()), ("^0.1.0", "~0.1.0"));
         assert!(matches!(
-            read_pins(&serde_json::json!({ "devDependencies": { "crucible": "0.1.0" } })),
+            read_pins(&serde_json::json!({ "devDependencies": { CLI: "0.1.0" } })),
             Err(Error::Failed(_))
         ));
     }
@@ -1022,8 +1020,8 @@ mod tests {
         old.owned.iter_mut().find(|part| part.path == "LICENSE").unwrap().content = "old license".into();
         old.owned.push(PartV1 { path: "old.json".into(), section: None, content: "{}".into() });
         fs::write(root.join("package.json"), "{\"name\":\"game\"}").unwrap();
-        fs::create_dir_all(root.join("node_modules/crucible")).unwrap();
-        fs::write(root.join("node_modules/crucible/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
+        fs::create_dir_all(root.join("node_modules/@trioforge/crucible-cli")).unwrap();
+        fs::write(root.join("node_modules/@trioforge/crucible-cli/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
         fs::write(
             root.join("AGENTS.md"),
             format!("# Game\r\n\r\n{}\r\n\r\n## Mine\r\n", old_section.replace('\n', "\r\n")),
@@ -1098,8 +1096,7 @@ mod tests {
     #[test]
     fn npm_ranges_are_registry_specs() {
         for spec in ["^0.1.0 || ^0.2.0", ">=0.1.0 <0.2.0", "0.1.0 - 0.2.0", "1.2", "*", "", "x", "v0.1.0"] {
-            let manifest =
-                serde_json::json!({ "dependencies": { RUNTIME: spec }, "devDependencies": { "crucible": spec } });
+            let manifest = serde_json::json!({ "dependencies": { RUNTIME: spec }, "devDependencies": { CLI: spec } });
             assert!(read_pins(&manifest).is_ok(), "{spec:?} is a registry range");
         }
         assert_ne!(satisfies("1.2", &version("1.3.0")), Some(true), "npm reads 1.2 as 1.2.x");
@@ -1136,8 +1133,8 @@ mod tests {
             }
         }
         fs::write(root.join("package.json"), "{\"name\":\"game\"}").unwrap();
-        fs::create_dir_all(root.join("node_modules/crucible")).unwrap();
-        fs::write(root.join("node_modules/crucible/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
+        fs::create_dir_all(root.join("node_modules/@trioforge/crucible-cli")).unwrap();
+        fs::write(root.join("node_modules/@trioforge/crucible-cli/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
         fs::write(root.join("AGENTS.md"), &old_agents).unwrap();
         fs::write(root.join("LICENSE"), &old_license).unwrap();
         let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
@@ -1207,11 +1204,11 @@ mod tests {
     }
 
     fn installed(root: &Path, crucible: &str, runtime: &str, bin: &str) {
-        fs::create_dir_all(root.join("node_modules/crucible")).unwrap();
+        fs::create_dir_all(root.join("node_modules/@trioforge/crucible-cli")).unwrap();
         fs::create_dir_all(root.join("node_modules/@trioforge/crucible")).unwrap();
         let manifest = serde_json::json!({ "version": crucible, "bin": { "crucible": "bin.js" } });
-        fs::write(root.join("node_modules/crucible/package.json"), manifest.to_string()).unwrap();
-        fs::write(root.join("node_modules/crucible/bin.js"), bin).unwrap();
+        fs::write(root.join("node_modules/@trioforge/crucible-cli/package.json"), manifest.to_string()).unwrap();
+        fs::write(root.join("node_modules/@trioforge/crucible-cli/bin.js"), bin).unwrap();
         let runtime = serde_json::json!({ "version": runtime });
         fs::write(root.join("node_modules/@trioforge/crucible/package.json"), runtime.to_string()).unwrap();
     }
