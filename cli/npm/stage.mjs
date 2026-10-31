@@ -7,7 +7,6 @@ const cli = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const PLATFORMS = [
 	{ os: "win32", cpu: "x64" },
 	{ os: "linux", cpu: "x64" },
-	{ os: "darwin", cpu: "arm64" },
 ];
 
 const repository = { type: "git", url: "git+https://github.com/Trio-Forge-Studio/crucible.git", directory: "cli" };

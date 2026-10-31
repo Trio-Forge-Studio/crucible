@@ -18,7 +18,7 @@ cargo build --release --locked --package crucible
 
 ## npm packages
 
-The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package holds a Node shim and the `crucible` bin. npm reserves the unscoped `crucible` name, so the CLI ships in the `@trioforge` scope. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64`, `@trioforge/crucible-cli-linux-x64`, and `@trioforge/crucible-cli-darwin-arm64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
+The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package holds a Node shim and the `crucible` bin. npm reserves the unscoped `crucible` name, so the CLI ships in the `@trioforge` scope. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-win32-x64` and `@trioforge/crucible-cli-linux-x64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
 
 `npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
 
@@ -30,41 +30,41 @@ node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 
 ## Release packages
 
-`.github/workflows/release.yml` runs on pull requests and `v*` tag pushes. It builds MSVC Windows x64, static musl Linux x64, and native Apple Silicon macOS binaries on Blacksmith. The Mac job uses `blacksmith-6vcpu-macos-15`, documented in [Blacksmith runner types](https://docs.blacksmith.sh/blacksmith-runners/overview). It ad-hoc signs the Mach-O binary, verifies its signature and architecture, and executes it through the npm shim on a real Mac. Ad-hoc signing does not provide Apple notarization or a Developer ID identity. Linux checks `file` and `ldd` and executes the static binary.
+`.github/workflows/release.yml` runs on pull requests and `v*` tag pushes. It builds MSVC Windows x64 and static musl Linux x64 binaries on Blacksmith. There is no macOS package: the team develops on Windows and CI runs on Linux. Windows checks the static CRT. Linux checks `file` and `ldd`. Both execute the binary.
 
-The packaging job builds the runtime and transformer, generates `THIRD_PARTY_NOTICES` with cargo-about from the locked dependency graph, and stages all five packages at the version in `cli/Cargo.toml`. The platform packages include the notices and MIT license. Notices include dependency license texts and the Rojo source location for its MPL-2.0 license when Rojo is bundled. New dependency licenses outside `cli/about.toml` fail the job for review.
+The packaging job builds the runtime and transformer, generates `THIRD_PARTY_NOTICES` with cargo-about from the locked dependency graph, and stages all four packages at the version in `cli/Cargo.toml`. The platform packages include the notices and MIT license. Notices include dependency license texts and the Rojo source location for its MPL-2.0 license when Rojo is bundled. New dependency licenses outside `cli/about.toml` fail the job for review.
 
-`node cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64`, `win32-x64`, and `darwin-arm64`. It checks `npm pack --dry-run` for runtime output, transformer, and side entries, then packs five tarballs. CI runs `npm stage publish --dry-run` on each tarball without credentials. Tags must match `v` plus the Cargo version.
+`node cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64` and `win32-x64`. It checks `npm pack --dry-run` for runtime output, transformer, and side entries, then packs four tarballs. CI runs `npm stage publish --dry-run` on each tarball without credentials. Tags must match `v` plus the Cargo version.
 
 The publish job runs on GitHub-hosted `ubuntu-latest`. npm provenance rejects self-hosted runners, including Blacksmith. Build jobs stay on Blacksmith. The publish job holds no npm token. It authenticates through [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) from the `npm-release` GitHub Environment, and it can only [stage](https://docs.npmjs.com/cli/v11/commands/npm-stage) versions. A staged version stays private until a maintainer approves it with 2FA, so a compromised workflow cannot release on its own.
 
 ### Prepare the first release
 
-Trusted publishing needs packages that already exist, and staging creates a missing package with a public `0.0.0-stage` placeholder version. The operator does this once, with npm 11.15.0 or newer (12.x needs Node 24.15 or newer):
+Trusted publishing needs packages that already exist, so the operator publishes the first version by hand:
 
 1. Make the source repository public. [npm provenance](https://docs.npmjs.com/generating-provenance-statements/) requires public source and a supported hosted runner.
 2. Create the `npm-release` GitHub Environment and limit its deployment tags to `v*`. It holds no secrets.
-3. Log in to npm as a member of the `@trioforge` organization. For each of the five names, stage a throwaway version (for example `0.0.1-bootstrap.0` with `--tag bootstrap`) from a directory that holds only a `package.json`, then reject it in npmjs.com > Staged Packages.
-4. For each name, run `npm trust github <name> --file release.yml --repo Trio-Forge-Studio/crucible --env npm-release --allow-stage-publish --yes`. Leave out `--allow-publish`, so CI can only stage.
+3. Download the `npm-release` artifact from a green Release run on the commit to publish. As a member of the `@trioforge` npm organization, run `npm publish <tarball> --access public` for the two platform packages, then `@trioforge/crucible`, then `@trioforge/crucible-cli`. The first version has no provenance.
+4. For each of the four names, run `npm trust github <name> --file release.yml --repo Trio-Forge-Studio/crucible --env npm-release --allow-stage-publish --yes` with npm 11.15.0 or newer. Leave out `--allow-publish`, so CI can only stage.
 
 ### Cut a release
 
 1. Bump `[workspace.package].version` in `cli/Cargo.toml` and `version` in `packages/crucible/package.json` together. Run Cargo to refresh `cli/Cargo.lock` and retain it. Generated npm packages inherit the Cargo version.
-2. Choose a version never used by any of the five packages. The registry preflight checks both `versions` and `time` keys before staging. Unpublishing does not make a version reusable.
-3. Run the repository checks and review the five package dry runs in CI. Commit and land the version change before tagging.
+2. Choose a version never used by any of the four packages. The registry preflight checks both `versions` and `time` keys before staging. Unpublishing does not make a version reusable.
+3. Run the repository checks and review the four package dry runs in CI. Commit and land the version change before tagging.
 4. Create and push the exact version tag, replacing `X.Y.Z` below.
 
 ```console
 git tag vX.Y.Z && git push origin refs/tags/vX.Y.Z
 ```
 
-The tag must match the Cargo version. The workflow stages all five packages. Inspect build, notices, preflight, and dry-run logs, then approve the staged packages on npmjs.com > Staged Packages or with `npm stage approve <stage-id>`. Approve the three platform packages and `@trioforge/crucible` before `@trioforge/crucible-cli`, because the shim's optional dependencies must resolve when it goes live. Prerelease versions require `npm publish --tag next` or another non-`latest` dist-tag. This workflow selects `next` for versions containing a hyphen and `latest` for stable versions.
+The tag must match the Cargo version. The workflow stages all four packages. Inspect build, notices, preflight, and dry-run logs, then approve the staged packages on npmjs.com > Staged Packages or with `npm stage approve <stage-id>`. Approve the two platform packages and `@trioforge/crucible` before `@trioforge/crucible-cli`, because the shim's optional dependencies must resolve when it goes live. Prerelease versions require `npm publish --tag next` or another non-`latest` dist-tag. This workflow selects `next` for versions containing a hyphen and `latest` for stable versions.
 
 ### Recover and verify
 
-npm cannot stage or approve five packages atomically. After a partial staging failure, rerun **failed jobs only** in the same Actions run. The successful packaging job's unused-version preflight and tarballs stay intact. The stage job reads each tarball's name and version, skips tarballs already published with matching registry integrity, and stages the rest. Staged versions are invisible to the public registry, so a rerun reports packages already staged by an earlier attempt as not staged. Confirm in Staged Packages that each one is there at the right version, then approve them. A full workflow rerun repeats preflight and rejects a partly published version. If tarballs differ or the artifacts have expired, reject the stages and release a fresh shared version. Never delete and recreate a tag or try to reuse an unpublished version.
+npm cannot stage or approve four packages atomically. After a partial staging failure, rerun **failed jobs only** in the same Actions run. The successful packaging job's unused-version preflight and tarballs stay intact. The stage job reads each tarball's name and version, skips tarballs already published with matching registry integrity, and stages the rest. Staged versions are invisible to the public registry, so a rerun reports packages already staged by an earlier attempt as not staged. Confirm in Staged Packages that each one is there at the right version, then approve them. A full workflow rerun repeats preflight and rejects a partly published version. If tarballs differ or the artifacts have expired, reject the stages and release a fresh shared version. Never delete and recreate a tag or try to reuse an unpublished version.
 
-After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestations` for all five names. Check the provenance badge and linked source on each npm package page. On Windows x64, Linux x64, and macOS arm64, run `npx crucible@X.Y.Z --version` and confirm the shared version and embedded Rojo version.
+After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestations` for all four names. Check the provenance badge and linked source on each npm package page. On Windows x64 and Linux x64, run `npx @trioforge/crucible-cli@X.Y.Z --version` and confirm the shared version and embedded Rojo version.
 
 ## Create a game
 

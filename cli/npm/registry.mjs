@@ -42,7 +42,7 @@ export async function main(
 			return { path, name, version };
 		})
 		.sort((a, b) => Number(a.name === SHIM) - Number(b.name === SHIM) || a.name.localeCompare(b.name));
-	assert.equal(packages.length, 5);
+	assert.equal(packages.length, 4);
 	assert.equal(new Set(packages.map(({ version }) => version)).size, 1);
 	assert.deepEqual(
 		new Set(packages.map(({ name }) => name)),
@@ -51,7 +51,6 @@ export async function main(
 			"@trioforge/crucible",
 			"@trioforge/crucible-cli-linux-x64",
 			"@trioforge/crucible-cli-win32-x64",
-			"@trioforge/crucible-cli-darwin-arm64",
 		]),
 	);
 	const documents = await Promise.all(packages.map(({ name }) => lookup(name)));

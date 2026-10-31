@@ -15,4 +15,4 @@ accepted = [
 
 
 ignore-dev-dependencies = true
-targets = ["x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
+targets = ["x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]

@@ -20,7 +20,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		const names = [
 			SHIM,
 			"@trioforge/crucible",
-			...["linux-x64", "win32-x64", "darwin-arm64"].map((platform) => `@trioforge/crucible-cli-${platform}`),
+			...["linux-x64", "win32-x64"].map((platform) => `@trioforge/crucible-cli-${platform}`),
 		];
 		const documents = {};
 		const manifests = new Map();
@@ -53,7 +53,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		);
 		assert.deepEqual(published, []);
 		await main("stage", directory, async (name) => documents[name] ?? {}, publish);
-		assert.equal(published.length, 4);
+		assert.equal(published.length, 3);
 		assert.equal(published.at(-1), SHIM);
 		assert.ok(!published.includes(names[2]));
 		published.length = 0;
@@ -69,7 +69,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 			),
 			/Not staged by this run: @trioforge\/crucible@1\.2\.3-beta\.1\. If npmjs\.com > Staged Packages/,
 		);
-		assert.equal(published.length, 3);
+		assert.equal(published.length, 2);
 		assert.equal(published.at(-1), SHIM);
 		documents[names[2]].versions["1.2.3-beta.1"].dist.integrity = "different";
 		await assert.rejects(

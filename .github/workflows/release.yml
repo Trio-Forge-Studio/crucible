@@ -34,10 +34,6 @@ jobs:
             runner: blacksmith-4vcpu-windows-2025
             target: x86_64-pc-windows-msvc
             binary: crucible.exe
-          - platform: darwin-arm64
-            runner: blacksmith-6vcpu-macos-15
-            target: aarch64-apple-darwin
-            binary: crucible
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
@@ -65,35 +61,17 @@ jobs:
           ldd "$binary" > binary-ldd.txt 2>&1 || true
           cat binary-ldd.txt
           grep -E 'not a dynamic executable|statically linked' binary-ldd.txt
-      - name: Sign and verify native arm64 binary
-        if: matrix.platform == 'darwin-arm64'
-        run: |
-          test "$(uname -m)" = arm64
-          binary=target/${{ matrix.target }}/release/crucible
-          codesign --force --sign - "$binary"
-          codesign --verify --strict --verbose=2 "$binary"
-          file "$binary" | tee binary-file.txt
-          grep 'Mach-O 64-bit executable arm64' binary-file.txt
-      - if: matrix.platform == 'darwin-arm64'
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
       - name: Verify Windows static CRT
         if: matrix.platform == 'win32-x64'
         run: node npm/check-pe.mjs target/${{ matrix.target }}/release/crucible.exe
-      - name: Build runtime for installed package tests
-        if: matrix.platform == 'darwin-arm64'
-        working-directory: .
-        run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build
       - name: Exercise release binary through npm
         run: |
           export CRUCIBLE_BINARY="$PWD/target/${{ matrix.target }}/release/${{ matrix.binary }}"
           "$CRUCIBLE_BINARY" --version
           "$CRUCIBLE_BINARY" oc find asset
-      - name: Test installed packages on Mac
-        if: matrix.platform == 'darwin-arm64'
-        run: CRUCIBLE_BINARY="$PWD/target/${{ matrix.target }}/release/${{ matrix.binary }}" node --test npm/package.test.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: binary-${{ matrix.platform }}
@@ -123,9 +101,9 @@ jobs:
         run: |
           cargo install cargo-about --version 0.8.4 --locked
           node npm/notices.mjs ../build/THIRD_PARTY_NOTICES
-      - name: Stage five packages at the Cargo version
+      - name: Stage four packages at the Cargo version
         run: |
-          for platform in linux-x64 win32-x64 darwin-arm64; do
+          for platform in linux-x64 win32-x64; do
             mv "build/binaries/binary-$platform" "build/binaries/$platform"
           done
           node cli/npm/release.mjs build/binaries build/release build/THIRD_PARTY_NOTICES
@@ -168,7 +146,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11.21.1
-      - name: Stage all five packages for maintainer approval
+      - name: Stage all four packages for maintainer approval
         env:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
