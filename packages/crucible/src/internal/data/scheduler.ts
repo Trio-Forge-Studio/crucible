@@ -359,13 +359,6 @@ export class KeyedScheduler {
 			if (best === undefined) break;
 			this.dispatch(best, now);
 		}
-		for (const entry of this.queue) {
-			const request = entry.request;
-			if (request.priority === Priority.Ordinary && now - entry.enqueuedAt < ORDINARY_AGING_SECONDS)
-				wake = math.min(wake, entry.enqueuedAt + ORDINARY_AGING_SECONDS);
-			const critical = (request.safeUntil ?? math.huge) - LEASE_CRITICAL_SECONDS;
-			if (request.renewal === true && critical > now) wake = math.min(wake, critical);
-		}
 		if (blocked) wake = math.min(wake, now + BUDGET_RECHECK_SECONDS);
 		this.arm(wake, now);
 	}

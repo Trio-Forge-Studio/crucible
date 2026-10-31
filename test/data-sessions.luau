@@ -430,6 +430,16 @@ return {
 		end)
 		backend:advance(0.1)
 		spec.eq(never.value, false, "false when a player with no load leaves")
+		backend:seed(STORE, "67", { format = 9 })
+		local broken = a.join(67)
+		local failing = a.run(function()
+			return a.store:await(broken)
+		end)
+		a.run(function()
+			a.store:load(broken, "join")
+		end)
+		backend:advance(1)
+		spec.eq(failing.value, false, "false without waiting further when the load fails")
 		a.run(function()
 			a.store:handoff(pa)
 		end)
@@ -510,6 +520,15 @@ return {
 		backend:advance(0.2)
 		spec.eq(#backend.calls, before + 1, "a requested save dispatches at once")
 		spec.eq(stored(backend).payload.coins, 5, "and stores the newest revision")
+		local first = #backend.calls + 1
+		backend:advance(120)
+		local gaps = {}
+		for index = first + 1, #backend.calls do
+			local gap = backend.calls[index].at - backend.calls[index - 1].at
+			table.insert(gaps, gap)
+			assert(gap >= 18 and gap <= 22.2, `renewal gap {gap} is not 20 s plus or minus 2 s`)
+		end
+		assert(#gaps >= 4, "a clean session keeps renewing")
 	end,
 	["rule 44 a renewal for a departed player releases instead"] = function()
 		local backend, a = world()

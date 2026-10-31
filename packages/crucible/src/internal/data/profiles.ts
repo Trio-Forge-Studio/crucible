@@ -181,12 +181,6 @@ export class ProfileRuntime {
 		return session;
 	}
 
-	private unsettled(userId: number): boolean {
-		for (const [, session] of this.sealed.get(userId) ?? new Map<string, Session>())
-			if (session.released === undefined) return true;
-		return false;
-	}
-
 	private supersedes(userId: number): ReadonlyMap<string, Sealed> {
 		const result = new Map<string, Sealed>();
 		for (const [token, session] of this.sealed.get(userId) ?? new Map<string, Session>())
@@ -231,7 +225,6 @@ export class ProfileRuntime {
 		const deadline = bootClock() + LOAD_DEADLINE_SECONDS;
 		const session = this.newSession(player);
 		const userId = session.userId;
-		while (this.unsettled(userId) && bootClock() < deadline && !this.stopped(session)) this.changed.park(deadline);
 		let polls = 0;
 		let held = false;
 		let mayHaveCommitted = false;
@@ -243,15 +236,6 @@ export class ProfileRuntime {
 				return this.end(session, mayHaveCommitted, held ? LOAD_BUSY_MESSAGE : LOAD_FAILED_MESSAGE);
 			let decision: AcquireDecision | undefined;
 			let sentAt = 0;
-			const input = {
-				userId,
-				token: session.token,
-				serverId: port.serverId,
-				jobId: port.jobId,
-				schemaVersion: this.schema.version,
-				supersedes: this.supersedes(userId),
-				wall: port.wall,
-			};
 			const ticket = this.engine.scheduler.submit({
 				store: this.schema.name,
 				key: this.key(userId),
@@ -259,7 +243,20 @@ export class ProfileRuntime {
 				kind: "update",
 				dispatchDeadline: deadline,
 				bytes: 1024,
-				transform: () => (current) => acquire(current, input, (d) => (decision = d)),
+				// A sealed session's release holds this key's lane until it settles, backoff included, so the
+				// supersede set read at dispatch is settled (rules 29, 30, 47).
+				transform: () => {
+					const input = {
+						userId,
+						token: session.token,
+						serverId: port.serverId,
+						jobId: port.jobId,
+						schemaVersion: this.schema.version,
+						supersedes: this.supersedes(userId),
+						wall: port.wall,
+					};
+					return (current) => acquire(current, input, (d) => (decision = d));
+				},
 				onDispatch: (at) => (sentAt = at),
 				onResult: (outcome) => {
 					if (outcome.kind === "error" && !outcome.ambiguous) return;
