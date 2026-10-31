@@ -129,18 +129,19 @@ jobs:
             mv "build/binaries/binary-$platform" "build/binaries/$platform"
           done
           node cli/npm/release.mjs build/binaries build/release build/THIRD_PARTY_NOTICES
-      - name: Test registry preflight and partial publication recovery
+      - name: Test registry preflight and partial staging recovery
         run: node --test cli/npm/registry.test.mjs
       - name: Reject previously used release versions
         if: github.event_name == 'push'
         run: node cli/npm/registry.mjs preflight build/release/tarballs
-      - name: Prove publish packaging without credentials
+      - run: npm install --global npm@11.21.1
+      - name: Prove staged packaging without credentials
         run: |
           version=$(node -p "require('./build/release/packages/crucible/package.json').version")
           tag=latest
           if [[ "$version" == *-* ]]; then tag=next; fi
           for package in build/release/tarballs/*.tgz; do
-            npm publish "$package" --dry-run --access public --ignore-scripts --tag "$tag"
+            npm stage publish "$package" --dry-run --access public --ignore-scripts --tag "$tag"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -166,11 +167,10 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Publish platforms and runtime before the shim
+      - run: npm install --global npm@11.21.1
+      - name: Stage all five packages for maintainer approval
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           test "$REPOSITORY_PRIVATE" = false || { echo 'npm provenance requires a public source repository'; exit 1; }
-          test -n "$NODE_AUTH_TOKEN"
-          node cli/npm/registry.mjs publish packages
+          node cli/npm/registry.mjs stage packages

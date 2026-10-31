@@ -14,7 +14,7 @@ test("preflight rejects live, unpublished, and known burned versions", () => {
 	for (const version of burned) assert.throws(() => unused({}, "crucible", version), /burned/);
 });
 
-test("partial publication resumes identical tarballs and publishes the shim last", async () => {
+test("partial staging skips identical published tarballs, stages the shim last, and reports stage failures", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "crucible-release-"));
 	try {
 		mkdirSync(join(directory, "package"));
@@ -43,22 +43,38 @@ test("partial publication resumes identical tarballs and publishes the shim last
 		}
 		const published = [];
 		const publish = (args) => {
+			assert.deepEqual(args.slice(0, 2), ["stage", "publish"]);
 			assert.ok(args.includes("--provenance"));
 			assert.equal(args.at(-1), "next");
-			published.push(manifests.get(args[1]));
+			published.push(manifests.get(args[2]));
 		};
 		await assert.rejects(
 			main("preflight", directory, async (name) => documents[name] ?? {}, publish),
 			/already used/,
 		);
 		assert.deepEqual(published, []);
-		await main("publish", directory, async (name) => documents[name] ?? {}, publish);
+		await main("stage", directory, async (name) => documents[name] ?? {}, publish);
 		assert.equal(published.length, 4);
 		assert.equal(published.at(-1), "crucible");
 		assert.ok(!published.includes(names[2]));
+		published.length = 0;
+		await assert.rejects(
+			main(
+				"stage",
+				directory,
+				async (name) => documents[name] ?? {},
+				(args) => {
+					if (manifests.get(args[2]) === "@trioforge/crucible") throw new Error("E409 Conflict");
+					publish(args);
+				},
+			),
+			/Not staged by this run: @trioforge\/crucible@1\.2\.3-beta\.1\. If npmjs\.com > Staged Packages/,
+		);
+		assert.equal(published.length, 3);
+		assert.equal(published.at(-1), "crucible");
 		documents[names[2]].versions["1.2.3-beta.1"].dist.integrity = "different";
 		await assert.rejects(
-			main("publish", directory, async (name) => documents[name] ?? {}, publish),
+			main("stage", directory, async (name) => documents[name] ?? {}, publish),
 			/artifact differs/,
 		);
 		await assert.rejects(
