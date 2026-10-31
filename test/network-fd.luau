@@ -258,12 +258,93 @@ local fixtures = {
 	},
 }
 
+local toClient = {
+	["Admin.Announcement"] = true,
+	["Admin.Entrance"] = true,
+	["Admin.Record"] = true,
+	["Appearance.RevealSkin"] = true,
+	["CodeDoor.KeypadAnswer"] = true,
+	["Codes.Result"] = true,
+	["Doorbell.Rang"] = true,
+	["Loading.Teleporting"] = true,
+	["Notifications.Notify"] = true,
+	["Party.Private"] = true,
+	["PlayerCard.Profile"] = true,
+	["Progression.LevelUp"] = true,
+	["Progression.RewardGranted"] = true,
+	["Replication.StateSync"] = true,
+}
+local definitions = {}
+for _, fixture in fixtures do
+	local name = fixture[1]
+	local ask = name == "Admin.CommandTree" or name == "Admin.RunCommand"
+	definitions[name] = r.catalog.define({
+		name = name,
+		kind = if ask then "ask-server" elseif toClient[name] then "to-client" else "to-server",
+		input = fixture[2],
+		output = if ask then n.dynamic else nil,
+	})
+end
+definitions["Worked.Map"] = r.catalog.define({
+	name = "Worked.Map",
+	kind = "to-client",
+	input = n.map(literals({ "a", "b" }), n.u8),
+})
+local published = r.catalog.seal()
+
+local function byte(value)
+	assert(value < 128, "one-byte varuint")
+	return string.format("%02x", value)
+end
+
+local function header(opcode, fields, reason)
+	local writer = r.codec.Writer.new()
+	writer:u8(opcode)
+	for _, field in fields or {} do
+		writer:varuint(field)
+	end
+	if reason ~= nil then
+		writer:u8(reason)
+	end
+	return (writer:finish(buffer.create(0)))
+end
+
+local function message(definition, value, nonce)
+	local writer = r.codec.Writer.new()
+	definition.input.encode(writer, value, "payload")
+	local opcode = if nonce == nil then 0 else 1
+	local fields = if nonce == nil
+		then header(opcode, { definition.index, #writer.slots })
+		else header(opcode, { definition.index, nonce, #writer.slots })
+	return writer:finish(fields)
+end
+
+tests["9 12 FD names seal into one realm catalog in byte order"] = function()
+	local names = {}
+	for name in definitions do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	spec.eq(#names, 51, "50 FD declarations and the worked map")
+	spec.eq(published, table.concat(names, "\n"), "published Catalog text")
+	for index, name in names do
+		spec.eq(definitions[name].index, index - 1, `{name} index is its sealed position`)
+		spec.eq(r.catalog.definitionAt(index - 1), definitions[name], `{name} resolves by index`)
+	end
+end
+
 for _, fixture in fixtures do
 	tests[`FD {fixture[1]} payload golden bytes`] = function()
 		local node, value, golden = fixture[2], fixture[3], fixture[4]
 		local packet, sidecar, slots = h.encode(r, node, value)
 		spec.eq(h.hex(packet), golden, "golden payload")
 		spec.eq(slots, fixture[5] or 0, "slot count")
+		local definition = definitions[fixture[1]]
+		local ask = definition.kind == "ask-server"
+		local framed = message(definition, value, if ask then 1 else nil)
+		local prefix = if ask then `01 {byte(definition.index)} 01` else `00 {byte(definition.index)}`
+		local expected = `{prefix} {byte(slots)}` .. (if golden == "" then "" else ` {golden}`)
+		spec.eq(h.hex(framed), expected, "header from the realm's sealed index, then the payload")
 		local decoded = h.decode(r, node, packet, sidecar, slots)
 		spec.eq(h.hex(h.encode(r, node, decoded)), golden, "decoded round trip")
 		for length = 0, buffer.len(packet) - 1 do
@@ -278,6 +359,34 @@ end
 
 tests["worked bytes command responses absent button and Party Leave variant"] = function()
 	spec.eq(h.hex(h.encode(r, n.dynamic, nil)), "00", "CommandTree nil response")
+	local tree = definitions["Admin.CommandTree"]
+	local ix = byte(tree.index)
+	spec.eq(h.hex(message(tree, nil, 1)), `01 {ix} 01 00`, "first ask of the session")
+	local reply = r.codec.Writer.new()
+	tree.output.encode(reply, nil, "response")
+	spec.eq(h.hex(reply:finish(header(2, { tree.index, 1, 0 }))), `02 {ix} 01 00 00`, "OK with a dynamic nil")
+	spec.eq(h.hex(header(3, { tree.index, 1 }, 0)), `03 {ix} 01 00`, "ERROR unavailable")
+	spec.eq(h.hex(header(3, { tree.index, 1 }, 3)), `03 {ix} 01 03`, "ERROR invalid")
+	local toggle = definitions["Doors.Toggle"]
+	spec.eq(
+		h.hex(message(toggle, { door = model, open = true })),
+		`00 {byte(toggle.index)} 01 01`,
+		"Doors.Toggle EVENT with one slot"
+	)
+	local rang = definitions["Doorbell.Rang"]
+	spec.eq(
+		h.hex(message(rang, { chime = vector, houseId = "H-012" })),
+		`00 {byte(rang.index)} 00 00 {vec} 01 05 48 2d 30 31 32`,
+		"Doorbell.Rang without its button"
+	)
+	local map = definitions["Worked.Map"]
+	spec.eq(
+		h.hex(message(map, { b = 2, a = 1 })),
+		`00 {byte(map.index)} 00 02 00 01 01 02`,
+		"literal-union map keys by tag"
+	)
+	spec.eq(h.hex(header(4)), "04", "READY")
+	spec.eq(h.hex(header(5, {}, 0)), "05 00", "FAIL overflow")
 	local node = obj({ button = optional(n.instance({ "BasePart" })), chime = n.vector3, houseId = optional(n.string) })
 	spec.eq(
 		h.hex(h.encode(r, node, { chime = vector, houseId = "H-012" })),
