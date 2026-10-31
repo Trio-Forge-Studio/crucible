@@ -124,6 +124,21 @@ return {
 		spec.eq(holder.progress.pending, 0, "the dependent finished before the dependency started")
 		spec.eq(holder.progress.notStarted, 0, "nothing left unstarted")
 	end,
+	["rule 111 a second ignite in one realm sees no stale sweep"] = function()
+		local backend, realm = world()
+		local probe = realm.graph.module("subsystem").Subsystem
+		realm.close()
+		backend:advance(30)
+		assert(realm.boot.shutdownProgress(probe) ~= nil, "the sweep is visible after it ran")
+		local ok = pcall(
+			realm.boot.ignite,
+			realm.engine.port,
+			{ name = "server", renders = false, booted = function() end },
+			{}
+		)
+		spec.eq(ok, false, "a second boot is refused by the registry")
+		spec.eq(realm.boot.shutdownProgress(probe), nil, "but its ignite reset the sweep first")
+	end,
 	["rule 52 early hook: the early flush keeps the lease and the final phase follows the last hook"] = function()
 		local accepted
 		local backend, realm = world(function(r)
