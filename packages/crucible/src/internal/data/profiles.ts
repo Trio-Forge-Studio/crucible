@@ -211,8 +211,7 @@ export class ProfileRuntime {
 				bytes: 512,
 				transform: () => (current) => abandonAcquisition(current, session.userId, session.token, () => {}),
 			});
-		if (message !== undefined && this.present(session.player))
-			this.engine.port.players.kick(session.player, message);
+		if (message !== undefined) this.engine.port.players.kick(session.player, message);
 		this.drop(session);
 		this.changed.wake();
 		return false;

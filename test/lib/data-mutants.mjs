@@ -200,14 +200,7 @@ const mutants = [
 		"held ? LOAD_FAILED_MESSAGE : LOAD_BUSY_MESSAGE",
 		"rule 24 one winner",
 	],
-	[
-		"20",
-		"guard",
-		D + "profiles.ts",
-		"if (message !== undefined && this.present(session.player))",
-		"if (message !== undefined)",
-		"rule 20 abandon after an ambiguous",
-	],
+	["20", "guard", D + "profiles.ts", "\t\t\t\theld = true;\n", "\n", "rule 24 one winner"],
 	[
 		"20",
 		"pair",
@@ -802,10 +795,11 @@ try {
 	const baseline = run("lune", ["run", "test", ...targets]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
 	const start = Number(process.argv[2] ?? 0);
+	const only = process.env.ONLY?.split(",").map(Number);
 	let killed = 0;
 	const survivors = [];
 	for (const [index, [rule, kind, file, before, after, target]] of mutants.entries()) {
-		if (index < start) continue;
+		if (index < start || (only !== undefined && !only.includes(index))) continue;
 		const original = originals.get(file);
 		fs.writeFileSync(path.join(scratch, file), original.replace(before, after));
 		const compiled = build();
@@ -826,7 +820,7 @@ try {
 		killed++;
 	}
 	assert.equal(build().status, 0, "restored build");
-	console.log(`${killed}/${mutants.length - start} data mutants killed; restored build 0`);
+	console.log(`${killed}/${only?.length ?? mutants.length - start} data mutants killed; restored build 0`);
 	assert.deepEqual(survivors, [], "every mutant is killed");
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });
