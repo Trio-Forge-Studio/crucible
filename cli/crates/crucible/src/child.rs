@@ -105,10 +105,13 @@ fn copy_plain(mut from: impl Read, mut to: impl Write) {
 mod tests {
     use super::*;
 
-    struct Chunks(Vec<&'static [u8]>);
+    struct Chunks<'a>(Vec<&'a [u8]>);
 
-    impl Read for Chunks {
+    impl Read for Chunks<'_> {
         fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            while self.0.first().is_some_and(|chunk| chunk.is_empty()) {
+                self.0.remove(0);
+            }
             if self.0.is_empty() {
                 return Ok(0);
             }
@@ -138,5 +141,35 @@ mod tests {
         assert_eq!(plain("\x1b(Bplain \x1b[1;31mred\x1b[m [kept]"), "plain red [kept]");
         assert_eq!(plain("\x1b]8;;unterminated\nnext line\n"), "\nnext line\n");
         assert_eq!(plain("\x1b\x1b[31mx"), "x");
+    }
+
+    fn assert_plain_at_every_split(input: &[u8], expected: &[u8]) {
+        for split in 0..=input.len() {
+            let mut out = Vec::new();
+            copy_plain(Chunks(vec![&input[..split], &input[split..]]), &mut out);
+            assert_eq!(out, expected, "split at {split}");
+        }
+    }
+
+    #[test]
+    fn escape_aborts_control_strings() {
+        for introducer in [b']', b'P'] {
+            let mut input = vec![0x1b, introducer];
+            input.extend_from_slice(b"payload\x1b[31mvisible\nnext\n");
+            assert_plain_at_every_split(&input, b"visible\nnext\n");
+        }
+    }
+
+    #[test]
+    fn malformed_sequences_preserve_line_breaks() {
+        for (input, expected) in [
+            (b"before\x1b\nafter\n".as_slice(), b"before\nafter\n".as_slice()),
+            (b"before\x1b(\nafter\n", b"before\nafter\n"),
+            (b"before\x1b[12\nafter\n", b"before\nafter\n"),
+            (b"before\x1b[12\x01visible\nafter\n", b"beforevisible\nafter\n"),
+            (b"before\x1b[1 2visible\nafter\n", b"beforevisible\nafter\n"),
+        ] {
+            assert_plain_at_every_split(input, expected);
+        }
     }
 }
