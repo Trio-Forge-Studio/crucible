@@ -42,11 +42,31 @@ Run `pnpm build` from the repository root first. The npm package test packs the 
 
 `npx crucible upgrade [version]` moves a game's `crucible` and `@trioforge/crucible` to one version, reinstalls, and refreshes the template files the game has not edited. See `docs/cli.md` for the rules and exit codes.
 
-`npx crucible upgrade` runs the game's installed, older binary. It resolves the version, bumps `package.json`, and installs. Then it hands off. It checks that the installed shim's `--version` reports the new version and runs the hidden `crucible __upgrade-apply <old-version>` through that shim, with its own template snapshot as JSON on stdin. The new binary compares the old snapshot with its embedded template, writes the files, and prints the report. The reconcile rules live in the newer binary, so a fix to them reaches games still on an older version.
-
-The snapshot has a `format` number. Raise it when a field changes meaning, and only add fields otherwise. A binary treats a higher format, a snapshot whose `version` is not the old installed version, or an empty stdin as an unknown old template, which lists differing files and writes none.
+`npx crucible upgrade` runs the game's installed, older binary. It resolves the version, bumps `package.json`, and installs. Then it hands off to the newly installed binary, which compares the old template with its own, writes the files, and prints the report. The reconcile rules live in the newer binary, so a fix to them reaches games still on an older version. The install step stays in the old binary, so a fix to how a released version installs reaches only later upgrades.
 
 The npm package test stages the current binary at the CLI version and again at the next patch version, serves both from a local registry in a worker thread (`npm/test-registry.mjs`, which passes other packages through to npmjs), creates a game at the first version, upgrades it, and runs its `check`. The next version reuses the binary, so its shim reports the next version and rewrites the old snapshot it receives to stand in for a changed template and docs. The test also drives a failed install and its retry, and a pnpm game under `CI=true`.
+
+## Upgrade hand-off contract
+
+Every released binary keeps this contract with every other, because an old binary hands off to whatever version a game installs, newer or older. `src/upgrade.rs` implements it.
+
+1. The old binary runs `node <bin> --version` in the game's root, where `<bin>` is the `crucible` bin of the installed `crucible` package. The first line of stdout must start with `crucible <semver>`, followed by a space or the end of the line. That output is frozen. The old binary stops if the version is not the target.
+2. The old binary runs `node <bin> __upgrade-apply <old version> <old crucible spec> <old runtime spec>` in the game's root. `<old version>` is the `crucible` package version installed before the upgrade. The two specs are the `crucible` and `@trioforge/crucible` strings from `package.json` before the bump.
+3. Stdin is one JSON snapshot of the old binary's template, then EOF.
+
+   ```json
+   {"format":1,"version":"0.1.0","owned":[{"path":"AGENTS.md","section":"## Crucible","content":"<whole rendered file>"}],"docs":{"cli":"<sha256>"}}
+   ```
+
+   `owned` lists every file the old binary's template owns. `content` is the whole rendered file, and `section` is the heading of the part it owns, or `null` for the whole file. The reading binary cuts sections with its own rules. `docs` maps each topic name to the lowercase hex SHA-256 of the topic's Markdown bytes, exactly as `crucible docs <topic>` prints them.
+4. The new binary inherits the old binary's stdout and stderr. It prints the report on stdout and diagnostics on stderr. Exit 0 means the report is complete, and any other exit means the refresh did not finish. With no exit within 120 seconds, the old binary kills the process tree. On any failure the old binary exits 1 and says the template was not refreshed.
+5. The new binary treats the old template as unknown, which lists differing files and writes none, when the snapshot's format is higher than its own, when the snapshot's `version` differs from `<old version>`, or when either old spec is a range it can evaluate that excludes `<old version>`.
+
+Skew rules for the snapshot:
+
+- A binary decodes every snapshot format up to its own. Each format has its own structs and its own decode arm, so an old format never goes through a newer struct.
+- A binary refuses a format higher than its own and treats the old template as unknown. It lists the differences and writes nothing.
+- Raise `FORMAT` for any change to the snapshot's fields or their meaning. Add the new structs and decode arm, and keep every older arm.
 
 ## Update the spec
 
