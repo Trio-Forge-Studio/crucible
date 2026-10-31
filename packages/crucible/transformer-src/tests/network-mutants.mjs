@@ -159,6 +159,38 @@ const mutations = [
 		"...lowerMessage(node, kind, report).reverse().map(emit)",
 		descriptors,
 	],
+	[
+		"rule 6 literal inference",
+		"PayloadArgs<NoInfer<P>>",
+		"PayloadArgs<P>",
+		"K1 K16 R5",
+		"tests/fixtures/network/net.d.ts",
+		"network-types.test.cjs",
+	],
+	[
+		"rule 6 covariance",
+		"readonly payload: (value: P) => P",
+		"readonly payload: () => P",
+		"network token types",
+		"tests/fixtures/network/index.d.ts",
+		"network-types.test.cjs",
+	],
+	[
+		"rule 27 callable receiver",
+		"export interface Receiver {",
+		"export interface Receiver {\n(): void;",
+		"network token types",
+		"tests/fixtures/network/index.d.ts",
+		"network-types.test.cjs",
+	],
+	[
+		"rule 31 sendable ready",
+		'readonly [message]: { readonly kind: "client-ready" };',
+		'readonly [message]: { readonly kind: "to-server"; readonly payload: (value: undefined) => undefined };',
+		"network token types",
+		"tests/fixtures/network/index.d.ts",
+		"network-types.test.cjs",
+	],
 ];
 if (process.argv.includes("--list")) {
 	console.log(JSON.stringify(mutations.map(([name]) => name)));
@@ -166,14 +198,14 @@ if (process.argv.includes("--list")) {
 }
 fs.rmSync(scratch, { recursive: true, force: true });
 const receipts = [];
-for (const [name, before, after, test] of mutations) {
+for (const [name, before, after, test, file = "network.cjs", suite = "network.test.cjs"] of mutations) {
 	const root = path.join(scratch, String(receipts.length));
 	const copy = path.join(root, "transformer-src");
 	fs.mkdirSync(root, { recursive: true });
 	for (const entry of ["out", "server", "client", "emit", "package.json", "transformer"])
 		fs.cpSync(path.join(source, "..", entry), path.join(root, entry), { recursive: true });
 	fs.cpSync(source, copy, { recursive: true });
-	const target = path.join(copy, "network.cjs");
+	const target = path.join(copy, file);
 	const original = fs.readFileSync(target, "utf8");
 	assert.ok(original.includes(before), `${name} matches source`);
 	fs.writeFileSync(target, original.replaceAll(before, after));
@@ -181,7 +213,7 @@ for (const [name, before, after, test] of mutations) {
 	assert.equal(built.status, 0, built.stderr);
 	const result = spawnSync(
 		process.execPath,
-		["--test", `--test-name-pattern=${test}`, path.join(copy, "tests/network.test.cjs")],
+		["--test", `--test-name-pattern=${test}`, path.join(copy, "tests", suite)],
 		{ encoding: "utf8", env: { ...process.env, CRUCIBLE_TEST_REPO: repo }, timeout: 180000 },
 	);
 	fs.writeFileSync(path.join(root, "result.log"), result.stdout + result.stderr);
