@@ -2,6 +2,8 @@
 
 These plain Luau instruments measure Roblox behavior for the networking, reactive, and data contracts. S0 remains incomplete. Question 1c has no surviving-client observation. Questions 5 and 6 are parked on unpublished-place API errors.
 
+The full repository check exits 1. It builds the sample, then reports 243 Lune cases passed and two existing consumer-compilation cases failed because roblox-ts cannot find compiler-types and types. See [check output](results/repository-check.log). Their files are outside this unit's write scope.
+
 ## Rerun
 
 Use Windows with Studio signed in and Assistant MCP enabled. Run from the repository root.

@@ -153,3 +153,6 @@ https://roblox-ts.com/docs/quick-start#project-folder-setup
 
 Node.js v24.14.0
 : expected 0, got 1
+243 passed, 2 failed
+[ELIFECYCLE] Test failed. See above for more details.
+[ELIFECYCLE] Command failed with exit code 1.
