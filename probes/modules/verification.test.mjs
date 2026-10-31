@@ -5,12 +5,13 @@ import { createPlaceName, selectStudio } from "./session.mjs";
 
 const trace = fs.readFileSync(process.env.S0_TRACE || new URL("results/deferred-short.log", import.meta.url), "utf8");
 const lines = trace.trim().split(/\r?\n/);
+const streaming = fs.readFileSync(
+	process.env.S0_STREAM_TRACE || new URL("results/deferred-short-r2.log", import.meta.url),
+	"utf8",
+);
+const streamingLines = streaming.trim().split(/\r?\n/);
 
 test("NET 67 and 68 a previously visible streamed-out part can retain its Instance slot", () => {
-	const streaming = fs.readFileSync(
-		process.env.S0_STREAM_TRACE || new URL("results/deferred-short-r2.log", import.meta.url),
-		"utf8",
-	);
 	const observations = [
 		"|1a-transition|visible=Workspace.PreviouslyVisiblePart",
 		"|1a-transition|client confirmed visible; moving character beyond target radius",
@@ -92,7 +93,7 @@ test("DATA 58 receipt environment failure and DATA 2 dotted override have eviden
 	assert.ok(trace.includes("gameId=0 placeId=0 ok=false result=HTTP 404 (Not Found)"));
 	assert.ok(trace.includes("S0.Dotted ok=true result=nil"));
 });
-test("NET 35, 52 and 77 kick traces preserve the observed callback lifetime", () => {
+test("NET 35, 52 and 77 kick traces preserve the observed callback lifetime and Kick-to-removal delay", () => {
 	for (const kind of ["startup", "handler"]) {
 		assert.ok(trace.includes(`|3kick|${kind} before Kick`));
 		assert.ok(trace.includes(`|3kick|${kind} after Kick`));
@@ -102,6 +103,21 @@ test("NET 35, 52 and 77 kick traces preserve the observed callback lifetime", ()
 	const removal = lines.findIndex((line, index) => index > afterKick && line.includes("|3kick|PlayerRemoving"));
 	const returned = lines.findIndex((line) => line.endsWith("|3kick|handler return"));
 	assert.ok(afterKick >= 0 && removal > afterKick && returned > removal);
+	const clock = (line) => Number(line.split("S0|server|")[1].split("|")[0]);
+	for (const traceLines of [lines, streamingLines]) {
+		const kicks = traceLines.flatMap((line, index) =>
+			/\|3kick\|(startup|handler) after Kick$/.test(line) ? [index] : [],
+		);
+		assert.equal(kicks.length, 2);
+		for (const kick of kicks) {
+			const removed = traceLines.findIndex(
+				(line, index) => index > kick && line.includes("|3kick|PlayerRemoving"),
+			);
+			assert.ok(removed > kick, `no PlayerRemoving after ${traceLines[kick]}`);
+			const delay = clock(traceLines[removed]) - clock(traceLines[kick]);
+			assert.ok(delay >= 1, `PlayerRemoving ${delay.toFixed(3)} s after ${traceLines[kick]}`);
+		}
+	}
 });
 test("DATA 97 and 100 parked reads retain the engine error", () => {
 	assert.ok(trace.includes("|6fetch|ok=false result=ConfigService: Failed to load config"));
