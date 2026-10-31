@@ -43,8 +43,6 @@ export interface Lifetime extends Linked {
 	ended: boolean;
 	/** Its children and releases have been ended. */
 	finished: boolean;
-	/** Its own body, a run or a setup, is on the stack. */
-	running: boolean;
 	/** Endings that wait for this body's completion, because they reached it while it ran. */
 	deferred?: Lifetime[];
 	warned: boolean;
@@ -104,7 +102,6 @@ export function newLifetime(
 		releases: [],
 		ended: false,
 		finished: false,
-		running: false,
 		linked: false,
 		warned: false,
 	};
@@ -311,10 +308,8 @@ export function runBody<A>(
 	arg: A,
 	after: (completion: Completion) => void,
 ) {
-	lifetime.running = true;
 	bodies.push(lifetime);
 	boundary(lifetime.owner, body, arg, (completion) => {
-		lifetime.running = false;
 		const index = bodies.indexOf(lifetime);
 		if (index >= 0) bodies.remove(index);
 		const [ok, err] = pcall(() => {

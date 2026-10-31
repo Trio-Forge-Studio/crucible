@@ -202,7 +202,6 @@ export function write(node: StateNode, value: unknown) {
 
 /** @internal */
 export function update(node: StateNode, change: (current: unknown) => unknown) {
-	guardPure("write state");
 	write(
 		node,
 		readUntracked(() => change(node.value), "update's callback"),

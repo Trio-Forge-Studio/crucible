@@ -106,6 +106,9 @@ return {
 		source:set(4)
 		r.flush()
 		spec.list(calls, { "1>4" }, "three writes: one call with the first and last values")
+		source:set(1)
+		r.flush()
+		spec.list(calls, { "1>4", "4>1" }, "previous moves with each call")
 	end,
 	["rule 15 a source that throws at the watch call is rethrown and creates nothing"] = function()
 		local r = realm()

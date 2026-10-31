@@ -156,7 +156,6 @@ function complete(effect: EffectNode, run: Lifetime, frame: Frame, completion: C
 	else if (value !== undefined && !typeIs(value, "function"))
 		failure = `returned a ${typeOf(value)}; an effect returns nothing or a cleanup function`;
 	if (failure !== undefined) {
-		endLifetime(run);
 		fail(effect, failure);
 		return;
 	}

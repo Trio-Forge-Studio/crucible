@@ -203,6 +203,23 @@ return {
 		r.flush()
 		spec.list(events, { "Q 2", "R 2" }, "the culprit was latched stopped by plain writes; flushing is false")
 	end,
+	["rule 35 rule 13 T15 an internal error inside a run's completion escapes the boundary and is recovered"] = function()
+		local armed = {}
+		local r = realm(function(graph)
+			inject(graph, "internal/reactive/graph", "rewire", armed, "rewire", true)
+		end)
+		local events = {}
+		local s = threeEffects(r, events)
+		armed.rewire = true
+		s:set(1)
+		r.flush()
+		spec.list(events, { "P 1", "Q 1", "R 1" }, "the culprit's body had run; the rest of the batch ran")
+		spec.eq(r.logged("internal error; the reactive flush recovered"), 1, "one report")
+		table.clear(events)
+		s:set(2)
+		r.flush()
+		spec.list(events, { "Q 2", "R 2" }, "the culprit was stopped")
+	end,
 	["rule 35 T15 an error while sorting the batch stops nothing"] = function()
 		local armed = {}
 		local r = realm(function(graph)
