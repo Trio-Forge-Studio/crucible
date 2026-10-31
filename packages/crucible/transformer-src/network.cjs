@@ -279,6 +279,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					const groups = objects.map((object) => {
 						const prop = checker.getPropertyOfType(object, name);
 						if (!prop || prop.flags & ts.SymbolFlags.Optional) return;
+						references((prop.valueDeclaration ?? prop.declarations?.[0])?.type, `${location}.${name}`);
 						const t = checker.getTypeOfSymbolAtLocation(
 							prop,
 							prop.valueDeclaration ?? prop.declarations?.[0] ?? node,
@@ -300,6 +301,8 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						location,
 						`union members ${objects.map((o) => checker.typeToString(o)).join(", ")} have no discriminant; give each a distinct literal property`,
 					);
+				if (ts.isNumericLiteralName(discriminant) || discriminant.startsWith("__@"))
+					return fail(node, location, "numeric or symbol property names are not supported; use a Map");
 				for (let i = 0; i < objects.length; i++)
 					for (const value of values[i])
 						variants.push({

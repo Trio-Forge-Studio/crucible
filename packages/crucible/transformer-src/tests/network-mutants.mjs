@@ -14,6 +14,18 @@ const globals = "network duplicate names";
 const sides = "network side entry references";
 const limits = "network schema boundaries";
 const mutations = [
+	[
+		"rule 61 variant property name guard",
+		'ts.isNumericLiteralName(discriminant) || discriminant.startsWith("__@")',
+		"false",
+		negative,
+	],
+	[
+		"CRU010 discriminant reference",
+		"references((prop.valueDeclaration ?? prop.declarations?.[0])?.type, `${location}.${name}`);",
+		"",
+		globals,
+	],
 	["rule 1 const guard", "!(list.flags & ts.NodeFlags.Const)", "false", negative],
 	["rule 1 export guard", "!modifiers(statement, ts.ModifierFlags.Export)", "false", negative],
 	["rule 1 side guard", 'side(node) !== "shared"', "false", negative],

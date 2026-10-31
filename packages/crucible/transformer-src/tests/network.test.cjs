@@ -107,6 +107,13 @@ const negatives = [
 	["empty interface", "CRU019", "interface Empty {} " + declaration("Empty")],
 	["recursive interface", "CRU019", "interface Recursive { next?: Recursive } " + declaration("Recursive")],
 	["numeric enum properties", "CRU019", "const enum Slot { A, B } " + declaration("Record<Slot,string>")],
+	["numeric discriminant", "CRU019", declaration('{1:"A";value:number}|{1:"B"}')],
+	[
+		"symbol discriminant",
+		"CRU019",
+		'declare const key: unique symbol; type Tagged = {readonly [key]:"A"}|{readonly [key]:"B"};' +
+			declaration("Tagged"),
+	],
 	["template type", "CRU019", "type T = `a${string}`; " + declaration("T")],
 	["generic payload", "CRU019", 'function f<T>() { return toServer<T>("X.Test"); }'],
 	["required client instance", "CRU020", declaration("BasePart", "toClient")],
@@ -245,10 +252,15 @@ test("network duplicate names and transitive global or merged payloads fail at t
 		"src/shared/a.ts": imports + declaration("string"),
 		"src/shared/b.ts": imports + declaration("number"),
 		"src/global.d.ts": "interface ScriptPayload { value: string }\n",
-		"src/alias.d.ts": "type GlobalString = string;",
+		"src/alias.d.ts": 'type GlobalString = string; type GlobalTag = "A";',
 		"src/shared/alias.ts": imports + declaration("{ name: GlobalString }", "toServer", "X.Alias"),
 		"src/shared/global.ts": imports + declaration("{ nested: ScriptPayload }", "toServer", "X.Global"),
-		"src/shared/type.ts": "export interface Payload { count: number }",
+		"src/shared/type.ts":
+			"export interface Payload { count: number } export interface Tagged {Kind:GlobalTag;value:number}",
+		"src/shared/global-variant.ts":
+			imports +
+			'import {Tagged} from "./type";' +
+			declaration('Tagged|{Kind:"B"}', "toServer", "X.GlobalVariant"),
 		"src/shared/merged.ts":
 			imports + 'import { Payload } from "./type"; ' + declaration("Payload", "toServer", "X.Merge"),
 		"src/augment.ts":
@@ -259,7 +271,7 @@ test("network duplicate names and transitive global or merged payloads fail at t
 	const result = inspect(game);
 	for (const file of ["a.ts", "b.ts"])
 		assert.ok(result.diagnostics.some((d) => d.file.fileName.endsWith(file) && d.code === 90018));
-	for (const file of ["global.ts", "merged.ts", "augment.ts", "declared-global.ts", "alias.ts"])
+	for (const file of ["global.ts", "merged.ts", "augment.ts", "declared-global.ts", "alias.ts", "global-variant.ts"])
 		assert.ok(
 			result.diagnostics.some((d) => d.file.fileName.endsWith(file) && d.code === 90010),
 			file,
