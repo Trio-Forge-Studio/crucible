@@ -150,7 +150,10 @@ return {
 		backend:advance(0.1)
 		local retry = backend:gate("transform", { server = a.id })
 		backend:advance(1)
-		set(a, pa, 6)
+		local sess = session(a, pa)
+		set(a, pa, 6, function()
+			sess:stage("R")
+		end)
 		local waiting = save(a, pa, 20)
 		local next = backend:gate("commit", { server = a.id })
 		retry.release()
@@ -161,6 +164,7 @@ return {
 		backend:advance(0.5)
 		spec.eq(waiting.value, "ok", "ok once the next operation committed revision 2")
 		spec.eq(stored(backend).commit.revision, 2, "disk holds revision 2")
+		spec.eq(sess.durable.R, true, "the staged id is durable once a confirmed envelope holds it")
 	end,
 	["rule 37 R1 a new session's first save with an update waits for its own commit"] = function()
 		for _, update in { true, false } do

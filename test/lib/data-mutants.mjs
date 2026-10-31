@@ -298,7 +298,7 @@ const mutants = [
 		D + "profiles.ts",
 		"session.safeUntil = earliest! + LOCAL_AUTHORITY_SECONDS;",
 		"session.safeUntil = port.wall() + LOCAL_AUTHORITY_SECONDS;",
-		"rule 25 a common wall-clock step",
+		"rule 9 writable exactly",
 	],
 	[
 		"26",
@@ -357,14 +357,14 @@ const mutants = [
 		D + "profiles.ts",
 		"session.durable = new Set(envelope.receipts);\n\t\tif (earliest",
 		"if (earliest",
-		"rule 29 resume after the release gave up",
+		"rule 37 save after an already",
 	],
 	[
 		"29",
 		"pair",
 		D + "lease.ts",
 		"\tconst carried =\n\t\tsealed !== undefined &&",
-		"\tconst carried =\n\t\tfalse &&\n\t\tsealed !== undefined &&",
+		"\tconst carried =\n\t\t(false as boolean) &&\n\t\tsealed !== undefined &&",
 		"rule 29 resume after the release gave up",
 	],
 	[
