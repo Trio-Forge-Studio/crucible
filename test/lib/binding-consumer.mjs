@@ -15,11 +15,14 @@ try {
 		path.join(scratch, "node_modules/@trioforge/crucible"),
 		"junction",
 	);
-	fs.symlinkSync(
-		path.join(repo, "packages/crucible/node_modules/@rbxts"),
-		path.join(scratch, "node_modules/@rbxts"),
-		"junction",
-	);
+	fs.mkdirSync(path.join(scratch, "node_modules/@rbxts"));
+	for (const name of ["compiler-types", "types"]) {
+		fs.symlinkSync(
+			fs.realpathSync(path.join(repo, "packages/crucible/node_modules/@rbxts", name)),
+			path.join(scratch, "node_modules/@rbxts", name),
+			"junction",
+		);
+	}
 	fs.writeFileSync(path.join(scratch, "package.json"), '{"name":"binding-consumer","private":true}');
 	fs.writeFileSync(
 		path.join(scratch, "tsconfig.json"),
