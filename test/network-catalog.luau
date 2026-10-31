@@ -36,6 +36,13 @@ return {
 		h.rejects(function()
 			h.realm().catalog.adopt(largest .. "\nN")
 		end)
+		local short = {}
+		for i = 1, 1025 do
+			table.insert(short, string.format("A%04d", i))
+		end
+		h.rejects(function()
+			h.realm().catalog.adopt(table.concat(short, "\n"))
+		end, "too many messages")
 		local r = h.realm()
 		for i = 1, 1024 do
 			r.catalog.define({ name = `M.N{i}`, kind = "to-server", input = r.n["nil"] })
@@ -59,6 +66,7 @@ return {
 		local extra = client.catalog.define({ name = "ClientOnly", kind = "to-server", input = client.n["nil"] })
 		spec.eq(z.index, server.catalog.definitionAt(1).index, "adopted index")
 		spec.eq(extra.index, nil, "unpublished")
+		spec.eq(#client.catalog.unpublished(), 1, "only the absent name is unpublished")
 		spec.eq(client.catalog.unpublished()[1], extra, "report")
 		for _, index in { -1, 0.5, 2, math.huge, 0 / 0 } do
 			spec.eq(client.catalog.definitionAt(index), nil, "untrusted index")
