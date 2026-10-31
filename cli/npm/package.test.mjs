@@ -178,12 +178,12 @@ test("the next upgrade version is a release above a prerelease CLI version", () 
 const OLD_TEMPLATE = {
 	tsconfig: (text) => text.replace('"strict": true,', '"strict": true,\n\t\t"noImplicitReturns": true,'),
 	project: (text) => text.replace('"tree"', '"servePort": 34873,\n\t"tree"'),
-	agents: (section) => `${section}\n\nThe old version had this line.`,
+	agents: (text) => `${text.trimEnd()}\n\nThe old version had this line.\n`,
 };
 
 // The next version reuses this binary, so its shim reports the next version and
 // rewrites the old template it receives to stand in for an older release whose
-// template and docs differed.
+// template and docs differed. Each snapshot part holds the whole rendered file.
 const NEXT_VERSION_SHIM = `#!/usr/bin/env node
 const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
@@ -203,6 +203,7 @@ if (args[0] === "--version") {
 			if (part.path === "tsconfig.json") part.content = OLD_TEMPLATE.tsconfig(part.content);
 			if (part.path === "default.project.json") part.content = OLD_TEMPLATE.project(part.content);
 			if (part.path === "LICENSE") part.content += "An older license.\\n";
+			if (part.path === ".gitattributes") part.content += "*.lua text\\n";
 			if (part.section === "## Crucible") part.content = OLD_TEMPLATE.agents(part.content);
 		}
 		old.owned.push({ path: "old-only.txt", section: null, content: "old\\n" });
@@ -218,6 +219,11 @@ if (args[0] === "--version") {
 `;
 
 function startUpgradeRegistry() {
+	upgradeRegistry ??= launchUpgradeRegistry();
+	return upgradeRegistry;
+}
+
+function launchUpgradeRegistry() {
 	const next = nextPatch(cliVersion());
 	const platformName = platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host));
 	const runtimeDir = join(cli, "..", "packages", "crucible");
@@ -283,8 +289,7 @@ test(
 	"upgrade hands off to the next version, which refreshes only untouched template files",
 	{ skip: !supported && `no package for ${host}` },
 	async () => {
-		upgradeRegistry ??= startUpgradeRegistry();
-		const setup = await upgradeRegistry;
+		const setup = await startUpgradeRegistry();
 		const { next } = setup;
 		const game = createGame("upgrade-game", setup);
 		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
@@ -298,8 +303,10 @@ test(
 		writeFileSync(projectFile, edited);
 		const agentsFile = join(game, "AGENTS.md");
 		const agents = readFileSync(agentsFile, "utf8").trimEnd();
-		writeFileSync(agentsFile, `${OLD_TEMPLATE.agents(agents)}\n\n## Notes\n\nKeep this.\n`);
-		rmSync(join(game, "LICENSE"));
+		writeFileSync(agentsFile, `${OLD_TEMPLATE.agents(agents)}\n## Notes\n\nKeep this.\n`);
+		const license = `${readFileSync(join(game, "LICENSE"), "utf8")}An older license.\n`;
+		writeFileSync(join(game, "LICENSE"), license);
+		rmSync(join(game, ".gitattributes"));
 		writeFileSync(join(game, "old-only.txt"), "old\n");
 
 		const downgrade = run("npx", ["crucible", "upgrade", "0.0.1"], game);
@@ -318,7 +325,8 @@ test(
 			/Refreshed from the new template:\n {2}tsconfig\.json\n {2}AGENTS\.md \(## Crucible\)\n\n/,
 		);
 		assert.match(report, /this project edited them, so they were left alone:\n {2}default\.project\.json\n\n/);
-		assert.match(report, /deleted in this project, so they were not recreated:\n {2}LICENSE\n\n/);
+		assert.match(report, /deleted in this project, so they were not recreated:\n {2}\.gitattributes\n\n/);
+		assert.match(report, /never rewrites them\. Review the change:\n {2}LICENSE\n\n/);
 		assert.match(
 			report,
 			/no longer includes these\. Delete them if this game does not use them:\n {2}old-only\.txt\n/,
@@ -329,7 +337,8 @@ test(
 		assert.equal(readFileSync(tsconfigFile, "utf8"), tsconfig, "an untouched file takes the new template");
 		assert.equal(readFileSync(projectFile, "utf8"), edited, "an edited template file is left alone");
 		assert.equal(readFileSync(agentsFile, "utf8"), `${agents}\n\n## Notes\n\nKeep this.\n`);
-		assert.ok(!existsSync(join(game, "LICENSE")), "a deleted file is not recreated");
+		assert.ok(!existsSync(join(game, ".gitattributes")), "a deleted file is not recreated");
+		assert.equal(readFileSync(join(game, "LICENSE"), "utf8"), license, "the license is never rewritten");
 
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
@@ -353,14 +362,23 @@ test(
 				),
 			);
 			assert.equal(readFileSync(manifestFile, "utf8"), failing, `${attempt} restores package.json byte for byte`);
+			assert.equal(installedVersion(game, "crucible"), cliVersion(), "npm runs preinstall after it reifies");
 		}
 		delete manifest.scripts.preinstall;
 		writeFileSync(manifestFile, `${JSON.stringify(manifest, null, "\t")}\n`);
 		const recovered = run("npx", ["crucible", "upgrade", cliVersion(), "--allow-downgrade"], game);
 		assert.equal(recovered.status, 0, recovered.stderr);
+		assert.ok(
+			recovered.stdout.startsWith(`Reinstalled crucible and @trioforge/crucible at ${cliVersion()}.\n`),
+			recovered.stdout,
+		);
+		assert.match(
+			recovered.stderr,
+			new RegExp(`package\\.json pinned ${next}, which does not match the installed ${cliVersion()}`),
+		);
 		assert.match(
 			recovered.stdout,
-			new RegExp(`(Upgraded|Reinstalled) crucible and @trioforge/crucible .*${cliVersion()}\\.\n`),
+			/the old template is unknown, so they were left alone:\n {2}default\.project\.json\n/,
 		);
 		assertPinned(game, cliVersion());
 	},
@@ -370,8 +388,7 @@ test(
 	"upgrade reinstalls a pnpm game under CI despite its frozen lockfile default",
 	{ skip: !supported && `no package for ${host}` },
 	async () => {
-		upgradeRegistry ??= startUpgradeRegistry();
-		const setup = await upgradeRegistry;
+		const setup = await startUpgradeRegistry();
 		const game = createGame("pnpm-game", setup);
 		const ci = { CI: "true" };
 		const installed = run("pnpm", ["install"], game, ci);
