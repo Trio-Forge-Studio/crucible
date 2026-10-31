@@ -357,8 +357,9 @@ test("network augmentations that add no declaration to a reached payload symbol 
 	const game = project({
 		"src/shared/model.ts": "export interface Other { x: number }",
 		"src/shared/messages.ts": imports + declaration("{ door: Model }", "toServer", "Doors.Toggle"),
-		"src/workspace.ts": "export {}; declare global { interface Workspace { Lobby: Model } }",
-		"src/other.ts": 'import "./shared/model"; declare module "./shared/model" { interface Other { door: Model } }',
+		"src/util/workspace.ts": "export {}; declare global { interface Workspace { Lobby: Model } }",
+		"src/util/other.ts":
+			'import "../shared/model"; declare module "../shared/model" { interface Other { door: Model } }',
 	});
 	assert.deepEqual(
 		inspect(game).diagnostics.map((d) => d.messageText),

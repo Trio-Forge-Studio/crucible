@@ -23,6 +23,9 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		return false;
 	};
 	const flags = ts.TypeFlags;
+	const root = path.dirname(
+		program.getCompilerOptions().configFilePath ?? path.join(program.getCurrentDirectory(), "tsconfig.json"),
+	);
 	const absent = (type) => !!(type.flags & flags.Undefined) || (type.isUnion() && type.types.some(absent));
 	const literal = (type) => {
 		if (type.isStringLiteral() || type.isNumberLiteral()) return type.value;
@@ -172,6 +175,15 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					if (prop.declarations?.some((d) => ts.isMethodSignature(d) || ts.isMethodDeclaration(d)))
 						fail(node, `${location}.${prop.name}`, "functions cannot cross the network");
 					const value = checker.getTypeOfSymbolAtLocation(prop, at);
+					if (value.flags & flags.Undefined)
+						return [
+							prop.name,
+							fail(
+								node,
+								`${location}.${prop.name}`,
+								"a field of type undefined carries no information; remove it",
+							),
+						];
 					return [
 						prop.name,
 						lower(
@@ -591,16 +603,18 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					for (const declaration of index())
 						lowerMessage(declaration.node, declaration.kind, () => {}, reached);
 				}
-				const walk = (child) => {
-					if (ts.isIdentifier(child) && reached.has(unalias(checker.getSymbolAtLocation(child))))
-						report(
-							node,
-							"CRU010",
-							"This augmentation changes a network payload; incremental builds cannot see the merge. Declare the type in one module.",
-						);
-					ts.forEachChild(child, walk);
-				};
-				walk(node);
+				const added = (body) =>
+					(body && ts.isModuleBlock(body) ? body.statements : [body]).flatMap((statement) =>
+						statement?.name
+							? [statement, ...(ts.isModuleDeclaration(statement) ? added(statement.body) : [])]
+							: [],
+					);
+				if (added(node.body).some((d) => reached.has(checker.getSymbolAtLocation(d.name))))
+					report(
+						node,
+						"CRU010",
+						"This augmentation changes a network payload; incremental builds cannot see the merge. Declare the type in one module.",
+					);
 			}
 			if (
 				ts.isStringLiteral(node) &&
@@ -722,7 +736,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					report(
 						node,
 						"CRU018",
-						`${name.text} is already declared at ${sf.fileName}:${sf.getLineAndCharacterOfPosition(other.node.getStart()).line + 1}.`,
+						`${name.text} is already declared at ${path.relative(root, sf.fileName).replaceAll("\\", "/")}:${sf.getLineAndCharacterOfPosition(other.node.getStart()).line + 1}.`,
 					);
 				}
 			}
