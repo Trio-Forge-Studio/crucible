@@ -309,10 +309,12 @@ test("network compiler limits equal the approved table and runtime limits when a
 	const runtime = path.resolve(__dirname, "../../src/internal/network/limits.ts");
 	if (fs.existsSync(runtime)) {
 		const sf = ts.createSourceFile(runtime, fs.readFileSync(runtime, "utf8"), ts.ScriptTarget.Latest, true);
+		const values = new Map();
 		for (const statement of sf.statements)
 			if (ts.isVariableStatement(statement))
 				for (const decl of statement.declarationList.declarations)
-					if (decl.name.text in limits) assert.equal(Number(decl.initializer.text), limits[decl.name.text]);
+					values.set(decl.name.text, Number(decl.initializer?.text));
+		for (const [name, value] of Object.entries(limits)) assert.equal(values.get(name), value, name);
 	}
 });
 
@@ -371,7 +373,7 @@ export const Alias=toServer<Partial<Record<"z"|"a",number>>>("X.Alias");
 	compile(game, 1);
 });
 
-test("network callback parameter types survive imported payload aliases and nested macros", () => {
+test("network callback parameter types survive imported payload aliases", () => {
 	const game = project({
 		"src/shared/model.ts": "export interface Payload { value: string }",
 		"src/shared/messages.ts": imports + 'import {Payload} from "./model";' + declaration("Payload"),
