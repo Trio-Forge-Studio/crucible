@@ -534,7 +534,7 @@ test("review regressions cover alias macros, abstract-only imports, empty files 
 	const client = run('import { boot } from "@trioforge/crucible/client"; boot({load: ["src/server/**/*.ts"]});');
 	assert.deepEqual(
 		client.diagnostics.map((d) => d.messageText),
-		[],
+		Array(3).fill("CRU024: This file cannot reference @trioforge/crucible/client; move it under a client folder."),
 	);
 	assert.match(client.output, /crucible-path:/);
 });

@@ -1,0 +1,13 @@
+import { toServer, toClient, V1Server, V1Client } from "./net";
+declare const player: Player;
+const Analytics = toServer<"Upgrades" | "SkinShop">("Analytics.ScreenOpened");
+V1Client.send(Analytics, "Upgrades");                                   // L4
+const Teleporting = toClient<"Job" | "Warehouse" | undefined>("Loading.Teleporting");
+V1Server.send(player, Teleporting, "Job");                              // L6
+const Codes = toClient<"Ok" | "Invalid" | "Expired">("Codes.Result");
+V1Server.send(player, Codes, "Ok");                                     // L8
+V1Server.broadcast(Codes, "Ok");                                        // L9
+const Num = toClient<1 | 2 | 3>("X.Num");
+V1Server.send(player, Num, 2);                                          // L11
+const B = toClient<true | undefined>("X.B");
+V1Server.send(player, B, true);                                         // L13

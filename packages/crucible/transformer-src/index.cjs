@@ -2,6 +2,7 @@ const path = require("node:path");
 const { createRequire } = require("node:module");
 const { packageOf, typeId, sourceRoot } = require("./type-id.cjs");
 const { createReporter } = require("./diagnostics.cjs");
+const { createNetwork } = require("./network.cjs");
 
 module.exports = function transformer(program, config = {}, extras = {}) {
 	const ts = extras.ts ?? require("typescript");
@@ -46,6 +47,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 	};
 	const diagnosticSink = extras.addDiagnostic;
 	let report;
+	let networkProgram;
 	return (context) => (source) => {
 		if (source.isDeclarationFile) return source;
 		let used = false;
@@ -499,7 +501,16 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				.slice(0, -1)
 				.reverse()
 				.find((part) => ["server", "client", "shared"].includes(part));
+		networkProgram ??= createNetwork({ ts, program, checker, api, kindOf, instanceType, modifiers, isMacro });
+		const network = networkProgram({
+			source,
+			report,
+			runtime,
+			side,
+			visitInput: (node) => ts.visitNode(node, visit),
+		});
 		const inspect = (node) => {
+			network.inspect(node);
 			if (
 				ts.isImportDeclaration(node) ||
 				ts.isExportDeclaration(node) ||
@@ -622,6 +633,8 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		};
 
 		const visit = (node) => {
+			const networkNode = network.visit(node);
+			if (networkNode) return networkNode;
 			if (isMacro(node, "attribute")) {
 				const field = node.parent;
 				if (

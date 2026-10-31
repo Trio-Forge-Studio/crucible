@@ -19,5 +19,5 @@ const { setup } = require("./side-harness.cjs");
 	const result = spawnSync(process.execPath, [cli, "-p", game], { cwd: game, encoding: "utf8" });
 	const output = result.stdout + result.stderr;
 	assert.equal(result.status, 0, output);
-	console.log(output);
+	console.log("K1 string, u8 and literal-union map descriptors recheck with rbxtsc 3.0.0.");
 }

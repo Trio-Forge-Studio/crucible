@@ -58,26 +58,36 @@ export type MapKey =
 				readonly value: string | number;
 			}[];
 	  };
+export type Kind<K extends Node["kind"]> =
+	Extract<Node, { readonly kind: K }> extends never ? { readonly kind: K } : Extract<Node, { readonly kind: K }>;
+export interface LiteralNode<V extends Literal> {
+	readonly kind: "literal";
+	readonly value: V;
+}
+export interface UnionNode<B extends Node> {
+	readonly kind: "union";
+	readonly branches: readonly B[];
+}
 export interface NodeBuilders {
-	readonly nil: Node;
-	readonly bool: Node;
-	readonly f64: Node;
-	readonly f32: Node;
-	readonly u8: Node;
-	readonly u16: Node;
-	readonly u32: Node;
-	readonly string: Node;
-	readonly vector3: Node;
-	readonly color3: Node;
-	readonly cframe: Node;
-	readonly dynamic: Node;
-	readonly literal: (value: Literal) => Node;
-	readonly instance: (classes: readonly (keyof Instances)[]) => Node;
-	readonly object: (fields: readonly (readonly [name: string, value: Node])[]) => Node;
-	readonly array: (element: Node) => Node;
-	readonly tuple: (elements: readonly Node[]) => Node;
-	readonly map: (key: MapKey, value: Node) => Node;
-	readonly union: (branches: readonly Node[]) => Node;
-	readonly variant: (key: string, value: Literal, body: Node) => Node;
+	readonly nil: { readonly kind: "nil" };
+	readonly bool: { readonly kind: "bool" };
+	readonly f64: { readonly kind: "f64" };
+	readonly f32: { readonly kind: "f32" };
+	readonly u8: { readonly kind: "u8" };
+	readonly u16: { readonly kind: "u16" };
+	readonly u32: { readonly kind: "u32" };
+	readonly string: { readonly kind: "string" };
+	readonly vector3: { readonly kind: "vector3" };
+	readonly color3: { readonly kind: "color3" };
+	readonly cframe: { readonly kind: "cframe" };
+	readonly dynamic: { readonly kind: "dynamic" };
+	readonly literal: <V extends Literal>(value: V) => LiteralNode<V>;
+	readonly instance: (classes: readonly (keyof Instances)[]) => Kind<"instance">;
+	readonly object: (fields: readonly (readonly [name: string, value: Node])[]) => Kind<"object">;
+	readonly array: (element: Node) => Kind<"array">;
+	readonly tuple: (elements: readonly Node[]) => Kind<"tuple">;
+	readonly map: (key: MapKey, value: Node) => Kind<"map">;
+	readonly union: <B extends Node>(branches: readonly B[]) => UnionNode<B>;
+	readonly variant: (key: string, value: Literal, body: Node) => Kind<"variant">;
 }
 export declare const n: NodeBuilders;
