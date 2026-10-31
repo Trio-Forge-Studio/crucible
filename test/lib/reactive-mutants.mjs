@@ -640,6 +640,94 @@ const mutants = [
 		BOOT,
 		[["	side.booted();\n	releaseBarrier();", "	releaseBarrier();\n	side.booted();"]],
 	],
+	[
+		"barrier released before the rollback",
+		"pair",
+		[36, 76],
+		BOOT,
+		[
+			['		stage = "rollback";\n', '		stage = "rollback";\n		releaseBarrier();\n'],
+			["		owned.clear();\n		releaseBarrier();\n", "		owned.clear();\n"],
+		],
+	],
+	[
+		"computed frame never popped",
+		"pair",
+		[7, 13],
+		GRAPH,
+		[
+			[
+				"	const [ok, result] = xpcall(node.read, capture);\n	pop(frame);",
+				"	const [ok, result] = xpcall(node.read, capture);",
+			],
+		],
+	],
+	["cycle mark never reset", "pair", [8], GRAPH, [["		node.cycle = undefined;\n", ""]]],
+	[
+		"attach stops at the first computed",
+		"guard",
+		[10],
+		GRAPH,
+		[
+			[
+				"			if (first && source.kind === NodeKind.Computed) pending.push(source);",
+				"			if ((false as boolean) && source.kind === NodeKind.Computed) pending.push(source);",
+			],
+		],
+	],
+	[
+		"stale edges never unlinked",
+		"pair",
+		[14],
+		GRAPH,
+		[["	for (const edge of previous) if (!keep.has(edge.source)) unlink(observer, edge.source);\n", ""]],
+	],
+	[
+		"root scope adopted",
+		"guard",
+		[23],
+		OWNERSHIP,
+		[["	if (parent !== undefined) adopt(parent, scope);", "	adopt(parent!, scope);"]],
+	],
+	["scope adoption arguments swapped", "swap", [23], OWNERSHIP, [["adopt(parent, scope);", "adopt(scope, parent);"]]],
+	[
+		"first run ends a missing previous run",
+		"guard",
+		[26],
+		FLUSH,
+		[["	if (previous !== undefined) endLifetime(previous);", "	endLifetime(previous!);"]],
+	],
+	[
+		"every cleanup reported as failed",
+		"guard",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				"		if (completion.result !== CallResult.Ok)\n			runtimeDiagnostic(",
+				"		runtimeDiagnostic(",
+			],
+		],
+	],
+	[
+		"nested evaluation in its own boundary",
+		"guard",
+		[12, 13, 32],
+		GRAPH,
+		[
+			[
+				"	if (inBody()) evaluateInline(evaluation);",
+				"	if (inBody() && (false as boolean)) evaluateInline(evaluation);",
+			],
+		],
+	],
+	[
+		"busiest origins listed least first",
+		"swap",
+		[34],
+		FLUSH,
+		[["busiest.sort((a, b) => a.runs > b.runs);", "busiest.sort((a, b) => b.runs > a.runs);"]],
+	],
 ];
 
 function run(command, args, timeout = 300000) {
