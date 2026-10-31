@@ -456,8 +456,10 @@ function Backend:realm(options)
 	-- A profile store's engine with the D1 seams: identity load, no claims, and a recorded slot.
 	function realm.profile(name: string, defaults, version: number?)
 		local published = {}
+		local reasons = {}
 		local runtime = realm.data:profile({ name = name, version = version or 0, defaults = defaults or {} }, {
-			onLoad = function(_, value)
+			onLoad = function(_, value, reason)
+				table.insert(reasons, reason)
 				return value
 			end,
 			onRelease = function(_, value)
@@ -469,6 +471,7 @@ function Backend:realm(options)
 			delivered = function() end,
 		})
 		runtime.published = published
+		runtime.reasons = reasons
 		return runtime
 	end
 
