@@ -31,6 +31,8 @@ pub enum Command {
     Oc(Oc),
     /// Build and publish the places in a crucible.toml environment. One JSON document.
     Publish(crate::publish::Args),
+    /// Upgrade crucible and @trioforge/crucible, then refresh template files this project has not edited.
+    Upgrade(crate::upgrade::Args),
     /// Serve one Rojo project. crucible dev runs this in a child process.
     #[command(name = crate::dev::ROJO_SERVE, hide = true)]
     RojoServe {
@@ -54,6 +56,16 @@ pub enum Command {
         project: PathBuf,
         /// The place file to write.
         output: PathBuf,
+    },
+    /// Refresh template files after crucible upgrade installs this version. Reads the old template on stdin.
+    #[command(name = crate::upgrade::APPLY, hide = true)]
+    UpgradeApply {
+        /// The crucible version installed before the upgrade.
+        from: semver::Version,
+        /// The crucible spec in package.json before the upgrade.
+        crucible: String,
+        /// The @trioforge/crucible spec in package.json before the upgrade.
+        runtime: String,
     },
 }
 fn topics() -> clap::builder::PossibleValuesParser {

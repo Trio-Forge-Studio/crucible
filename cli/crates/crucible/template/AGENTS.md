@@ -8,6 +8,7 @@ Run `npm run fmt` to fix formatting. Use the equivalent script commands with you
 ## Crucible
 
 Read `npx crucible docs` and `npx crucible docs cli` first.
+Run `npx crucible upgrade` to move to the latest Crucible. It refreshes template files you have not edited, lists the ones you did, and names the docs to read again.
 Before using a module, read `npx crucible docs <topic>`, such as `npx crucible docs logging`. Documented exports are the source of truth.
 
 `@trioforge/crucible` is shared-safe. Shared code must never import or re-export `/server` or `/client`, including transitively.

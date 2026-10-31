@@ -17,6 +17,7 @@ url = "2"
 tempfile = "3"
 rojo = "=7.7.1"
 sha2 = "0.10"
+semver = "1"
 env_logger = "0.9"
 ctrlc = { version = "3", features = ["termination"] }
 

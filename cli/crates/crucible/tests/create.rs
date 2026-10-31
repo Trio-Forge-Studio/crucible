@@ -26,6 +26,7 @@ fn creates_default_and_explicit_targets_without_installing() {
             "AGENTS.md",
             "LICENSE",
             ".gitignore",
+            ".gitattributes",
             "vite.config.ts",
             "src/server/main.server.ts",
             "src/client/main.client.ts",

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { PLATFORMS, cliVersion, platformPackageName, stage } from "./stage.mjs";
 
 const cli = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,10 +19,11 @@ const supported = PLATFORMS.some(({ os, cpu }) => `${os}-${cpu}` === host);
 let root;
 let shim;
 let platform;
+let upgradeRegistry;
 
-function run(command, args, cwd) {
+function run(command, args, cwd, env = {}) {
 	const line = [command, ...args.map((arg) => `"${arg}"`)].join(" ");
-	return spawnSync(line, { cwd, encoding: "utf8", shell: true });
+	return spawnSync(line, { cwd, encoding: "utf8", shell: true, env: { ...process.env, ...env } });
 }
 
 function pack(directory, destination) {
@@ -49,7 +52,8 @@ before(() => {
 	[shim, platform] = staged.map((directory) => pack(directory, join(root, "tarballs")));
 });
 
-after(() => {
+after(async () => {
+	await upgradeRegistry?.then(({ registry }) => registry.terminate());
 	if (root) rmSync(root, { recursive: true, force: true });
 });
 
@@ -158,5 +162,247 @@ test(
 		assert.notEqual(unformatted.status, 0, "the generated check actually rejects Vite+ formatting or lint errors");
 		assert.match(`${unformatted.stdout}\n${unformatted.stderr}`, /format|lint|no-unused-vars/i);
 		assert.ok(!existsSync(join(game, "build", "start.rbxl")), "vp check fails before crucible build runs");
+	},
+);
+
+function nextPatch(version) {
+	const [, major, minor, patch] = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+	return `${major}.${minor}.${Number(patch) + 1}`;
+}
+
+test("the next upgrade version is a release above a prerelease CLI version", () => {
+	assert.equal(nextPatch("0.1.0"), "0.1.1");
+	assert.equal(nextPatch("0.2.0-alpha.1"), "0.2.1");
+});
+
+const OLD_TEMPLATE = {
+	tsconfig: (text) => text.replace('"strict": true,', '"strict": true,\n\t\t"noImplicitReturns": true,'),
+	project: (text) => text.replace('"tree"', '"servePort": 34873,\n\t"tree"'),
+	agents: (text) => `${text.trimEnd()}\n\nThe old version had this line.\n`,
+};
+
+// The next version reuses this binary, so its shim reports the next version and
+// rewrites the old template it receives to stand in for an older release whose
+// template and docs differed. Each snapshot part holds the whole rendered file.
+const NEXT_VERSION_SHIM = `#!/usr/bin/env node
+const { spawnSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "--version") {
+	console.log("crucible " + require("../package.json").version + " (rojo 7.7.1)");
+} else if (args[0] !== "__upgrade-apply") {
+	require("./real.cjs");
+} else {
+	const OLD_TEMPLATE = {${Object.entries(OLD_TEMPLATE)
+		.map(([key, edit]) => `${key}: ${edit}`)
+		.join(", ")}};
+	let input = readFileSync(0, "utf8");
+	if (input) {
+		const old = JSON.parse(input);
+		for (const part of old.owned) {
+			if (part.path === "tsconfig.json") part.content = OLD_TEMPLATE.tsconfig(part.content);
+			if (part.path === "default.project.json") part.content = OLD_TEMPLATE.project(part.content);
+			if (part.path === "LICENSE") part.content += "An older license.\\n";
+			if (part.path === ".gitattributes") part.content += "*.lua text\\n";
+			if (part.section === "## Crucible") part.content = OLD_TEMPLATE.agents(part.content);
+		}
+		old.owned.push({ path: "old-only.txt", section: null, content: "old\\n" });
+		old.docs.logging = "changed";
+		input = JSON.stringify(old);
+	}
+	const result = spawnSync(process.execPath, [require.resolve("./real.cjs"), ...args], {
+		input,
+		stdio: ["pipe", "inherit", "inherit"],
+	});
+	process.exit(result.status ?? 1);
+}
+`;
+
+function startUpgradeRegistry() {
+	upgradeRegistry ??= launchUpgradeRegistry();
+	return upgradeRegistry;
+}
+
+function launchUpgradeRegistry() {
+	const next = nextPatch(cliVersion());
+	const platformName = platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host));
+	const runtimeDir = join(cli, "..", "packages", "crucible");
+	const sources = {
+		crucible: join(root, "staged", "crucible"),
+		"@trioforge/crucible": join(root, "upgrade-runtime"),
+		[platformName]: join(root, "staged", `crucible-cli-${host}`),
+	};
+	for (const entry of ["package.json", "out", "transformer", "server", "client", "emit"]) {
+		cpSync(join(runtimeDir, entry), join(sources["@trioforge/crucible"], entry), {
+			recursive: true,
+			filter: (source) => !source.endsWith(".tsbuildinfo"),
+		});
+	}
+	const tarballs = join(root, "upgrade-tarballs");
+	mkdirSync(tarballs);
+	const files = [];
+	const packages = {};
+	for (const version of [cliVersion(), next]) {
+		for (const [name, source] of Object.entries(sources)) {
+			const directory = join(root, `upgrade-${version}`, name);
+			cpSync(source, directory, { recursive: true });
+			const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+			manifest.version = version;
+			if (name === "crucible") {
+				manifest.optionalDependencies = { [platformName]: version };
+				if (version === next) {
+					renameSync(join(directory, "bin", "crucible.cjs"), join(directory, "bin", "real.cjs"));
+					writeFileSync(join(directory, "bin", "crucible.cjs"), NEXT_VERSION_SHIM);
+				}
+			}
+			writeFileSync(join(directory, "package.json"), JSON.stringify(manifest));
+			files.push(pack(directory, tarballs));
+			packages[name] = { ...packages[name], [version]: { manifest, file: files.length - 1 } };
+		}
+	}
+	const registry = new Worker(new URL("./test-registry.mjs", import.meta.url), { workerData: { files, packages } });
+	const creator = project("upgrade-creator", [shim, platform]);
+	return once(registry, "message").then(([port]) => ({ registry, port, next, creator }));
+}
+
+function createGame(name, { port, creator }) {
+	const game = join(root, name);
+	const created = run("npx", ["crucible", "create", name, game, "--no-install"], creator);
+	assert.equal(created.status, 0, created.stderr);
+	writeFileSync(join(game, ".npmrc"), `registry=http://127.0.0.1:${port}/\n`);
+	return game;
+}
+
+function installedVersion(game, name) {
+	return JSON.parse(readFileSync(join(game, "node_modules", ...name.split("/"), "package.json"), "utf8")).version;
+}
+
+function assertPinned(game, version) {
+	const manifest = JSON.parse(readFileSync(join(game, "package.json"), "utf8"));
+	assert.equal(manifest.devDependencies.crucible, version);
+	assert.equal(manifest.dependencies["@trioforge/crucible"], version);
+	assert.equal(installedVersion(game, "crucible"), version);
+	assert.equal(installedVersion(game, "@trioforge/crucible"), version);
+}
+
+test(
+	"upgrade hands off to the next version, which refreshes only untouched template files",
+	{ skip: !supported && `no package for ${host}` },
+	async () => {
+		const setup = await startUpgradeRegistry();
+		const { next } = setup;
+		const game = createGame("upgrade-game", setup);
+		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
+		assert.equal(installed.status, 0, installed.stderr);
+
+		const tsconfigFile = join(game, "tsconfig.json");
+		const tsconfig = readFileSync(tsconfigFile, "utf8");
+		writeFileSync(tsconfigFile, OLD_TEMPLATE.tsconfig(tsconfig));
+		const projectFile = join(game, "default.project.json");
+		const edited = readFileSync(projectFile, "utf8").replace('"tree"', '"servePort": 34999,\n\t"tree"');
+		writeFileSync(projectFile, edited);
+		const agentsFile = join(game, "AGENTS.md");
+		const agents = readFileSync(agentsFile, "utf8").trimEnd();
+		writeFileSync(agentsFile, `${OLD_TEMPLATE.agents(agents)}\n## Notes\n\nKeep this.\n`);
+		const license = `${readFileSync(join(game, "LICENSE"), "utf8")}An older license.\n`;
+		writeFileSync(join(game, "LICENSE"), license);
+		rmSync(join(game, ".gitattributes"));
+		writeFileSync(join(game, "old-only.txt"), "old\n");
+
+		const downgrade = run("npx", ["crucible", "upgrade", "0.0.1"], game);
+		assert.equal(downgrade.status, 2, downgrade.stderr);
+		assert.match(downgrade.stderr, /--allow-downgrade/);
+
+		const upgraded = run("npx", ["crucible", "upgrade"], game);
+		assert.equal(upgraded.status, 0, upgraded.stderr);
+		const report = upgraded.stdout;
+		assert.match(
+			report,
+			new RegExp(`^Upgraded crucible and @trioforge/crucible from ${cliVersion()} to ${next}\\.\n`),
+		);
+		assert.match(
+			report,
+			/Refreshed from the new template:\n {2}tsconfig\.json\n {2}AGENTS\.md \(## Crucible\)\n\n/,
+		);
+		assert.match(report, /this project edited them, so they were left alone:\n {2}default\.project\.json\n\n/);
+		assert.match(report, /deleted in this project, so they were not recreated:\n {2}\.gitattributes\n\n/);
+		assert.match(report, /never rewrites them\. Review the change:\n {2}LICENSE\n\n/);
+		assert.match(
+			report,
+			/no longer includes these\. Delete them if this game does not use them:\n {2}old-only\.txt\n/,
+		);
+		assert.match(report, /\n {2}npx crucible docs logging\n/);
+		assert.doesNotMatch(report, /npx crucible docs oc\n/);
+		assertPinned(game, next);
+		assert.equal(readFileSync(tsconfigFile, "utf8"), tsconfig, "an untouched file takes the new template");
+		assert.equal(readFileSync(projectFile, "utf8"), edited, "an edited template file is left alone");
+		assert.equal(readFileSync(agentsFile, "utf8"), `${agents}\n\n## Notes\n\nKeep this.\n`);
+		assert.ok(!existsSync(join(game, ".gitattributes")), "a deleted file is not recreated");
+		assert.equal(readFileSync(join(game, "LICENSE"), "utf8"), license, "the license is never rewritten");
+
+		const checked = run("npm", ["run", "check"], game);
+		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
+		const again = run("npx", ["crucible", "upgrade", next], game);
+		assert.equal(again.status, 0, again.stderr);
+		assert.equal(again.stdout, `crucible is already at ${next}.\n`);
+
+		const manifestFile = join(game, "package.json");
+		const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+		manifest.scripts.preinstall = "exit 1";
+		const failing = `${JSON.stringify(manifest, null, "\t")}\n`;
+		writeFileSync(manifestFile, failing);
+		for (const attempt of ["first", "retry"]) {
+			const failed = run("npx", ["crucible", "upgrade", cliVersion(), "--allow-downgrade"], game);
+			assert.equal(failed.status, 1, `${attempt}: ${failed.stdout}\n${failed.stderr}`);
+			assert.equal(failed.stdout, "", `${attempt} does not report success`);
+			assert.match(
+				failed.stderr,
+				new RegExp(
+					`package\\.json is restored to crucible ${next} and @trioforge/crucible ${next}\\. Run \`npm install\``,
+				),
+			);
+			assert.equal(readFileSync(manifestFile, "utf8"), failing, `${attempt} restores package.json byte for byte`);
+			assert.equal(installedVersion(game, "crucible"), cliVersion(), "npm runs preinstall after it reifies");
+		}
+		delete manifest.scripts.preinstall;
+		writeFileSync(manifestFile, `${JSON.stringify(manifest, null, "\t")}\n`);
+		const recovered = run("npx", ["crucible", "upgrade", cliVersion(), "--allow-downgrade"], game);
+		assert.equal(recovered.status, 0, recovered.stderr);
+		assert.ok(
+			recovered.stdout.startsWith(`Reinstalled crucible and @trioforge/crucible at ${cliVersion()}.\n`),
+			recovered.stdout,
+		);
+		assert.match(
+			recovered.stderr,
+			new RegExp(`package\\.json pinned ${next}, which does not match the installed ${cliVersion()}`),
+		);
+		assert.match(
+			recovered.stdout,
+			/the old template is unknown, so they were left alone:\n {2}default\.project\.json\n/,
+		);
+		assertPinned(game, cliVersion());
+	},
+);
+
+test(
+	"upgrade reinstalls a pnpm game under CI despite its frozen lockfile default",
+	{ skip: !supported && `no package for ${host}` },
+	async () => {
+		const setup = await startUpgradeRegistry();
+		const game = createGame("pnpm-game", setup);
+		const ci = { CI: "true" };
+		const installed = run("pnpm", ["install"], game, ci);
+		assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
+		assert.ok(existsSync(join(game, "pnpm-lock.yaml")));
+
+		const upgraded = run("pnpm", ["exec", "crucible", "upgrade"], game, ci);
+		assert.equal(upgraded.status, 0, `${upgraded.stdout}\n${upgraded.stderr}`);
+		assert.match(upgraded.stdout, new RegExp(`from ${cliVersion()} to ${setup.next}\\.\n`));
+		assert.match(upgraded.stdout, /Run `pnpm run check` next\.\n$/);
+		assertPinned(game, setup.next);
+		assert.match(
+			readFileSync(join(game, "pnpm-lock.yaml"), "utf8"),
+			new RegExp(`crucible@${setup.next.replaceAll(".", "\\.")}`),
+		);
 	},
 );

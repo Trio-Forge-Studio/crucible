@@ -542,6 +542,7 @@ dependencies = [
  "percent-encoding",
  "rmp-serde",
  "rojo",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

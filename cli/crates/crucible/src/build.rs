@@ -183,7 +183,7 @@ fn fingerprint(root: &Path) -> Result<String, Error> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn node_package(root: &Path, name: &str) -> Option<PathBuf> {
+pub fn node_package(root: &Path, name: &str) -> Option<PathBuf> {
     root.ancestors()
         .map(|dir| dir.join("node_modules").join(name))
         .find(|package| package.join("package.json").is_file())
