@@ -132,3 +132,21 @@ A successful dry run exits 0 with no published receipts. `auth` is the existing 
 ```json
 {"environment":"production","dryRun":true,"published":[],"failed":null,"notAttempted":["arena","start"],"auth":{"keySource":"profile publish","name":"publish-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}}
 ```
+
+## crucible upgrade
+
+Run `npx crucible upgrade` from the game's root to move `crucible` and `@trioforge/crucible` to the latest version in the registry. Pass a version, such as `npx crucible upgrade 0.2.0`, to pick one.
+
+```console
+npx crucible upgrade
+npx crucible upgrade 0.2.0
+```
+
+- The latest version comes from `npm view crucible version` in the game's root, so the registry and credentials in `.npmrc` apply.
+- Both packages move to the same exact version in `package.json`. Only their version strings change, so the file keeps its formatting. Then the game's package manager installs them. A lockfile picks the manager: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, or `package-lock.json`. Without one, `npm_config_user_agent` picks it, with npm as the default.
+- An older version exits 2 unless you pass `--allow-downgrade`. The installed version exits 0 and changes nothing.
+- The template owns `tsconfig.json`, `default.project.json`, `vite.config.ts`, `.gitignore`, `LICENSE`, and the `## Crucible` section of `AGENTS.md`. A file or section that still matches the old version's template takes the new version's content. One that differs is listed and left alone. The comparison ignores CRLF line endings. `package.json`, `crucible.toml`, and `src` belong to the game and are never changed.
+- The installed versions supply both templates. Before install, the old version describes its template and docs, and after install the new one does. If the old version cannot describe them, every owned file that differs from the new template is listed, and every docs topic is listed.
+- If install fails, `package.json` is restored and the command exits 1.
+
+Stdout is the report an agent acts on: the two versions, the refreshed files, the edited files to merge by hand, and a `npx crucible docs <topic>` line for each topic whose content changed. Install output and progress go to stderr. `npx crucible create <name> <empty-dir> --no-install` writes the new template for a manual merge.

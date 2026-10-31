@@ -38,6 +38,14 @@ In the generated game, run `npx crucible dev` to compile on save and sync the ga
 
 Run `pnpm build` from the repository root first. The npm package test packs the built runtime, creates a project through the packed CLI, replaces its dependency pins with local test tarballs, installs it, and runs its full `check` script. Shipped templates contain no tarball paths.
 
+## Upgrade a game
+
+`npx crucible upgrade [version]` moves a game's `crucible` and `@trioforge/crucible` to one version, reinstalls, and refreshes the template files the game has not edited. See `docs/cli.md` for the rules and exit codes.
+
+`npx crucible upgrade` runs the game's installed, older binary. It cannot know the new template, so both sides come from the installed packages. The hidden `crucible __upgrade-snapshot <name>` prints a version's owned template parts and a SHA-256 per docs topic as JSON. `upgrade` runs it through the installed shim before and after install. Old and new versions exchange that JSON, so only add fields to it. The new version's snapshot decides which files the template owns.
+
+The npm package test stages the current binary at the CLI version and again at the next patch version, serves both from a local registry in a worker thread (`npm/test-registry.mjs`, which passes other packages through to npmjs), creates a game at the first version, upgrades it, and runs its `check`. The next version's shim edits its snapshot to stand in for a changed template and docs.
+
 ## Update the spec
 
 The checked-in source is `spec/openapi.json` from `Roblox/creator-docs` commit `46be165f526ec23305394ac0c56a95edd2d7f7d9`. `spec/overlay.toml` contains guarded corrections and the two added operations. Every command reads the generated `spec/registry.json`. The binary embeds that registry and loads no spec at runtime.
