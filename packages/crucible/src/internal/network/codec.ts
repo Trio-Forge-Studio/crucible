@@ -228,12 +228,12 @@ export interface Codec {
 	readonly decode: (reader: Reader, path: string) => unknown;
 }
 
-function plain(value: unknown, path: string): Record<string, unknown> {
-	if (!typeIs(value, "table") || getmetatable(value) !== undefined) fail(path, "expected plain table");
+function tableValue(value: unknown, path: string): Record<string, unknown> {
+	if (!typeIs(value, "table")) fail(path, "expected table");
 	return value as Record<string, unknown>;
 }
 function dense(value: unknown, path: string): unknown[] {
-	plain(value, path);
+	tableValue(value, path);
 	const array = value as unknown[];
 	let count = 0;
 	for (const [key] of pairs(array)) {
@@ -402,7 +402,7 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 				const fields = node.fields.map(([name, child]) => [name, build(child, depth + 1)] as const);
 				for (const [, codec] of fields) minBytes += codec.minBytes;
 				encode = (w, v, p) => {
-					const object = plain(v, p);
+					const object = tableValue(v, p);
 					for (const [name, c] of fields) c.encode(w, object[name], `${p}.${name}`);
 				};
 				decode = (r, p) => {
@@ -417,7 +417,7 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 				const body = build(node.body, depth + 1, true);
 				minBytes = body.minBytes;
 				encode = (w, v, p) => {
-					if (plain(v, p)[node.key] !== node.value) fail(p, "invalid discriminant");
+					if (tableValue(v, p)[node.key] !== node.value) fail(p, "invalid discriminant");
 					body.encode(w, v, p);
 				};
 				decode = (r, p) => {
@@ -517,7 +517,7 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 				};
 				encode = (w, v, p) => {
 					const entries = new Array<readonly [unknown, unknown]>();
-					for (const [k, val] of pairs(plain(v, p))) entries.push([k, val]);
+					for (const [k, val] of pairs(tableValue(v, p))) entries.push([k, val]);
 					w.budget.chargeEntries(entries.size(), p);
 					entries.sort((a, b) => less(a[0], b[0]));
 					w.varuint(entries.size());
@@ -611,7 +611,8 @@ export function encodeDynamic(
 		w.u8(kind === "vector3" ? 7 : kind === "color3" ? 8 : 9);
 		datatypes[kind].encode(w, value, path);
 	} else {
-		const object = plain(value, path);
+		const object = tableValue(value, path);
+		if (getmetatable(object) !== undefined) fail(path, "dynamic metatable");
 		if (active.has(object)) fail(path, "cycle");
 		active.add(object);
 		w.budget.enter(path);

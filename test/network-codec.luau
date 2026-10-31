@@ -570,4 +570,15 @@ tests["58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 	end)
 end
 
+tests["61 66 static tables admit metatables while 69 dynamic tables reject them"] = function()
+	local r = h.realm()
+	local object = r.n.object({ { "a", r.n.u8 } })
+	spec.eq(h.hex(h.encode(r, object, setmetatable({ a = 3, extra = 4 }, {}))), "03", "static object")
+	spec.eq(h.hex(h.encode(r, r.n.array(r.n.u8), setmetatable({ 3, 4 }, {}))), "02 03 04", "static array")
+	spec.eq(h.hex(h.encode(r, r.n.map(r.n.string, r.n.u8), setmetatable({ a = 3 }, {}))), "01 01 61 03", "static map")
+	h.rejects(function()
+		h.encode(r, r.n.dynamic, setmetatable({ a = 3 }, {}))
+	end)
+end
+
 return tests
