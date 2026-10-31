@@ -404,7 +404,7 @@ test("FD catalogue lowers all 50 approved payloads PartyRequest variants and typ
 	);
 	fs.writeFileSync(path.join(game, "expected.json"), JSON.stringify(expected));
 	fs.copyFileSync(
-		path.join(__dirname, "fixtures/network/emitted-descriptors.luau"),
+		path.join(__dirname, "fixtures/network/emitted-descriptors.luau.txt"),
 		path.join(game, "emitted-descriptors.luau"),
 	);
 	const lune = spawnSync("lune", ["run", "emitted-descriptors.luau"], {
