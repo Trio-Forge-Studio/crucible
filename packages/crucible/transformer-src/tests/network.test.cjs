@@ -414,3 +414,22 @@ test("network declaration and receiver aliases and namespaces preserve macro sym
 	assert.match(result.output.get("src/server/service.ts"), /__crucible.receive\(this, "r", Named/);
 	compile(game);
 });
+
+test("network width identity survives workspace junctions outside node_modules", () => {
+	const game = project({ "src/shared/messages.ts": imports + declaration("{a:u8;b:u16;c:u32;d:f32;e:f64}") });
+	const installed = path.join(game, "node_modules/@trioforge/crucible");
+	const vendor = path.join(game, "vendor/runtime");
+	fs.cpSync(installed, vendor, { recursive: true });
+	fs.rmSync(installed, { recursive: true, force: true });
+	fs.symlinkSync(vendor, installed, "junction");
+	const result = inspect(game);
+	assert.deepEqual(
+		result.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.equal(
+		descriptorExpressions(result.output.get("src/shared/messages.ts")).get("X.Test")[0],
+		'__crucible.n.object([["a", __crucible.n.u8], ["b", __crucible.n.u16], ["c", __crucible.n.u32], ["d", __crucible.n.f32], ["e", __crucible.n.f64]])',
+	);
+	compile(game);
+});

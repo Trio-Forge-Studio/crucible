@@ -1,4 +1,5 @@
 const path = require("node:path");
+const { packageOf } = require("./type-id.cjs");
 
 const limits = Object.freeze({
 	MESSAGE_NAME_MAX_BYTES: 64,
@@ -37,7 +38,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 	const sorted = (names) => names.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
 	const widths = new Set();
 	for (const sf of program.getSourceFiles()) {
-		if (!/[\\/]@trioforge[\\/]crucible[\\/]/.test(sf.fileName)) continue;
+		if (packageOf(sf.fileName)?.json.name !== "@trioforge/crucible") continue;
 		const walk = (node) => {
 			if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "width")
 				widths.add(checker.getSymbolAtLocation(node.name));

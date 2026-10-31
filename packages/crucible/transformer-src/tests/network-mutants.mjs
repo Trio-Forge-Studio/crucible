@@ -191,11 +191,20 @@ const mutations = [
 		"tests/fixtures/network/index.d.ts",
 		"network-types.test.cjs",
 	],
+	[
+		"width identity package resolution",
+		'packageOf(sf.fileName)?.json.name !== "@trioforge/crucible"',
+		"!/[\\\\/]@trioforge[\\\\/]crucible[\\\\/]/.test(sf.fileName)",
+		"network width identity",
+	],
 ];
 if (process.argv.includes("--list")) {
 	console.log(JSON.stringify(mutations.map(([name]) => name)));
 	process.exit(0);
 }
+for (const [name, before, , , file = "network.cjs"] of mutations)
+	assert.ok(fs.readFileSync(path.join(source, file), "utf8").includes(before), `${name} matches source`);
+if (process.argv.includes("--validate")) process.exit(0);
 fs.rmSync(scratch, { recursive: true, force: true });
 const receipts = [];
 for (const [name, before, after, test, file = "network.cjs", suite = "network.test.cjs"] of mutations) {
