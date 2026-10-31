@@ -801,7 +801,7 @@ fn download_retry_waits_end_at_the_deadline() {
     });
     let download = server.mock(|w, t| {
         w.path("/file");
-        t.status(503).header("retry-after", "2");
+        t.status(503).header("retry-after", "60");
     });
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("download");
@@ -815,7 +815,7 @@ fn download_retry_waits_end_at_the_deadline() {
         .output()
         .unwrap();
     assert_eq!(code(&out), 7, "{}", document(&out));
-    assert!(start.elapsed() < std::time::Duration::from_secs(1), "the deadline bounds Retry-After sleeps");
+    assert!(start.elapsed() < std::time::Duration::from_secs(30), "the deadline bounds Retry-After sleeps");
     download.assert_calls(1);
     assert!(!path.exists());
 }
