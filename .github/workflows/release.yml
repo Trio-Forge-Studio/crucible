@@ -136,8 +136,11 @@ jobs:
         run: node cli/npm/registry.mjs preflight build/release/tarballs
       - name: Prove publish packaging without credentials
         run: |
+          version=$(node -p "require('./build/release/packages/crucible/package.json').version")
+          tag=latest
+          if [[ "$version" == *-* ]]; then tag=next; fi
           for package in build/release/tarballs/*.tgz; do
-            npm publish "$package" --dry-run --access public --ignore-scripts
+            npm publish "$package" --dry-run --access public --ignore-scripts --tag "$tag"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
