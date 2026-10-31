@@ -71,9 +71,6 @@ jobs:
           codesign --verify --strict --verbose=2 "$binary"
           file "$binary" | tee binary-file.txt
           grep 'Mach-O 64-bit executable arm64' binary-file.txt
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 24
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
