@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitCode, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,37 +23,46 @@ pub struct Args {
 
 pub const APPLY: &str = "__upgrade-apply";
 
-// Raise when a snapshot field changes meaning. A binary refuses formats above its own.
+// The hand-off contract in cli/README.md says when to raise this.
 const FORMAT: u32 = 1;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 const RUNTIME: &str = "@trioforge/crucible";
 
-const OWNED: &[(&str, Option<&str>)] = &[
-    ("tsconfig.json", None),
-    ("default.project.json", None),
-    ("vite.config.ts", None),
-    (".gitignore", None),
-    ("LICENSE", None),
-    ("AGENTS.md", Some("## Crucible")),
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Upkeep {
+    Refresh,
+    // Rewriting a game's license text has legal effect, so a change is only reported.
+    Report,
+}
+
+const OWNED: &[(&str, Option<&str>, Upkeep)] = &[
+    ("tsconfig.json", None, Upkeep::Refresh),
+    ("default.project.json", None, Upkeep::Refresh),
+    ("vite.config.ts", None, Upkeep::Refresh),
+    (".gitignore", None, Upkeep::Refresh),
+    (".gitattributes", None, Upkeep::Refresh),
+    ("LICENSE", None, Upkeep::Report),
+    ("AGENTS.md", Some("## Crucible"), Upkeep::Refresh),
 ];
 
-// The old binary sends this to the new one, so fields are only ever added.
+// Snapshot format 1. Never change these structs. A new shape gets a new format, new structs, and a decode arm.
 #[derive(Serialize, Deserialize)]
-struct Snapshot {
+struct SnapshotV1 {
     format: u32,
     version: String,
-    owned: Vec<Part>,
+    owned: Vec<PartV1>,
     docs: BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct Part {
+struct PartV1 {
     path: String,
     section: Option<String>,
+    // The whole rendered file, so the reading binary cuts the section with its own rules.
     content: String,
 }
 
-impl Part {
+impl PartV1 {
     fn label(&self) -> String {
         match &self.section {
             Some(heading) => format!("{} ({heading})", self.path),
@@ -68,7 +77,11 @@ impl Part {
         }
     }
 
-    fn same_place(&self, other: &Part) -> bool {
+    fn template(&self) -> Option<&str> {
+        self.find(&self.content).map(|range| &self.content[range])
+    }
+
+    fn same_place(&self, other: &PartV1) -> bool {
         self.path == other.path && self.section == other.section
     }
 }
@@ -127,7 +140,7 @@ struct Installed {
 #[derive(Debug, PartialEq)]
 enum Plan {
     Current,
-    NewerThanLatest,
+    NewerThanLatest(Version),
     Install,
 }
 
@@ -138,7 +151,8 @@ pub fn main(args: Args) -> ExitCode {
     exit(result)
 }
 
-pub fn apply_main(from: String) -> ExitCode {
+pub fn apply_main(from: Version, crucible: String, runtime: String) -> ExitCode {
+    let pins = Pins { crucible, runtime };
     let mut input = String::new();
     let result = std::io::stdin()
         .read_to_string(&mut input)
@@ -147,7 +161,7 @@ pub fn apply_main(from: String) -> ExitCode {
             std::env::current_dir()
                 .map_err(|error| Error::Failed(format!("cannot read the current directory: {error}")))
         })
-        .and_then(|root| apply(&root, &from, &input))
+        .and_then(|root| apply(&root, &from, &pins, &input))
         .map(|report| print!("{report}"));
     exit(result)
 }
@@ -186,21 +200,13 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
             println!("crucible is already at {target}.");
             return Ok(());
         }
-        Plan::NewerThanLatest => {
-            println!("crucible {} is already newer than latest, {target}.", installed.crucible);
+        Plan::NewerThanLatest(newest) => {
+            println!("This game is already on {newest}, newer than latest, {target}.");
             return Ok(());
         }
         Plan::Install => {}
     }
-    let old = if satisfies(&pins.crucible, &installed.crucible) {
-        serde_json::to_string(&snapshot(&name)).expect("snapshots serialize")
-    } else {
-        eprintln!(
-            "crucible upgrade: package.json pins crucible {} but {} is installed, so the template these files came from is unknown",
-            pins.crucible, installed.crucible
-        );
-        String::new()
-    };
+    let old = serde_json::to_string(&snapshot(&name)).expect("snapshots serialize");
     let bumped = bump(&manifest_text, &target.to_string())?;
     write_atomic(&manifest_path, &bumped)
         .map_err(|error| Error::Failed(format!("cannot write {}: {error}", manifest_path.display())))?;
@@ -209,7 +215,7 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     );
     if let Err(error) = run_install(root, manager) {
         let pinned = format!("crucible {} and {RUNTIME} {}", pins.crucible, pins.runtime);
-        return Err(Error::Failed(match write_atomic(&manifest_path, &manifest_text) {
+        return Err(Error::Failed(match restore(&manifest_path, &manifest_text) {
             Ok(()) => format!(
                 "{error}. package.json is restored to {pinned}. Run `{install}` to return node_modules to those versions"
             ),
@@ -218,14 +224,7 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
             }
         }));
     }
-    let now = [installed_version(root, "crucible")?, installed_version(root, RUNTIME)?];
-    if now.iter().any(|version| version.as_ref() != Some(&target)) {
-        let [crucible, runtime] = now.map(|version| version.map_or("nothing".into(), |version| version.to_string()));
-        return Err(Error::Failed(format!(
-            "after `{install}`, crucible is at {crucible} and {RUNTIME} at {runtime}, not {target}. Delete node_modules and run `{install}`"
-        )));
-    }
-    hand_off(root, &target, &installed.crucible, old, &install)
+    refresh(root, &name, &target, &installed.crucible, &pins, old, &install)
 }
 
 fn plan(
@@ -243,22 +242,54 @@ fn plan(
     {
         return Ok(Plan::Current);
     }
-    if *target < installed.crucible {
+    let newest = installed.runtime.as_ref().map_or(&installed.crucible, |runtime| runtime.max(&installed.crucible));
+    if target < newest {
         if !requested {
-            return Ok(Plan::NewerThanLatest);
+            return Ok(Plan::NewerThanLatest(newest.clone()));
         }
         if !allow_downgrade {
             return Err(Error::Usage(format!(
-                "{target} is older than the installed {}. Pass --allow-downgrade to install it anyway",
-                installed.crucible
+                "{target} is older than the installed {newest}. Pass --allow-downgrade to install it anyway"
             )));
         }
     }
     Ok(Plan::Install)
 }
 
+// package.json and node_modules are at the target by now, so a rerun reports it as installed and cannot finish the refresh.
+fn refresh(
+    root: &Path,
+    name: &str,
+    target: &Version,
+    from: &Version,
+    pins: &Pins,
+    old: String,
+    install: &str,
+) -> Result<(), Error> {
+    hand_off(root, target, from, pins, old, install).map_err(|error| {
+        Error::Failed(format!(
+            "{error}. package.json and node_modules are at {target}, but the template was not refreshed, and running crucible upgrade again reports crucible as already at {target}. To compare by hand, run `npx crucible create {name} <empty-dir> --no-install` and diff {} with this game's",
+            owned_labels()
+        ))
+    })
+}
+
 // The installed binary reconciles the template, so a fix to these rules reaches games still on an older version.
-fn hand_off(root: &Path, target: &Version, from: &Version, old: String, install: &str) -> Result<(), Error> {
+fn hand_off(
+    root: &Path,
+    target: &Version,
+    from: &Version,
+    pins: &Pins,
+    old: String,
+    install: &str,
+) -> Result<(), Error> {
+    let now = [installed_version(root, "crucible")?, installed_version(root, RUNTIME)?];
+    if now.iter().any(|version| version.as_ref() != Some(target)) {
+        let [crucible, runtime] = now.map(|version| version.map_or("nothing".into(), |version| version.to_string()));
+        return Err(Error::Failed(format!(
+            "after `{install}`, crucible is at {crucible} and {RUNTIME} at {runtime}, not {target}. Delete node_modules and run `{install}`"
+        )));
+    }
     let shim = shim(root).ok_or_else(|| Error::Failed("the installed crucible package has no crucible bin".into()))?;
     let mut version = Command::new("node");
     version.arg(&shim).arg("--version").current_dir(root).stdout(Stdio::piped());
@@ -271,60 +302,65 @@ fn hand_off(root: &Path, target: &Version, from: &Version, old: String, install:
         )));
     }
     let mut apply = Command::new("node");
-    apply.arg(&shim).args([APPLY, &from.to_string()]).current_dir(root);
+    apply.arg(&shim).args([APPLY, &from.to_string(), &pins.crucible, &pins.runtime]).current_dir(root);
     if finish(apply, Some(old), &format!("crucible {APPLY}"))?.status.success() {
         Ok(())
     } else {
-        Err(Error::Failed(format!(
-            "crucible {target} is installed, but it could not refresh the template. `npx crucible create <name> <empty-dir> --no-install` writes the new template to compare by hand"
-        )))
+        Err(Error::Failed(format!("crucible {APPLY} failed")))
     }
+}
+
+fn owned_labels() -> String {
+    let labels: Vec<_> = OWNED
+        .iter()
+        .map(|&(path, heading, _)| match heading {
+            Some(heading) => format!("the {heading} section of {path}"),
+            None => path.into(),
+        })
+        .collect();
+    let (last, rest) = labels.split_last().expect("the template owns files");
+    format!("{}, and {last}", rest.join(", "))
 }
 
 fn reported_version(stdout: &str) -> Option<&str> {
     stdout.strip_prefix("crucible ")?.split_whitespace().next()
 }
 
-fn apply(root: &Path, from: &str, input: &str) -> Result<String, Error> {
+fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<String, Error> {
     let (_, manifest) = read_manifest(root)?;
     let name = package_name(&manifest)?;
-    let old = match old_snapshot(input, from) {
-        Ok(old) => Some(old),
-        Err(reason) => {
-            if !input.is_empty() {
-                eprintln!("crucible upgrade: {reason}, so the old template is unknown");
-            }
-            None
-        }
-    };
+    let old = old_template(input, from, pins)
+        .inspect_err(|reason| eprintln!("crucible upgrade: {reason}, so the old template is unknown"))
+        .ok();
     let new = snapshot(&name);
     let to = installed_version(root, "crucible")?
-        .ok_or_else(|| Error::Failed(format!("crucible is not installed in {}", root.display())))?
-        .to_string();
+        .ok_or_else(|| Error::Failed(format!("crucible is not installed in {}", root.display())))?;
     let mut written = Vec::new();
     let mut edited = Vec::new();
     let mut deleted = Vec::new();
-    for part in &new.owned {
+    let mut review = Vec::new();
+    for (part, &(_, _, upkeep)) in new.owned.iter().zip(OWNED) {
+        let new_part = part.template().expect("owned sections exist");
         let file = root.join(&part.path);
         let current = fs::read_to_string(&file).ok();
         let range = current.as_deref().and_then(|text| part.find(text));
         let current_part = current.as_deref().zip(range.clone()).map(|(text, range)| &text[range]);
-        let old_part = old
-            .as_ref()
-            .map(|old| old.owned.iter().find(|candidate| candidate.same_place(part)).map(|old| old.content.as_str()));
-        match reconcile(old_part, &part.content, current_part, part.section.is_none()) {
-            Change::Current => {}
-            Change::Edited => edited.push(part.label()),
-            Change::Deleted => deleted.push(part.label()),
-            Change::Write => {
+        let old_part =
+            old.as_ref().and_then(|old| match old.owned.iter().find(|candidate| candidate.same_place(part)) {
+                Some(old) => old.template().map(Some),
+                None => Some(None),
+            });
+        match (reconcile(old_part, new_part, current_part, part.section.is_none()), upkeep) {
+            (Change::Current, _) => {}
+            (Change::Edited, _) => edited.push(part.label()),
+            (Change::Deleted, _) => deleted.push(part.label()),
+            (Change::Write, Upkeep::Report) => review.push(part.label()),
+            (Change::Write, Upkeep::Refresh) => {
                 let content = match (&current, range) {
-                    (Some(text), Some(range)) => format!(
-                        "{}{}{}",
-                        &text[..range.start],
-                        line_endings_like(&part.content, text),
-                        &text[range.end..]
-                    ),
-                    _ => part.content.clone(),
+                    (Some(text), Some(range)) => {
+                        format!("{}{}{}", &text[..range.start], line_endings_like(new_part, text), &text[range.end..])
+                    }
+                    _ => new_part.to_owned(),
                 };
                 write_atomic(&file, &content)
                     .map_err(|error| Error::Failed(format!("cannot write {}: {error}", file.display())))?;
@@ -337,7 +373,7 @@ fn apply(root: &Path, from: &str, input: &str) -> Result<String, Error> {
         .flat_map(|old| &old.owned)
         .filter(|part| !new.owned.iter().any(|candidate| candidate.same_place(part)))
         .filter(|part| fs::read_to_string(root.join(&part.path)).is_ok_and(|text| part.find(&text).is_some()))
-        .map(Part::label)
+        .map(PartV1::label)
         .collect();
     let topics: Vec<_> = new
         .docs
@@ -346,7 +382,7 @@ fn apply(root: &Path, from: &str, input: &str) -> Result<String, Error> {
         .map(|(topic, _)| topic.as_str())
         .collect();
 
-    let mut report = if from == to {
+    let mut report = if *from == to {
         format!("Reinstalled crucible and {RUNTIME} at {to}.\n")
     } else {
         format!("Upgraded crucible and {RUNTIME} from {from} to {to}.\n")
@@ -367,8 +403,9 @@ fn apply(root: &Path, from: &str, input: &str) -> Result<String, Error> {
         &edited,
     );
     list("These are deleted in this project, so they were not recreated:", &deleted);
+    list("The new template changed these, and crucible upgrade never rewrites them. Review the change:", &review);
     list("The new template no longer includes these. Delete them if this game does not use them:", &dropped);
-    if !edited.is_empty() || !deleted.is_empty() {
+    if !edited.is_empty() || !deleted.is_empty() || !review.is_empty() {
         report +=
             &format!("Merge by hand. `npx crucible create {name} <empty-dir> --no-install` writes the new template.\n");
     }
@@ -381,43 +418,46 @@ fn apply(root: &Path, from: &str, input: &str) -> Result<String, Error> {
     Ok(report)
 }
 
-fn old_snapshot(input: &str, from: &str) -> Result<Snapshot, String> {
+fn old_template(input: &str, from: &Version, pins: &Pins) -> Result<SnapshotV1, String> {
+    let old = decode(input)?;
+    if old.version.parse().ok().as_ref() != Some(from) {
+        return Err(format!("the old template is from crucible {}, but {from} was installed", old.version));
+    }
+    if let Some(pin) = [&pins.crucible, &pins.runtime].into_iter().find(|pin| satisfies(pin, from) == Some(false)) {
+        return Err(format!("package.json pinned {pin}, which does not match the installed {from}"));
+    }
+    Ok(old)
+}
+
+fn decode(input: &str) -> Result<SnapshotV1, String> {
     #[derive(Deserialize)]
     struct Header {
         format: u32,
     }
-    let header: Header =
-        serde_json::from_str(input).map_err(|error| format!("the old template is not readable: {error}"))?;
-    if header.format > FORMAT {
-        return Err(format!("the old template uses format {}, newer than this version's {FORMAT}", header.format));
+    let unreadable = |error: serde_json::Error| format!("the old template is not readable: {error}");
+    match serde_json::from_str::<Header>(input).map_err(unreadable)?.format {
+        1 => serde_json::from_str(input).map_err(unreadable),
+        format if format > FORMAT => {
+            Err(format!("the old template uses format {format}, newer than this version's {FORMAT}"))
+        }
+        format => Err(format!("the old template uses unknown format {format}")),
     }
-    let snapshot: Snapshot =
-        serde_json::from_str(input).map_err(|error| format!("the old template is not readable: {error}"))?;
-    if snapshot.version != from {
-        return Err(format!("the old template is from crucible {}, but {from} was installed", snapshot.version));
-    }
-    Ok(snapshot)
 }
 
-fn snapshot(name: &str) -> Snapshot {
+fn snapshot(name: &str) -> SnapshotV1 {
     let tokens = tokens(name);
     let owned = OWNED
         .iter()
-        .map(|&(path, heading)| {
+        .map(|&(path, heading, _)| {
             let source = FILES.iter().find(|(file, _)| *file == path).expect("owned files are template files").1;
-            let content = render(source, &tokens);
-            let content = match heading {
-                Some(heading) => content[section(&content, heading).expect("owned sections exist")].to_owned(),
-                None => content,
-            };
-            Part { path: path.into(), section: heading.map(Into::into), content }
+            PartV1 { path: path.into(), section: heading.map(Into::into), content: render(source, &tokens) }
         })
         .collect();
     let docs = crate::docs::TOPICS
         .iter()
         .map(|topic| (topic.name.to_owned(), format!("{:x}", Sha256::digest(topic.markdown))))
         .collect();
-    Snapshot { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), owned, docs }
+    SnapshotV1 { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), owned, docs }
 }
 
 // `old` is `None` when the old template is unknown and `Some(None)` when it lacked this part.
@@ -502,7 +542,7 @@ fn read_pins(manifest: &serde_json::Value) -> Result<Pins, Error> {
     for group in ["dependencies", "devDependencies"] {
         for (slot, package) in found.iter_mut().zip(["crucible", RUNTIME]) {
             let Some(spec) = manifest[group].get(package) else { continue };
-            let spec = spec.as_str().filter(|spec| VersionReq::parse(spec).is_ok()).ok_or_else(|| {
+            let spec = spec.as_str().filter(|spec| registry_spec(spec)).ok_or_else(|| {
                 Error::Usage(format!(
                     "package.json sets {package} to {spec}, which is not a registry version or range. crucible upgrade only rewrites those, so change it by hand"
                 ))
@@ -520,11 +560,29 @@ fn read_pins(manifest: &serde_json::Value) -> Result<Pins, Error> {
     })
 }
 
-fn satisfies(spec: &str, version: &Version) -> bool {
-    match spec.parse::<Version>() {
-        Ok(exact) => exact == *version,
-        Err(_) => VersionReq::parse(spec).is_ok_and(|range| range.matches(version)),
+// npm reads a spec as a version range unless a protocol, URL, path, Git shorthand, or tag name says otherwise.
+fn registry_spec(spec: &str) -> bool {
+    let spec = spec.trim();
+    let mut chars = spec.chars();
+    let (first, second) = (chars.next(), chars.next());
+    !spec.contains([':', '/', '\\', '#'])
+        && match first {
+            None => true,
+            Some(first) if first.is_ascii_digit() || "^~<>=*".contains(first) => true,
+            Some('v' | 'V') => second.is_some_and(|second| second.is_ascii_digit()),
+            Some('x' | 'X') => second.is_none_or(|second| " .|".contains(second)),
+            _ => false,
+        }
+}
+
+// None when the semver crate would read the range differently from npm, such as `1.2`, `a || b`, or `a - b`.
+fn satisfies(spec: &str, version: &Version) -> Option<bool> {
+    let spec = spec.trim();
+    if let Ok(exact) = spec.parse::<Version>() {
+        return Some(exact == *version);
     }
+    let comparable = spec.starts_with(['^', '~', '<', '>', '=', '*']) && !spec.contains(['|', ',', ' ']);
+    VersionReq::parse(spec).ok().filter(|_| comparable).map(|range| range.matches(version))
 }
 
 // Edits the version strings in place, because reserializing would reformat the file and fail the game's format check.
@@ -570,12 +628,49 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
     Ok(result)
 }
 
-fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
-    let mut temporary = path.as_os_str().to_owned();
+fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
+    let (temporary, target) = stage(path, content)?;
+    replace(&temporary, &target).inspect_err(|_| {
+        let _ = fs::remove_file(&temporary);
+    })
+}
+
+// A failed restore keeps its temporary file, because that file then holds the only copy of the original.
+fn restore(path: &Path, original: &str) -> Result<(), String> {
+    let (temporary, target) = stage(path, original).map_err(|error| error.to_string())?;
+    replace(&temporary, &target).map_err(|error| {
+        format!("{error}. {} holds the original; move it over {}", temporary.display(), target.display())
+    })
+}
+
+fn stage(path: &Path, content: &str) -> io::Result<(PathBuf, PathBuf)> {
+    let linked = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink());
+    let target = if linked { fs::canonicalize(path)? } else { path.to_owned() };
+    let mut temporary = target.as_os_str().to_owned();
     temporary.push(".crucible-upgrade");
     let temporary = PathBuf::from(temporary);
-    fs::write(&temporary, content)?;
-    fs::rename(&temporary, path)
+    fs::write(&temporary, content).inspect_err(|_| {
+        let _ = fs::remove_file(&temporary);
+    })?;
+    Ok((temporary, target))
+}
+
+// On Windows an editor, indexer, or antivirus scanner holding the file open fails the rename for a moment.
+fn replace(temporary: &Path, target: &Path) -> io::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        match fs::rename(temporary, target) {
+            Err(error) if cfg!(windows) && busy(&error) && Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            result => return result,
+        }
+    }
+}
+
+fn busy(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::ResourceBusy)
+        || matches!(error.raw_os_error(), Some(32 | 33))
 }
 
 // A pnpm, Yarn, or npm workspace keeps one lockfile at its root, above the game.
@@ -657,7 +752,6 @@ struct Finished {
     stdout: Vec<u8>,
 }
 
-// The child's stderr is inherited, so its diagnostics reach the user when it fails.
 fn finish(command: Command, input: Option<String>, label: &str) -> Result<Finished, Error> {
     finish_within(command, input, label, CHILD_TIMEOUT)
 }
@@ -669,6 +763,8 @@ fn finish_within(
     timeout: Duration,
 ) -> Result<Finished, Error> {
     command.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let mut child = command.spawn().map_err(|error| Error::Failed(format!("cannot run {label}: {error}")))?;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         thread::spawn(move || stdin.write_all(input.as_bytes()));
@@ -686,7 +782,7 @@ fn finish_within(
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
-                let _ = child.kill();
+                kill_tree(&mut child);
                 return Err(Error::Failed(format!("{label} did not finish within {} seconds", timeout.as_secs())));
             }
             Err(error) => return Err(Error::Failed(format!("cannot wait for {label}: {error}"))),
@@ -694,6 +790,23 @@ fn finish_within(
     };
     let stdout = reader.map(|reader| reader.join().unwrap_or_default()).unwrap_or_default();
     Ok(Finished { status, stdout })
+}
+
+// The shim runs the native binary as a grandchild, so killing only the shim would leave it running.
+fn kill_tree(child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &child.id().to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]
@@ -767,7 +880,19 @@ mod tests {
 
     #[test]
     fn pins_refuse_non_registry_specs() {
-        for spec in ["workspace:*", "file:../crucible", "link:../crucible", "npm:other@0.1.0", "github:a/b", "latest"] {
+        for spec in [
+            "workspace:*",
+            "file:../crucible",
+            "link:../crucible",
+            "npm:other@0.1.0",
+            "github:a/b",
+            "a/b",
+            "git+https://example.com/a.git",
+            "https://example.com/a.tgz",
+            "../crucible",
+            "latest",
+            "next",
+        ] {
             let manifest =
                 serde_json::json!({ "dependencies": { RUNTIME: "0.1.0" }, "devDependencies": { "crucible": spec } });
             assert!(
@@ -806,7 +931,7 @@ mod tests {
             "a range is pinned exactly"
         );
         assert_eq!(
-            plan_for(&pins("0.2.0", "0.2.0"), &at("0.2.0", Some("0.3.0")), true, false),
+            plan_for(&pins("0.2.0", "0.2.0"), &at("0.2.0", Some("0.1.0")), true, false),
             Plan::Install,
             "runtime not installed at the target"
         );
@@ -814,7 +939,7 @@ mod tests {
         assert_eq!(plan_for(&pins("0.1.0", "0.1.0"), &at("0.1.0", Some("0.1.0")), false, false), Plan::Install);
         assert_eq!(
             plan_for(&pins("0.3.0-rc.1", "0.3.0-rc.1"), &at("0.3.0-rc.1", Some("0.3.0-rc.1")), false, false),
-            Plan::NewerThanLatest
+            Plan::NewerThanLatest(version("0.3.0-rc.1"))
         );
         assert!(matches!(
             plan(&pins("0.3.0", "0.3.0"), &at("0.3.0", Some("0.3.0")), &b, true, false),
@@ -825,31 +950,50 @@ mod tests {
 
     #[test]
     fn pins_match_the_installed_version_like_npm() {
-        assert!(satisfies("0.1.0", &version("0.1.0")));
-        assert!(!satisfies("0.1.0", &version("0.1.1")), "a bare version is exact in npm");
-        assert!(satisfies("^0.1.0", &version("0.1.4")));
-        assert!(!satisfies("~0.1.0", &version("0.2.0")));
+        assert_eq!(satisfies("0.1.0", &version("0.1.0")), Some(true));
+        assert_eq!(satisfies("0.1.0", &version("0.1.1")), Some(false), "a bare version is exact in npm");
+        assert_eq!(satisfies("^0.1.0", &version("0.1.4")), Some(true));
+        assert_eq!(satisfies("~0.1.0", &version("0.2.0")), Some(false));
+        for range in ["1.2", "^0.1.0 || ^0.2.0", ">=0.1.0 <0.2.0", "0.1.0 - 0.2.0", "x", "v0.1.0"] {
+            assert_eq!(satisfies(range, &version("0.1.0")), None, "{range} is left to npm");
+        }
     }
 
     #[test]
-    fn the_old_snapshot_must_be_a_known_format_from_the_installed_version() {
+    fn the_old_template_is_known_only_for_a_known_format_from_the_installed_version() {
         let current = serde_json::to_string(&snapshot("game")).unwrap();
-        let version = env!("CARGO_PKG_VERSION");
-        assert!(old_snapshot(&current, version).is_ok());
-        assert!(old_snapshot(&current, "0.0.1").is_err_and(|reason| reason.contains("but 0.0.1 was installed")));
+        let from = version(env!("CARGO_PKG_VERSION"));
+        let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
+        assert!(old_template(&current, &from, &exact).is_ok());
+        assert!(
+            old_template(&current, &version("0.0.1"), &pins("0.0.1", "0.0.1"))
+                .is_err_and(|reason| reason.contains("but 0.0.1 was installed"))
+        );
+        assert!(
+            old_template(&current, &from, &pins("0.0.1", env!("CARGO_PKG_VERSION")))
+                .is_err_and(|reason| reason.contains("package.json pinned 0.0.1"))
+        );
+        assert!(
+            old_template(&current, &from, &pins("^0.0.1 || >=0.0.1", "*")).is_ok(),
+            "npm-only ranges trust node_modules"
+        );
         let mut future: serde_json::Value = serde_json::from_str(&current).unwrap();
         future["format"] = (FORMAT + 1).into();
         future["owned"] = "a later shape".into();
         assert!(
-            old_snapshot(&future.to_string(), version).is_err_and(|reason| reason.contains("newer than this version"))
+            old_template(&future.to_string(), &from, &exact)
+                .is_err_and(|reason| reason.contains("newer than this version"))
         );
-        assert!(old_snapshot("", version).is_err());
+        assert!(old_template("", &from, &exact).is_err());
     }
 
     #[test]
     fn the_hand_off_reads_the_binary_version() {
         assert_eq!(reported_version("crucible 0.2.0 (rojo 7.7.1)\n"), Some("0.2.0"));
         assert_eq!(reported_version("something else"), None);
+        use clap::CommandFactory;
+        let real = crate::cli::Cli::command().render_version();
+        assert_eq!(reported_version(&real), Some(env!("CARGO_PKG_VERSION")), "{real:?} keeps the hand-off format");
     }
 
     #[test]
@@ -864,12 +1008,12 @@ mod tests {
         let root = dir.path();
         let mut old = snapshot("game");
         let new = snapshot("game");
-        let agents = new.owned.iter().find(|part| part.path == "AGENTS.md").unwrap();
+        let agents = new.owned.iter().find(|part| part.path == "AGENTS.md").unwrap().template().unwrap();
         let old_agents = old.owned.iter_mut().find(|part| part.path == "AGENTS.md").unwrap();
-        old_agents.content = format!("{}\n\nAn old line.", agents.content);
-        let old_section = old_agents.content.clone();
+        old_agents.content = format!("{}\n\nAn old line.\n", old_agents.content.trim_end());
+        let old_section = old_agents.template().unwrap().to_owned();
         old.owned.iter_mut().find(|part| part.path == "LICENSE").unwrap().content = "old license".into();
-        old.owned.push(Part { path: "old.json".into(), section: None, content: "{}".into() });
+        old.owned.push(PartV1 { path: "old.json".into(), section: None, content: "{}".into() });
         fs::write(root.join("package.json"), "{\"name\":\"game\"}").unwrap();
         fs::create_dir_all(root.join("node_modules/crucible")).unwrap();
         fs::write(root.join("node_modules/crucible/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
@@ -882,7 +1026,9 @@ mod tests {
         for part in new.owned.iter().filter(|part| part.section.is_none() && part.path != "LICENSE") {
             fs::write(root.join(&part.path), &part.content).unwrap();
         }
-        let report = apply(root, env!("CARGO_PKG_VERSION"), &serde_json::to_string(&old).unwrap()).unwrap();
+        let from = version(env!("CARGO_PKG_VERSION"));
+        let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
+        let report = apply(root, &from, &exact, &serde_json::to_string(&old).unwrap()).unwrap();
         assert!(
             report.starts_with(&format!(
                 "Upgraded crucible and {RUNTIME} from {} to 9.0.0.\n",
@@ -898,7 +1044,7 @@ mod tests {
         assert!(!root.join("LICENSE").exists());
         assert_eq!(
             fs::read_to_string(root.join("AGENTS.md")).unwrap(),
-            format!("# Game\r\n\r\n{}\r\n\r\n## Mine\r\n", agents.content.replace('\n', "\r\n"))
+            format!("# Game\r\n\r\n{}\r\n\r\n## Mine\r\n", agents.replace('\n', "\r\n"))
         );
     }
 
@@ -949,7 +1095,7 @@ mod tests {
                 serde_json::json!({ "dependencies": { RUNTIME: spec }, "devDependencies": { "crucible": spec } });
             assert!(read_pins(&manifest).is_ok(), "{spec:?} is a registry range");
         }
-        assert!(!satisfies("1.2", &version("1.3.0")), "npm reads 1.2 as 1.2.x");
+        assert_ne!(satisfies("1.2", &version("1.3.0")), Some(true), "npm reads 1.2 as 1.2.x");
     }
 
     #[test]
@@ -957,7 +1103,7 @@ mod tests {
         let installed = Installed { crucible: version("0.2.0"), runtime: Some(version("0.3.0-rc.1")) };
         assert_eq!(
             plan(&pins("0.3.0-rc.1", "0.3.0-rc.1"), &installed, &version("0.2.0"), false, false).unwrap(),
-            Plan::NewerThanLatest
+            Plan::NewerThanLatest(version("0.3.0-rc.1"))
         );
         assert!(matches!(
             plan(&pins("0.3.0-rc.1", "0.3.0-rc.1"), &installed, &version("0.2.0"), true, false),
@@ -987,13 +1133,11 @@ mod tests {
         fs::write(root.join("node_modules/crucible/package.json"), "{\"version\":\"9.0.0\"}").unwrap();
         fs::write(root.join("AGENTS.md"), &old_agents).unwrap();
         fs::write(root.join("LICENSE"), &old_license).unwrap();
-        let report = apply(root, env!("CARGO_PKG_VERSION"), &old.to_string()).unwrap();
+        let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
+        let report = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, &old.to_string()).unwrap();
         assert!(report.contains("Refreshed from the new template:\n  AGENTS.md (## Crucible)\n"), "{report}");
         assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), agents);
-        assert!(
-            report.contains("  LICENSE\n") && !report.contains("Refreshed from the new template:\n  LICENSE"),
-            "{report}"
-        );
+        assert!(report.contains("never rewrites them. Review the change:\n  LICENSE\n"), "{report}");
         assert_eq!(fs::read_to_string(root.join("LICENSE")).unwrap(), old_license, "the license is never rewritten");
     }
 
@@ -1038,12 +1182,74 @@ mod tests {
     }
 
     #[test]
-    fn a_hung_child_times_out() {
+    fn a_hung_child_times_out_with_its_descendants() {
+        let dir = tempfile::tempdir().unwrap();
         let mut command = if cfg!(windows) { Command::new("cmd") } else { Command::new("sh") };
-        command.args(if cfg!(windows) { ["/d", "/c", "ping -n 30 127.0.0.1 >nul"] } else { ["-c", "sleep 30", ""] });
+        if cfg!(windows) {
+            command.args(["/d", "/c", "cmd", "/d", "/c", "ping -n 3 127.0.0.1 >nul & echo late>late.txt"]);
+        } else {
+            command.args(["-c", "sh -c 'sleep 2; echo late > late.txt'; true"]);
+        }
+        command.current_dir(dir.path());
         let started = Instant::now();
         let result = finish_within(command, None, "sleeper", Duration::from_millis(300));
         assert!(matches!(result, Err(Error::Failed(message)) if message.contains("did not finish")));
         assert!(started.elapsed() < Duration::from_secs(10));
+        thread::sleep(Duration::from_secs(4));
+        assert!(!dir.path().join("late.txt").exists(), "the grandchild was killed with the child");
+    }
+
+    fn installed(root: &Path, crucible: &str, runtime: &str, bin: &str) {
+        fs::create_dir_all(root.join("node_modules/crucible")).unwrap();
+        fs::create_dir_all(root.join("node_modules/@trioforge/crucible")).unwrap();
+        let manifest = serde_json::json!({ "version": crucible, "bin": { "crucible": "bin.js" } });
+        fs::write(root.join("node_modules/crucible/package.json"), manifest.to_string()).unwrap();
+        fs::write(root.join("node_modules/crucible/bin.js"), bin).unwrap();
+        let runtime = serde_json::json!({ "version": runtime });
+        fs::write(root.join("node_modules/@trioforge/crucible/package.json"), runtime.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_failed_hand_off_says_the_template_was_not_refreshed() {
+        let cases = [
+            ("0.1.0", "", "@trioforge/crucible at 0.1.0, not 0.2.0. Delete node_modules"),
+            ("0.2.0", "console.log('crucible 0.1.0 (rojo 7.7.1)')", "binary reports 0.1.0, not 0.2.0"),
+            (
+                "0.2.0",
+                "if (process.argv[2] === '--version') console.log('crucible 0.2.0'); else process.exit(3);",
+                "crucible __upgrade-apply failed",
+            ),
+        ];
+        for (runtime, bin, cause) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            installed(dir.path(), "0.2.0", runtime, bin);
+            let (from, to, old_pins) = (version("0.1.0"), version("0.2.0"), pins("0.1.0", "0.1.0"));
+            let result = refresh(dir.path(), "game", &to, &from, &old_pins, "{}".into(), "npm install");
+            let Err(Error::Failed(message)) = result else { panic!("{cause}: the hand-off fails") };
+            assert!(message.contains(cause), "{message}");
+            assert!(message.contains("but the template was not refreshed"), "{message}");
+            assert!(
+                message.contains("`npx crucible create game <empty-dir> --no-install` and diff tsconfig.json,"),
+                "{message}"
+            );
+            assert!(message.contains("and the ## Crucible section of AGENTS.md with this game's"), "{message}");
+        }
+    }
+
+    #[test]
+    fn the_hand_off_passes_the_old_version_pins_and_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = "const fs = require('fs');
+if (process.argv[2] === '--version') console.log('crucible 0.2.0 (rojo 7.7.1)');
+else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8') }));";
+        installed(dir.path(), "0.2.0", "0.2.0", bin);
+        let old_pins = pins("^0.1.0 || ^0.2.0", ">=0.1.0 <0.2.0");
+        let snapshot = "{\"format\":1}";
+        refresh(dir.path(), "game", &version("0.2.0"), &version("0.1.0"), &old_pins, snapshot.into(), "npm install")
+            .unwrap();
+        let seen: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.path().join("seen.json")).unwrap()).unwrap();
+        assert_eq!(seen["argv"], serde_json::json!([APPLY, "0.1.0", "^0.1.0 || ^0.2.0", ">=0.1.0 <0.2.0"]));
+        assert_eq!(seen["stdin"], snapshot);
     }
 }

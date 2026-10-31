@@ -61,7 +61,11 @@ pub enum Command {
     #[command(name = crate::upgrade::APPLY, hide = true)]
     UpgradeApply {
         /// The crucible version installed before the upgrade.
-        from: String,
+        from: semver::Version,
+        /// The crucible spec in package.json before the upgrade.
+        crucible: String,
+        /// The @trioforge/crucible spec in package.json before the upgrade.
+        runtime: String,
     },
 }
 fn topics() -> clap::builder::PossibleValuesParser {

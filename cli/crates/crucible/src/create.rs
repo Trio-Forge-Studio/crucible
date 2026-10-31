@@ -30,6 +30,7 @@ pub const FILES: &[(&str, &str)] = template![
     "AGENTS.md",
     "LICENSE",
     ".gitignore",
+    ".gitattributes",
     "src/server/main.server.ts",
     "src/client/main.client.ts",
 ];
