@@ -470,4 +470,104 @@ tests["73 codec failures carry paths and reasons without logging payload content
 	spec.eq(logged, 0, "no logging")
 end
 
+tests["58 60 66 69 70 exact width and budget ceilings and every dynamic datatype"] = function()
+	local r = h.realm()
+	local n = r.n
+	for _, fixture in
+		{
+			{ n.u8, 0, "00" },
+			{ n.u16, 0, "00 00" },
+			{ n.u16, 65535, "ff ff" },
+			{ n.u32, 0, "00 00 00 00" },
+			{ n.f32, 2 ^ -149, "01 00 00 00" },
+			{ n.f32, (2 - 2 ^ -23) * 2 ^ 127, "ff ff 7f 7f" },
+		}
+	do
+		local packet = h.encode(r, fixture[1], fixture[2])
+		spec.eq(h.hex(packet), fixture[3], "width edge bytes")
+		spec.eq(h.decode(r, fixture[1], packet), fixture[2], "width edge round trip")
+	end
+	for _, text in { "00 00 00 00 00 00 f0 7f", "00 00 00 00 00 00 f8 7f" } do
+		h.rejects(function()
+			h.decode(r, n.f64, h.bytes(text))
+		end)
+		h.rejects(function()
+			h.decode(r, n.dynamic, h.bytes("03 " .. text))
+		end)
+	end
+	for _, fixture in
+		{
+			{ n.color3, h.roblox.Color3.new(0.25, 0.5, 1.5) },
+			{ n.cframe, h.roblox.CFrame.Angles(0.2, 0.3, 0.4) },
+		}
+	do
+		local packet = h.encode(r, fixture[1], fixture[2])
+		for length = 0, buffer.len(packet) - 1 do
+			local cut = buffer.create(length)
+			buffer.copy(cut, 0, packet, 0, length)
+			h.rejects(function()
+				h.decode(r, fixture[1], cut)
+			end)
+		end
+	end
+	local tuple = n.tuple({ n.u8, n.string, n.bool })
+	spec.eq(h.hex(h.encode(r, tuple, { 3, "A", false })), "03 01 41 00", "tuple has no count")
+	local tupleValue = h.decode(r, tuple, h.bytes("03 01 41 00"))
+	spec.eq(tupleValue[1], 3, "tuple first")
+	spec.eq(tupleValue[2], "A", "tuple second")
+	spec.eq(tupleValue[3], false, "tuple third")
+	local model = h.roblox.Instance.new("Model")
+	local instancePacket, sidecar, slots = h.encode(r, n.dynamic, model)
+	spec.eq(h.hex(instancePacket), "0a", "dynamic Instance tag")
+	spec.eq(h.decode(r, n.dynamic, instancePacket, sidecar, slots), model, "dynamic Instance")
+	spec.eq(h.decode(r, n.dynamic, instancePacket, {}, slots), nil, "missing whole Instance")
+	local recordPacket, _, recordSlots = h.encode(r, n.dynamic, { a = model, b = false })
+	local record = h.decode(r, n.dynamic, recordPacket, {}, recordSlots)
+	spec.eq(record.a, nil, "missing Instance key absent")
+	spec.eq(record.b, false, "later record value intact")
+	h.rejects(function()
+		h.encode(r, n.dynamic, { model })
+	end)
+	for _, value in
+		{
+			h.roblox.Vector3.new(1, 2, 3),
+			h.roblox.Color3.new(0.25, 0.5, 1.5),
+			h.roblox.CFrame.Angles(0.2, 0.3, 0.4),
+			1.5,
+		}
+	do
+		local packet = h.encode(r, n.dynamic, value)
+		spec.eq(
+			h.hex(h.encode(r, n.dynamic, h.decode(r, n.dynamic, packet))),
+			h.hex(packet),
+			"dynamic datatype round trip"
+		)
+	end
+	for _, value in { coroutine.create(function() end), h.roblox.Vector2.new(1, 2), { [true] = 1 } } do
+		h.rejects(function()
+			h.encode(r, n.dynamic, value)
+		end)
+	end
+	local atDepth = buffer.fromstring(string.rep("\5\1", 32) .. "\1")
+	spec.eq(h.hex(h.encode(r, n.dynamic, h.decode(r, n.dynamic, atDepth))), h.hex(atDepth), "depth ceiling admitted")
+	local maximumString = string.rep("x", 65536)
+	spec.eq(h.decode(r, n.string, h.encode(r, n.string, maximumString)), maximumString, "string ceiling admitted")
+	local fields = {}
+	for i = 1, 4095 do
+		table.insert(fields, { string.format("F%04d", i), n.bool })
+	end
+	r.codec.compile(n.object(fields))
+	local branches = {}
+	for i = 0, 255 do
+		table.insert(branches, n.literal(i))
+	end
+	local union = n.union(branches)
+	spec.eq(h.hex(h.encode(r, union, 255)), "ff 01", "256 branches use varuint tags")
+	spec.eq(h.decode(r, union, h.bytes("ff 01")), 255, "maximum tag")
+	table.insert(branches, n.literal(256))
+	h.rejects(function()
+		n.union(branches)
+	end)
+end
+
 return tests
