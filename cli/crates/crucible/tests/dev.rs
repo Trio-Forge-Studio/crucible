@@ -169,39 +169,93 @@ fn wait_until_exit(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
     None
 }
 
-fn descendants(pid: u32) -> Vec<u32> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Process {
+    pid: u32,
+    parent: u32,
+    created: u64,
+    running: bool,
+}
+
+fn processes() -> Vec<Process> {
     let output = if cfg!(windows) {
-        let list = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }";
+        let list = "Get-CimInstance Win32_Process | Where-Object { $_.CreationDate } | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.CreationDate.ToUniversalTime().Ticks) R\" }";
         Command::new("powershell").args(["-NoProfile", "-Command", list]).output()
     } else {
-        Command::new("ps").args(["-e", "-o", "pid=,ppid="]).output()
+        Command::new("ps").args(["-e", "-o", "pid=,ppid=,stat="]).output()
+    }.unwrap();
+    assert!(output.status.success(), "process snapshot failed: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).lines().map(parse_process).collect()
+}
+
+fn parse_process(line: &str) -> Process {
+    let mut fields = line.split_whitespace();
+    let pid = fields.next().unwrap().parse().unwrap();
+    let parent = fields.next().unwrap().parse().unwrap();
+    let field = fields.next().unwrap();
+    let (created, state) = match fields.next() {
+        Some(state) => (field.parse().unwrap(), state),
+        None => (0, field),
     };
-    let output = String::from_utf8_lossy(&output.unwrap().stdout).into_owned();
-    let pairs: Vec<(u32, u32)> = output
-        .lines()
-        .filter_map(|line| {
-            let mut ids = line.split_whitespace().map(|id| id.parse().unwrap());
-            Some((ids.next()?, ids.next()?))
-        })
-        .collect();
-    let mut found = vec![pid];
+    Process { pid, parent, created, running: !state.starts_with('Z') }
+}
+
+fn descendants(pid: u32) -> Vec<Process> {
+    descendants_in(pid, &processes())
+}
+
+fn descendants_in(pid: u32, snapshot: &[Process]) -> Vec<Process> {
+    let root = *snapshot.iter().find(|process| process.pid == pid).expect("parent is running");
+    let mut found = vec![root];
     let mut next = 0;
     while next < found.len() {
         let parent = found[next];
-        found.extend(pairs.iter().filter(|(child, ppid)| *ppid == parent && *child != parent).map(|(child, _)| *child));
+        for child in snapshot {
+            // Windows keeps a dead parent's PID even after that PID is reused.
+            if child.parent == parent.pid && child.created >= parent.created && !found.contains(child) {
+                found.push(*child);
+            }
+        }
         next += 1;
     }
     found.remove(0);
     found
 }
 
-fn alive(pid: u32) -> bool {
-    if cfg!(windows) {
-        let tasks = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"]).output();
-        String::from_utf8_lossy(&tasks.unwrap().stdout).contains(&format!("\"{pid}\""))
-    } else {
-        Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().unwrap().success()
-    }
+fn alive(process: &Process, snapshot: &[Process]) -> bool {
+    snapshot.iter().any(|current| current.pid == process.pid && current.created == process.created && current.running)
+}
+
+#[test]
+fn reused_parent_pid_is_not_a_descendant() {
+    let root = Process { pid: 10, parent: 1, created: 100, running: true };
+    let child = Process { pid: 20, parent: 10, created: 110, running: true };
+    let grandchild = Process { pid: 30, parent: 20, created: 120, running: true };
+    let stale = Process { pid: 40, parent: 20, created: 105, running: true };
+    let unrelated = Process { pid: 50, parent: 40, created: 130, running: true };
+    assert_eq!(descendants_in(10, &[root, child, grandchild, stale, unrelated]), vec![child, grandchild]);
+    assert!(!alive(&child, &[Process { created: 200, ..child }]));
+}
+
+#[test]
+fn zombies_are_not_alive() {
+    let process = parse_process("20 10 S");
+    assert!(alive(&process, &[process]));
+    assert!(!alive(&process, &[parse_process("20 10 Z")]));
+    assert!(!alive(&process, &[parse_process("20 10 Z+")]));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unreaped_child_is_not_alive() {
+    let mut child = Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
+    let pid = child.id();
+    wait_until("child to become an unreaped zombie", STOP, || {
+        let snapshot = processes();
+        let process = snapshot.iter().find(|process| process.pid == pid)?;
+        (!alive(process, &snapshot)).then_some(())
+    });
+    assert!(child.wait().unwrap().success());
 }
 
 fn port_is_free(port: u16) -> bool {
@@ -212,15 +266,18 @@ fn rbxtsc_pids(dir: &Path) -> Vec<u32> {
     fs::read_to_string(dir.join("rbxtsc.pids")).unwrap().split(' ').map(|pid| pid.parse().unwrap()).collect()
 }
 
-fn assert_all_stop(pids: &[u32], port: u16) {
+fn assert_all_stop(pids: &[Process], port: u16) {
     let deadline = Instant::now() + STOP;
     while Instant::now() < deadline {
-        if pids.iter().all(|pid| !alive(*pid)) && port_is_free(port) {
+        let snapshot = processes();
+        if pids.iter().all(|process| !alive(process, &snapshot)) && port_is_free(port) {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let survivors: Vec<_> = pids.iter().copied().filter(|pid| alive(*pid)).collect();
+    let snapshot = processes();
+    let survivors: Vec<_> =
+        pids.iter().filter(|process| alive(process, &snapshot)).map(|process| process.pid).collect();
     // Survivors hold this test's output handles, so the run would hang on them.
     for pid in &survivors {
         let _ = if cfg!(windows) {
@@ -248,13 +305,12 @@ fn ctrl_c_stops_roblox_ts_and_rojo() {
     assert!(game.path().join("out/transformer.sha256").is_file(), "the first compile writes the receipt");
     let spawned = descendants(dev.pid());
     let rbxtsc = rbxtsc_pids(game.path());
-    assert!(rbxtsc.iter().all(|pid| spawned.contains(pid)), "{rbxtsc:?} in {spawned:?}");
+    assert!(rbxtsc.iter().all(|pid| spawned.iter().any(|process| process.pid == *pid)), "{rbxtsc:?} in {spawned:?}");
     assert!(spawned.len() >= 4, "a guard, roblox-ts, its child and Rojo: {spawned:?}");
     dev.interrupt();
     let status = dev.wait(STOP);
     assert_eq!(status.code(), Some(0), "{}", dev.stderr());
-    assert!(spawned.iter().all(|pid| !alive(*pid)), "no child outlives crucible dev: {spawned:?}");
-    assert!(port_is_free(port), "Rojo released port {port}");
+    assert_all_stop(&spawned, port);
 }
 
 #[test]
@@ -265,7 +321,10 @@ fn killing_only_crucible_dev_stops_its_children() {
     dev.wait_for_stderr("Rojo server listening", START);
     let spawned = descendants(dev.pid());
     assert!(spawned.len() >= 4, "a guard, roblox-ts, its child and Rojo: {spawned:?}");
-    assert!(rbxtsc_pids(game.path()).iter().all(|pid| spawned.contains(pid)), "{spawned:?}");
+    assert!(
+        rbxtsc_pids(game.path()).iter().all(|pid| spawned.iter().any(|process| process.pid == *pid)),
+        "{spawned:?}"
+    );
     dev.child.kill().unwrap();
     dev.child.wait().unwrap();
     assert_all_stop(&spawned, port);
@@ -281,7 +340,11 @@ fn rojo_failure_stops_roblox_ts() {
     let stderr = dev.stderr();
     assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("[rojo] ") && stderr.contains("crucible dev: Rojo stopped"), "{stderr}");
-    assert!(rbxtsc_pids(game.path()).iter().all(|pid| !alive(*pid)), "roblox-ts stops when Rojo does");
+    let pids = rbxtsc_pids(game.path());
+    wait_until("roblox-ts to stop when Rojo does", STOP, || {
+        let snapshot = processes();
+        pids.iter().all(|pid| !snapshot.iter().any(|process| process.pid == *pid && process.running)).then_some(())
+    });
 }
 
 #[test]
@@ -361,6 +424,5 @@ fn sample_game_edit_reaches_rojo() {
     dev.interrupt();
     let status = dev.wait(STOP);
     assert_eq!(status.code(), Some(0), "{}", dev.stderr());
-    assert!(spawned.iter().all(|pid| !alive(*pid)), "no child outlives crucible dev: {spawned:?}");
-    assert!(port_is_free(port), "Rojo released port {port}");
+    assert_all_stop(&spawned, port);
 }

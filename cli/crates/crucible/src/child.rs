@@ -58,6 +58,7 @@ enum Escape {
     Start,
     Intermediate,
     Csi,
+    CsiIntermediate,
     String,
     StringEsc,
 }
@@ -66,25 +67,27 @@ impl Plain {
     pub fn strip(&mut self, bytes: &[u8], plain: &mut Vec<u8>) {
         for &byte in bytes {
             self.0 = match (self.0, byte) {
-                (Escape::String | Escape::StringEsc, 0x07) | (Escape::StringEsc, b'\\') => Escape::None,
-                (Escape::String | Escape::StringEsc, 0x1b) => Escape::StringEsc,
-                // A string that never terminates ends at the line break, so one
-                // malformed sequence cannot hide the rest of the output.
-                (Escape::String | Escape::StringEsc, b'\n') => {
+                (_, b'\n' | b'\r') => {
                     plain.push(byte);
                     Escape::None
                 }
-                (Escape::String | Escape::StringEsc, _) => Escape::String,
+                (Escape::String | Escape::StringEsc, 0x07) | (Escape::StringEsc, b'\\') => Escape::None,
+                (Escape::String | Escape::StringEsc, 0x1b) => Escape::StringEsc,
+                (Escape::String, _) => Escape::String,
                 (_, 0x1b) => Escape::Start,
                 (Escape::None, _) => {
                     plain.push(byte);
                     Escape::None
                 }
-                (Escape::Start, b'[') => Escape::Csi,
-                (Escape::Start, b']' | b'P' | b'X' | b'^' | b'_') => Escape::String,
-                (Escape::Start | Escape::Intermediate, 0x20..=0x2f) => Escape::Intermediate,
-                (Escape::Csi, 0x40..=0x7e) | (Escape::Start | Escape::Intermediate, _) => Escape::None,
-                (Escape::Csi, _) => Escape::Csi,
+                (Escape::Start | Escape::StringEsc, b'[') => Escape::Csi,
+                (Escape::Start | Escape::StringEsc, b']' | b'P' | b'X' | b'^' | b'_') => Escape::String,
+                (Escape::Start | Escape::StringEsc | Escape::Intermediate, 0x20..=0x2f) => Escape::Intermediate,
+                (Escape::Csi, 0x30..=0x3f) => Escape::Csi,
+                (Escape::Csi | Escape::CsiIntermediate, 0x20..=0x2f) => Escape::CsiIntermediate,
+                (
+                    Escape::Csi | Escape::CsiIntermediate | Escape::Start | Escape::StringEsc | Escape::Intermediate,
+                    _,
+                ) => Escape::None,
             };
         }
     }
