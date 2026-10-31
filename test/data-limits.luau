@@ -102,6 +102,14 @@ return {
 			return r.envelope.parseEnvelope(envelope, "profiles")
 		end
 		spec.eq(parse(function() end).kind, "ok", "a valid envelope parses")
+		spec.eq(
+			parse(function(e)
+				e.receipts = { "a", "b" }
+				e.seen = { "s" }
+			end).kind,
+			"ok",
+			"a valid envelope with entries parses"
+		)
 		spec.eq(r.envelope.parseEnvelope(nil, "profiles").kind, "absent", "nil is absent")
 		local cases = {
 			format = function(e)

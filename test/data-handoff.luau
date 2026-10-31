@@ -162,6 +162,35 @@ return {
 		spec.eq(session(a, pa).value.pendingRewards, 57, "the payout is kept")
 		spec.eq(stored(backend).epoch, 2, "acquired after the release")
 	end,
+	["rule 47 resume never acquires past an unsettled release, even one pacing holds back"] = function()
+		local backend, a = world(1)
+		local pa = loaded(backend, a)
+		local blob = string.rep("x", 250000)
+		for coins = 1, 12 do
+			a.run(function()
+				a.store:write(pa, function(current)
+					local value = table.clone(current)
+					value.blob = blob
+					value.pendingRewards = coins
+					return value
+				end)
+				a.store:save(pa)
+			end)
+			backend:advance(0.5)
+		end
+		local old = session(a, pa)
+		local handed = call(a, "handoff", pa)
+		backend:advance(11)
+		spec.eq(handed.value, "timeout", "the release is held back by the per-key pace")
+		local resumed = call(a, "resume", pa)
+		backend:advance(5)
+		spec.eq(resumed.done, false, "resume waits for the paced release")
+		spec.eq(stored(backend).lease.token, old.token, "the sealed lease is untouched")
+		backend:advance(80)
+		spec.eq(resumed.value, true, "resumed once the release settled")
+		spec.eq(old.released, "committed", "the release was never fenced by our own acquisition")
+		spec.eq(session(a, pa).value.pendingRewards, 12, "the newest revision is kept")
+	end,
 	["rule 29 resume after the release gave up carries the sealed revision"] = function()
 		local backend, a = world(1)
 		local pa = loaded(backend, a)
