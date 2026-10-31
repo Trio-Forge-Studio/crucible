@@ -253,23 +253,25 @@ export class ProfileRuntime {
 				supersedes: this.supersedes(userId),
 				wall: port.wall,
 			};
-			const settled = this.engine.scheduler
-				.submit({
-					store: this.schema.name,
-					key: this.key(userId),
-					priority: Priority.Load,
-					kind: "update",
-					dispatchDeadline: deadline,
-					bytes: 1024,
-					transform: () => (current) => acquire(current, input, (d) => (decision = d)),
-					onDispatch: (at) => (sentAt = at),
-					onResult: (outcome) => {
-						if (outcome.kind === "error" && !outcome.ambiguous) return;
-						earliest ??= sentAt;
-						mayHaveCommitted = true;
-					},
-				})
-				.wait()!;
+			const ticket = this.engine.scheduler.submit({
+				store: this.schema.name,
+				key: this.key(userId),
+				priority: Priority.Load,
+				kind: "update",
+				dispatchDeadline: deadline,
+				bytes: 1024,
+				transform: () => (current) => acquire(current, input, (d) => (decision = d)),
+				onDispatch: (at) => (sentAt = at),
+				onResult: (outcome) => {
+					if (outcome.kind === "error" && !outcome.ambiguous) return;
+					earliest ??= sentAt;
+					mayHaveCommitted = true;
+				},
+			});
+			ticket.onSettled(() => this.changed.wake());
+			while (ticket.settled === undefined && !this.stopped(session)) this.changed.park();
+			const settled = ticket.settled;
+			if (settled === undefined) return this.end(session, true);
 			if (settled.kind === "done" && settled.outcome.kind === "error")
 				return this.end(session, mayHaveCommitted, LOAD_FAILED_MESSAGE);
 			if (settled.kind !== "done") {
@@ -515,7 +517,7 @@ export class ProfileRuntime {
 	private confirm(session: Session, envelope: Envelope, earliest: number | undefined) {
 		session.confirmed = math.max(session.confirmed, envelope.commit!.revision);
 		session.durable = new Set(envelope.receipts);
-		if (session.phase === Phase.Active && earliest !== undefined && bootClock() < session.safeUntil)
+		if (earliest !== undefined && this.accept(session))
 			session.safeUntil = math.max(session.safeUntil, earliest + LOCAL_AUTHORITY_SECONDS);
 		this.hooks.delivered(session, envelope);
 	}
@@ -543,6 +545,7 @@ export class ProfileRuntime {
 	leave(player: Player) {
 		const session = this.sessions.get(player);
 		if (session !== undefined) this.release(session, "leave");
+		this.changed.wake();
 	}
 
 	/** Rule 45. */

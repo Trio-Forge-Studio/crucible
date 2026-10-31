@@ -82,11 +82,25 @@ return {
 		backend:advance(99)
 		spec.eq(lb.done, false, "no takeover before expiry plus grace")
 		spec.eq(stored(backend).lease.serverId, a.id, "crashed lease still stored")
-		backend:advance(20)
+		for _ = 1, 400 do
+			if lb.done then
+				break
+			end
+			backend:advance(0.05)
+		end
 		spec.eq(lb.value, true, "takeover after expiry plus grace")
 		local lease = stored(backend).lease
 		spec.eq(lease.serverId, b.id, "new owner")
 		assert(lease.expiresAt - 90 > expiresAt + 10, "taken only past expiresAt + TAKEOVER_GRACE_SECONDS")
+		local committing
+		for _, call in backend:callsTo({ server = b.id }) do
+			committing = committing or (call.committed and call)
+		end
+		spec.eq(
+			session(b, pb).safeUntil,
+			committing.at + b.mono + 70,
+			"authority dates from the taking attempt, never a held poll"
+		)
 		spec.eq(stored(backend).epoch, 2, "epoch rose once per acquisition")
 	end,
 	["rule 21 polls follow the schedule and never wait past expiry plus grace"] = function()
@@ -201,7 +215,17 @@ return {
 		spec.eq(kind, "fenced", "old token fenced")
 		spec.eq(result, nil, "nothing written")
 		spec.eq(replay(current.token, old.epoch), "fenced", "old epoch fenced")
+		spec.eq(replay(old.token, current.epoch), "fenced", "old token fenced at the current epoch")
 		spec.eq(replay(current.token, current.epoch), "written", "current token and epoch write")
+	end,
+	["rule 17 a slot never has two loads at once"] = function()
+		local backend, a = world(1)
+		local pa = a.join(USER)
+		local first, second = load(a, pa), load(a, pa)
+		backend:advance(1)
+		spec.eq(first.value, true, "first load")
+		spec.eq(second.value, true, "the second call waited for the first")
+		spec.eq(#backend:callsTo({ server = a.id }), 1, "one acquisition")
 	end,
 	["rule 19 acquisition committed then errored finds its own commit"] = function()
 		local backend, a = world(1)
