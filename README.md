@@ -1,6 +1,6 @@
 # Crucible
 
-Crucible is Trio Forge's roblox-ts game framework. This private workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. The tag-triggered release workflow stages the CLI and runtime together for npm with provenance.
+Crucible is Trio Forge's roblox-ts game framework. This workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. The tag-triggered release workflow stages the CLI and runtime together for npm with provenance.
 
 ## Check the workspace
 

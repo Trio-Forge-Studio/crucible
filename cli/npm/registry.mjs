@@ -42,12 +42,9 @@ export async function main(
 	mode,
 	directory,
 	lookup = registry,
-	publish = (args) => execFileSync("npm", args, { stdio: "inherit" }),
+	stage = (args) => execFileSync("npm", args, { stdio: "inherit" }),
 ) {
-	assert.ok(
-		["preflight", "publish"].includes(mode) && directory,
-		"Usage: registry.mjs <preflight|publish> <tarballs>",
-	);
+	assert.ok(["preflight", "stage"].includes(mode) && directory, "Usage: registry.mjs <preflight|stage> <tarballs>");
 	const packages = readdirSync(directory)
 		.filter((file) => file.endsWith(".tgz"))
 		.map((file) => {
@@ -71,6 +68,7 @@ export async function main(
 		]),
 	);
 	const documents = await Promise.all(packages.map(({ name }) => lookup(name)));
+	const failed = [];
 	for (const [index, { path, name, version }] of packages.entries()) {
 		const document = documents[index];
 		if (mode === "preflight") {
@@ -86,17 +84,30 @@ export async function main(
 			continue;
 		}
 		unused(document, name, version);
-		publish([
-			"publish",
-			path,
-			"--access",
-			"public",
-			"--provenance",
-			"--ignore-scripts",
-			"--tag",
-			version.includes("-") ? "next" : "latest",
-		]);
+		try {
+			stage([
+				"stage",
+				"publish",
+				path,
+				"--access",
+				"public",
+				"--provenance",
+				"--ignore-scripts",
+				"--tag",
+				version.includes("-") ? "next" : "latest",
+			]);
+		} catch (error) {
+			console.error(`Could not stage ${name}@${version}: ${error.message}`);
+			failed.push(`${name}@${version}`);
+		}
 	}
+	// Staged versions are invisible to the public registry document, so a rerun cannot tell an
+	// earlier stage from a real failure. Approval is the integrity gate, so stage the rest and report.
+	assert.deepEqual(
+		failed,
+		[],
+		`Not staged by this run: ${failed.join(", ")}. If npmjs.com > Staged Packages already lists them from an earlier attempt, approve them there; otherwise investigate.`,
+	);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main(...process.argv.slice(2));
