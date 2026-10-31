@@ -18,7 +18,7 @@ Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to
 
 ## Command line
 
-`cli` holds the `crucible` binary, written in Rust. `crucible oc` calls Roblox Open Cloud. See `cli/README.md` for installation, keys, commands, and its checks.
+`cli` holds the `crucible` binary, written in Rust. `npx crucible docs cli` lists every command. See `docs/cli.md` for the commands and `cli/README.md` for building and testing the CLI.
 
 ## Package entries
 

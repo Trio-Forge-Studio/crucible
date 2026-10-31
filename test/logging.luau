@@ -91,6 +91,7 @@ return {
 		local a = w.api.Logging:addSink(sink, 2)
 		spec.eq(w.api.Logging:addSink(sink, 0), a, "same active subscription")
 		a:disconnect()
+		assert(not pcall(a.setMinimum, a, 99), "disconnected minimum still validates")
 		a:disconnect()
 		local b = w.api.Logging:addSink(sink, 0)
 		assert(a ~= b, "fresh generation")
@@ -306,5 +307,43 @@ return {
 		h.load(h.place:GetService("ServerScriptService").TS.main)
 		spec.eq(#h.engine.gameLogs, 4, "sample levels before boot")
 		h.place:Destroy()
+	end,
+	["L12 failed rendering drops the record and recovers"] = function()
+		local w = world()
+		local received = 0
+		w.api.Logging:addSink({
+			write = function()
+				received += 1
+			end,
+		})
+		w.log:info(
+			"{value}",
+			{ value = setmetatable({}, {
+				__tostring = function()
+					error("bad tostring")
+				end,
+			}) }
+		)
+		spec.eq(received, 0, "no sink delivery")
+		spec.eq(#w.e.gameLogs, 0, "no default output")
+		spec.eq(#w.e.logs, 1, "one diagnostic")
+		spec.has(w.e.logs[1].message, "Logging failed", "rendering diagnostic")
+		w.log:info("recovered")
+		spec.eq(received, 1, "later records delivered")
+	end,
+	["L13 independent runtimes do not share logging state"] = function()
+		local server, client = world(), world()
+		local received = 0
+		server.api.Logging:addSink({
+			write = function()
+				received += 1
+			end,
+		})
+		client.log:info("client record")
+		spec.eq(received, 0, "server sink does not receive client record")
+		spec.eq(#server.e.gameLogs, 0, "server output isolated")
+		spec.eq(#client.e.gameLogs, 1, "client output receives record")
+		server.log:info("server record")
+		spec.eq(received, 1, "server sink receives server record")
 	end,
 }
