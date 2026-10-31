@@ -313,7 +313,12 @@ const mutants = [
 		"guard",
 		[20],
 		OWNERSHIP,
-		[["	if (owner === undefined) error(NO_OWNER, 0);\n	if (owner.ended)", "	if (owner!.ended)"]],
+		[
+			[
+				"	const owner = resolveOwner();\n	if (owner === undefined) error(NO_OWNER, 0);\n	if (owner.ended)",
+				"	const owner = resolveOwner()!;\n	if (owner.ended)",
+			],
+		],
 	],
 	[
 		"interval and generation swapped",
@@ -697,6 +702,9 @@ try {
 		const owned = failed.filter((spec) => rules.some((rule) => names(rule).test(spec)));
 		fs.writeFileSync(path.join(scratch, file), original);
 		assert.notEqual(tested.status, 0, `${name} survived\n${tested.stdout}${tested.stderr}`);
+		// Unbounded recursion can abort Lune before it reports. Only the rule's specs ran, so the abort is theirs.
+		const crashed = !/\d+ passed, \d+ failed/.test(tested.stdout);
+		if (crashed) owned.push(`crashed while running the specs for rule ${rules.join(", ")}`);
 		assert.ok(
 			owned.length > 0,
 			`${name} was not caught by a spec for rule ${rules.join(", ")}: ${failed.join("; ")}`,

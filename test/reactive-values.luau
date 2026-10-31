@@ -144,17 +144,17 @@ return {
 		r.flush()
 		spec.eq(runs, 2, "the effect runs on the flush")
 	end,
-	["rule 11 untracked reads are not dependencies"] = function()
+	["rule 11 untracked reads are not dependencies, and reads after it are"] = function()
 		local r = realm()
 		local a, b = r.api.state(1), r.api.state(1)
 		local runs = 0
 		r.root(function()
 			r.api.effect(function()
 				runs += 1
-				b()
 				r.api.untracked(function()
 					return a()
 				end)
+				b()
 			end)
 		end)
 		r.flush()
