@@ -336,14 +336,19 @@ fn rojo_failure_stops_roblox_ts() {
     let taken = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = taken.local_addr().unwrap().port();
     let mut dev = Dev::start(game.path(), &["--port", &port.to_string()], &[]);
+    let pids = wait_until("roblox-ts process identities", START, || {
+        game.path().join("rbxtsc.pids").is_file().then(|| {
+            let pids = rbxtsc_pids(game.path());
+            processes().into_iter().filter(|process| pids.contains(&process.pid)).collect::<Vec<_>>()
+        })
+    });
     let status = dev.wait(START);
     let stderr = dev.stderr();
     assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("[rojo] ") && stderr.contains("crucible dev: Rojo stopped"), "{stderr}");
-    let pids = rbxtsc_pids(game.path());
     wait_until("roblox-ts to stop when Rojo does", STOP, || {
         let snapshot = processes();
-        pids.iter().all(|pid| !snapshot.iter().any(|process| process.pid == *pid && process.running)).then_some(())
+        pids.iter().all(|process| !alive(process, &snapshot)).then_some(())
     });
 }
 
