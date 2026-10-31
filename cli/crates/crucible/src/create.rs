@@ -21,7 +21,7 @@ macro_rules! template {
     };
 }
 
-const FILES: &[(&str, &str)] = template![
+pub const FILES: &[(&str, &str)] = template![
     "package.json",
     "tsconfig.json",
     "default.project.json",
@@ -86,22 +86,18 @@ fn create(args: Args) -> Result<PathBuf, Error> {
     eprintln!("crucible create: wrote {}", path.display());
     if !args.no_install {
         eprintln!("crucible create: running {manager} install");
-        let mut command = if cfg!(windows) {
-            let mut command = Command::new("cmd");
-            command.args(["/d", "/s", "/c", manager]);
-            command
-        } else {
-            Command::new(manager)
-        };
-        let status =
-            command.arg("install").current_dir(&path).stdin(Stdio::null()).stdout(std::io::stderr()).status().map_err(
-                |error| {
-                    Error::Failed(format!(
-                        "cannot run {manager} install: {error}. The project remains in {}",
-                        path.display()
-                    ))
-                },
-            )?;
+        let status = package_manager_command(manager)
+            .arg("install")
+            .current_dir(&path)
+            .stdin(Stdio::null())
+            .stdout(std::io::stderr())
+            .status()
+            .map_err(|error| {
+                Error::Failed(format!(
+                    "cannot run {manager} install: {error}. The project remains in {}",
+                    path.display()
+                ))
+            })?;
         if !status.success() {
             return Err(Error::Failed(format!("{manager} install failed. Retry it in {}", path.display())));
         }
@@ -147,7 +143,17 @@ fn validate_target(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn package_manager(agent: &str) -> &'static str {
+pub fn package_manager_command(manager: &str) -> Command {
+    if cfg!(windows) {
+        let mut command = Command::new("cmd");
+        command.args(["/d", "/s", "/c", manager]);
+        command
+    } else {
+        Command::new(manager)
+    }
+}
+
+pub fn package_manager(agent: &str) -> &'static str {
     match agent.split('/').next().unwrap_or_default() {
         "pnpm" => "pnpm",
         "yarn" => "yarn",
@@ -156,7 +162,7 @@ fn package_manager(agent: &str) -> &'static str {
     }
 }
 
-fn tokens(name: &str) -> Vec<(&'static str, String)> {
+pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
     let workspace: serde_json::Value =
         serde_json::from_str(include_str!("../../../../package.json")).expect("workspace package.json is valid");
     let sample: serde_json::Value = serde_json::from_str(include_str!("../../../../examples/sample-game/package.json"))
@@ -175,7 +181,7 @@ fn tokens(name: &str) -> Vec<(&'static str, String)> {
     tokens
 }
 
-fn render(source: &str, tokens: &[(&str, String)]) -> String {
+pub fn render(source: &str, tokens: &[(&str, String)]) -> String {
     tokens.iter().fold(source.to_owned(), |result, (token, value)| result.replace(token, value))
 }
 
