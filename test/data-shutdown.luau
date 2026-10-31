@@ -78,6 +78,7 @@ return {
 			sleep(r, 3)
 		end)
 		spec.eq(realm.boot.bootClock(), realm.clock(), "bootClock is the realm's scripted clock")
+		spec.eq(#realm.closers, 1, "rule 56: data binds no BindToClose of its own")
 		backend:advance(10)
 		local start = realm.clock()
 		realm.close()
