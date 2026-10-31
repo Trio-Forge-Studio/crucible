@@ -1,43 +1,101 @@
 import { MAX_UNION_BRANCHES } from "./limits";
 
 export type Literal = string | number | boolean;
-export type Node =
-	| {
-			readonly kind:
-				| "nil"
-				| "bool"
-				| "f64"
-				| "f32"
-				| "u8"
-				| "u16"
-				| "u32"
-				| "string"
-				| "vector3"
-				| "color3"
-				| "cframe"
-				| "dynamic";
-	  }
-	| { readonly kind: "literal"; readonly value: Literal }
-	| { readonly kind: "instance"; readonly classes: readonly (keyof Instances)[] }
-	| { readonly kind: "object"; readonly fields: readonly (readonly [string, Node])[] }
-	| { readonly kind: "array"; readonly element: Node }
-	| { readonly kind: "tuple"; readonly elements: readonly Node[] }
-	| { readonly kind: "map"; readonly key: Node; readonly value: Node }
-	| { readonly kind: "union"; readonly branches: readonly Node[] }
-	| { readonly kind: "variant"; readonly key: string; readonly value: Literal; readonly body: Node };
+export type LeafKind =
+	| "nil"
+	| "bool"
+	| "f64"
+	| "f32"
+	| "u8"
+	| "u16"
+	| "u32"
+	| "string"
+	| "vector3"
+	| "color3"
+	| "cframe"
+	| "dynamic";
+export interface LeafNode<K extends LeafKind = LeafKind> {
+	readonly kind: K;
+}
+export interface LiteralNode<V extends Literal = Literal> {
+	readonly kind: "literal";
+	readonly value: V;
+}
+export interface InstanceNode {
+	readonly kind: "instance";
+	readonly classes: readonly (keyof Instances)[];
+}
+export interface ObjectNode {
+	readonly kind: "object";
+	readonly fields: readonly (readonly [name: string, value: Node])[];
+}
+export interface ArrayNode {
+	readonly kind: "array";
+	readonly element: Node;
+}
+export interface TupleNode {
+	readonly kind: "tuple";
+	readonly elements: readonly Node[];
+}
+export interface MapNode {
+	readonly kind: "map";
+	readonly key: MapKey;
+	readonly value: Node;
+}
+export interface VariantNode {
+	readonly kind: "variant";
+	readonly key: string;
+	readonly value: Literal;
+	readonly body: ObjectNode;
+}
+export type Branch = Node | VariantNode;
+export interface UnionNode<B extends Branch = Branch> {
+	readonly kind: "union";
+	readonly branches: readonly B[];
+}
+export type Node = LeafNode | LiteralNode | InstanceNode | ObjectNode | ArrayNode | TupleNode | MapNode | UnionNode;
+export type MapKey = LeafNode<"string" | "u8" | "u16" | "u32"> | UnionNode<LiteralNode<string | number>>;
 
+export interface NodeBuilders {
+	readonly nil: LeafNode<"nil">;
+	readonly bool: LeafNode<"bool">;
+	readonly f64: LeafNode<"f64">;
+	readonly f32: LeafNode<"f32">;
+	readonly u8: LeafNode<"u8">;
+	readonly u16: LeafNode<"u16">;
+	readonly u32: LeafNode<"u32">;
+	readonly string: LeafNode<"string">;
+	readonly vector3: LeafNode<"vector3">;
+	readonly color3: LeafNode<"color3">;
+	readonly cframe: LeafNode<"cframe">;
+	readonly dynamic: LeafNode<"dynamic">;
+	readonly literal: <V extends Literal>(value: V) => LiteralNode<V>;
+	readonly instance: (classes: readonly (keyof Instances)[]) => InstanceNode;
+	readonly object: (fields: readonly (readonly [name: string, value: Node])[]) => ObjectNode;
+	readonly array: (element: Node) => ArrayNode;
+	readonly tuple: (elements: readonly Node[]) => TupleNode;
+	readonly map: (key: MapKey, value: Node) => MapNode;
+	readonly union: <B extends Branch>(branches: readonly B[]) => UnionNode<B>;
+	readonly variant: (key: string, value: Literal, body: ObjectNode) => VariantNode;
+}
+
+// Descriptors arrive from Luau, where the types above do not hold, so provenance is checked at runtime.
 const descriptors = new Set<object>();
 
-function descriptor<T extends object>(node: T): Readonly<T> {
+function descriptor<T extends Branch>(node: T): T {
 	descriptors.add(node);
-	return table.freeze(node);
+	return table.freeze(node) as T;
 }
 
-function leaf<K extends Node["kind"]>(kind: K): { readonly kind: K } {
-	return descriptor({ kind });
+export function assertDescriptor(node: unknown): asserts node is Branch {
+	assert(typeIs(node, "table") && descriptors.has(node), "expected a descriptor constructor result");
 }
 
-function literal(value: Literal): Node {
+function numericName(name: string) {
+	return tostring(tonumber(name)) === name;
+}
+
+function literal<V extends Literal>(value: V): LiteralNode<V> {
 	assert(
 		typeIs(value, "string") ||
 			typeIs(value, "boolean") ||
@@ -47,15 +105,11 @@ function literal(value: Literal): Node {
 	return descriptor({ kind: "literal", value });
 }
 
-export function admitsNil(node: Node): boolean {
+export function admitsNil(node: Branch): boolean {
 	return node.kind === "nil" || node.kind === "dynamic" || (node.kind === "union" && node.branches.some(admitsNil));
 }
 
-function assertNode(node: Node) {
-	assert(typeIs(node, "table") && descriptors.has(node), "expected a descriptor constructor result");
-}
-
-export function runtimeKind(node: Node): string {
+export function runtimeKind(node: Branch): string {
 	switch (node.kind) {
 		case "bool":
 			return "boolean";
@@ -90,22 +144,75 @@ export function literalLess(a: Literal, b: Literal): boolean {
 	return (a as string) < (b as string);
 }
 
-export const n = table.freeze({
-	nil: leaf("nil"),
-	bool: leaf("bool"),
-	f64: leaf("f64"),
-	f32: leaf("f32"),
-	u8: leaf("u8"),
-	u16: leaf("u16"),
-	u32: leaf("u32"),
-	string: leaf("string"),
-	vector3: leaf("vector3"),
-	color3: leaf("color3"),
-	cframe: leaf("cframe"),
-	dynamic: leaf("dynamic"),
+/** Rule 63 order and rule 65 ambiguity, asserted by the builder and again by `compile`. */
+export function checkUnion(branches: readonly Branch[]) {
+	assert(branches.size() > 0 && branches.size() <= MAX_UNION_BRANCHES, "invalid union size");
+	const kinds = new Set<string>();
+	let phase = 0;
+	let previousLiteral: Literal | undefined;
+	let previousKind: string | undefined;
+	let discriminant: string | undefined;
+	for (let i = 0; i < branches.size(); i++) {
+		const branch = branches[i];
+		assertDescriptor(branch);
+		if (branch.kind === "nil") {
+			assert(i === 0, "absent must be first");
+		} else if (branch.kind === "literal") {
+			assert(
+				phase <= 1 && (previousLiteral === undefined || literalLess(previousLiteral, branch.value)),
+				"literal order",
+			);
+			phase = 1;
+			previousLiteral = branch.value;
+		} else if (branch.kind === "variant") {
+			assert(
+				!kinds.has("table") && (discriminant === undefined || discriminant === branch.key),
+				"ambiguous variants",
+			);
+			if (phase < 3) previousLiteral = undefined;
+			assert(previousLiteral === undefined || literalLess(previousLiteral, branch.value), "variant order");
+			phase = 3;
+			previousLiteral = branch.value;
+			discriminant = branch.key;
+		} else {
+			const kind = runtimeKind(branch);
+			assert(
+				branch.kind !== "union" &&
+					branch.kind !== "dynamic" &&
+					phase <= 2 &&
+					!kinds.has(kind) &&
+					(previousKind === undefined || previousKind < kind),
+				"ambiguous union",
+			);
+			phase = 2;
+			kinds.add(kind);
+			previousKind = kind;
+		}
+	}
+}
+
+function node(child: unknown): Node {
+	assertDescriptor(child);
+	assert(child.kind !== "variant", "variant outside union");
+	return child;
+}
+
+export const n: NodeBuilders = table.freeze({
+	nil: descriptor({ kind: "nil" }),
+	bool: descriptor({ kind: "bool" }),
+	f64: descriptor({ kind: "f64" }),
+	f32: descriptor({ kind: "f32" }),
+	u8: descriptor({ kind: "u8" }),
+	u16: descriptor({ kind: "u16" }),
+	u32: descriptor({ kind: "u32" }),
+	string: descriptor({ kind: "string" }),
+	vector3: descriptor({ kind: "vector3" }),
+	color3: descriptor({ kind: "color3" }),
+	cframe: descriptor({ kind: "cframe" }),
+	dynamic: descriptor({ kind: "dynamic" }),
 	literal,
-	instance: (classes: readonly (keyof Instances)[]): Node => {
-		assert(classes.size() > 0, "empty Instance classes");
+	instance: (classes) => {
+		assert(typeIs(classes, "table") && classes.size() > 0, "empty Instance classes");
 		const copy = [...classes];
 		for (let i = 0; i < copy.size(); i++)
 			assert(
@@ -114,30 +221,27 @@ export const n = table.freeze({
 			);
 		return descriptor({ kind: "instance", classes: table.freeze(copy) });
 	},
-	object: (fields: readonly (readonly [string, Node])[]): Node => {
-		const copy = fields.map(([name, node]) => {
-			assertNode(node);
-			assert(typeIs(name, "string") && tostring(tonumber(name)) !== name, "numeric property name");
-			return table.freeze([name, node] as [string, Node]);
+	object: (fields) => {
+		const copy = fields.map(([name, child]) => {
+			assert(typeIs(name, "string") && !numericName(name), "numeric property name");
+			return table.freeze([name, node(child)] as const);
 		});
 		for (let i = 1; i < copy.size(); i++) assert(copy[i - 1][0] < copy[i][0], "fields must be sorted and unique");
 		return descriptor({ kind: "object", fields: table.freeze(copy) });
 	},
-	array: (element: Node): Node => {
-		assertNode(element);
-		assert(!admitsNil(element), "nil array element");
+	array: (element) => {
+		assert(!admitsNil(node(element)), "nil array element");
 		return descriptor({ kind: "array", element });
 	},
-	tuple: (elements: readonly Node[]): Node => {
-		for (const node of elements) {
-			assertNode(node);
-			assert(!admitsNil(node), "nil tuple element");
-		}
-		return descriptor({ kind: "tuple", elements: table.freeze([...elements]) });
+	tuple: (elements) => {
+		const copy = elements.map((element) => {
+			assert(!admitsNil(node(element)), "nil tuple element");
+			return element;
+		});
+		return descriptor({ kind: "tuple", elements: table.freeze(copy) });
 	},
-	map: (key: Node, value: Node): Node => {
-		assertNode(key);
-		assertNode(value);
+	map: (key, value) => {
+		node(key);
 		assert(
 			key.kind === "string" ||
 				key.kind === "u8" ||
@@ -147,69 +251,22 @@ export const n = table.freeze({
 					key.branches.every((b) => b.kind === "literal" && !typeIs(b.value, "boolean"))),
 			"invalid map key",
 		);
-		assert(!admitsNil(value), "nil map value");
+		assert(!admitsNil(node(value)), "nil map value");
 		return descriptor({ kind: "map", key, value });
 	},
-	union: (branches: readonly Node[]): Node => {
-		assert(branches.size() > 0 && branches.size() <= MAX_UNION_BRANCHES, "invalid union size");
-		const kinds = new Set<string>();
-		let phase = 0;
-		let previousLiteral: Literal | undefined;
-		let previousKind: string | undefined;
-		let discriminant: string | undefined;
-		for (let i = 0; i < branches.size(); i++) {
-			const branch = branches[i];
-			assertNode(branch);
-			if (branch.kind === "nil") {
-				assert(i === 0, "absent must be first");
-				continue;
-			}
-			if (branch.kind === "literal") {
-				assert(
-					phase <= 1 && (previousLiteral === undefined || literalLess(previousLiteral, branch.value)),
-					"literal order",
-				);
-				phase = 1;
-				previousLiteral = branch.value;
-			} else if (branch.kind === "variant") {
-				assert(
-					!kinds.has("table") && (discriminant === undefined || discriminant === branch.key),
-					"ambiguous variants",
-				);
-				if (phase < 3) previousLiteral = undefined;
-				assert(previousLiteral === undefined || literalLess(previousLiteral, branch.value), "variant order");
-				phase = 3;
-				previousLiteral = branch.value;
-				discriminant = branch.key;
-			} else {
-				const kind = runtimeKind(branch);
-				assert(
-					branch.kind !== "union" &&
-						branch.kind !== "dynamic" &&
-						phase <= 2 &&
-						!kinds.has(kind) &&
-						(previousKind === undefined || previousKind < kind),
-					"ambiguous union",
-				);
-				phase = 2;
-				kinds.add(kind);
-				previousKind = kind;
-			}
-		}
+	union: <B extends Branch>(branches: readonly B[]) => {
+		checkUnion(branches);
 		return descriptor({ kind: "union", branches: table.freeze([...branches]) });
 	},
-	variant: (key: string, value: Literal, body: Node): Node => {
-		assertNode(body);
+	variant: (key, value, body) => {
 		literal(value);
 		assert(
 			typeIs(key, "string") &&
-				tostring(tonumber(key)) !== key &&
-				body.kind === "object" &&
+				!numericName(key) &&
+				node(body).kind === "object" &&
 				body.fields.every(([name]) => name !== key),
 			"invalid variant",
 		);
 		return descriptor({ kind: "variant", key, value, body });
 	},
 });
-
-export type NodeBuilders = typeof n;

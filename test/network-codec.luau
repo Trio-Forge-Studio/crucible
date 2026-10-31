@@ -25,11 +25,16 @@ tests["58 finite numbers and widths use little endian without wrapping"] = funct
 			end)
 		end
 	end
-	for _, node in { r.n.u8, r.n.u16, r.n.u32 } do
-		for _, bad in { -1, 0.5, math.huge, 0 / 0, 4294967296 } do
+	for _, fixture in { { r.n.u8, 256 }, { r.n.u16, 65536 }, { r.n.u32, 4294967296 } } do
+		for _, bad in { -1, 0.5, fixture[2] } do
 			h.rejects(function()
-				h.encode(r, node, bad)
-			end)
+				h.encode(r, fixture[1], bad)
+			end, "integer out of range")
+		end
+		for _, bad in { math.huge, 0 / 0 } do
+			h.rejects(function()
+				h.encode(r, fixture[1], bad)
+			end, "expected finite number")
 		end
 	end
 	for _, node in { r.n.f32, r.n.f64 } do
@@ -67,10 +72,10 @@ tests["59 UTF-8 rejects malformed strings in every string position"] = function(
 		do
 			h.rejects(function()
 				h.encode(r, fixture[1], fixture[2])
-			end)
+			end, "invalid UTF-8")
 			h.rejects(function()
 				h.decode(r, fixture[1], buffer.fromstring(fixture[3]))
-			end)
+			end, "invalid UTF-8")
 		end
 	end
 	local valid = "hello " .. utf8.char(0x10ffff)
@@ -114,7 +119,30 @@ tests["60 Vector3 Color3 and CFrame preserve all finite components"] = function(
 	buffer.writef64(bad, 56, math.sqrt(1 - 0.0015 ^ 2))
 	h.rejects(function()
 		h.decode(r, r.n.cframe, bad)
-	end)
+	end, "invalid CFrame orthogonality")
+	local function scaled(length)
+		local frame = buffer.create(96)
+		buffer.writef64(frame, 24, length)
+		buffer.writef64(frame, 56, 1 / length)
+		buffer.writef64(frame, 88, 1)
+		return frame
+	end
+	local edge = h.decode(r, r.n.cframe, scaled(1.0007))
+	spec.eq(math.abs(select(4, edge:GetComponents()) - 1.0007) < 1e-6, true, "row length inside tolerance decodes")
+	spec.eq(buffer.len(h.encode(r, r.n.cframe, edge)), 96, "row length inside tolerance encodes")
+	h.rejects(function()
+		h.decode(r, r.n.cframe, scaled(1.0015))
+	end, "invalid CFrame rows")
+	h.rejects(function()
+		h.encode(r, r.n.cframe, h.roblox.CFrame.new(0, 0, 0, 1.0015, 0, 0, 0, 1 / 1.0015, 0, 0, 0, 1))
+	end, "invalid CFrame rows")
+	local skewed = buffer.create(96)
+	buffer.writef64(skewed, 24, 1)
+	buffer.writef64(skewed, 56, 1)
+	buffer.writef64(skewed, 88, -1)
+	h.rejects(function()
+		h.decode(r, r.n.cframe, skewed)
+	end, "invalid CFrame determinant")
 end
 
 tests["61 objects ignore undeclared fields and reject empty and numeric shapes"] = function()
@@ -141,16 +169,19 @@ tests["63 64 65 canonical unions select literals kinds and variants"] = function
 		r.n.variant("Kind", "Invite", r.n.object({ { "UserId", r.n.f64 } })),
 		r.n.variant("Kind", "Leave", r.n.object({})),
 	})
-	spec.eq(h.hex(h.encode(r, party, { Kind = "Leave" })), "01", "empty variant body")
-	local value = h.decode(r, party, h.bytes("00 00 00 00 00 00 c0 5e 40"))
+	local leave, _, _, leaveBudget = h.encode(r, party, { Kind = "Leave" })
+	spec.eq(h.hex(leave), "01", "empty variant body")
+	spec.eq(leaveBudget.visits, 2, "one selection and one variant value")
+	local value, inviteBudget = h.decode(r, party, h.bytes("00 00 00 00 00 00 c0 5e 40"))
 	spec.eq(value.Kind, "Invite", "discriminant restored")
 	spec.eq(value.UserId, 123, "body restored")
+	spec.eq(inviteBudget.visits, 3, "selection, variant value and its field")
 	h.rejects(function()
 		h.decode(r, party, h.bytes("02"))
-	end)
+	end, "bad union tag")
 	h.rejects(function()
 		h.encode(r, party, { Kind = "Bogus" })
-	end)
+	end, "no union branch")
 	h.rejects(function()
 		r.n.union({ r.n.u8, r.n.f64 })
 	end)
@@ -164,31 +195,45 @@ end
 
 tests["66 zero-byte arrays charge counts and maps enforce key order"] = function()
 	local r = h.realm()
-	for _, element in
+	for _, fixture in
 		{
-			r.n.literal("Tick"),
-			r.n.union({ r.n.variant("Kind", "Leave", r.n.object({})) }),
+			{ r.n.literal("Tick"), "Tick" },
+			{ r.n.object({ { "Kind", r.n.literal("Leave") } }), { Kind = "Leave" } },
 		}
 	do
-		local node = r.n.array(element)
-		local values = table.create(100, if element.kind == "literal" then "Tick" else { Kind = "Leave" })
-		local packet, _, _, budget = h.encode(r, node, values)
+		local node = r.n.array(fixture[1])
+		local packet, _, _, budget = h.encode(r, node, table.create(100, fixture[2]))
+		spec.eq(h.hex(packet), "64", "zero-byte elements are one count byte")
 		spec.eq(budget.entries, 100, "entries charged")
-		spec.eq(#h.decode(r, node, packet), 100, "count preserved")
-		if element.kind == "literal" then
-			spec.eq(h.hex(packet), "64", "zero-byte literal")
-		end
+		local decoded, decodedBudget = h.decode(r, node, packet)
+		spec.eq(#decoded, 100, "count preserved")
+		spec.eq(decodedBudget.entries, 100, "decode charges the same entries")
 		h.rejects(function()
-			h.encode(r, node, table.create(16385, values[1]))
-		end)
+			h.encode(r, node, table.create(16385, fixture[2]))
+		end, "entry budget exhausted")
 		h.rejects(function()
 			h.decode(r, node, h.bytes("81 80 01"))
-		end)
+		end, "entry budget exhausted")
 	end
 	for _, fixture in
 		{
 			{ r.n.string, { z = 2, a = 1 }, "02 01 61 01 01 7a 02", "02 01 7a 02 01 61 01", "02 01 61 01 01 61 02" },
+			{
+				r.n.string,
+				{ [utf8.char(0xe9)] = 2, z = 1 },
+				"02 01 7a 01 02 c3 a9 02",
+				"02 02 c3 a9 02 01 7a 01",
+				"02 01 7a 01 01 7a 02",
+			},
 			{ r.n.u8, { [3] = 2, [1] = 1 }, "02 01 01 03 02", "02 03 02 01 01", "02 01 01 01 02" },
+			{ r.n.u16, { [256] = 2, [2] = 1 }, "02 02 00 01 00 01 02", "02 00 01 02 02 00 01", "02 02 00 01 02 00 02" },
+			{
+				r.n.u32,
+				{ [65536] = 2, [3] = 1 },
+				"02 03 00 00 00 01 00 00 01 00 02",
+				"02 00 00 01 00 02 03 00 00 00 01",
+				"02 03 00 00 00 01 03 00 00 00 02",
+			},
 			{
 				r.n.union({ r.n.literal("a"), r.n.literal("b") }),
 				{ b = 2, a = 1 },
@@ -204,7 +249,7 @@ tests["66 zero-byte arrays charge counts and maps enforce key order"] = function
 		for i = 4, 5 do
 			h.rejects(function()
 				h.decode(r, node, h.bytes(fixture[i]))
-			end)
+			end, "map keys not strictly ascending")
 		end
 	end
 	h.rejects(function()
@@ -289,14 +334,26 @@ tests["70 71 budgets varuint truncation tags counts and sidecars reject before d
 		{
 			{ ["01"] = h.roblox.Instance.new("Model") },
 			{ ["2"] = h.roblox.Instance.new("Model") },
+			{ ["1.0"] = h.roblox.Instance.new("Model") },
+			{ [" 1"] = h.roblox.Instance.new("Model") },
+			{ [1] = h.roblox.Instance.new("Model") },
 			{ ["1"] = true },
-			setmetatable({}, {}),
 		}
 	do
 		h.rejects(function()
 			r.codec.Reader.new(buffer.create(0), 0, sidecar, 1)
-		end)
+		end, "invalid sidecar slot")
 	end
+	h.rejects(function()
+		r.codec.Reader.new(buffer.create(0), 0, setmetatable({}, {}), 1)
+	end, "invalid sidecar")
+	local crowded = {}
+	for i = 1, 257 do
+		crowded[tostring(i)] = h.roblox.Instance.new("Model")
+	end
+	h.rejects(function()
+		r.codec.Reader.new(buffer.create(0), 0, crowded, 256)
+	end, "invalid sidecar slot")
 	h.rejects(function()
 		h.decode(r, r.n["nil"], buffer.create(0), {}, 1)
 	end)
@@ -431,12 +488,13 @@ tests["57 62 descriptors freeze copy and reject malformed or oversized graphs"] 
 		r.codec.compile(r.n.object(many))
 	end)
 	local deep = r.n.bool
-	for _ = 1, 32 do
+	for _ = 1, 31 do
 		deep = r.n.array(deep)
 	end
+	r.codec.compile(deep)
 	h.rejects(function()
-		r.codec.compile(deep)
-	end)
+		r.codec.compile(r.n.array(deep))
+	end, "schema budget exhausted")
 	h.rejects(function()
 		r.codec.compile({ kind = "union", branches = { r.n.u8, r.n.f64 } })
 	end)

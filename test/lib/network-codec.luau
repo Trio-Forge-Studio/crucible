@@ -30,9 +30,13 @@ local function decode(r, node, packet, sidecar, slots)
 	return value, reader.budget
 end
 
-local function rejects(fn)
+local function rejects(fn, reason)
 	local ok, failure = pcall(fn)
 	spec.eq(ok, false, "rejected")
+	if reason ~= nil then
+		local text = if type(failure) == "table" then failure.reason else tostring(failure)
+		assert(string.find(text, reason, 1, true), `expected "{reason}", got "{text}"`)
+	end
 	return failure
 end
 

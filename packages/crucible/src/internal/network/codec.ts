@@ -1,5 +1,5 @@
 import * as L from "./limits";
-import { type Node, n, runtimeKind } from "./schema";
+import { assertDescriptor, type Branch, checkUnion, n, type Node, runtimeKind } from "./schema";
 
 export interface CodecFailure {
 	readonly codecFailure: true;
@@ -147,9 +147,8 @@ export class Reader {
 		uint(cursor, buffer.len(packet));
 		uint(slotCount, L.MAX_INSTANCE_SLOTS);
 		assert(typeIs(sidecar, "table") && getmetatable(sidecar) === undefined, "invalid sidecar");
-		let entries = 0;
+		// At most R keys are valid, so the key check ends iteration by entry R + 1 (rule 71).
 		for (const [key, value] of pairs(sidecar)) {
-			assert(++entries <= L.MAX_INSTANCE_SLOTS, "sidecar too large");
 			const slot = typeIs(key, "string") ? tonumber(key) : undefined;
 			assert(
 				slot !== undefined &&
@@ -222,7 +221,7 @@ export class Reader {
 }
 
 export interface Codec {
-	readonly node: Node;
+	readonly node: Branch;
 	readonly minBytes: number;
 	readonly encode: (writer: Writer, value: unknown, path: string) => void;
 	readonly decode: (reader: Reader, path: string) => unknown;
@@ -249,7 +248,8 @@ function frame(values: readonly number[], path: string) {
 	for (const v of values) finite(v, path);
 	const r = values.filter((_, i) => i >= 3);
 	const dot = (a: number, b: number) => r[a] * r[b] + r[a + 1] * r[b + 1] + r[a + 2] * r[b + 2];
-	for (const i of [0, 3, 6]) if (math.abs(dot(i, i) - 1) > L.CFRAME_TOLERANCE) fail(path, "invalid CFrame rows");
+	for (const i of [0, 3, 6])
+		if (math.abs(math.sqrt(dot(i, i)) - 1) > L.CFRAME_TOLERANCE) fail(path, "invalid CFrame rows");
 	if (
 		math.abs(dot(0, 3)) > L.CFRAME_TOLERANCE ||
 		math.abs(dot(0, 6)) > L.CFRAME_TOLERANCE ||
@@ -262,8 +262,9 @@ function frame(values: readonly number[], path: string) {
 }
 
 export function compile(node: Node, tally = { nodes: 0 }): Codec {
-	const active = new Set<Node>();
-	function build(node: Node, depth: number, empty = false, nilable = false): Codec {
+	assertDescriptor(node);
+	const active = new Set<Branch>();
+	function build(node: Branch, depth: number, empty = false, nilable = false): Codec {
 		assert(
 			++tally.nodes <= L.MAX_SCHEMA_NODES && depth <= L.MAX_DEPTH && !active.has(node),
 			"schema budget exhausted",
@@ -428,7 +429,7 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 				break;
 			}
 			case "union": {
-				n.union(node.branches);
+				checkUnion(node.branches);
 				const branches = node.branches.map((b) =>
 					build(
 						b,
@@ -554,11 +555,13 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 		active.delete(node);
 		const container =
 			node.kind === "object" || node.kind === "array" || node.kind === "tuple" || node.kind === "map";
+		// A union charges its selection, a variant is its body's value, and a dynamic value charges itself.
+		const visits = node.kind !== "union" && node.kind !== "variant" && node.kind !== "dynamic";
 		return {
 			node,
 			minBytes,
 			encode: (w, v, p) => {
-				if (node.kind !== "union" && node.kind !== "dynamic") w.budget.visit(p);
+				if (visits) w.budget.visit(p);
 				if (container) w.budget.enter(p);
 				const [ok, reason] = pcall(() => encode(w, v, p));
 				if (!ok) {
@@ -569,7 +572,7 @@ export function compile(node: Node, tally = { nodes: 0 }): Codec {
 				if (container) w.budget.leave();
 			},
 			decode: (r, p) => {
-				if (node.kind !== "union" && node.kind !== "dynamic") r.budget.visit(p);
+				if (visits) r.budget.visit(p);
 				if (container) r.budget.enter(p);
 				const value = decode(r, p);
 				if (container) r.budget.leave();

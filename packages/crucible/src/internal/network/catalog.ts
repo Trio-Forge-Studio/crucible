@@ -94,7 +94,7 @@ export function seal(): string {
 
 export function adopt(catalog: string): void {
 	assert(
-		!sealed && typeIs(catalog, "string") && catalog.size() <= L.MAX_MESSAGES * (L.MESSAGE_NAME_MAX_BYTES + 1),
+		!sealed && typeIs(catalog, "string") && catalog.size() < L.MAX_MESSAGES * (L.MESSAGE_NAME_MAX_BYTES + 1),
 		"invalid catalog",
 	);
 	const ordered = catalog === "" ? [] : catalog.split("\n");

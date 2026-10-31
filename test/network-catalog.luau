@@ -12,8 +12,11 @@ return {
 		spec.eq(r.catalog.definitionAt(0), a, "first lookup")
 		spec.eq(r.catalog.definitionAt(1), b, "last lookup")
 		h.rejects(function()
-			r.catalog.define({ name = "Late", kind = "to-server", input = r.n["nil"] })
-		end)
+			r.catalog.define({ name = "Doors.Toggle", kind = "to-server", input = r.n["nil"] })
+		end, "Doors.Toggle was declared after the network catalog sealed; declare messages in modules that boot loads.")
+		h.rejects(function()
+			r.catalog.seal()
+		end, "catalog already sealed")
 	end,
 	["11 13 catalog count grammar and ascending order are bounded"] = function()
 		for _, bad in { "A\nA", "Z\nA", "A\n", "Crucible.Test", "1A", ".A", "A..B", string.rep("a", 65) } do
@@ -21,13 +24,31 @@ return {
 				h.realm().catalog.adopt(bad)
 			end)
 		end
+		local names = {}
+		for i = 1, 1024 do
+			table.insert(names, "M" .. string.format("%063d", i))
+		end
+		local largest = table.concat(names, "\n")
+		spec.eq(#largest, 66559, "1,024 names of 64 bytes")
+		local adopted = h.realm()
+		adopted.catalog.adopt(largest)
+		spec.eq(adopted.catalog.catalogSize(), 1024, "largest catalog adopts")
+		h.rejects(function()
+			h.realm().catalog.adopt(largest .. "\nN")
+		end)
 		local r = h.realm()
+		for i = 1, 1024 do
+			r.catalog.define({ name = `M.N{i}`, kind = "to-server", input = r.n["nil"] })
+		end
+		r.catalog.seal()
+		spec.eq(r.catalog.catalogSize(), 1024, "MAX_MESSAGES seals")
+		r = h.realm()
 		for i = 1, 1025 do
 			r.catalog.define({ name = `M.N{i}`, kind = "to-server", input = r.n["nil"] })
 		end
 		h.rejects(function()
 			r.catalog.seal()
-		end)
+		end, "too many messages")
 	end,
 	["13 14 15 two realms adopt published indices and leave absent names unpublished"] = function()
 		local server, client = h.realm(), h.realm()
@@ -56,7 +77,38 @@ return {
 		spec.eq(r.catalog.definitionOf({ name = "A" }), nil, "forged token")
 		h.rejects(function()
 			r.catalog.define({ name = "A", kind = "to-server", input = r.n["nil"] })
-		end)
+		end, "duplicate message A")
+		for _, bad in { "", "Crucible.Test", "Crucible", "1A", ".A", "A.", "A..B", "A-B", "A B", string.rep("a", 65) } do
+			h.rejects(function()
+				r.catalog.define({ name = bad, kind = "to-server", input = r.n["nil"] })
+			end)
+		end
+		r.catalog.define({ name = string.rep("a", 64), kind = "to-server", input = r.n["nil"] })
+		r.catalog.define({ name = "CrucibleGame.A_1", kind = "to-server", input = r.n["nil"] })
+		h.rejects(function()
+			r.catalog.define({ name = "Timed", kind = "to-server", input = r.n["nil"], timeout = 5 })
+		end, "invalid message options")
+		h.rejects(function()
+			r.catalog.define({ name = "Bare", kind = "ask-server", input = r.n["nil"] })
+		end, "invalid message options")
+		local slow = r.catalog.define({
+			name = "Slow",
+			kind = "ask-server",
+			input = r.n["nil"],
+			output = r.n["nil"],
+			timeout = 120,
+		})
+		spec.eq(slow.timeout, 120, "MAX_ASK_TIMEOUT_SECONDS admitted")
+		local half = {}
+		for i = 1, 2047 do
+			table.insert(half, { string.format("F%04d", i), r.n.bool })
+		end
+		local request = r.n.object(half)
+		r.catalog.define({ name = "Fits", kind = "ask-server", input = request, output = request })
+		local response = r.n.object({ { "a", request }, { "b", r.n.bool } })
+		h.rejects(function()
+			r.catalog.define({ name = "Over", kind = "ask-server", input = request, output = response })
+		end, "schema budget exhausted")
 		for _, timeout in { 0, -1, 121, math.huge, 0 / 0 } do
 			h.rejects(function()
 				r.catalog.define({
