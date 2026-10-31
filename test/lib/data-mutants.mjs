@@ -803,6 +803,7 @@ try {
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
 	const start = Number(process.argv[2] ?? 0);
 	let killed = 0;
+	const survivors = [];
 	for (const [index, [rule, kind, file, before, after, target]] of mutants.entries()) {
 		if (index < start) continue;
 		const original = originals.get(file);
@@ -816,16 +817,17 @@ try {
 		const tested = run("lune", ["run", "test", target]);
 		fs.writeFileSync(path.join(scratch, file), original);
 		const output = tested.stdout + tested.stderr;
-		assert.notEqual(tested.status, 0, `${index} rule ${rule} ${kind} survived ${target}\n${output}`);
-		assert.ok(
-			output.includes(`FAIL `) && output.includes(target),
-			`${index} rule ${rule} ${kind} must fail ${target}`,
-		);
+		if (tested.status === 0 || !output.includes("FAIL ") || !output.includes(target)) {
+			survivors.push(`${index} rule ${rule} ${kind}`);
+			console.log(`SURVIVED ${index} | rule ${rule} | ${kind} | ${target}`);
+			continue;
+		}
 		console.log(`KILLED ${index} | rule ${rule} | ${kind} | ${target}`);
 		killed++;
 	}
 	assert.equal(build().status, 0, "restored build");
 	console.log(`${killed}/${mutants.length - start} data mutants killed; restored build 0`);
+	assert.deepEqual(survivors, [], "every mutant is killed");
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });
 }

@@ -361,7 +361,11 @@ return {
 		backend:advance(bound - a.clock() - 0.01)
 		spec.eq(a.store:writable(pa), true, "writable just before the bound")
 		spec.eq(set(a, pa, 2), true, "writes accepted just before the bound")
+		a.suspended = true
 		backend:advance(0.02)
+		spec.eq(a.store:writable(pa), false, "an authority check past the bound fails before the seal timer runs")
+		a.suspended = false
+		backend:advance(0.01)
 		spec.eq(a.store:writable(pa), false, "not writable at the bound")
 		spec.eq(set(a, pa, 3), false, "writes refused at the bound")
 	end,
