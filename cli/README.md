@@ -36,9 +36,33 @@ The packaging job builds the runtime and transformer, generates `THIRD_PARTY_NOT
 
 `node cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64`, `win32-x64`, and `darwin-arm64`. It checks `npm pack --dry-run` for runtime output, transformer, and side entries, then packs five tarballs. CI runs `npm publish --dry-run` on each tarball without credentials. Tags must match `v` plus the Cargo version.
 
-Only the tag push job can access `NPM_TOKEN` and request an OIDC token. It publishes the verified tarballs with npm provenance, platform packages and runtime first, then the shim. npm does not provide an atomic transaction across five packages. A failed release can leave some packages published and needs operator recovery.
+The publish job runs on GitHub-hosted `ubuntu-latest`. npm provenance rejects self-hosted runners, including Blacksmith. Build jobs stay on Blacksmith. The publish job uses the `npm-release` GitHub Environment and its `NPM_TOKEN` secret. Environment protection gates access. A repository secret would also be available to other authorized workflows that reference it, so the event condition alone is not a secret access boundary.
 
-Actual publishing requires separate authorization, the `NPM_TOKEN` repository secret, and a public source repository. This repository is currently private. [npm provenance requirements](https://docs.npmjs.com/generating-provenance-statements/) require public source and document GitHub-hosted runners; provenance support on Blacksmith remains unproven until an authorized release. The workflow fails before publishing while the repository is private and never falls back to a publication without provenance. No tag, secret, publication, or repository setting is created by this PR.
+### Prepare the first release
+
+1. Confirm with npm that the operator's account can claim the unscoped `crucible` name. npm's security team held that name until 2025-11-20. The elapsed date does not prove claim rights. The account also needs publish access to the `@trioforge` organization and all four scoped packages.
+2. Make the source repository public before publishing. [npm provenance](https://docs.npmjs.com/generating-provenance-statements/) requires public source and a supported hosted runner. Keep the publish job on GitHub-hosted Ubuntu even if builds use Blacksmith.
+3. Create the `npm-release` GitHub Environment. Limit its deployment tags to `v*`, require reviewers, and restrict who can approve releases. Store `NPM_TOKEN` there, not as a repository secret. Use an expiring granular token with package read/write permission for unscoped `crucible` and the four `@trioforge` packages. For new names, include permission to create the packages in those scopes. Enable bypass 2FA for noninteractive publication where npm account policy permits it. An organization permission alone does not grant package publication.
+4. This workflow keeps token authentication for the first publication because the package names must exist before their [trusted publisher](https://docs.npmjs.com/trusted-publishers/) records can be configured. After claiming all five names, prefer OIDC. Configure each package's GitHub publisher for `Trio-Forge-Studio/crucible`, `release.yml`, and environment `npm-release`. Then remove the token requirement and `NODE_AUTH_TOKEN` from the workflow and revoke the token. Keep `id-token: write` and use npm 11.5.1 or newer. These setup actions belong to the operator.
+
+### Cut a release
+
+1. Bump `[workspace.package].version` in `cli/Cargo.toml` and `version` in `packages/crucible/package.json` together. Run Cargo to refresh `cli/Cargo.lock` and retain it. Generated npm packages inherit the Cargo version.
+2. Choose a version never used by any of the five packages. The registry preflight checks both `versions` and `time` keys before publication. Known burned versions of `crucible` are `0.0.0`, `0.0.1`, `0.3.0`, `0.3.1`, `0.3.2`, `0.3.3`, `0.3.4`, `0.3.5`, `0.4.0`, `0.4.1`, and `9.0.0`. Unpublishing does not make a version reusable. The local denylist also catches these versions if registry history disappears.
+3. Run the repository checks and review the five package dry runs in CI. Commit and land the version change before tagging.
+4. Create and push the exact version tag, replacing `X.Y.Z` below.
+
+```console
+git tag vX.Y.Z && git push origin refs/tags/vX.Y.Z
+```
+
+The tag must match the Cargo version. Approve the protected environment deployment after inspecting build, notices, preflight, and dry-run logs. Prerelease versions require `npm publish --tag next` or another non-`latest` dist-tag. This workflow selects `next` for versions containing a hyphen and `latest` for stable versions.
+
+### Recover and verify
+
+npm cannot publish five packages atomically. After a partial publication, rerun **failed jobs only** in the same Actions run. The successful packaging job's unused-version preflight and tarballs stay intact. The publish job reads each tarball's name and version, skips already-published tarballs only when registry integrity matches, and publishes missing platform packages and runtime before the shim. A full workflow rerun repeats preflight and rejects the partly used version. If tarballs differ or the artifacts have expired, investigate and release a fresh shared version. Never delete and recreate a tag or try to reuse an unpublished version.
+
+After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestations` for all five names. Check the provenance badge and linked source on each npm package page. On Windows x64, Linux x64, and macOS arm64, run `npx crucible@X.Y.Z --version` and confirm the shared version and embedded Rojo version.
 
 ## Create a game
 

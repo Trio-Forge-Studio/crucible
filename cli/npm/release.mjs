@@ -12,7 +12,7 @@ const version = cliVersion();
 if (process.env.GITHUB_EVENT_NAME === "push") {
 	assert.equal(process.env.GITHUB_REF, `refs/tags/v${version}`, "release tag must match cli/Cargo.toml");
 }
-assert.ok(readFileSync(notices, "utf8").includes("Third-party notices"), "generated notices are required");
+assert.ok(readFileSync(notices, "utf8").includes("rojo "), "generated notices are required");
 const output = resolve(outputDirectory);
 const packages = stage(
 	join(output, "packages"),

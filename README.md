@@ -1,6 +1,6 @@
 # Crucible
 
-Crucible is Trio Forge's roblox-ts game framework. This private workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. Framework features and publishing come in later units.
+Crucible is Trio Forge's roblox-ts game framework. This private workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. The tag-triggered release workflow stages the CLI and runtime together for npm with provenance.
 
 ## Check the workspace
 
@@ -12,7 +12,7 @@ rokit install
 pnpm check
 ```
 
-`pnpm check` checks formatting and lint, compiles the runtime, builds the sample with `crucible build` into `build/sample-game.rbxl`, and runs the Lune specs against that place. CI runs the same command with the shared Trio Forge setup action. It omits the reusable workflow's changeset job because this private scaffold has no release flow.
+`pnpm check` checks formatting and lint, compiles the runtime, builds the sample with `crucible build` into `build/sample-game.rbxl`, and runs the Lune specs against that place. CI runs the same command with the shared Trio Forge setup action. It omits the reusable workflow's changeset job because releases use the version-tag workflow. See `cli/README.md` for operator setup.
 
 Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to fix formatting.
 
