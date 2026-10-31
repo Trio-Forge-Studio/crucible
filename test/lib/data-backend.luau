@@ -127,9 +127,9 @@ local function matches(filter, call): boolean
 	return true
 end
 
--- Parks calls that reach `point` ("transform", "commit", "committed" or "response") while closed.
+-- Parks calls made after it that reach `point` ("transform", "commit", "committed" or "response") while closed.
 function Backend:gate(point: string, filter)
-	local gate = { point = point, filter = filter or {}, open = false, parked = {} }
+	local gate = { point = point, filter = filter or {}, open = false, parked = {}, after = #self.calls }
 	function gate.release()
 		gate.open = true
 		local parked = gate.parked
@@ -144,7 +144,7 @@ end
 
 function Backend:pass(call, point: string, continue)
 	for _, gate in self.gates do
-		if not gate.open and gate.point == point and matches(gate.filter, call) then
+		if not gate.open and gate.point == point and call.index > gate.after and matches(gate.filter, call) then
 			table.insert(gate.parked, continue)
 			call.parked = point
 			return
