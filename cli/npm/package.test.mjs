@@ -60,7 +60,7 @@ test("npx crucible runs the installed platform binary", { skip: !supported && `n
 	const app = project("app", [shim, platform]);
 	const version = run("npx", ["crucible", "--version"], app);
 	assert.equal(version.status, 0, version.stderr);
-	assert.equal(version.stdout.trim(), `crucible ${cliVersion()}`);
+	assert.equal(version.stdout.trim(), `crucible ${cliVersion()} (rojo 7.7.1)`);
 
 	const found = run("npx", ["crucible", "oc", "find", "asset"], app);
 	assert.equal(found.status, 0, found.stderr);

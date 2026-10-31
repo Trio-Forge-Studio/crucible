@@ -4,7 +4,7 @@ Crucible is Trio Forge's roblox-ts game framework. This private workspace contai
 
 ## Check the workspace
 
-Install Node.js 24, pnpm 12.15.0, and Rokit. Run these commands from the repository root.
+Install Node.js 24, pnpm 12.15.0, Rokit, and rustup. `rust-toolchain.toml` pins the Rust toolchain. Run these commands from the repository root.
 
 ```sh
 pnpm install --pm-on-fail=download
@@ -12,7 +12,7 @@ rokit install
 pnpm check
 ```
 
-`pnpm check` checks formatting and lint, compiles both workspace packages, builds `build/sample-game.rbxl`, and runs the Lune specs against that place. CI runs the same command with the shared Trio Forge setup action. It omits the reusable workflow's changeset job because this private scaffold has no release flow.
+`pnpm check` checks formatting and lint, compiles the runtime, builds the sample with `crucible build` into `build/sample-game.rbxl`, and runs the Lune specs against that place. CI runs the same command with the shared Trio Forge setup action. It omits the reusable workflow's changeset job because this private scaffold has no release flow.
 
 Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to fix formatting.
 

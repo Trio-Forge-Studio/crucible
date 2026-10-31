@@ -92,6 +92,6 @@ Each batch drain reaches exactly 1,024 starts, then reports MAX_BATCHES. The cou
 
 `node test/lib/logging-mutants.mjs` rebuilds source mutants in isolated scratch and runs each named Lune spec. `test/logging-mutants.log` records 32 killed mutants, each with build exit 0 and spec exit 1. Scratch is removed with Node's `fs.rmSync`.
 
-`node test/sample-mutants.mjs` covers fingerprint invalidation, real fixture copying, PID ownership, retry waiting and sample wiring. Its receipt is `results/sample-mutants.log`. Transformer receipts are `results/transformer-mutants.json` and `results/transformer-mutants.log`. Fix-round boot, binding and scheduler receipts are under `test` with the `-fix1.log` suffix.
+`node test/sample-mutants.mjs` covers real fixture copying, PID ownership, retry waiting and sample wiring. Its receipt is `results/sample-mutants.log`. `cli/crates/crucible/tests/build.rs` covers transformer fingerprint invalidation in `crucible build`. Transformer receipts are `results/transformer-mutants.json` and `results/transformer-mutants.log`. Fix-round boot, binding and scheduler receipts are under `test` with the `-fix1.log` suffix.
 
 The Lune sample fixture includes a tagged Part without required Identity. The compiled lifecycle spec rejects its admission. Its valid Part has Identity fleet-23 and absent Speed, so field substitution and fallback errors remain distinguishable.

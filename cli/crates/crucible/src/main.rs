@@ -1,10 +1,13 @@
 mod auth;
+mod build;
 mod call;
+mod child;
 mod cli;
 mod discover;
 mod docs;
 mod exec;
 mod flows;
+mod manifest;
 mod outcome;
 mod output;
 
@@ -27,6 +30,8 @@ fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(Cli { command: Command::Oc(cli) }) => cli,
         Ok(Cli { command: Command::Docs { topic } }) => return docs::run(topic.as_deref()),
+        Ok(Cli { command: Command::Build(args) }) => return build::main(args),
+        Ok(Cli { command: Command::RojoBuild { project, output } }) => return build::rojo_main(project, output),
         Err(error) => {
             if std::env::args_os().nth(1).is_none_or(|word| word != "oc") {
                 error.exit();

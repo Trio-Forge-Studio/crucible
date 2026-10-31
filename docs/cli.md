@@ -4,7 +4,7 @@ Run `crucible` commands and read their output and exit codes.
 
 `crucible` is the command line for Crucible games. Run it with `npx crucible <command>` from a project that has `crucible` in its `devDependencies`. `npx crucible docs cli` lists every command.
 
-`crucible --help` lists the commands, and `crucible <command> --help` describes one. `crucible --version` prints the version.
+`crucible --help` lists the commands, and `crucible <command> --help` describes one. `crucible --version` prints the CLI version and the embedded Rojo version.
 
 ## Output and exit codes
 
@@ -15,6 +15,38 @@ Commands print text. The result goes to stdout, and progress and errors go to st
 | 0 | The command succeeded. |
 | 1 | The command failed. |
 | 2 | The arguments are invalid. The usage error is on stderr. |
+
+## crucible build
+
+Run `npx crucible build` from the game's root. It runs the project's roblox-ts once as `rbxtsc --type game`, then builds every place in `crucible.toml` to `build/<name>.rbxl` with the Rojo it embeds. `crucible --version` names that Rojo version. Projects need no separate Rojo install.
+
+- roblox-ts resolves the way Node resolves `roblox-ts` from the game's root, through each parent `node_modules`. It runs with the `node` on `PATH`. Its diagnostics reach stderr with their file and line positions. When stderr is not a terminal, their colour codes are removed.
+- `--place <name>` builds only that place. Repeat it to build several.
+- `--output <file>` writes the place file elsewhere. It needs exactly one place.
+- When the installed `@trioforge/crucible` transformer differs from the one recorded in `out/transformer.sha256`, `out` is deleted and the game compiles from clean.
+- Exit 0 means every place built. Exit 1 means `crucible.toml` could not be read, or roblox-ts or Rojo failed. Exit 2 means a usage error or an invalid `crucible.toml`, reported before anything compiles.
+
+`crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `default.project.json`.
+
+```toml
+[places.start]
+project = "default.project.json"
+
+[places.arena]
+project = "arena.project.json"
+
+[env.staging]
+universe = 1234
+profile = "publish"          # optional crucible oc profile
+places = { start = 5678, arena = 5679 }
+
+[env.production]
+universe = 9999
+version_type = "Published"   # default "Saved"
+places = { start = 4321, arena = 4322 }
+```
+
+Every env must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
 
 ## crucible docs
 
