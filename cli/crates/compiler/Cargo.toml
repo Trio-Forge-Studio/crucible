@@ -1,0 +1,19 @@
+[package]
+name = "crucible-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# tsrs 0.20.1 (TypeScript 7.1.0-beta). Its crates are not published, so they come from git at one pinned SHA, and the
+# root rust-toolchain.toml follows the Rust version that SHA requires.
+[dependencies]
+tsrs_ast = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_checker = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_compiler = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_core = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_printer = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_scanner = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_tsoptions = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+tsrs_vfs = { git = "https://github.com/oxc-project/tsrs", rev = "77d3cddb44540734abc33a42ccca4d3f33bee527" }
+serde_json.workspace = true
