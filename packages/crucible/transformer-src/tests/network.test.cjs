@@ -395,19 +395,20 @@ const augmentedFiles = (result) =>
 test("network augmentations of a base interface a reached payload extends fail at the augmentation", () => {
 	const game = project({
 		"src/shared/base.ts":
-			"export interface Base { base: string } export interface Root { root: string } export interface Gen<T> { value: T }",
+			"export interface Base { base: string } export interface Root { root: string } export interface Gen<T> { value: T } export class KBase { k = 1; }",
 		"src/shared/model.ts":
-			'import { Base, Root, Gen } from "./base"; export interface Child extends Base { child: string } export interface Middle extends Root { middle: string } export interface Top extends Middle { top: string } export interface Generic extends Gen<string> { own: number } export interface Unreached extends Base { own: string }',
+			'import { Base, Root, Gen, KBase } from "./base"; export interface Child extends Base { child: string } export interface Middle extends Root { middle: string } export interface Top extends Middle { top: string } export interface Generic extends Gen<string> { own: number } export interface Unreached extends Base { own: string } export class Klass extends KBase { own = 2; }',
 		"src/shared/messages.ts":
 			imports +
-			'import { Child, Top, Generic } from "./model"; export const One = toServer<Child>("X.One"); export const Two = toServer<Top>("X.Two"); export const Three = toServer<Generic>("X.Three");',
+			'import { Child, Top, Generic, Klass } from "./model"; export const Four = toServer<Klass>("X.Four"); export const One = toServer<Child>("X.One"); export const Two = toServer<Top>("X.Two"); export const Three = toServer<Generic>("X.Three");',
 		"src/util/base.ts": augmentation("../shared/base", "interface Base { extra: string }"),
 		"src/util/root.ts": augmentation("../shared/base", "interface Root { extra: string }"),
 		"src/util/gen.ts": augmentation("../shared/base", "interface Gen<T> { extra: T }"),
+		"src/util/kbase.ts": augmentation("../shared/base", "interface KBase { extra: string }"),
 		"src/util/middle.ts": augmentation("../shared/model", "interface Middle { extra: string }"),
 		"src/util/unreached.ts": augmentation("../shared/model", "interface Unreached { extra: string }"),
 	});
-	assert.deepEqual(augmentedFiles(inspect(game)), ["base", "gen", "middle", "root"]);
+	assert.deepEqual(augmentedFiles(inspect(game)), ["base", "gen", "kbase", "middle", "root"]);
 	assert.match(compile(game, 1), /CRU010/);
 });
 
