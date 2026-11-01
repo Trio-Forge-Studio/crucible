@@ -41,7 +41,7 @@ const mutations = [
 	],
 	["rule 1 const guard", "!(list.flags & ts.NodeFlags.Const)", "false", negative],
 	["rule 1 export guard", "!modifiers(statement, ts.ModifierFlags.Export)", "false", negative],
-	["rule 1 side guard", 'side(node) !== "shared"', "false", negative],
+	["rule 1 side guard", "side(node) !== spec.side", "false", negative],
 	[
 		"rule 2 absent descriptor",
 		'if (type.flags & flags.Undefined) return { kind: "nil" };',
@@ -49,7 +49,7 @@ const mutations = [
 		descriptors,
 	],
 	["rule 3 reserved prefix guard", 'name.text.split(".")[0] === "Crucible"', "false", negative],
-	["rule 3 length guard", "Buffer.byteLength(name.text) > limits.MESSAGE_NAME_MAX_BYTES", "false", negative],
+	["rule 3 length guard", "Buffer.byteLength(name.text) > spec.maxBytes", "false", negative],
 	["rule 4 duplicate guard", "if (other) {", "if (false && other) {", globals],
 	[
 		"rule 5 timeout bound",
@@ -169,7 +169,7 @@ const mutations = [
 		negative,
 	],
 	["rule 70 schema node budget", "> limits.MAX_SCHEMA_NODES)", "> Infinity)", limits],
-	["rule 70 depth budget", "depth > limits.MAX_DEPTH", "false", limits],
+	["rule 70 depth budget", "depth > depthLimit", "false", limits],
 	[
 		"CRU010 global and merge guards",
 		"decls.some(global) || new Set(decls.map((d) => d.getSourceFile().fileName)).size > 1",
@@ -180,8 +180,8 @@ const mutations = [
 	["CRU023 escape guard", "!ts.isImportSpecifier(p) &&", "false &&", negative],
 	[
 		"ask request response argument swap",
-		"...lowerMessage(node, kind, report).map(emit)",
-		"...lowerMessage(node, kind, report).reverse().map(emit)",
+		"...descriptors.map(emit),",
+		"...[...descriptors].reverse().map(emit),",
 		descriptors,
 	],
 	[
@@ -305,12 +305,7 @@ const mutations = [
 		receivers,
 	],
 	["M08 CRU012 const binding guard", "ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const &&", "", receivers],
-	[
-		"M09 rule 1 extra argument guard",
-		'if (node.arguments.length > (kind === "askServer" ? 2 : 1))',
-		"if (false)",
-		negative,
-	],
+	["M09 rule 1 extra argument guard", "if (node.arguments.length > spec.arguments)", "if (false)", negative],
 	[
 		"M10 rule 63 boolean fold needs both literals",
 		"parts.filter((p) => p.flags & flags.BooleanLiteral).length === 2",
@@ -420,15 +415,16 @@ const mutations = [
 	["K4 undefined field guard", "if (value.flags & flags.Undefined)", "if (false)", negative],
 	[
 		"K4 undefined field path",
-		'`${location}.${prop.name}`,\n\t\t\t\t\t\t\t\t"a field of type undefined',
-		'location,\n\t\t\t\t\t\t\t\t"a field of type undefined',
+		"`${location}.${prop.name}`,\n\t\t\t\t\t\t\t\tspec.handles",
+		"location,\n\t\t\t\t\t\t\t\tspec.handles",
 		negative,
 	],
 	[
-		"rule 1 type argument count swap",
-		'node.typeArguments?.length !== (kind === "askServer" ? 2 : 1)',
-		'node.typeArguments?.length !== (kind === "askServer" ? 1 : 2)',
+		"rule 1 askServer type argument count",
+		"askServer: { ...message, typeArguments: 2, arguments: 2 }",
+		"askServer: { ...message, typeArguments: 1, arguments: 2 }",
 		descriptors,
+		"declarations.cjs",
 	],
 ];
 if (process.argv.includes("--list")) {

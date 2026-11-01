@@ -5,8 +5,5 @@ import { fileURLToPath } from "node:url";
 const source = path.dirname(fileURLToPath(import.meta.url));
 const output = path.join(source, "..", "transformer");
 fs.mkdirSync(output, { recursive: true });
-fs.copyFileSync(path.join(source, "index.cjs"), path.join(output, "index.js"));
-fs.copyFileSync(path.join(source, "type-id.cjs"), path.join(output, "type-id.cjs"));
-
-fs.copyFileSync(path.join(source, "diagnostics.cjs"), path.join(output, "diagnostics.cjs"));
-fs.copyFileSync(path.join(source, "network.cjs"), path.join(output, "network.cjs"));
+for (const file of fs.readdirSync(source).filter((name) => name.endsWith(".cjs")))
+	fs.copyFileSync(path.join(source, file), path.join(output, file === "index.cjs" ? "index.js" : file));
