@@ -26,6 +26,7 @@ fn main() -> ExitCode {
     };
     println!("modules     {}", modules.len());
     println!("written     {}", changes.written);
+    println!("renamed     {}", changes.renamed);
     println!("removed     {}", changes.removed);
     println!("compile     {:.0} ms", compiled.as_secs_f64() * 1e3);
     println!("total       {:.0} ms", start.elapsed().as_secs_f64() * 1e3);
