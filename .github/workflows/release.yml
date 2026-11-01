@@ -101,7 +101,7 @@ jobs:
         run: |
           cargo install cargo-about --version 0.8.4 --locked
           node npm/notices.mjs ../build/THIRD_PARTY_NOTICES
-      - name: Stage four packages at the Cargo version
+      - name: Stage four packages at the Cargo version, or a PR prerelease of it
         run: |
           for platform in linux-x64 win32-x64; do
             mv "build/binaries/binary-$platform" "build/binaries/$platform"

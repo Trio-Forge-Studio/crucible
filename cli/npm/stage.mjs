@@ -29,8 +29,7 @@ function writeJson(path, value) {
 	writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`);
 }
 
-export function stage(out, binaries, notices) {
-	const version = cliVersion();
+export function stage(out, binaries, notices, version = cliVersion()) {
 	rmSync(out, { recursive: true, force: true });
 	const staged = [];
 
