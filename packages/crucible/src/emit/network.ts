@@ -1,4 +1,4 @@
-import type { AskServer, Receiver, ToClient, ToServer } from "../network";
+import type { AskServer, ReceiveCallback, Receiver, ReceiveTarget, ToClient, ToServer } from "../network";
 import { define } from "../internal/network/catalog";
 import { claim } from "../internal/network/claims";
 import type { Node } from "../internal/network/schema";
@@ -23,6 +23,11 @@ export function askServer<Request, Response>(
 	>;
 }
 
-export function receive(owner: object, field: string, target: unknown, callback: Callback): Receiver {
+export function receive<T extends ReceiveTarget>(
+	owner: object,
+	field: string,
+	target: T,
+	callback: ReceiveCallback<T>,
+): Receiver {
 	return claim(owner, field, target, callback);
 }
