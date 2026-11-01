@@ -13,7 +13,7 @@ use tsrs_checker::{EmitResolver, Type};
 use tsrs_compiler::CheckerHandle;
 use tsrs_core::{P, jsnum};
 
-use crate::facts::{Callee, Crucible, Fact, Facts, FileFacts, Import, Reason, Receiver, Site, Span, Unanswered};
+use crate::facts::{Callee, Crucible, Fact, Facts, Falsy, FileFacts, Import, Reason, Receiver, Site, Span, Unanswered};
 use crate::macros::Macro;
 use crate::program::Checked;
 
@@ -93,6 +93,11 @@ fn pattern_role(n: P<Node>) -> Option<Pattern> {
     }
 }
 
+/// Whether an argument is a call, which can pass several values or none.
+fn returns_values(argument: P<Node>) -> bool {
+    types::skip_downwards(argument).kind() == Kind::CallExpression
+}
+
 fn computed_key(n: P<Node>) -> bool {
     let computed = |key: Option<P<Node>>| key.is_some_and(|key| key.kind() == Kind::ComputedPropertyName);
     match n.kind() {
@@ -142,9 +147,7 @@ impl Extractor {
     }
 
     fn span(&self, n: P<Node>) -> Span {
-        let pos = n.pos().source_offset().unwrap_or(0);
-        let end = n.end().source_offset().unwrap_or(pos);
-        Span { start: tsrs_scanner::skip_trivia(self.text, pos), end }
+        crate::tree::span(n, self.text)
     }
 
     fn site(&mut self) {
@@ -260,11 +263,16 @@ impl Extractor {
         let callee = n.as_call_expression().expression;
         let target = types::skip_downwards(callee);
         let object = match target.kind() {
-            Kind::SuperKeyword | Kind::ImportKeyword => return,
+            Kind::ImportKeyword => return,
+            Kind::SuperKeyword => {
+                self.call_or_return(n);
+                return;
+            }
             Kind::PropertyAccessExpression | Kind::ElementAccessExpression => target.expression(),
             _ => None,
         };
         if object.is_some_and(|o| o.kind() == Kind::SuperKeyword) {
+            self.call_or_return(n);
             return;
         }
         self.site();
@@ -302,7 +310,7 @@ impl Extractor {
                     {
                         self.unanswered(last, Site::Spread, Reason::MacroSpread);
                     }
-                } else if arguments.iter().any(|a| a.kind() == Kind::CallExpression) {
+                } else if arguments.iter().any(|&a| returns_values(a)) {
                     let roblox = self.possibly_roblox(t);
                     self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
                 }
@@ -343,9 +351,12 @@ impl Extractor {
         self.site();
         let callee = n.expression().unwrap();
         let t = self.type_of(callee);
+        let span = self.span(callee);
         if let Some(m) = t.symbol().and_then(|s| self.globals.constructor_macro(s)) {
-            let span = self.span(callee);
             self.table.store(span, Site::NewCallee, |f| &mut f.callee, Callee::Macro(m));
+        } else if n.arguments().iter().any(|&a| returns_values(a)) {
+            let roblox = self.possibly_roblox(t);
+            self.table.store(span, Site::NewCallee, |f| &mut f.roblox_api, roblox);
         }
     }
 
@@ -368,14 +379,8 @@ impl Extractor {
         match binary.operator_token.kind() {
             Kind::PlusToken | Kind::PlusEqualsToken => self.plus(left, right),
             Kind::AmpersandAmpersandToken | Kind::BarBarToken => {
-                let op = binary.operator_token.kind();
-                for operand in [left, right] {
-                    let same = operand.kind() == Kind::BinaryExpression
-                        && operand.as_binary_expression().operator_token.kind() == op;
-                    if !same {
-                        self.truthy(operand);
-                    }
-                }
+                self.truthy(left);
+                self.truthy(right);
             }
             Kind::AmpersandAmpersandEqualsToken | Kind::BarBarEqualsToken => self.truthy(left),
             Kind::QuestionQuestionToken => {
@@ -420,10 +425,32 @@ impl Extractor {
 
     fn truthy(&mut self, n: P<Node>) {
         self.site();
-        let t = self.type_of(n);
-        let falsy = self.falsy(t);
+        let falsy = self.falsy_of(n);
         let span = self.span(n);
         self.table.store(span, Site::Truthiness, |f| &mut f.falsy, falsy);
+    }
+
+    /// `&&`, `||` and parentheses answer from their operands. The checker types `a && b` with only `a`'s
+    /// definitely falsy part, which is `0` for a number, so its type drops NaN.
+    fn falsy_of(&mut self, n: P<Node>) -> Falsy {
+        match n.kind() {
+            Kind::ParenthesizedExpression => self.falsy_of(n.as_parenthesized_expression().expression.get()),
+            Kind::BinaryExpression => {
+                let binary = n.as_binary_expression();
+                match binary.operator_token.kind() {
+                    Kind::AmpersandAmpersandToken => self.falsy_of(binary.left) | self.falsy_of(binary.right()),
+                    Kind::BarBarToken => self.falsy_of(binary.right()),
+                    _ => {
+                        let t = self.type_of(n);
+                        self.falsy(t)
+                    }
+                }
+            }
+            _ => {
+                let t = self.type_of(n);
+                self.falsy(t)
+            }
+        }
     }
 
     /// The checker accepts only object types and falsy values in a spread, so no falsy values means an object.

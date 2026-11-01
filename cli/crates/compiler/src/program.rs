@@ -18,6 +18,22 @@ pub(crate) struct Checked {
     pub host: ConfigHost,
 }
 
+impl Checked {
+    pub fn files(&self) -> Vec<crate::tree::File> {
+        self.program
+            .source_files()
+            .iter()
+            .filter(|f| !f.is_declaration_file() && !f.is_js())
+            .map(|&f| crate::tree::File::new(f))
+            .collect()
+    }
+
+    pub fn root_dir(&self) -> Option<String> {
+        let root = &self.program.options().root_dir;
+        (!root.is_empty()).then(|| root.replace('\\', "/"))
+    }
+}
+
 pub(crate) struct ConfigHost {
     fs: Arc<dyn FS>,
     cwd: String,
