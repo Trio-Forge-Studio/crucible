@@ -77,7 +77,7 @@ const rules = [
 	[
 		"15",
 		["guard", K, "index >= names.size()", "index >= names.size() - 1"],
-		["swap", "the bounds check compares one index with one size"],
+		["swap", K, "index >= names.size()", "names.size() >= index"],
 		["pair", K, "sealed = false;\n\tsetNames([]);", "sealed = false;"],
 	],
 	[
@@ -199,7 +199,7 @@ const rules = [
 	[
 		"73",
 		["guard", C, 'fail(path, "expected finite number");', "fail(path, tostring(value));"],
-		["swap", "a failure carries a path and a fixed reason; nothing pairs"],
+		["swap", C, 'fail(path, "expected finite number");', 'fail("expected finite number", path);'],
 		["pair", "the codec never logs, so nothing pairs with a log call"],
 	],
 	[

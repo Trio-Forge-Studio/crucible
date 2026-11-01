@@ -5,7 +5,6 @@
 12 guard: not applicable, attributes and parenting are the session's (unit N2); seal only returns the text
 12 swap: not applicable, the text is one join of one list
 14 swap: not applicable, an index is looked up by one name
-15 swap: not applicable, the bounds check compares one index with one size
 57 swap: not applicable, a builder copies one argument list into one frozen node
 62 guard: not applicable, unsupported types are CRU019 in the transformer (unit T1); no runtime node exists for them
 62 swap: not applicable, no runtime site
@@ -16,7 +15,6 @@
 72 guard: not applicable, the codec reads no sender; the session supplies the engine sender (unit N2)
 72 swap: not applicable, no runtime site
 72 pair: not applicable, no runtime site
-73 swap: not applicable, a failure carries a path and a fixed reason; nothing pairs
 73 pair: not applicable, the codec never logs, so nothing pairs with a log call
 Limits guard: not applicable, constants hold no guard; the value mutants below break the parity table
 Limits swap: not applicable, constants take no arguments
@@ -42,6 +40,7 @@ KILLED 13 pair | catalog.ts | first failure: network-catalog.luau: 11 13 catalog
 KILLED 14 guard | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
 KILLED 14 pair | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
 KILLED 15 guard | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
+KILLED 15 swap | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
 KILLED 15 pair | catalog.ts | first failure: network-catalog.luau: 13 14 15 two realms adopt published indices and leave absent names unpublished
 KILLED 57 guard | schema.ts | first failure: network-codec.luau: 57 62 descriptors freeze copy and reject malformed or oversized graphs
 KILLED 57 pair | schema.ts | first failure: network-codec.luau: 57 62 descriptors freeze copy and reject malformed or oversized graphs
@@ -82,6 +81,7 @@ KILLED 71 guard | codec.ts | first failure: network-codec.luau: 70 71 budgets va
 KILLED 71 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 KILLED 71 pair | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
 KILLED 73 guard | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
+KILLED 73 swap | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
 KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
 KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
 KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
@@ -101,4 +101,4 @@ KILLED Extra guard | codec.ts | first failure: network-codec.luau: 58 finite num
 KILLED Extra guard | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 KILLED Extra pair | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 KILLED Extra pair | codec.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
-80/80 source mutants killed; 23 operators not applicable; restored build 0
+82/82 source mutants killed; 21 operators not applicable; restored build 0
