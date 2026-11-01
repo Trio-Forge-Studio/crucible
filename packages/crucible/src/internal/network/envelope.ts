@@ -48,11 +48,10 @@ export type Header =
 	| { readonly opcode: Opcode.Ready }
 	| { readonly opcode: Opcode.Fail; readonly reason: number };
 
-/** @internal One encoded packet, immutable once built; a broadcast shares one across peers. */
+/** @internal */
 export interface Packet {
 	readonly bytes: buffer;
 	readonly sidecar: Readonly<Record<string, Instance>>;
-	/** Buffer length plus QUEUED_SLOT_CHARGE_BYTES per Instance slot (rule 50). */
 	readonly charge: number;
 }
 
@@ -109,12 +108,7 @@ export function argumentCount(args: readonly unknown[]): number {
 	return count;
 }
 
-/**
- * @internal
- * Wire.md decode steps 1 and 2: exactly two remote arguments, a buffer and a plain table, then the header. Returns
- * undefined for any envelope failure. Controls and ERROR carry no slots, so their sidecar must be empty here; a game
- * packet's sidecar is checked against its slot count when its payload decodes (step 4).
- */
+/** @internal */
 export function readHeader(argumentCount: number, packet: unknown, sidecar: unknown): Header | undefined {
 	if (argumentCount !== 2 || !typeIs(packet, "buffer") || !typeIs(sidecar, "table")) return undefined;
 	if (getmetatable(sidecar) !== undefined) return undefined;
@@ -133,7 +127,7 @@ function headerBytes(opcode: Opcode, fields: readonly number[], reason?: number)
 	return writer.finish(buffer.create(0))[0];
 }
 
-/** @internal A packet with no payload: READY, FAIL or ERROR. */
+/** @internal */
 export function controlPacket(opcode: Opcode, fields: readonly number[], reason?: number): Packet {
 	const bytes = headerBytes(opcode, fields, reason);
 	return table.freeze({ bytes, sidecar: EMPTY, charge: buffer.len(bytes) });
@@ -152,18 +146,14 @@ function describe(name: string, path: string, err: unknown): string {
 	return `${name} ${path}: ${plain(err)}`;
 }
 
-/** @internal An encoded payload waiting for its header. */
+/** @internal */
 export interface Body {
 	readonly name: string;
 	readonly path: string;
 	readonly writer: Writer;
 }
 
-/**
- * @internal
- * Validates and encodes a payload now, before anything is queued or yields (rules 18, 19). A payload that does not fit
- * its declaration throws at the call site, naming the message, the property path and the reason.
- */
+/** @internal */
 export function encodeBody(name: string, codec: Codec, path: string, value: unknown): Body {
 	const writer = new Writer();
 	const [ok, err] = pcall(() => codec.encode(writer, value, path));
@@ -171,7 +161,7 @@ export function encodeBody(name: string, codec: Codec, path: string, value: unkn
 	return { name, path, writer };
 }
 
-/** @internal Puts the header in front of an encoded payload. `fields` precede the slot count. */
+/** @internal */
 export function frame(body: Body, opcode: Opcode, fields: readonly number[]): Packet {
 	const slots = body.writer.slots.size();
 	let bytes = buffer.create(0);
@@ -183,7 +173,7 @@ export function frame(body: Body, opcode: Opcode, fields: readonly number[]): Pa
 	return table.freeze({ bytes, sidecar, charge: buffer.len(bytes) + L.QUEUED_SLOT_CHARGE_BYTES * slots });
 }
 
-/** @internal Decode step 4 for a game packet: the sidecar against the header's slot count. Throws on failure. */
+/** @internal */
 export function openBody(
 	packet: buffer,
 	sidecar: Readonly<Record<string, Instance>>,
@@ -192,19 +182,19 @@ export function openBody(
 	return new Reader(packet, header.payloadAt, sidecar, header.slots);
 }
 
-/** @internal Decode steps 6 and 7: the payload, then nothing left over. Throws on failure. */
+/** @internal */
 export function decodeBody(codec: Codec, path: string, reader: Reader): unknown {
 	const value = codec.decode(reader, path);
 	assert(reader.finished(), "trailing bytes or unconsumed slots");
 	return value;
 }
 
-/** @internal True when a decode failed first on a missing Instance (rules 41, 67, 68). */
+/** @internal */
 export function missingInstance(err: unknown): boolean {
 	return typeIs(err, "table") && (err as CodecFailure).missing === true;
 }
 
-/** @internal The reason a decode failed, for a diagnostic. Never payload content (rule 73). */
+/** @internal */
 export function failureReason(err: unknown): string {
 	if (typeIs(err, "table") && (err as CodecFailure).codecFailure === true) {
 		const failure = err as CodecFailure;

@@ -23,9 +23,7 @@ export const BOOT_CLASSES = [Subsystem, CrucibleBehaviour];
 export interface Side {
 	readonly name: "server" | "client";
 	readonly renders: boolean;
-	/** Returns the undo a later boot failure runs, so the client's CrucibleBooted is set only by a boot that commits. */
 	readonly booted: () => (() => void) | void;
-	/** Built by the side entry, so the root never imports a session. */
 	readonly network: NetworkLifecycle;
 }
 

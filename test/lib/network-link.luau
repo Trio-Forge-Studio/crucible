@@ -5,9 +5,9 @@
 --   * One remote per client, reliable and in fire order, delivered by `link:flush()`.
 --   * The engine's per-remote queue: packets fired before a client connected arrive once it connects.
 --   * Buffers copied and sidecars rebuilt on delivery, so no buffer or sidecar table is shared across realms.
---   * Instances are shared Lune Instances. `hide(client, x)` makes one invisible to a client, `clientOnly(client, x)`
---     makes one unknown to the server, and `destroy(x)` removes one on the server while in flight. An invisible
---     Instance leaves its sidecar key absent.
+--   * Instances are shared Lune Instances. `hide(client, x)` makes one invisible to a client, `only(client, x)` makes
+--     one unknown to the server, and `destroy(x)` removes one on the server while in flight. An invisible Instance
+--     leaves its sidecar key absent, as Studio measured.
 --   * The engine-supplied Player on the server. A client cannot choose it.
 --   * A deterministic clock: `advance(seconds)` fires delays, discovery deadlines and handler lifetimes.
 --   * `Player:Kick` is recorded with its message, and PlayerRemoving follows on the next flush, after the packets that
@@ -99,7 +99,6 @@ function link:delay(seconds, callback)
 	end
 end
 
--- Live timers, for asserting that a closed session left none.
 function link:pending(): number
 	local n = 0
 	for _, timer in self.timers do
@@ -123,8 +122,6 @@ function link:fault(operation: string)
 	error(`injected {operation} failure`)
 end
 
--- A later call of that port operation throws once: "create", "publish", "fireServer" or "discover". `skip` calls
--- succeed first.
 function link:failNext(operation: string, skip: number?)
 	self.failing[operation] = skip or 0
 end
@@ -157,7 +154,6 @@ local function visible(self, to, from, instance)
 	return not (self.hidden[to] and self.hidden[to][instance])
 end
 
--- Rebuilds a sidecar for its receiver: a fresh table, with the Instances it cannot see left out.
 local function rebuild(self, to, from, sidecar)
 	if type(sidecar) ~= "table" then
 		return sidecar
@@ -195,14 +191,12 @@ function link:transmit(from, to, packet, sidecar)
 	table.insert(self.wire, { from = from, to = to, args = args, visibility = true })
 end
 
--- Raw remote arguments from a client, bypassing its session: any count, any types.
 function link:inject(client, ...)
 	local args = table.pack(...)
 	record(self, client, self.server, args, true)
 	table.insert(self.wire, { from = client, to = self.server, args = args })
 end
 
--- Raw remote arguments from the server to one client.
 function link:injectToClient(client, ...)
 	local args = table.pack(...)
 	record(self, self.server, client, args, true)
@@ -249,7 +243,6 @@ local function deliver(self, entry)
 	end
 end
 
--- One step of the engine: a deferred task, else the oldest deliverable packet, else a discovery that can finish.
 function link:step(): boolean
 	for _, realm in self:realms() do
 		if #realm.engine.deferred > 0 then
@@ -287,7 +280,6 @@ function link:flush()
 	until not stepped
 end
 
--- Moves the clock forward, firing due timers in time order, each followed by a flush.
 function link:advance(seconds: number)
 	local target = self.now + seconds
 	self:flush()
@@ -429,8 +421,6 @@ local function clientPort(self, realm)
 	}
 end
 
--- A realm: its own module graph and fake engine, a fake `game` with the services boot reads, and a network port.
--- `realm.setup(realm)` runs as its one game module, `ServerScriptService.Game`, during boot's load.
 function link:realm(side: string, name: string)
 	local engine = Engine.new()
 	local realm = { link = self, side = side, name = name, engine = engine, attributes = {}, closers = {} }
@@ -560,7 +550,6 @@ function link:realm(side: string, name: string)
 		})
 		return class
 	end
-	-- The state of the generation an object is, for internal lifecycle requests a spec makes.
 	function realm.state(object)
 		return realm.life.stateOf(object)
 	end
@@ -577,7 +566,6 @@ function link:realm(side: string, name: string)
 	return realm
 end
 
--- Boots the server realm. `setup(server)` declares its messages and Subsystems during load.
 function link:boot(setup)
 	local server = self.server
 	server.setup = setup
@@ -590,7 +578,6 @@ function link:boot(setup)
 	return ok, err
 end
 
--- Boots a client realm on its own thread, since discovery may wait for publication.
 function link:start(client)
 	client.entry = client.graph.module("client")
 	client.Network = client.entry.Network
@@ -603,7 +590,6 @@ function link:start(client)
 	self:flush()
 end
 
--- A player joins: PlayerAdded on the server, then, unless `options.boot` is false, that client's boot.
 function link:join(name: string, setup, options)
 	options = options or {}
 	local client = self:realm("client", name)
@@ -622,7 +608,6 @@ function link:join(name: string, setup, options)
 	return client
 end
 
--- The player leaves now: PlayerRemoving fires on the server at once and the client stops receiving.
 function link:leave(client)
 	if self.present[client.player] == nil then
 		return
@@ -635,7 +620,6 @@ function link:leave(client)
 	end
 end
 
--- Runs `body` on a thread the link resumes, so it may yield in `Network.ask`. Returns a box its result lands in.
 function link:run(body)
 	local box = {}
 	box.thread = coroutine.create(function()

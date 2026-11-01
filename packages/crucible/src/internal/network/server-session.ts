@@ -22,16 +22,13 @@ import { type Cleanup, newPeer, type Peer, PeerState, Session, Stage } from "./s
 
 const FAIL_NAMES = ["overflow", "overloaded", "closing", "malformed"];
 
-/** @internal The server's session. Imported only by `src/server/index.ts`. */
+/** @internal */
 export class ServerSession extends Session {
-	/** Live peers only; an ended peer leaves (rule 49). */
 	private readonly peers = new Map<Player, Peer>();
-	/** The same peers in creation order, which broadcast, retirement and close walk. */
 	private readonly order = new Array<Peer>();
 	private readonly connections = new Array<Cancel>();
 	private catalog = "";
 	private published = false;
-	/** The session's own sentinel, for packets from a player with no peer (rule 49). */
 	private reportedNoPeer = false;
 
 	open() {
@@ -107,7 +104,7 @@ export class ServerSession extends Session {
 		return super.end(peer);
 	}
 
-	/** Rule 77: FAIL best effort, end the peer now so its later packets drop, then kick. */
+	/** Ends the peer before the kick: PlayerRemoving fires seconds after Kick returns, and packets keep arriving. */
 	protected fail(peer: Peer, reason: FailReason) {
 		if (peer.state === PeerState.Ended) return;
 		const player = peer.player!;
@@ -125,10 +122,6 @@ export class ServerSession extends Session {
 		this.order.push(peer);
 	}
 
-	/**
-	 * Rule 29, from lifecycle's release inside a drain; the claim already left the table. Each unreplied request of the
-	 * claim replies `unavailable`, its events keep running, and its stored cleanups are deferred in peer creation order.
-	 */
 	private retired(claim: Claim) {
 		const cleanups = new Array<[Peer, Cleanup]>();
 		for (const peer of this.order) {
@@ -151,7 +144,6 @@ export class ServerSession extends Session {
 		for (const [peer, entry] of cleanups) this.deferCleanup(peer, entry);
 	}
 
-	/** Rule 74: one diagnostic per player per message name, plus the envelope sentinel. Never payload content. */
 	private reject(peer: Peer, key: Definition | "envelope", what: string, detail?: string) {
 		if (peer.rejected.has(key)) return;
 		peer.rejected.add(key);
@@ -159,7 +151,6 @@ export class ServerSession extends Session {
 		runtimeDiagnostic("warning", `Crucible dropped ${what} from ${peer.player!.Name}${reason}`);
 	}
 
-	/** OnServerEvent. `player` is the engine's (rules 30, 72); everything else is untrusted. */
 	private receive(player: Player, count: number, packet?: unknown, sidecar?: unknown) {
 		const [ok, err] = pcall(() => this.dispatch(player, count, packet, sidecar));
 		if (!ok) runtimeDiagnostic("error", `Crucible network receive failed: ${tostring(err)}`);
@@ -225,10 +216,6 @@ export class ServerSession extends Session {
 		this.start(peer, receiver, [player, value], { definition, nonce });
 	}
 
-	/**
-	 * READY from a waiting peer (rules 33, 46): ready, drain the queue in send order, then run ClientReady in owner
-	 * construction order. Each callback checks again that its claim is live and the peer is still ready.
-	 */
 	private ready(peer: Peer) {
 		peer.state = PeerState.Ready;
 		this.flush(peer);

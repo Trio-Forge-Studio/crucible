@@ -47,7 +47,6 @@ return function()
 		)
 		return class, w.registry.recordOf(class)
 	end
-	-- `overrides.booted` and `overrides.commit` replace the finalization steps the network specs inject faults into.
 	function w.boot(options, client, overrides)
 		overrides = overrides or {}
 		local function none() end

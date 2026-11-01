@@ -46,12 +46,11 @@ interface Pending {
 
 type Game = Extract<Header, { readonly payloadAt: number }>;
 
-/** @internal The client's session. Imported only by `src/client/index.ts`. Its one peer is the server. */
+/** @internal */
 export class ClientSession extends Session {
 	private readonly peer = newPeer();
 	private nextNonce = 1;
 	private readonly pending = new Map<number, Pending>();
-	/** Callers settled on the receive path, resumed only after its pcall returns (rule 44). */
 	private later?: Pending[];
 	private fired = false;
 	private readonly unpublishedReported = new Set<Definition>();
@@ -60,7 +59,6 @@ export class ClientSession extends Session {
 	private readonly undecoded = new Set<Definition>();
 	private readonly missingPlayer = new Set<Definition>();
 
-	/** Rule 13: the only protocol check. Any failure throws, so client boot fails before a module loads. */
 	open() {
 		this.stage = Stage.Open;
 		openClaims({ side: "client", retired: () => {} });
@@ -84,7 +82,6 @@ export class ClientSession extends Session {
 		this.stage = Stage.Loaded;
 	}
 
-	/** Rules 14, 46 and 79: freeze claims, report unpublished receivers, then READY, ready, and the flush. */
 	commit() {
 		freezeClaims();
 		for (const definition of unpublished()) if (receiverOf(definition) !== undefined) this.unpublished(definition);
@@ -122,7 +119,6 @@ export class ClientSession extends Session {
 		return this.deliver(this.peer, frame(body, Opcode.Event, [index]));
 	}
 
-	/** Rules 37 to 44. Yields until the reply, the declared deadline or the session ending. */
 	ask(token: unknown, value: unknown): AskResult<unknown> {
 		const sendable = this.sendable();
 		const definition = toServer(token, "ask-server", "Network.ask needs a message declared with askServer");
@@ -158,7 +154,6 @@ export class ClientSession extends Session {
 		return true;
 	}
 
-	/** Rule 77: report once, FAIL best effort, end. The server kicks on that FAIL. */
 	protected fail(peer: Peer, reason: FailReason, detail?: string) {
 		if (peer.state === PeerState.Ended) return;
 		runtimeDiagnostic(
@@ -181,7 +176,6 @@ export class ClientSession extends Session {
 		runtimeDiagnostic("warning", message);
 	}
 
-	/** Rule 40: a queued ask that times out leaves the queue without renumbering. */
 	private expire(nonce: number) {
 		const entry = this.pending.get(nonce);
 		if (entry === undefined) return;
@@ -193,7 +187,6 @@ export class ClientSession extends Session {
 		this.settle(nonce, failed("timeout"));
 	}
 
-	/** Rule 44: the one non-yielding settle. Exactly one of reply, deadline and session end wins. */
 	private settle(nonce: number, result: AskResult<unknown>) {
 		const entry = this.pending.get(nonce);
 		if (entry === undefined) return;
@@ -208,7 +201,6 @@ export class ClientSession extends Session {
 		if (coroutine.status(entry.thread) === "suspended") this.port.resume(entry.thread, entry.result);
 	}
 
-	/** OnClientEvent. A protocol violation fails the session (rule 77). */
 	private receive(count: number, packet?: unknown, sidecar?: unknown) {
 		const later = new Array<Pending>();
 		this.later = later;
@@ -267,7 +259,6 @@ export class ClientSession extends Session {
 		this.start(this.peer, receiver, [value]);
 	}
 
-	/** Rule 43: a reply settles the pending call with its nonce, and must name that call's message. */
 	private answer(
 		header: Extract<Header, { readonly opcode: Opcode.Ok | Opcode.Error }>,
 		packet: buffer,
