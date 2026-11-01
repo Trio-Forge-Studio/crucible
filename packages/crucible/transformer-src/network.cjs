@@ -414,6 +414,12 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						location,
 						"serverOnly marks a profileStore template field; it means nothing here",
 					);
+				if (position.root)
+					fail(
+						node,
+						location,
+						"serverOnly marks a template field, never the store's whole value; wrap the value in an object and mark the field",
+					);
 				if (position.marked) return fail(node, location, "this field is already inside a serverOnly field");
 				if (!position.path)
 					return fail(
@@ -539,9 +545,15 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		else {
 			const target = targetOf(node);
 			if (!target) return [];
-			const value = lower(target, "value", { toClient: false, nilable: false, path: true });
+			const value = lower(target, "value", { toClient: false, nilable: false, path: true, root: true });
 			if (spec.store && value.kind !== "object" && value.kind !== "map")
 				fail(node, "value", `a store's value is a record; wrap a ${checker.typeToString(target)} in an object`);
+			else if (spec.handles && value.kind === "map")
+				fail(
+					node,
+					"value",
+					"a profile store's value is an object with declared fields; wrap the record in a field",
+				);
 			result = [value];
 		}
 		const cost = (n, depth = 1) => {
