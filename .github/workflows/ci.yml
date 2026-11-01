@@ -44,6 +44,9 @@ jobs:
       - name: Run checks and tests
         run: pnpm run check
 
+      - name: Run the Lune specs on the compiler's runtime
+        run: pnpm run test:compiler
+
   cli:
     strategy:
       matrix:
