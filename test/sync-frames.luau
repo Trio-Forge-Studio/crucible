@@ -298,4 +298,57 @@ return {
 		spec.list(order, { "frame", "note" }, "the snapshot first, then the game's ClientReady message")
 		w:finish()
 	end,
+	["56 a game Subsystem defined before boot still sends its ClientReady message after the snapshot"] = function()
+		local function withNote(r)
+			local d = declare(r)
+			d.Note = r.emit.toClient("Job.Note", r.n.string)
+			return d
+		end
+		local function frameworkBuilt(realm, id: string): boolean
+			for _, record in realm.registry.records() do
+				if record.id == id then
+					return record.state ~= nil and record.state.object ~= nil
+				end
+			end
+			return false
+		end
+		local serverSaw
+		local w = World.new({
+			declare = withNote,
+			serve = job,
+			patch = function(world)
+				local server = world.server
+				server.service("Early", function(self)
+					serverSaw = frameworkBuilt(server, "Crucible.ServerSync")
+					self.ready = server.emit.receive(self, "ready", server.ClientReady, function(player)
+						server.Network.send(player, server.d.Note, "hello")
+					end)
+				end)
+			end,
+		})
+		spec.eq(serverSaw, true, "ServerSync was constructed before a game Subsystem defined ahead of it")
+		w.job.score:set(4)
+		local notes = {}
+		local clientSaw
+		local ann = w:join("Ann", {
+			declare = function(c)
+				local d = withNote(c)
+				c.service("Listener", function(self)
+					self.note = c.emit.receive(self, "note", d.Note, function()
+						table.insert(notes, c.d.Score())
+					end)
+				end)
+				return d
+			end,
+			patch = function(c)
+				c.service("EarlyClient", function()
+					clientSaw = frameworkBuilt(c, "Crucible.ClientSync")
+				end)
+			end,
+		})
+		spec.eq(clientSaw, true, "ClientSync was constructed before a game Subsystem defined ahead of it")
+		spec.list(notes, { 4 }, "the game message's handler reads the snapshot's value")
+		spec.eq(ann.d.Score(), 4, "the snapshot arrived")
+		w:finish()
+	end,
 }
