@@ -124,6 +124,43 @@ local tests = {
 		spec.eq(#w:frames(ann), 1, "Ann gets nothing more")
 		w:finish()
 	end,
+	["60 a client computed over a replicated value recomputes after each applied frame, observed or not"] = function()
+		local w = World.new({
+			declare = function(r)
+				return { Score = r.emit.replicated("Job.Score", 0, r.n.f64) }
+			end,
+			serve = function(s, d, world)
+				s.service("JobService", function()
+					world.score = s.entry.publish(d.Score)
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		local api = ann.api
+		local doubled = api.computed(function()
+			return ann.d.Score() * 2
+		end)
+		local seen = {}
+		api.scope(function()
+			api.effect(function()
+				table.insert(seen, doubled())
+			end)
+		end)
+		local unobserved = api.computed(function()
+			return ann.d.Score() + 1
+		end)
+		w.link:flush()
+		spec.eq(unobserved(), 1, "the unobserved computed reads the snapshot")
+		w.score:set(5)
+		w:heartbeat()
+		spec.eq(unobserved(), 6, "the unobserved computed is not stale after a frame")
+		spec.eq(doubled(), 10, "the observed computed recomputed")
+		w.score:set(6)
+		w:heartbeat()
+		spec.eq(unobserved(), 7, "and again after the next frame")
+		spec.list(seen, { 0, 10, 12 }, "the effect ran once per frame")
+		w:finish()
+	end,
 }
 
 for name, frame in violations do

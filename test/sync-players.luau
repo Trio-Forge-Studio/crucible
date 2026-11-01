@@ -204,4 +204,65 @@ return {
 		spec.eq(#w:frames(ann), 2, "a retired declaration is announced once")
 		w:finish()
 	end,
+	["49 72 undeclared keys inside array elements and map values never reach the server's value or a frame"] = function()
+		local w = World.new({
+			declare = function(r)
+				local n = r.n
+				local item = n.object({ { "id", n.f64 }, { "label", n.string } })
+				return {
+					Items = r.emit.replicated("Shop.Items", {}, n.array(item)),
+					Tags = r.emit.replicated("Shop.Tags", {}, n.map(n.string, n.object({ { "a", n.f64 } }))),
+				}
+			end,
+			serve = function(s, d, world)
+				s.service("ShopService", function()
+					world.items = s.entry.publish(d.Items)
+					world.tags = s.entry.publish(d.Tags)
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		w.items:set({ { id = 1, label = "sword" }, { id = 2, label = "shield", secret = "SECRET-item" } })
+		w.tags:set({ red = { a = 1 }, blue = { a = 2, secret = "SECRET-tag" } })
+		local items, tags = w.server.d.Items(), w.server.d.Tags()
+		spec.eq(items[2].secret, nil, "the server's admitted array element has no undeclared key")
+		spec.eq(items[2].label, "shield", "and keeps its declared fields")
+		spec.eq(tags.blue.secret, nil, "the server's admitted map value has no undeclared key")
+		spec.eq(tags.blue.a, 2, "and keeps its declared field")
+		w:heartbeat()
+		local frames = w:frames(ann)
+		spec.eq(#frames, 2, "the snapshot, then one update")
+		local decoded = frames[2]
+		spec.eq(World.value(decoded, "Shop.Items")[2].secret, nil, "the decoded array element has no undeclared key")
+		spec.eq(World.value(decoded, "Shop.Tags").blue.secret, nil, "the decoded map value has no undeclared key")
+		spec.eq(ann.d.Items()[2].label, "shield", "the client reads the declared field")
+		spec.eq(ann.d.Tags().red.a, 1, "and the untouched map value")
+		w:finish()
+	end,
+	["52 a per-player-only publisher fault after a quiet Heartbeat still reaches every live client"] = function()
+		local w = World.new({
+			declare = function(r)
+				return { Solo = r.emit.replicatedPerPlayer("Solo.Value", 0, r.n.f64) }
+			end,
+			serve = function(s, d, world)
+				s.service("SoloService", function(self)
+					world.service = self
+					s.entry.publish(d.Solo, function()
+						return 7
+					end)
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		local bea = w:join("Bea")
+		w:heartbeat()
+		spec.eq(ann.d.Solo(), 7, "the snapshot carried the projection")
+		w.server.life.fault(w.server.state(w.service), CALLBACK, "publisher faulted")
+		w.link:flush()
+		w:heartbeat()
+		spec.eq(ann.api.syncStatus(ann.d.Solo), "failed", "Ann is told")
+		spec.eq(bea.api.syncStatus(bea.d.Solo), "failed", "Bea is told")
+		spec.eq(ann.d.Solo(), 7, "the last value is kept")
+		w:finish()
+	end,
 }

@@ -358,8 +358,10 @@ return {
 	["73 ServerSync's own end sends every live peer a failed frame before its view ends"] = function()
 		local w = newWorld()
 		local ann = w:join("Ann")
+		local heartbeats = #w.server.engine.frames[5].list
 		w.server.life.fault(w.server.state(w:sync()), CALLBACK, "framework fault")
 		w.link:flush()
+		spec.eq(#w.server.engine.frames[5].list, heartbeats - 1, "ServerSync's Heartbeat is disconnected")
 		local frames = w:frames(ann)
 		spec.eq(frames[#frames].frame.kind, "failed", "a failed frame")
 		spec.eq(ann.api.syncStatus(ann.d.Score), "failed", "the client fails every status")
@@ -419,6 +421,15 @@ return {
 		spec.eq(ann.api.syncStatus(ann.d.Spare), "pending", "pending")
 		spec.eq(w:logged("Spare"), 0, "no diagnostic")
 		spec.eq(#w.link.kicks, 0, "nobody kicked")
+		w:finish()
+	end,
+	["55 a game message cannot take a framework message's name"] = function()
+		local w = newWorld()
+		for _, name in { "Crucible.State.Frame", "Crucible.State.Fault" } do
+			local ok, err = pcall(w.server.emit.toClient, name, w.server.n.f64)
+			spec.eq(ok, false, `{name} is refused`)
+			spec.has(tostring(err), "reserved message name", "as a reserved name")
+		end
 		w:finish()
 	end,
 }

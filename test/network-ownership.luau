@@ -225,6 +225,7 @@ return {
 			end
 		end
 		assert(ix and bare, "indices")
+		spec.eq(ix < bare, true, "catalog order: Own.Ask sorts before Own.Bare")
 		link.server.remote.receive(ann.player, h.bytes(`00 {bare} 00`), {})
 		second = engine.instance("second", "Model")
 		engine.addTag(second, "Door")

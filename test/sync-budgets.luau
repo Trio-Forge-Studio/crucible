@@ -443,4 +443,52 @@ return {
 		spec.eq(kicked(w, "Ann"), 1, "kicked")
 		w:finish()
 	end,
+	["58 70 a Heartbeat with nothing written since the last settled one examines no peer"] = function()
+		local w = World.new(projected(function(n)
+			return n.f64
+		end))
+		want(w, function()
+			return 1
+		end)
+		w:join("Ann")
+		w:join("Bea")
+		w.score:set(2)
+		w:heartbeat()
+		assert(w:sync().spent > 0, "a Heartbeat after a write examines its peers")
+		w:heartbeat()
+		spec.eq(w:sync().spent, 0, "the next, with nothing written, examines none")
+		w.score:set(3)
+		w:heartbeat()
+		assert(w:sync().spent > 0, "a later write is examined again")
+		w:finish()
+	end,
+	["69 frameCost counts 130 values with a two-byte list length, as networking's encoder does"] = function()
+		local w = World.new({
+			declare = function(r)
+				local d = {}
+				for i = 1, 130 do
+					d[i] = r.emit.replicated(string.format("Wide.D%03d", i), 0, r.n.f64)
+				end
+				return d
+			end,
+			serve = function(s, d, world)
+				s.service("WideService", function()
+					world.pubs = {}
+					for i, declaration in d do
+						world.pubs[i] = s.entry.publish(declaration)
+					end
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		for i, publication in w.pubs do
+			publication:set(i)
+		end
+		w:heartbeat()
+		local frames = w:frames(ann)
+		spec.eq(#frames, 2, "a snapshot and one update")
+		spec.eq(#frames[2].frame.values, 130, "the update carries all 130 values")
+		spec.eq(ann.d[130](), 130, "and the client applied them")
+		spec.eq(w:finish(), 2, "frameCost matched the encoder on both frames")
+	end,
 }

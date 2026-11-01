@@ -253,6 +253,7 @@ return {
 			players += 1
 		end
 		spec.eq(players, 1, "only the new peer remains")
+		spec.eq(#w:sync().order, 1, "and only its view is in the round robin")
 		w:finish()
 	end,
 	["56 ServerSync is constructed first, so the snapshot precedes what game ClientReady callbacks send"] = function()
@@ -349,6 +350,48 @@ return {
 		spec.eq(clientSaw, true, "ClientSync was constructed before a game Subsystem defined ahead of it")
 		spec.list(notes, { 4 }, "the game message's handler reads the snapshot's value")
 		spec.eq(ann.d.Score(), 4, "the snapshot arrived")
+		w:finish()
+	end,
+	["61 63 a value that loses an element or a key arrives without it, and a grown array arrives longer"] = function()
+		local w = World.new({
+			declare = function(r)
+				local n = r.n
+				return {
+					List = r.emit.replicated("Shrink.List", {}, n.array(n.f64)),
+					Map = r.emit.replicated("Shrink.Map", {}, n.map(n.string, n.f64)),
+					Object = r.emit.replicated(
+						"Shrink.Object",
+						{ a = 1 },
+						n.object({ { "a", n.f64 }, { "b", n.union({ n["nil"], n.f64 }) } })
+					),
+				}
+			end,
+			serve = function(s, d, world)
+				s.service("ShrinkService", function()
+					world.list = s.entry.publish(d.List)
+					world.map = s.entry.publish(d.Map)
+					world.object = s.entry.publish(d.Object)
+				end)
+			end,
+		})
+		w.list:set({ 1, 2, 3 })
+		w.map:set({ x = 1, y = 2 })
+		w.object:set({ a = 1, b = 2 })
+		local ann = w:join("Ann")
+		w.list:set({ 1, 2 })
+		w.map:set({ x = 1 })
+		w.object:set({ a = 1 })
+		w:heartbeat()
+		spec.list(ann.d.List(), { 1, 2 }, "the array lost its last element on the client")
+		spec.eq(ann.d.Map().y, nil, "the map lost its key on the client")
+		spec.eq(ann.d.Map().x, 1, "and kept the other")
+		spec.eq(ann.d.Object().b, nil, "the object lost its optional field on the client")
+		w.list:set({ 1, 2, 3, 4 })
+		w:heartbeat()
+		spec.list(ann.d.List(), { 1, 2, 3, 4 }, "a grown array arrives longer")
+		w.list:set({ 1, 2, 3 })
+		w:heartbeat()
+		spec.list(ann.d.List(), { 1, 2, 3 }, "and shrinks again")
 		w:finish()
 	end,
 }

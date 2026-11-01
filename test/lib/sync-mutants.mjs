@@ -19,6 +19,7 @@ const B = src + "internal/boot.ts";
 const R = src + "replicated.ts";
 const EM = src + "emit/replicated.ts";
 const CI = src + "client/index.ts";
+const REG = src + "internal/registry.ts";
 const specs = ["sync-frames", "sync-players", "sync-client", "sync-budgets", "sync-publish"];
 const types = ["sync-types"];
 
@@ -131,6 +132,18 @@ const rules = [
 		["guard density", V, '\t\tif (seen !== count) a.reject(path, "sparse array");\n', "\n"],
 		["guard map key", V, '\t\t\t\ta.reject(path, "invalid map key");', "\t\t\t\tcount += 0;"],
 		["guard freeze", V, "\t\tif (!table.isfrozen(entry.value)) table.freeze(entry.value);\n", "\n"],
+		[
+			"guard array copy",
+			V,
+			"\t\t\tif (!rawequal(result, child) && copy === undefined) copy = table.clone(source);\n\t\t\tif (copy !== undefined) copy[i] = result;",
+			"\t\t\tif (copy !== undefined) copy[i] = result;",
+		],
+		[
+			"guard map copy",
+			V,
+			"\t\t\tif (!rawequal(result, child) && copy === undefined) copy = table.clone(source);\n\t\t\tif (copy !== undefined) copy[key] = result;",
+			"\t\t\tif (copy !== undefined) copy[key] = result;",
+		],
 		["swap", V, "\ta.charge(stringBytes(name), 1, 1, path);", "\ta.charge(1, stringBytes(name), 1, path);"],
 		[
 			"pair",
@@ -161,6 +174,7 @@ const rules = [
 		],
 		["swap", "a retirement latches one publication with no arguments to swap"],
 		["pair", D, "\towner.subscriptions.push(() => retire(declaration, publication));\n", "\n"],
+		["pair retired since", SS, "\t\tthis.retiredSince = true;\n", "\n"],
 	],
 	[
 		"53",
@@ -194,6 +208,7 @@ const rules = [
 			["network-catalog"],
 		],
 		["swap", F, '["failed", n.array(n.string)],', '["failed", n.array(n.u32)],'],
+		["guard define", CAT, '\tassert(!FRAMEWORK_MESSAGES.has(spec.name), "reserved message name");\n', "\n"],
 		["pair", CI, "\tinstallClientSync((revision) => active().send(SyncFaultMessage, revision));\n", "\n"],
 	],
 	[
@@ -204,8 +219,25 @@ const rules = [
 			'\treadonly ready = claim(this, "ready", ClientReady, (player: Player) => this.snapshot(player));',
 			"\treadonly ready = undefined;",
 		],
-		["swap", "ServerSync defines one record with no arguments of one type to swap"],
-		["pair", "the framework Subsystem is one definition with nothing paired to it"],
+		[
+			"guard first",
+			REG,
+			"\tfor (const record of records) if (record.kind === Kind.Subsystem && record.first) visit(record);\n",
+			"\n",
+		],
+		["swap", "the plan's two passes visit the same records and differ only in order, which the guard removes"],
+		[
+			"pair",
+			SS,
+			'id: "Crucible.ServerSync" as TypeId, deps: [], provides: [] }, true);',
+			'id: "Crucible.ServerSync" as TypeId, deps: [], provides: [] });',
+		],
+		[
+			"pair client",
+			CS,
+			'id: "Crucible.ClientSync" as TypeId, deps: [], provides: [] }, true);',
+			'id: "Crucible.ClientSync" as TypeId, deps: [], provides: [] });',
+		],
 	],
 	[
 		"57",
@@ -233,6 +265,12 @@ const rules = [
 		],
 		["swap", SS, "\t\t\t\tthis.commit(view, staged, false);", "\t\t\t\tthis.commit(view, staged, true);"],
 		["pair", SS, "\t\tthis.commit(view, staged, true);\n\t\treturn cost.bytes;", "\t\treturn cost.bytes;"],
+		[
+			"guard quiet",
+			SS,
+			"\t\tif (!this.incomplete && !this.retiredSince && currentEpoch() === this.settledEpoch) return;\n",
+			"\n",
+		],
 	],
 	[
 		"59",
@@ -256,6 +294,18 @@ const rules = [
 		],
 		["pair", CS, "\t\tthis.revision = frame.revision;\n", "\n"],
 		["guard commit equal", G, "\t\tif (rawequal(value, node.value)) continue;\n", "\n"],
+		[
+			"guard commit version",
+			G,
+			"\t\tnode.value = value;\n\t\tnode.version += 1;\n\t\tepoch += 1;\n\t\tmarkObservers(node);",
+			"\t\tnode.value = value;\n\t\tepoch += 1;\n\t\tmarkObservers(node);",
+		],
+		[
+			"guard commit epoch",
+			G,
+			"\t\tnode.value = value;\n\t\tnode.version += 1;\n\t\tepoch += 1;\n\t\tmarkObservers(node);",
+			"\t\tnode.value = value;\n\t\tnode.version += 1;\n\t\tmarkObservers(node);",
+		],
 	],
 	[
 		"61",
@@ -266,6 +316,7 @@ const rules = [
 			"\t\t\tif (accepted !== undefined && (false as boolean))",
 		],
 		["swap", "equality is symmetric: swapping its arguments changes only which side is iterated"],
+		["guard length", V, "\t\t\tif (xs.size() !== ys.size()) return false;\n", "\n"],
 		[
 			"pair",
 			V,
@@ -276,6 +327,7 @@ const rules = [
 	[
 		"63",
 		["guard", V, "\t\tif (seen === count) return old;\n", "\n"],
+		["guard count", V, "\t\tif (seen === count) return old;\n", "\t\treturn old;\n"],
 		["swap", V, "\t\tconst result = reuse(before, child);", "\t\tconst result = reuse(child, before);"],
 		["pair", V, "\treturn table.freeze(fresh);\n}", "\treturn fresh;\n}"],
 	],
@@ -332,6 +384,7 @@ const rules = [
 	[
 		"68",
 		["guard", SS, "\t\tif (this.peers.get(view.player) === view) this.peers.delete(view.player);\n", "\n"],
+		["guard order", SS, "\t\tif (index !== -1) this.order.remove(index);\n", "\n"],
 		["swap", "a peer is keyed by one Player with nothing to swap"],
 		["pair", "the cleanup ClientReady returns is rule 57's pair mutant"],
 	],
@@ -345,6 +398,18 @@ const rules = [
 			"\t\tentries += cost.visits;\n\t\tvisits += cost.entries;",
 		],
 		["pair", F, "\tbytes += varuintSize(frame.failed.size());\n", "\n"],
+		[
+			"swap failed length",
+			F,
+			"\tbytes += varuintSize(frame.failed.size());",
+			"\tbytes += varuintSize(frame.values.size());",
+		],
+		[
+			"swap values length",
+			F,
+			"\tbytes += varuintSize(frame.values.size());",
+			"\tbytes += varuintSize(frame.failed.size());",
+		],
 	],
 	[
 		"70",
@@ -396,6 +461,7 @@ const rules = [
 		],
 		["swap", "the end sends one frame per peer with nothing to swap"],
 		["pair", SS, "\t\tstate.subscriptions.push(() => this.stop());\n", "\n"],
+		["pair disconnect", SS, "\t\tthis.disconnect?.();\n", "\n"],
 	],
 	[
 		"74",
