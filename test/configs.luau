@@ -818,6 +818,26 @@ tests["107 a fetch that lands after retirement is discarded"] = function()
 	spec.eq(w.backend.updateListeners, 0, "not listened to")
 end
 
+tests["107 a refresh in flight at retirement applies nothing it staged"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	local discount = w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	local player = w.backend:join(7)
+	w.start()
+	w.backend:setGlobal("Shop.Coins", 4)
+	w.backend:setForPlayer(7, "Shop.Discount", 6)
+	w.backend:delay("global", 2)
+	local result = w.refresh()
+	w.backend:advance(1)
+	w.life.request(w.runtimeState(), Want.Destroyed)
+	w.life.drain()
+	w.backend:advance(1)
+	spec.eq(result.value, false, "false")
+	spec.eq(discount(player), 0, "the player scope staged before retirement is not applied")
+	spec.eq(coins(), 3, "global kept")
+end
+
 tests["103 4 configs touch only RunService and emit forms touch no service"] = function()
 	local w = world()
 	w.emit.config("Shop.Coins", 1, w.n.f64)

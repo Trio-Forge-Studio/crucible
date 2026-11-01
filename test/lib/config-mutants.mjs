@@ -377,7 +377,7 @@ const mutants = [
 		R,
 		"\tconst apply = live();",
 		"\tconst apply = owner !== undefined;",
-		"107 a fetch that lands",
+		"107 a refresh in flight",
 	],
 	["110", "guard", "no dedupe", R, "\tif (scope.diagnosed.has(key)) return;\n", "\n", "7 94"],
 	["110", "guard", "dedupe never reset", R, "\tscope.diagnosed = new Set();\n", "\n", "5 97 110"],
