@@ -51,3 +51,23 @@ export function chain(record?: { inner?: { value: number; get(): number } }) {
 export function ternary(flag: boolean, n: number) {
 	return flag ? n * 2 : n - 1;
 }
+
+export function callNonNull(record?: { run?: () => number }) {
+	return record?.run!();
+}
+
+function show(a: number, b: number) {
+	return `${a},${b}`;
+}
+
+export function order() {
+	let i = 0;
+	let s = "a";
+	let n = 1;
+	n += n = 5;
+	return [show(i, i++), s + (s = "b"), n];
+}
+
+export function eitherOr(n: number) {
+	return (n && "s") || "fallback";
+}

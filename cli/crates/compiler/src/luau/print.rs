@@ -165,7 +165,9 @@ impl Printer {
                 self.function(f);
             }
             Stmt::Assign(targets, values) => {
-                self.statement_start(&targets[0]);
+                if let Some(first) = targets.first() {
+                    self.statement_start(first);
+                }
                 self.exprs(targets);
                 self.out.push_str(" = ");
                 self.exprs(values);

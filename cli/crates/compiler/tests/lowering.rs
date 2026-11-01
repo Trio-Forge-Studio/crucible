@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use crucible_compiler::{Failure, Module};
+use crucible_compiler::{Failure, Module, Written};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join(name)
@@ -54,7 +54,10 @@ fn relative_imports_go_through_ts_import_from_the_module_folder() {
     );
     has("nested/init.luau", &["TS.import(script, script.Parent, \"util\")", "local high = 5"]);
     assert!(!luau("modules.luau").contains("Shape"), "a type-only import is elided");
-    assert!(luau("util.luau").starts_with("local greeting = \"hi\""), "a module without imports needs no TS");
+    assert!(
+        luau("util.luau").starts_with("-- Compiled with crucible-compiler\nlocal greeting = \"hi\""),
+        "a module without imports needs no TS"
+    );
 }
 
 #[test]
@@ -190,6 +193,34 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
         "25:9 instanceof is not supported",
     ];
     assert_eq!(found, expected);
+}
+
+#[test]
+fn write_skips_unchanged_modules_and_removes_only_its_own_stale_ones() {
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("write");
+    let _ = std::fs::remove_dir_all(&out);
+    let first = crucible_compiler::write(&out, &MODULES).expect("the fixtures are written");
+    assert_eq!(first, Written { written: MODULES.len(), removed: 0 });
+    std::fs::write(out.join("foreign.luau"), "return nil\n").unwrap();
+    std::fs::write(out.join("nested/init.d.ts"), "export {};\n").unwrap();
+    std::fs::create_dir_all(out.join("other")).unwrap();
+    std::fs::write(out.join("other/kept.luau"), "-- Compiled with roblox-ts v3.0.0\n").unwrap();
+
+    let without: Vec<Module> =
+        MODULES.iter().filter(|m| !matches!(m.path.as_str(), "util.luau" | "nested/init.luau")).cloned().collect();
+    let second = crucible_compiler::write(&out, &without).expect("the fixtures are written again");
+    assert_eq!(second, Written { written: 0, removed: 2 });
+    assert!(!out.join("util.luau").exists(), "a removed source's module is deleted");
+    assert!(!out.join("nested/init.luau").exists());
+    assert!(out.join("nested/init.d.ts").exists(), "a declaration beside it stays, and so does its folder");
+    assert!(out.join("foreign.luau").exists(), "a file without the header stays");
+    assert!(out.join("other/kept.luau").exists());
+
+    std::fs::remove_file(out.join("nested/init.d.ts")).unwrap();
+    std::fs::write(out.join("nested/init.luau"), luau("nested/init.luau")).unwrap();
+    let third = crucible_compiler::write(&out, &without).expect("the fixtures are written a third time");
+    assert_eq!(third, Written { written: 0, removed: 1 });
+    assert!(!out.join("nested").exists(), "a folder the deletion empties is deleted");
 }
 
 #[test]

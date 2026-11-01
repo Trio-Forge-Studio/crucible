@@ -25,7 +25,10 @@ impl Lower<'_> {
                     self.unsupported(e, "a rest element over a LuaTuple");
                     continue;
                 }
-                let name = e.name().unwrap();
+                let Some(name) = e.name() else {
+                    self.unsupported(e, "this binding element");
+                    continue;
+                };
                 if name.kind() == Kind::Identifier && e.initializer().is_none() && !self.is_hoisted(name) {
                     names.push(self.local_name(name));
                 } else {
@@ -95,7 +98,10 @@ impl Lower<'_> {
                         self.unsupported(e, "an object rest element");
                         continue;
                     }
-                    let key = e.property_name().or_else(|| e.name()).unwrap();
+                    let Some(key) = e.property_name().or_else(|| e.name()) else {
+                        self.unsupported(e, "this binding element");
+                        continue;
+                    };
                     let key = match key.kind() {
                         Kind::Identifier | Kind::StringLiteral => Expr::String(Cow::Borrowed(key.text())),
                         Kind::NumericLiteral => Expr::Number(key.number()),
@@ -115,8 +121,8 @@ impl Lower<'_> {
 
     fn bind_element(&mut self, e: Node, value: Expr) {
         let Some(name) = e.name() else {
-            let (line, col) = self.file.position(e.span().start);
-            panic!("{} {line}:{col} {:?}", self.path, e);
+            self.unsupported(e, "this binding element");
+            return;
         };
         let default = e.initializer();
         if name.kind() == Kind::Identifier {
@@ -161,9 +167,16 @@ impl Lower<'_> {
                 }
                 return None;
             }
-            if !matches!(receiver, Some(Receiver::Array | Receiver::LuaTuple)) {
-                self.unsupported(target, "destructuring this value");
-                return None;
+            match receiver {
+                Some(Receiver::Array | Receiver::LuaTuple) => {}
+                Some(_) => {
+                    self.unsupported(target, "destructuring this value");
+                    return None;
+                }
+                None => {
+                    self.error(target, "the type facts do not say what this pattern destructures");
+                    return None;
+                }
             }
             let value = self.expr(source);
             let value = self.push_temp_if_complex(value);
@@ -192,16 +205,22 @@ impl Lower<'_> {
         for p in target.properties().iter() {
             match p.kind() {
                 Kind::PropertyAssignment => {
-                    let key = p.name().unwrap();
+                    let (Some(key), Some(target)) = (p.name(), p.initializer()) else {
+                        self.unsupported(p, "this destructuring member");
+                        continue;
+                    };
                     if !matches!(key.kind(), Kind::Identifier | Kind::StringLiteral) {
                         self.unsupported(key, "this destructured property name");
                         continue;
                     }
                     let element = value.clone().field(Cow::Borrowed(key.text()));
-                    self.assign_target(p.initializer().unwrap(), element);
+                    self.assign_target(target, element);
                 }
                 Kind::ShorthandPropertyAssignment => {
-                    let name = p.name().unwrap();
+                    let Some(name) = p.name() else {
+                        self.unsupported(p, "this destructuring member");
+                        continue;
+                    };
                     let element = value.clone().field(Cow::Borrowed(name.text()));
                     let place = self.identifier_place(name);
                     self.out.push(Stmt::Assign(vec![place.clone()], vec![element]));

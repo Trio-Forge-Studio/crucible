@@ -263,7 +263,10 @@ impl File {
     /// One-based line and column, in bytes.
     pub fn position(&self, offset: u32) -> (u32, u32) {
         let text = self.file.text();
-        let offset = (offset as usize).min(text.len());
+        let mut offset = (offset as usize).min(text.len());
+        while !text.is_char_boundary(offset) {
+            offset -= 1;
+        }
         let before = &text[..offset];
         let line = before.matches('\n').count() + 1;
         let column = offset - before.rfind('\n').map_or(0, |i| i + 1) + 1;
@@ -624,7 +627,8 @@ impl Node {
             .iter()
             .find(|c| c.as_heritage_clause().token == TsKind::ExtendsKeyword)
             .and_then(|c| c.as_heritage_clause().types.get().nodes().first())
-            .map(|t| self.wrap(t.expression().expect("a heritage type has an expression")))
+            .and_then(|t| t.expression())
+            .map(|e| self.wrap(e))
     }
 
     pub fn module_specifier(&self) -> Option<Node> {

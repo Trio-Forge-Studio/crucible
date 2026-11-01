@@ -1,11 +1,18 @@
 use std::borrow::Cow;
 
-use super::expr::offset;
+use super::expr::{element_key, keyed_fields, offset};
 use super::{Lower, skip_down};
 use crate::facts::{Callee, Receiver};
 use crate::luau::{BinOp, Expr, Field, Name, Stmt, UnOp, is_name};
 use crate::macros::{Macro, MacroKind};
 use crate::tree::{Kind, Node};
+
+fn calls_super(call: Node) -> bool {
+    let callee = skip_down(call.expression());
+    callee.kind() == Kind::SuperKeyword
+        || (callee.kind() == Kind::PropertyAccessExpression
+            && skip_down(callee.expression()).kind() == Kind::SuperKeyword)
+}
 
 /// Luau types `type()` reports. Any other name needs `typeof()`.
 const PRIMITIVE_TYPES: &[&str] =
@@ -15,10 +22,16 @@ impl Lower<'_> {
     /// A call used as a value. A `LuaTuple` result becomes an array, as the source's type says.
     pub(super) fn call_value(&mut self, n: Node) -> Expr {
         let value = self.call(n, false).unwrap_or(Expr::Nil);
-        if value.is_multi() && self.fact(n).and_then(|f| f.receiver) == Some(Receiver::LuaTuple) {
-            Expr::Table(vec![Field::Item(value)])
-        } else {
-            value
+        if !value.is_multi() {
+            return value;
+        }
+        match self.fact(n).and_then(|f| f.receiver) {
+            Some(Receiver::LuaTuple) => Expr::Table(vec![Field::Item(value)]),
+            Some(_) => value,
+            None => {
+                self.error(n, "the type facts do not say what this call returns");
+                value
+            }
         }
     }
 
@@ -41,8 +54,9 @@ impl Lower<'_> {
         }
         if target.kind() == Kind::PropertyAccessExpression
             && skip_down(target.expression()).kind() == Kind::SuperKeyword
+            && let Some(name) = target.name()
         {
-            let name: Name = Cow::Borrowed(target.name().unwrap().text());
+            let name: Name = Cow::Borrowed(name.text());
             let args = self.arguments(n);
             let mut all = vec![Expr::global("self")];
             all.extend(args);
@@ -58,10 +72,11 @@ impl Lower<'_> {
         match target.kind() {
             Kind::PropertyAccessExpression => {
                 let object = target.expression();
-                let name: Name = Cow::Borrowed(target.name().unwrap().text());
+                let Some(name) = target.name() else { return Some(self.unsupported(target, "this callee")) };
+                let name: Name = Cow::Borrowed(name.text());
                 let base = self.expr(object);
                 let (args, block) = self.capture(|l| l.arguments(n));
-                let base = if block.is_empty() { base } else { self.push_temp_if_complex(base) };
+                let base = self.store_before(base, &block);
                 self.out.extend(block);
                 Some(match kind {
                     Callee::Method => self.method_call(base, name, args),
@@ -71,10 +86,8 @@ impl Lower<'_> {
             Kind::ElementAccessExpression => {
                 let object = target.expression();
                 let receiver = self.receiver(object);
-                let mut values = self.ordered([object, target.argument_expression()], |l, e| l.expr(e));
-                let key = values.pop().unwrap();
-                let base = values.pop().unwrap();
-                let key = if receiver == Some(Receiver::Array) { offset(key, 1.0) } else { key };
+                let (base, key) = self.ordered_pair(object, target.argument_expression());
+                let key = element_key(receiver, key);
                 if kind == Callee::Method {
                     let base = self.push_temp_if_complex(base);
                     let key = self.push_temp_if_complex(key);
@@ -85,11 +98,8 @@ impl Lower<'_> {
                     Some(base.index(key).call(all))
                 } else {
                     let (args, block) = self.capture(|l| l.arguments(n));
-                    let (base, key) = if block.is_empty() {
-                        (base, key)
-                    } else {
-                        (self.push_temp_if_complex(base), self.push_temp_if_complex(key))
-                    };
+                    let base = self.store_before(base, &block);
+                    let key = self.store_before(key, &block);
                     self.out.extend(block);
                     Some(base.index(key).call(args))
                 }
@@ -97,7 +107,7 @@ impl Lower<'_> {
             _ => {
                 let function = self.expr(callee);
                 let (args, block) = self.capture(|l| l.arguments(n));
-                let function = if block.is_empty() { function } else { self.push_temp_if_complex(function) };
+                let function = self.store_before(function, &block);
                 self.out.extend(block);
                 Some(function.call(args))
             }
@@ -118,7 +128,6 @@ impl Lower<'_> {
     /// A call's arguments in order. A spread must come last.
     pub(super) fn arguments(&mut self, call: Node) -> Vec<Expr> {
         let args: Vec<Node> = call.arguments().iter().collect();
-        let roblox = self.fact(call.expression()).and_then(|f| f.roblox_api) == Some(true);
         let count = args.len();
         let mut values = self.ordered(args.iter().copied(), |l, a| {
             if a.kind() == Kind::SpreadElement { l.spread_argument(a.expression()) } else { l.expr(a) }
@@ -128,13 +137,18 @@ impl Lower<'_> {
                 self.unsupported(*a, "a spread before the last argument");
             }
         }
-        if roblox
-            && let Some(last) = values.last_mut()
-            && last.is_multi()
-            && args.last().is_some_and(|a| a.kind() != Kind::SpreadElement)
-        {
-            let value = std::mem::replace(last, Expr::Nil);
-            *last = Expr::Paren(Box::new(value));
+        let truncate = values.last().is_some_and(Expr::is_multi)
+            && args.last().is_some_and(|&a| skip_down(a).kind() == Kind::CallExpression)
+            && !calls_super(call)
+            && match self.fact(call.expression()).and_then(|f| f.roblox_api) {
+                Some(roblox) => roblox,
+                None => {
+                    self.error(call, "the type facts do not say whether this calls a Roblox API");
+                    false
+                }
+            };
+        if truncate && let Some(last) = values.pop() {
+            values.push(Expr::Paren(Box::new(last)));
         }
         values
     }
@@ -162,7 +176,7 @@ impl Lower<'_> {
         }
         let class = self.expr(callee);
         let (args, block) = self.capture(|l| l.arguments(n));
-        let class = if block.is_empty() { class } else { self.push_temp_if_complex(class) };
+        let class = self.store_before(class, &block);
         self.out.extend(block);
         class.field("new").call(args)
     }
@@ -209,20 +223,19 @@ impl Lower<'_> {
     fn new_map(&mut self, source: Option<Node>) -> Expr {
         let Some(source) = source else { return Expr::Table(Vec::new()) };
         let inner = skip_down(source);
+        let mut nodes = Vec::new();
         let pairs = inner.kind() == Kind::ArrayLiteralExpression
             && inner.elements().iter().all(|e| {
                 let e = skip_down(e);
-                e.kind() == Kind::ArrayLiteralExpression && e.elements().len() == 2
+                let pair = e.kind() == Kind::ArrayLiteralExpression && e.elements().len() == 2;
+                if pair {
+                    nodes.extend(e.elements().iter());
+                }
+                pair
             });
         if pairs {
-            let mut nodes = Vec::new();
-            for e in inner.elements().iter() {
-                let e = skip_down(e);
-                nodes.push(e.elements().get(0).unwrap());
-                nodes.push(e.elements().get(1).unwrap());
-            }
             let values = self.ordered(nodes, |l, e| l.expr(e));
-            return Expr::Table(values.chunks(2).map(|p| Field::Keyed(p[0].clone(), p[1].clone())).collect());
+            return Expr::Table(keyed_fields(values));
         }
         let value = self.expr(source);
         let map = self.push_temp(Expr::Table(Vec::new()));
@@ -274,12 +287,10 @@ impl Lower<'_> {
                 Expr::global("typeof").call(values)
             }
             Macro::TypeIs => {
-                let mut values = self.ordered(args, |l, a| l.expr(a));
-                if values.len() != 2 {
+                let values = self.ordered(args, |l, a| l.expr(a));
+                let Ok([value, name]) = <[Expr; 2]>::try_from(values) else {
                     return self.unsupported(n, "typeIs without two arguments");
-                }
-                let name = values.pop().unwrap();
-                let value = values.pop().unwrap();
+                };
                 let function = match &name {
                     Expr::String(s) if PRIMITIVE_TYPES.contains(&s.as_ref()) => "type",
                     _ => "typeof",
@@ -287,12 +298,10 @@ impl Lower<'_> {
                 Expr::global(function).call(vec![value]).binary(BinOp::Eq, name)
             }
             Macro::ClassIs => {
-                let mut values = self.ordered(args, |l, a| l.expr(a));
-                if values.len() != 2 {
+                let values = self.ordered(args, |l, a| l.expr(a));
+                let Ok([value, name]) = <[Expr; 2]>::try_from(values) else {
                     return self.unsupported(n, "classIs without two arguments");
-                }
-                let name = values.pop().unwrap();
-                let value = values.pop().unwrap();
+                };
                 value.field("ClassName").binary(BinOp::Eq, name)
             }
             Macro::Identity => {
@@ -309,7 +318,7 @@ impl Lower<'_> {
     pub(super) fn method_macro(&mut self, m: Macro, n: Node, object: Expr, statement: bool) -> Option<Expr> {
         let arg_nodes: Vec<Node> = n.arguments().iter().collect();
         let (args, block) = self.capture(|l| l.ordered(arg_nodes.iter().copied(), |l, a| l.expr(a)));
-        let object = if block.is_empty() { object } else { self.push_temp_if_complex(object) };
+        let object = self.store_before(object, &block);
         self.out.extend(block);
         let mut args = args.into_iter();
         let mut arg = || args.next().unwrap_or(Expr::Nil);
@@ -395,9 +404,9 @@ impl Lower<'_> {
             }
             Macro::ArrayRemove => Expr::global("table.remove").call(vec![object, offset(arg(), 1.0)]),
             Macro::ArrayUnorderedRemove => {
+                let object = self.push_temp_if_complex(object);
                 let index = offset(arg(), 1.0);
                 let index = self.push_temp_if_complex(index);
-                let object = self.push_temp_if_complex(object);
                 let size = self.push_temp(length(&object));
                 let value = self.push_temp(object.clone().index(index.clone()));
                 let body = vec![
@@ -428,6 +437,7 @@ impl Lower<'_> {
             }
             Macro::ReadonlyArrayIsEmpty => length(&object).binary(BinOp::Eq, Expr::Number(0.0)),
             Macro::ReadonlyArrayJoin => {
+                let object = self.push_temp_if_complex(object);
                 let separator = match arg() {
                     Expr::Nil => Expr::string(", "),
                     e if e.is_simple() => e,
@@ -438,7 +448,6 @@ impl Lower<'_> {
                         separator
                     }
                 };
-                let object = self.push_temp_if_complex(object);
                 let strings = self.push_temp(Expr::global("table.create").call(vec![length(&object)]));
                 let (k, v) = (self.temp(), self.temp());
                 let body = vec![Stmt::Assign(
@@ -659,12 +668,12 @@ impl Lower<'_> {
                 object
             }
             Macro::SetDelete | Macro::MapDelete => {
-                let key = self.push_temp_if_complex(arg());
                 if statement {
-                    self.out.push(Stmt::Assign(vec![object.index(key)], vec![Expr::Nil]));
+                    self.out.push(Stmt::Assign(vec![object.index(arg())], vec![Expr::Nil]));
                     return None;
                 }
                 let object = self.push_temp_if_complex(object);
+                let key = self.push_temp_if_complex(arg());
                 let existed = self.push_temp(object.clone().index(key.clone()).binary(BinOp::Ne, Expr::Nil));
                 self.out.push(Stmt::Assign(vec![object.index(key)], vec![Expr::Nil]));
                 existed

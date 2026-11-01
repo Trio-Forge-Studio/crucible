@@ -125,7 +125,7 @@ impl Lower<'_> {
                         l.out.push(Stmt::Assign(vec![class.clone().field(key)], vec![value]));
                     }
                     Kind::ClassStaticBlockDeclaration => {
-                        let body = m.body().expect("a static block has a body");
+                        let Some(body) = m.body() else { continue };
                         let mut block = l.block(body.statements());
                         if uses_this(body) {
                             block.insert(0, Stmt::Local(vec![Cow::Borrowed("self")], vec![class.clone()]));
@@ -166,7 +166,8 @@ impl Lower<'_> {
                 return (Vec::new(), extends);
             };
             let (params, varargs) = l.parameters(c.parameters());
-            let statements = c.body().unwrap().statements();
+            let Some(body) = c.body() else { return (params, varargs) };
+            let statements = body.statements();
             l.hoist(statements);
             let split = statements.iter().position(is_super_call).map_or(0, |i| i + 1);
             for st in statements.iter().take(split) {

@@ -21,15 +21,16 @@ fn main() -> ExitCode {
         }
     };
     let compiled = start.elapsed();
-    let written = match crucible_compiler::write(&PathBuf::from(out), &modules) {
-        Ok(written) => written,
+    let changes = match crucible_compiler::write(&PathBuf::from(out), &modules) {
+        Ok(changes) => changes,
         Err(e) => {
             eprintln!("cannot write the output: {e}");
             return ExitCode::FAILURE;
         }
     };
     println!("modules     {}", modules.len());
-    println!("written     {written}");
+    println!("written     {}", changes.written);
+    println!("removed     {}", changes.removed);
     println!("compile     {:.0} ms", compiled.as_secs_f64() * 1e3);
     println!("total       {:.0} ms", start.elapsed().as_secs_f64() * 1e3);
     ExitCode::SUCCESS

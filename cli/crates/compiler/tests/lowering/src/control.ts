@@ -59,3 +59,56 @@ export function iterate(list: string[], lookup: Map<string, number>, members: Se
 	for (const member of members) if (member === "m") parts.push(member);
 	return parts.join(" ");
 }
+
+export function letters(word: string) {
+	const out = new Array<string>();
+	for (const ch of word) out.push(ch);
+	return out.join("-");
+}
+
+export function captured() {
+	const reads = new Array<() => number>();
+	for (let i = 0; i < 3; i++) reads.push(() => i);
+	return reads.map((read) => read()).join(",");
+}
+
+export function capturedAndChanged() {
+	const reads = new Array<() => number>();
+	for (let i = 0; i < 6; i++) {
+		reads.push(() => i);
+		i++;
+	}
+	return reads.map((read) => read()).join(",");
+}
+
+export function capturedWithContinue() {
+	const reads = new Array<() => number>();
+	for (let i = 0; i < 6; i++) {
+		if (i === 1) {
+			i = 3;
+			continue;
+		}
+		reads.push(() => i);
+	}
+	return reads.map((read) => read()).join(",");
+}
+
+export function shadowedIncrement() {
+	const step = 1;
+	let total = 0;
+	for (let i = 0; i < 6; i += step) {
+		const step = 5;
+		total += step;
+	}
+	return total;
+}
+
+export function shadowedCondition() {
+	let n = 3;
+	let passes = 0;
+	do {
+		const n = 0;
+		passes += 1 + n;
+	} while (--n > 0);
+	return passes;
+}
