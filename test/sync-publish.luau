@@ -25,6 +25,7 @@ local function declare(r)
 		Small = r.emit.replicated("Job.Small", 0, n.u8),
 		Spare = r.emit.replicated("Job.Spare", 0, n.f64),
 		Title = r.emit.replicated("Job.Title", "", n.string),
+		Tally = r.emit.replicated("Job.Tally", {}, n.map(n.string, n.f64)),
 		Where = r.emit.replicated("Job.Where", roblox.CFrame.new(), n.cframe),
 	}
 end
@@ -36,6 +37,7 @@ local function publisher(s, d, w)
 		w.score = s.entry.publish(d.Score)
 		w.small = s.entry.publish(d.Small)
 		w.title = s.entry.publish(d.Title)
+		w.tally = s.entry.publish(d.Tally)
 		w.where = s.entry.publish(d.Where)
 		w.owner = s.entry.publish(d.Owner, function(player)
 			return w.owned[player.Name]
@@ -250,6 +252,8 @@ return {
 				{ w.score, math.huge, "Job.Score: expected finite number" },
 				{ w.score, "12", "Job.Score: expected number, got string" },
 				{ w.small, 256, "Job.Small: u8 out of range" },
+				{ w.tally, { [1] = 2 }, "Job.Tally: invalid map key" },
+				{ w.tally, { a = "b" }, "Job.Tally[]: expected number, got string" },
 				{ w.small, 1.5, "Job.Small: u8 out of range" },
 				{ w.title, "\255\254", "Job.Title: invalid UTF-8" },
 				{ w.title, string.rep("y", 49153), "Job.Title: longer than SYNC_STRING_BYTES" },

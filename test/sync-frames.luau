@@ -247,4 +247,47 @@ return {
 		spec.eq(players, 1, "only the new peer remains")
 		w:finish()
 	end,
+	["56 ServerSync is constructed first, so the snapshot precedes what game ClientReady callbacks send"] = function()
+		local w = World.new({
+			declare = function(r)
+				local d = declare(r)
+				d.Note = r.emit.toClient("Job.Note", r.n.string)
+				return d
+			end,
+			serve = function(s, d, world)
+				job(s, d, world)
+				s.service("Greeter", function(self)
+					self.ready = s.emit.receive(self, "ready", s.ClientReady, function(player)
+						s.Network.send(player, d.Note, "hello")
+					end)
+				end)
+			end,
+		})
+		w.job.score:set(4)
+		local notes = {}
+		local ann = w:join("Ann", {
+			declare = function(c)
+				local d = declare(c)
+				d.Note = c.emit.toClient("Job.Note", c.n.string)
+				c.service("Listener", function(self)
+					self.note = c.emit.receive(self, "note", d.Note, function()
+						table.insert(notes, c.d.Score())
+					end)
+				end)
+				return d
+			end,
+		})
+		spec.list(notes, { 4 }, "the game message's handler already reads the snapshot's value")
+		local order = {}
+		for _, entry in
+			w.link:sent(function(e)
+				return e.to == ann.name and e.opcode == 0
+			end)
+		do
+			local header = w.wire.envelope.readHeader(2, entry.packet, {})
+			table.insert(order, if header.index == w.wire.frame.SyncFrameMessage.index then "frame" else "note")
+		end
+		spec.list(order, { "frame", "note" }, "the snapshot first, then the game's ClientReady message")
+		w:finish()
+	end,
 }
