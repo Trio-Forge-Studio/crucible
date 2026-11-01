@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
+const { stripVTControlCharacters } = require("node:util");
 const { project, inspect, compile, fs, path, ts } = require("./network-harness.cjs");
 
 test("K1 K16 R5 pinned rbxtsc type fixtures retain literal inference invariance and target callback errors", () => {
@@ -76,36 +77,59 @@ Network.send(ClientReady);
 	compile(game, 1);
 });
 
-test("K2 rule 25 unknown responses accept an empty callback and typed responses report TS2345 only before the receive rewrite", () => {
+test("K2 K9 rule 25 unknown responses accept an empty callback and the build rejects callbacks that break their target's types", () => {
 	const messages =
-		'import { askServer } from "@trioforge/crucible"; export const Query = askServer<undefined, unknown>("X.Query"); export const Typed = askServer<undefined, string | undefined>("X.Typed");';
-	const receiver = (token) =>
-		`import { receive, Subsystem } from "@trioforge/crucible"; import { ${token} } from "../shared/messages"; export class Q extends Subsystem { readonly r = receive(${token}, () => {}); }`;
-	const check = (token) => {
-		const game = project({ "src/shared/messages.ts": messages, "src/server/receiver.ts": receiver(token) });
-		const { program, diagnostics } = inspect(game);
-		assert.deepEqual(
-			diagnostics.map((d) => d.messageText),
-			[],
-		);
-		const source = program.getSourceFile(path.join(game, "src/server/receiver.ts"));
-		return {
-			game,
-			semantic: program
-				.getSemanticDiagnostics(source)
-				.map((d) => [d.code, ts.flattenDiagnosticMessageText(d.messageText, " ")]),
-		};
-	};
-	const unknown = check("Query");
-	assert.deepEqual(unknown.semantic, []);
-	compile(unknown.game);
-	const typed = check("Typed");
-	assert.deepEqual(typed.semantic, [
-		[
+		'import { askServer, toServer } from "@trioforge/crucible"; export const Query = askServer<undefined, unknown>("X.Query"); export const Typed = askServer<undefined, string | undefined>("X.Typed"); export const Event = toServer<string>("X.Event"); export const Ask = askServer<string, number>("X.Ask");';
+	const receiver = (field) =>
+		`import { receive, Subsystem, ClientReady } from "@trioforge/crucible"; import { Query, Typed, Event, Ask } from "../shared/messages"; export class Q extends Subsystem { readonly r = ${field}; }`;
+	const semantic = (program, game, file) =>
+		program
+			.getSemanticDiagnostics(program.getSourceFile(path.join(game, file)))
+			.map((d) => [d.code, ts.flattenDiagnosticMessageText(d.messageText, "\n")]);
+	const positive = project({
+		"src/shared/messages.ts": messages,
+		"src/server/query.ts": receiver("receive(Query, () => {})"),
+	});
+	const checked = inspect(positive);
+	assert.deepEqual(
+		checked.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.deepEqual(semantic(checked.program, positive, "src/server/query.ts"), []);
+	compile(positive);
+	const negatives = {
+		"src/server/typed.ts": [
+			"receive(Typed, () => {})",
 			2345,
-			"Argument of type '() => void' is not assignable to parameter of type '(player: Player) => string | undefined'.   Type 'void' is not assignable to type 'string | undefined'.",
+			"Argument of type '() => void' is not assignable to parameter of type '(player: Player) => string | undefined'.\n  Type 'void' is not assignable to type 'string | undefined'.",
 		],
-	]);
-	// rbxtsc rechecks the transformed text, where the emit receive takes an untyped callback.
-	compile(typed.game, 0);
+		"src/server/event.ts": [
+			"receive(Event, (p: Player, s: number) => {})",
+			2345,
+			"Argument of type '(p: Player, s: number) => void' is not assignable to parameter of type '(player: Player, payload: string) => void'.\n  Types of parameters 's' and 'payload' are incompatible.\n    Type 'string' is not assignable to type 'number'.",
+		],
+		"src/server/ready.ts": [
+			"receive(ClientReady, (p: string) => {})",
+			2345,
+			"Argument of type '(p: string) => void' is not assignable to parameter of type '(player: Player) => void | (() => void)'.\n  Types of parameters 'p' and 'player' are incompatible.\n    Type 'Player' is not assignable to type 'string'.",
+		],
+		"src/server/ask.ts": ["receive(Ask, (p, s) => s)", 2322, "Type 'string' is not assignable to type 'number'."],
+	};
+	const files = { "src/shared/messages.ts": messages };
+	for (const [file, [field]] of Object.entries(negatives)) files[file] = receiver(field);
+	const game = project(files);
+	const { program, diagnostics } = inspect(game);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	const output = stripVTControlCharacters(compile(game, 1));
+	assert.equal(output.match(/ error TS/g)?.length, 4, output);
+	for (const [file, [, code, message]] of Object.entries(negatives)) {
+		assert.deepEqual(semantic(program, game, file), [[code, message]]);
+		assert.ok(
+			output.includes(`${file}:1:`) && output.includes(`error TS${code}: ${message}`),
+			`${file}\n${output}`,
+		);
+	}
 });
