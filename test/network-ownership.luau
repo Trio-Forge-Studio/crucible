@@ -215,11 +215,12 @@ return {
 		local bea = link:join("Bea", client, { boot = false })
 		first = engine.instance("first", "Model")
 		engine.addTag(first, "Door")
-		local ix = string.format("%02x", link.server.catalog.definitionAt(0).index)
-		spec.eq(link.server.catalog.definitionAt(0).name, "Own.Ask", "catalog order")
-		local bare
+		local ix, bare
 		for i = 0, link.server.catalog.catalogSize() - 1 do
-			if link.server.catalog.definitionAt(i).name == "Own.Bare" then
+			local name = link.server.catalog.definitionAt(i).name
+			if name == "Own.Ask" then
+				ix = string.format("%02x", i)
+			elseif name == "Own.Bare" then
 				bare = string.format("%02x", i)
 			end
 		end

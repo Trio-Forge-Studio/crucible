@@ -15,6 +15,7 @@ import { Scheduler } from "./scheduler";
 import { Hook, Kind, Want, type ObjectState } from "./state";
 import { holdBarrier, releaseBarrier, useReactivePort } from "./reactive/flush";
 import { endInterval } from "./reactive/ownership";
+import { rollbackDeclarations, sealDeclarations } from "./sync/declarations";
 
 /** @internal */
 export const BOOT_CLASSES = [Subsystem, CrucibleBehaviour];
@@ -238,6 +239,7 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 					side.network.close();
 				});
 			unbooted = side.booted();
+			if (side.name === "client") sealDeclarations();
 			side.network.commit();
 		});
 		if (!finalized) {
@@ -253,6 +255,7 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		for (const s of owned) if (!hasEnded(s)) request(s, Want.Destroyed);
 		drain();
 		owned.clear();
+		rollbackDeclarations();
 		releaseBarrier();
 		error(`Crucible boot failed: ${failure}`, 0);
 	}
@@ -267,9 +270,11 @@ export function boot(side: Side, options: BootOptions) {
 		side.network.open();
 		load(options.load);
 		side.network.loaded();
+		if (side.name === "server") sealDeclarations();
 		ignite(robloxPort(), side, options);
 	});
 	if (ok) return;
 	side.network.close();
+	rollbackDeclarations();
 	error(err, 0);
 }

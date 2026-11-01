@@ -35,6 +35,10 @@ let scopeTarget: Instance | undefined;
 function port(): EnginePort {
 	return installed ?? error("Crucible binding used before boot");
 }
+/** @internal The port boot installed, for framework Subsystems that connect engine events. */
+export function enginePort(): EnginePort {
+	return port();
+}
 /** @internal */
 export function useEngine(engine: EnginePort) {
 	installed = engine;

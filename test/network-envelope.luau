@@ -56,7 +56,7 @@ return {
 		end)
 		spec.eq(
 			link.server.remote.attributes.Catalog,
-			"A.First\nAdmin.CommandTree\nDoorbell.Rang\nDoors.Toggle\nKeys.Map\nWords.List\nZ.Gone\nZ.Strict",
+			"A.First\nAdmin.CommandTree\nCrucible.State.Fault\nCrucible.State.Frame\nDoorbell.Rang\nDoors.Toggle\nKeys.Map\nWords.List\nZ.Gone\nZ.Strict",
 			"sealed names in byte order"
 		)
 		local ann = link:join("Ann", function(c)
