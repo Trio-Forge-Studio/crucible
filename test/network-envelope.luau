@@ -183,9 +183,12 @@ return {
 				},
 			}
 		do
-			local ok, err = pcall(case[1])
-			spec.eq(ok, false, "throws")
-			spec.eq(err, case[2], "message, path and reason")
+			local call = link:run(function()
+				return table.pack(pcall(case[1]))
+			end)
+			spec.eq(call.done, true, "a rejected call never yields")
+			spec.eq(call.value[1], false, "throws")
+			spec.eq(call.value[2], case[2], "message, path and reason")
 		end
 		spec.eq(#link:sent(), before, "nothing was sent or queued")
 		link:assertClean()

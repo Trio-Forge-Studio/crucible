@@ -211,16 +211,20 @@ return {
 		spec.eq(asked.value.value, "late", "the request past its lifetime still replies")
 		link:assertClean()
 	end,
-	["76 ending a peer cancels its lifetime timers and no callback"] = function()
+	["55 76 a callback that returns at once keeps no lifetime timer, and ending a peer cancels the rest"] = function()
 		local link = Link.new()
 		local held
 		server(link, {
+			ping = function() end,
 			slow = function()
 				held = coroutine.running()
 				coroutine.yield()
 			end,
 		})
 		local ann = link:join("Ann", client)
+		ann.Network.send(ann.m.Ping, "x")
+		link:flush()
+		spec.eq(link:pending(), 0, "a callback that returned keeps no lifetime timer")
 		ann.Network.send(ann.m.Slow, "x")
 		link:flush()
 		link:leave(ann)
