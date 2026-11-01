@@ -44,7 +44,7 @@ pub(crate) fn extract(checked: Checked) -> Facts {
 
 /// The checker does not mark a const enum import as referenced, because TypeScript inlines const enum members.
 /// Crucible compiles a const enum as a regular enum, so the import stays if any value refers to it.
-struct PendingImport {
+struct ConstEnumImport {
     name: &'static str,
     alias: P<Symbol>,
     span: Span,
@@ -113,7 +113,7 @@ struct Extractor {
     text: &'static str,
     path: String,
     table: Table,
-    pending: Vec<PendingImport>,
+    pending: Vec<ConstEnumImport>,
 }
 
 impl Extractor {
@@ -214,7 +214,7 @@ impl Extractor {
             Kind::JsxSpreadAttribute => self.object_spread(n.as_jsx_spread_attribute().expression),
             Kind::ReturnStatement => {
                 if let Some(expression) = n.expression() {
-                    self.value(expression);
+                    self.call_or_return(expression);
                 }
             }
             Kind::ArrowFunction => {
@@ -222,7 +222,7 @@ impl Extractor {
                 if let Some(body) = n.body()
                     && body.kind() != Kind::Block
                 {
-                    self.value(body);
+                    self.call_or_return(body);
                 }
             }
             Kind::FunctionDeclaration
@@ -258,7 +258,7 @@ impl Extractor {
 
     fn call(&mut self, n: P<Node>) {
         let callee = n.as_call_expression().expression;
-        let target = types::skip_outer(callee);
+        let target = types::skip_downwards(callee);
         let object = match target.kind() {
             Kind::SuperKeyword | Kind::ImportKeyword => return,
             Kind::PropertyAccessExpression | Kind::ElementAccessExpression => target.expression(),
@@ -309,15 +309,15 @@ impl Extractor {
             }
         }
         if let Some(object) = object {
-            self.value(object);
+            self.call_or_return(object);
         }
-        self.value(n);
+        self.call_or_return(n);
     }
 
     fn tagged_template(&mut self, n: P<Node>) {
         let tag = n.as_tagged_template_expression().tag;
         let property =
-            matches!(types::skip_outer(tag).kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression);
+            matches!(types::skip_downwards(tag).kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression);
         self.site();
         let t = self.type_of(tag);
         let t = self.checker.get_non_optional_type(t);
@@ -328,15 +328,15 @@ impl Extractor {
             let span = self.span(tag);
             self.table.store(span, Site::CallCallee, |f| &mut f.callee, callee);
         }
-        self.value(n);
+        self.call_or_return(n);
     }
 
     fn callee_kind(&mut self, n: P<Node>, site: Site, t: P<Type>) -> Callee {
-        let (method, function) = self.method_bits(t);
-        if method && function {
+        let signatures = self.signatures(t);
+        if signatures.method && signatures.function {
             self.unanswered(n, site, Reason::MethodAndFunction);
         }
-        if method { Callee::Method } else { Callee::Function }
+        if signatures.method { Callee::Method } else { Callee::Function }
     }
 
     fn new_expression(&mut self, n: P<Node>) {
@@ -392,7 +392,8 @@ impl Extractor {
         }
     }
 
-    /// An operand that is definitely a string makes `+` concatenate.
+    /// `+` concatenates when either operand is definitely a string, so an operand that only may be one leaves the
+    /// operator unanswered.
     fn plus(&mut self, left: P<Node>, right: P<Node>) {
         let mut strings = [false; 2];
         let mut maybe = [false; 2];
@@ -405,8 +406,8 @@ impl Extractor {
             }
             strings[i] = self.definitely(t, types::is_string);
             maybe[i] = !strings[i] && self.possibly_string(t);
-            let (receiver, _) = self.value_class(t);
-            self.receiver(operand, receiver, t, Site::PlusOperand);
+            let class = self.value_class(t);
+            self.receiver(operand, class.receiver, t, Site::PlusOperand);
         }
         if !strings.contains(&true) {
             for (i, operand) in [left, right].into_iter().enumerate() {
@@ -516,11 +517,11 @@ impl Extractor {
         }
     }
 
-    fn value(&mut self, n: P<Node>) {
+    fn call_or_return(&mut self, n: P<Node>) {
         self.site();
         let t = self.type_of(n);
-        let (receiver, _) = self.value_class(t);
-        self.receiver(n, receiver, t, Site::Value);
+        let class = self.value_class(t);
+        self.receiver(n, class.receiver, t, Site::CallOrReturn);
     }
 
     fn element_receiver(&mut self, n: P<Node>) {
@@ -535,11 +536,11 @@ impl Extractor {
             self.unanswered(n, Site::ElementReceiver, Reason::Any);
             return;
         }
-        let (receiver, mixed) = self.value_class(t);
-        if mixed {
+        let class = self.value_class(t);
+        if class.mixed {
             self.unanswered(n, Site::ElementReceiver, Reason::Mixed);
         }
-        self.receiver(n, receiver, t, Site::ElementReceiver);
+        self.receiver(n, class.receiver, t, Site::ElementReceiver);
     }
 
     fn receiver(&mut self, n: P<Node>, receiver: Receiver, t: P<Type>, site: Site) {
@@ -560,7 +561,7 @@ impl Extractor {
             self.unanswered(n, site, Reason::Any);
             return None;
         }
-        let (receiver, _) = self.value_class(t);
+        let receiver = self.value_class(t).receiver;
         if receiver == Receiver::Other {
             if !(site == Site::Iterable && self.is_call_to(n, Macro::Range)) {
                 self.unanswered(n, site, Reason::Iteration);
@@ -572,7 +573,7 @@ impl Extractor {
     }
 
     fn is_call_to(&mut self, n: P<Node>, m: Macro) -> bool {
-        let n = types::skip_outer(n);
+        let n = types::skip_downwards(n);
         if n.kind() != Kind::CallExpression {
             return false;
         }
@@ -647,7 +648,7 @@ impl Extractor {
                 target.is_some_and(|t| t.flags().intersects(SymbolFlags::ConstEnum | SymbolFlags::ConstEnumOnlyModule));
             match alias {
                 Some(alias) if const_enum => {
-                    self.pending.push(PendingImport { name: name.as_identifier().text(), alias, span, used: false })
+                    self.pending.push(ConstEnumImport { name: name.as_identifier().text(), alias, span, used: false })
                 }
                 _ => self.table.store(span, Site::Import, |f| &mut f.import, Import::Elide),
             }
@@ -704,8 +705,8 @@ mod tests {
     fn a_second_different_answer_is_a_conflict() {
         let span = Span { start: 3, end: 9 };
         let mut table = Table::default();
-        table.store(span, Site::Value, |f| &mut f.receiver, Receiver::Array);
-        table.store(span, Site::Value, |f| &mut f.receiver, Receiver::Array);
+        table.store(span, Site::CallOrReturn, |f| &mut f.receiver, Receiver::Array);
+        table.store(span, Site::CallOrReturn, |f| &mut f.receiver, Receiver::Array);
         table.store(span, Site::Truthiness, |f| &mut f.falsy, Falsy::NIL);
         assert!(table.conflicts.is_empty(), "equal answers agree");
         table.store(span, Site::Iterable, |f| &mut f.receiver, Receiver::Map);

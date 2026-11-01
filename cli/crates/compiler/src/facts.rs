@@ -13,26 +13,24 @@ pub struct Span {
     pub end: u32,
 }
 
-/// What the lowering of one node needs from the checker. A field is set only at the sites that ask for it.
+/// `None` in a field means no site on the node asks for it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fact {
-    /// The class of a value whose lowering depends on it. Computed over the non-nullable part of the type, with
-    /// `falsy` saying whether the value may also be nil.
+    /// Computed over the non-nullable part of the type, with `falsy` saying whether the value may also be nil.
     pub receiver: Option<Receiver>,
-    /// What a call, a `new` callee or an identifier macro resolves to, and whether a function takes `self`.
+    /// What a call or tagged template callee, a `new` callee or an identifier macro resolves to, and whether a
+    /// function takes `self`.
     pub callee: Option<Callee>,
     /// Whether a callee may be a Roblox API, which tells a missing argument from `nil`. Asked at calls with a call
     /// argument, which the lowering wraps in parentheses when it may return nothing.
     pub roblox_api: Option<bool>,
-    /// The JavaScript-falsy values the expression may hold.
     pub falsy: Option<Falsy>,
-    /// The value of an enum member or an enum member access.
+    /// The value of an enum member or a const enum member access.
     pub constant: Option<Constant>,
     /// Whether a numeric `for` loop bound is definitely an integer.
     pub integer: Option<bool>,
-    /// Whether an import or re-export binding must stay in the output.
     pub import: Option<Import>,
-    /// What Crucible's transform reads at a class, an `inject` call or an `attribute` call.
+    /// Set at a registered class and at an `inject` call.
     pub crucible: Option<Box<Crucible>>,
 }
 
@@ -43,7 +41,6 @@ impl Fact {
     }
 }
 
-/// The class of a value, for method calls, indexing, iteration, spreads, destructuring, call results and `+`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Array,
@@ -59,7 +56,6 @@ pub enum Receiver {
     Other,
 }
 
-/// What a call lowers to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Callee {
     Macro(Macro),
@@ -69,8 +65,8 @@ pub enum Callee {
     Function,
 }
 
-/// A set of JavaScript-falsy values. Luau treats only `nil` and `false` as falsy, so a truthiness check tests the
-/// other bits explicitly.
+/// The JavaScript-falsy values an expression may hold. Luau treats only `nil` and `false` as falsy, so a truthiness
+/// check tests the other bits explicitly.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Falsy(u8);
 
@@ -132,12 +128,11 @@ pub enum Import {
     Elide,
 }
 
-/// What Crucible's transform needs from the checker.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Crucible {
     /// A class that extends `Subsystem` or `CrucibleBehaviour`, registered with `defineClass`.
     Class(Class),
-    /// `inject<T>()` or `inject<All<T>>()`.
+    /// An `inject` call. Without a type argument its target is `Invalid`.
     Inject(Dependency),
 }
 
@@ -243,7 +238,7 @@ pub enum Site {
     Spread,
     Destructure,
     /// A call receiver, a call result or a returned value.
-    Value,
+    CallOrReturn,
     Function,
     Constant,
     Import,
@@ -269,7 +264,6 @@ pub enum Reason {
     Conflict,
 }
 
-/// The fact table of a checked program.
 #[derive(Clone, Debug, Default)]
 pub struct Facts {
     pub files: Vec<FileFacts>,

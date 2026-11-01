@@ -1,6 +1,3 @@
-//! Type predicates, ported from roblox-ts 3.0.0's `util/types.ts` and `isMethod.ts`, and the global symbols that
-//! identify macros and built-in classes.
-
 use std::collections::{HashMap, HashSet};
 
 use tsrs_ast::{Kind, Node, Symbol, SymbolFlags};
@@ -11,7 +8,7 @@ use super::Extractor;
 use crate::facts::{Constant, Falsy, Receiver};
 use crate::macros::{Macro, MacroKind};
 
-/// Global symbols, resolved once. A name the program does not declare is absent and never matches.
+/// A name the program does not declare is absent and never matches.
 pub(super) struct Globals {
     calls: HashMap<P<Symbol>, Macro>,
     constructors: HashMap<P<Symbol>, Macro>,
@@ -55,9 +52,11 @@ impl Globals {
                     }
                 }
                 MacroKind::Identifier => globals.identifier_macro = resolve(m.name(), SymbolFlags::All),
-                // roblox-ts keys a property call macro by the method's own symbol, which the callee's type carries.
+                // A method macro is keyed by the method's own symbol, which is the symbol of the callee's type.
                 MacroKind::Method => {
-                    if let Some(member) = resolve(m.owner(), SymbolFlags::Interface)
+                    if let Some(member) = m
+                        .owner()
+                        .and_then(|owner| resolve(owner, SymbolFlags::Interface))
                         .and_then(|owner| owner.members())
                         .and_then(|members| members.lookup(m.name()))
                     {
@@ -150,15 +149,13 @@ fn is_skippable(k: Kind) -> bool {
     )
 }
 
-/// roblox-ts's `skipDownwards`.
-pub(super) fn skip_outer(mut n: P<Node>) -> P<Node> {
+pub(super) fn skip_downwards(mut n: P<Node>) -> P<Node> {
     while is_skippable(n.kind()) {
         n = n.expression().unwrap();
     }
     n
 }
 
-/// roblox-ts's `skipUpwards`.
 fn skip_upwards(mut n: P<Node>) -> P<Node> {
     while let Some(p) = n.parent() {
         if !is_skippable(p.kind()) {
@@ -170,6 +167,19 @@ fn skip_upwards(mut n: P<Node>) -> P<Node> {
 }
 
 type Predicate = fn(&mut Extractor, P<Type>) -> bool;
+
+pub(super) struct ValueClass {
+    pub receiver: Receiver,
+    /// The type is a union of members that lower differently.
+    pub mixed: bool,
+}
+
+pub(super) struct Signatures {
+    /// Some call signature takes `self`.
+    pub method: bool,
+    /// Some call signature takes no `self`.
+    pub function: bool,
+}
 
 impl Extractor {
     fn constraint(&mut self, t: P<Type>) -> P<Type> {
@@ -197,7 +207,6 @@ impl Extractor {
         out
     }
 
-    /// roblox-ts's `isDefinitelyType`: every union member, or any intersection member or base type, satisfies `f`.
     pub(super) fn definitely(&mut self, t: P<Type>, f: Predicate) -> bool {
         let t = self.constraint(t);
         self.definitely_inner(t, f)
@@ -218,7 +227,6 @@ impl Extractor {
         f(self, t)
     }
 
-    /// roblox-ts's `isPossiblyType` for strings, which the `+` lowering asks.
     pub(super) fn possibly_string(&mut self, t: P<Type>) -> bool {
         if t.flags().intersects(TypeFlags::AnyOrUnknown | TypeFlags::TypeVariable) {
             return false;
@@ -234,8 +242,6 @@ impl Extractor {
         t.flags().intersects(TypeFlags::StringLike)
     }
 
-    /// The JavaScript-falsy values a type may hold: roblox-ts's `isPossiblyType` for `0`, NaN, `""`, `false` and
-    /// `undefined`, in one walk.
     pub(super) fn falsy(&mut self, t: P<Type>) -> Falsy {
         let t = self.constraint(t);
         self.falsy_inner(t)
@@ -325,9 +331,8 @@ impl Extractor {
             && x.checker.get_type_arguments_exported(t).first().is_some_and(|&step| x.is_lua_tuple(step))
     }
 
-    /// The class of a value over its non-nullable part, and whether it is a union of members that lower differently.
-    /// Every site asks this one question, so two sites on one node never disagree.
-    pub(super) fn value_class(&mut self, t: P<Type>) -> (Receiver, bool) {
+    /// Every site that classifies a value asks this one question, so two sites on one node agree.
+    pub(super) fn value_class(&mut self, t: P<Type>) -> ValueClass {
         let t = self.checker.get_non_nullable_type(t);
         // `never` is assignable to every array type, and it is what is left of `void` and `undefined`.
         let receiver = if t.flags().intersects(TypeFlags::Never) {
@@ -350,7 +355,7 @@ impl Extractor {
             Receiver::Other
         };
         if receiver != Receiver::Other {
-            return (receiver, false);
+            return ValueClass { receiver, mixed: false };
         }
         let constrained = self.constraint(t);
         let parts: Vec<P<Type>> = if constrained.flags().intersects(TypeFlags::Union) {
@@ -377,7 +382,7 @@ impl Extractor {
             };
             classes.insert(class);
         }
-        (receiver, classes.len() > 1)
+        ValueClass { receiver, mixed: classes.len() > 1 }
     }
 
     pub(super) fn possibly_roblox(&mut self, t: P<Type>) -> bool {
@@ -411,7 +416,6 @@ impl Extractor {
         t.symbol()
     }
 
-    /// roblox-ts's `isMethodDeclaration`.
     fn is_method_declaration(&mut self, node: P<Node>) -> bool {
         if !tsrs_ast::is_function_like(node) {
             return false;
@@ -434,8 +438,7 @@ impl Extractor {
         }
     }
 
-    /// roblox-ts's `isMethod`: whether any call signature takes `self`, and whether any does not.
-    pub(super) fn method_bits(&mut self, t: P<Type>) -> (bool, bool) {
+    pub(super) fn signatures(&mut self, t: P<Type>) -> Signatures {
         let mut parts = Vec::new();
         self.walk_types(t, &mut parts);
         let (mut method, mut function) = (false, false);
@@ -462,7 +465,7 @@ impl Extractor {
                 }
             }
         }
-        (method, function)
+        Signatures { method, function }
     }
 
     fn walk_types(&mut self, t: P<Type>, out: &mut Vec<P<Type>>) {
