@@ -87,6 +87,23 @@ local function attempts(realm)
 	return log
 end
 
+local function crowd(realm, count: number, spacing: number)
+	local players = {}
+	for index = 1, count do
+		players[index] = realm.join(USER + index)
+		load(realm, players[index])
+		realm.backend:advance(spacing)
+	end
+	return players
+end
+
+local function spaced(log, label: string)
+	for index = 2, #log do
+		local gap = log[index].at - log[index - 1].at
+		assert(gap >= 0.25 - 1e-6, `{label} {index} followed the last after {gap} s`)
+	end
+end
+
 local function snapshot(revision: number, coins: number)
 	return { revision = revision, schemaVersion = 0, payload = { coins = coins }, receipts = {} }
 end
@@ -415,6 +432,37 @@ return {
 		spec.eq(la.value, true, "loaded once the cap cleared")
 		spec.eq(a.kicked(pa), nil, "never kicked")
 		spec.eq(#backend:callsTo({ server = a.id }), 1, "the refused attempts and the withdrawn callers sent nothing")
+	end,
+	["rule 32 a load refused at a pending cap keeps the poll minimum while other players load"] = function()
+		local _, a = world(1)
+		local log = attempts(a)
+		a.budget.update = 1
+		fill(a, 30)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		local others = crowd(a, 100, 0.1)
+		spec.eq(la.done, false, "the load keeps trying while refused")
+		assert(#log >= 10, `{#log} attempts while the others loaded`)
+		for index, attempt in log do
+			assert(attempt.refused, `attempt {index} was refused at the per-key cap`)
+		end
+		spaced(log, "refused attempt")
+		a.backend:advance(1)
+		for index, other in others do
+			assert(a.store:writable(other), `player {index} beside it loaded`)
+		end
+	end,
+	["rule 21 a held load keeps the poll minimum while other players load"] = function()
+		local backend, a, b = world()
+		load(a, a.join(USER))
+		backend:advance(1)
+		local log = attempts(b)
+		local lb = load(b, b.join(USER))
+		crowd(b, 200, 0.1)
+		spec.eq(lb.done, false, "polling the live lease")
+		assert(#log >= 5, `{#log} polls while the others loaded`)
+		spaced(log, "poll")
+		spec.eq(stored(backend).lease.serverId, a.id, "the live lease was never taken")
 	end,
 	["rule 20 a load refused at a pending cap ends at the deadline"] = function()
 		local backend, a, b = world()
