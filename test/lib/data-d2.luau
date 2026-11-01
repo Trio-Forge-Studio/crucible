@@ -170,6 +170,19 @@ function D2.lenient(name: string)
 	}
 end
 
+-- A declaration whose admitted value differs from the stored payload: admission keeps only `amount`.
+function D2.stripping(name: string)
+	return {
+		name = name,
+		admit = function(payload)
+			if type(payload) == "table" and type(payload.amount) == "number" then
+				return { ok = true, value = { amount = payload.amount } }
+			end
+			return { ok = false }
+		end,
+	}
+end
+
 -- Registers a receiver that adds `payload.amount` to coins and records every call.
 -- options.throws(payload, count) makes it throw; options.unchanged returns the data untouched.
 function D2.receiver(realm, decl, options)

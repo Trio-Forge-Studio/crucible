@@ -367,6 +367,28 @@ return {
 		D2.seed(backend, nil, { seen = short })
 		spec.eq(send("m4"), "ok", "a ring with room needs no eviction")
 	end,
+	["rule 69 a ring head is evictable only once older than ID_EVICT_MIN_AGE_SECONDS, exactly 60 s is too young"] = function()
+		local backend, a = D2.world()
+		local decl = D2.message("grant")
+		local function ring(headCreated)
+			local seen = { D2.id(headCreated, "head") }
+			for index = 1, 1023 do
+				seen[index + 1] = D2.id(W - 5000 - index, `s{index}`)
+			end
+			return seen
+		end
+		local function send(suffix)
+			local handle = D2.send(a, decl, { amount = 1 }, D2.id(W - 30, suffix))
+			backend:advance(0.1)
+			return handle.value.kind
+		end
+		backend:advance(1 - a.latency / 2)
+		D2.seed(backend, nil, { seen = ring(W - 59) })
+		spec.eq(send("m1"), "overloaded", "a head exactly 60 s old at the transform is refused")
+		spec.eq(#inbox(backend), 0, "nothing was written")
+		D2.seed(backend, nil, { seen = ring(W - 60) })
+		spec.eq(send("m2"), "ok", "a head a second older may be evicted")
+	end,
 	["rule 69 an ack evicts regardless of age and raises the floor, so the evicted id is expired"] = function()
 		local backend, a = D2.world()
 		local decl = D2.message("grant")

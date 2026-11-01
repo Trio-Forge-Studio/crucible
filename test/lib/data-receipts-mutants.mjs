@@ -965,6 +965,56 @@ const mutants = [
 		"rule 72 R3 a stale payload",
 	),
 	m("108", "swap", FAKE, "after = options and options.after or 0,", "after = 0,", "rule 72 R3 a stale payload"),
+	// Pins from D2's verification: the duplicate and empty guards, the eviction boundary, the admitted value, the ack
+	// order, and the R3 sequence's release.
+	m(
+		"72",
+		"guard",
+		T,
+		"for (const id of ids) if (!seen.includes(id)) seen.push(id);",
+		"for (const id of ids) seen.push(id);",
+		"rule 72 an ack carried by a second write",
+	),
+	m(
+		"73",
+		"guard",
+		T,
+		"if (listed.size() === 0) {",
+		"if (false as boolean) {",
+		"rule 73 clearQuarantined with only unlisted ids",
+	),
+	m(
+		"69",
+		"swap",
+		O,
+		"return created === undefined || now - created > ID_EVICT_MIN_AGE_SECONDS;",
+		"return created === undefined || now - created >= ID_EVICT_MIN_AGE_SECONDS;",
+		"rule 69 a ring head is evictable only once older",
+	),
+	m(
+		"72",
+		"swap",
+		I,
+		"(data) => receiver.receive(session.player, data, admitted.value),",
+		"(data) => receiver.receive(session.player, data, item.payload),",
+		"rule 72 the receiver gets the admitted value",
+	),
+	m(
+		"72",
+		"guard",
+		S,
+		"\t\tapplied.sort((a, b) => a[1] < b[1]);\n",
+		"",
+		"rule 72 acks reach seen in the order of their revisions",
+	),
+	m(
+		"72",
+		"guard",
+		T,
+		"const index = inbox.findIndex((item) => item.id === mark.id && item.generation === mark.generation);",
+		"const index = inbox.findIndex((item) => item.id === mark.id);",
+		"rule 72 R3 a stale quarantine mark in a release",
+	),
 ];
 // Type-checks every mutant in one language service, so a mutant that cannot compile fails before the slow runs.
 function typecheck(originals) {
