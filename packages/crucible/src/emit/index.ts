@@ -1,6 +1,7 @@
 import { readClaim } from "../internal/construction-claim";
 export { n } from "../internal/network/schema";
 export { config, playerConfig } from "./configs";
+export { dataStore } from "./data";
 
 import type { All } from "../all";
 import type { CrucibleObject } from "../crucible-object";
