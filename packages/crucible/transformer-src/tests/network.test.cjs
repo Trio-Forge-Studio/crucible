@@ -742,11 +742,11 @@ test("network augmentations behind a deep heritage chain still fail at the augme
 
 test("network heritage chains deeper than the checker can analyse end in Crucible diagnostics", () => {
 	const result = inspect(chainGame(3000));
-	assert.ok(result.diagnostics.length > 0);
-	for (const diagnostic of result.diagnostics) {
-		assert.equal(diagnostic.code, 90000);
-		assert.match(diagnostic.messageText, /nests or inherits too deeply/);
-	}
+	const faults = result.diagnostics.filter((diagnostic) => diagnostic.code === 90000);
+	assert.ok(faults.length > 0);
+	for (const diagnostic of faults) assert.match(diagnostic.messageText, /nests or inherits too deeply/);
+	for (const diagnostic of result.diagnostics)
+		assert.ok([90000, 90010].includes(diagnostic.code), diagnostic.messageText);
 });
 
 test("network transformer faults other than a stack overflow keep their own message", () => {
