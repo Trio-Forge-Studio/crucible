@@ -647,7 +647,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				const name = receive(node);
 				return (
 					name &&
-					f.createCallExpression(runtime("receive"), undefined, [
+					f.createCallExpression(runtime("receive"), node.typeArguments, [
 						f.createThis(),
 						str(name),
 						visitInput(node.arguments[0]),

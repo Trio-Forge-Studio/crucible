@@ -525,7 +525,7 @@ test("network declaration and receiver aliases and namespaces preserve macro sym
 		result.output.get("src/shared/messages.ts"),
 		/__crucible.toServer<number>\("X.Namespace", __crucible.n.f64\)/,
 	);
-	assert.match(result.output.get("src/server/service.ts"), /__crucible.receive\(this, "r", Named/);
+	assert.match(result.output.get("src/server/service.ts"), /__crucible.receive<typeof Named>\(this, "r", Named/);
 	compile(game);
 });
 
