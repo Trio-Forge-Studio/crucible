@@ -1,0 +1,9 @@
+missing-slot: verifier exit 1, rejected
+catalog: verifier exit 1, rejected
+order: verifier exit 1, rejected
+flush: verifier exit 1, rejected
+kick: verifier exit 1, rejected
+config: verifier exit 1, rejected
+stream-visibility: verifier exit 1, rejected
+stream-removal: verifier exit 1, rejected
+stream-slot: verifier exit 1, rejected
