@@ -3,7 +3,7 @@
 	"private": true,
 	"scripts": {
 		"build": "pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build && pnpm --filter @trioforge/crucible-sample-game build",
-		"test": "pnpm run build && lune run test && node --test test/studio/verification.test.mjs test/docs.test.mjs",
+		"test": "pnpm run build && lune run test && node --test test/studio/verification.test.mjs test/docs.test.mjs test/compiler-types.test.mjs",
 		"check": "vp check && stylua --check test .lune probes && selene test .lune && selene --config probes/engine/selene.toml probes && node --test probes/engine/verification.test.mjs probes/modules/verification.test.mjs && pnpm run test && pnpm --filter @trioforge/crucible test:transformer",
 		"fmt": "vp fmt && stylua test .lune probes",
 		"prepare": "vp config"
@@ -11,6 +11,7 @@
 	"devDependencies": {
 		"@trioforge/tooling": "0.1.0",
 		"roblox-ts": "3.0.0",
+		"tsrs": "0.20.1-ts7.1.0-beta",
 		"typescript": "5.5.3",
 		"vite-plus": "1.3.0"
 	},
