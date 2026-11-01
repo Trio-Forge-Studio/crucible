@@ -53,6 +53,22 @@ local function stored(backend)
 	return backend:envelope(STORE, KEY)
 end
 
+local function recover(backend)
+	for _, plan in backend.plans do
+		plan.remaining = 0
+	end
+end
+
+local function lastCommitted(backend, realm)
+	local last
+	for _, call in backend:callsTo({ server = realm.id }) do
+		if call.committed then
+			last = call
+		end
+	end
+	return last
+end
+
 local function attempt(realm, fn)
 	local outcome = {}
 	realm.run(function()
@@ -675,6 +691,59 @@ return {
 			spec.eq(envelope.payload.blob, nil, `{case.mode}: the claim's result was skipped`)
 		end
 		spec.eq(a.engine.logged("onRelease (leave) was skipped"), 2, "diagnosed once per session")
+	end,
+	["rule 26 K15 a session sealed at its safe bound still releases and commits with no newer owner"] = function()
+		local backend, a = world()
+		local pa = loaded(backend, a)
+		backend:fail("throttle", { server = a.id }, 100000)
+		set(a, pa, 41)
+		local old = session(a, pa)
+		local bound = lastCommitted(backend, a).at + a.limits.LOCAL_AUTHORITY_SECONDS
+		backend:advance(bound - backend.now + 1)
+		spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "kicked at the safe bound")
+		spec.eq(stored(backend).lease.token, old.token, "the lease is still the sealed session's")
+		backend:advance(4)
+		recover(backend)
+		backend:advance(10)
+		local release = lastCommitted(backend, a)
+		assert(release.at > bound, `the release was sent {release.at - bound} s after the safe bound`)
+		spec.eq(old.released, "committed", "the release committed")
+		local envelope = stored(backend)
+		spec.eq(envelope.lease, nil, "the lease is released")
+		spec.eq(envelope.payload.coins, 41, "with the sealed session's newest revision")
+		spec.eq(envelope.commit.token, old.token, "under the sealed session's marker")
+	end,
+	["rule 26 K15 a session sealed at its safe bound releases against a newer owner and cancels"] = function()
+		local backend, a, b = world(2)
+		local pa = loaded(backend, a)
+		backend:fail("throttle", { server = a.id }, 100000)
+		set(a, pa, 41)
+		local old = session(a, pa)
+		local bound = lastCommitted(backend, a).at + a.limits.LOCAL_AUTHORITY_SECONDS
+		-- B's wall clock runs 30 s ahead, so B takes A's lease while A's release may still try (rule 25's step).
+		b.wallOffset += 30
+		backend:advance(bound - backend.now + 1)
+		spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+		local pb = b.join(USER)
+		local lb = b.run(function()
+			return b.store:load(pb, "join")
+		end)
+		backend:advance(1)
+		spec.eq(lb.value, true, "the newer owner acquired")
+		local taken = stored(backend)
+		recover(backend)
+		backend:advance(12)
+		local tried = false
+		for _, call in backend:callsTo({ server = a.id }) do
+			tried = tried or (call.at > bound + 2 and call.outcome ~= nil and call.outcome.kind == "ok")
+		end
+		assert(tried, "the sealed session's release was attempted after the newer owner acquired")
+		spec.eq(old.released, "fenced", "the release cancelled against the newer owner")
+		local envelope = stored(backend)
+		spec.eq(envelope.lease.token, taken.lease.token, "the newer owner keeps the lease")
+		spec.eq(envelope.epoch, taken.epoch, "nothing was written over the newer owner")
+		spec.eq(envelope.payload.coins, 0, "the sealed revision was never merged")
 	end,
 	["rule 26 authority loss is diagnosed once per session"] = function()
 		local backend, a = world()
