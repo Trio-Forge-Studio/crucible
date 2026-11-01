@@ -110,6 +110,10 @@ pub(super) fn is_string(_: &mut Extractor, t: P<Type>) -> bool {
     t.flags().intersects(TypeFlags::StringLike)
 }
 
+pub(super) fn is_integer_literal(_: &mut Extractor, t: P<Type>) -> bool {
+    literal_number(t).is_some_and(|v| v.fract() == 0.0)
+}
+
 fn is_number(t: P<Type>) -> bool {
     t.flags().intersects(TypeFlags::NumberLike)
 }
@@ -315,6 +319,12 @@ impl Extractor {
         x.globals.iterable_function.is_some() && t.symbol() == x.globals.iterable_function
     }
 
+    fn is_lua_tuple_iterable_function(x: &mut Extractor, t: P<Type>) -> bool {
+        Self::is_iterable_function(x, t)
+            && t.object_flags().intersects(ObjectFlags::Reference)
+            && x.checker.get_type_arguments_exported(t).first().is_some_and(|&step| x.is_lua_tuple(step))
+    }
+
     /// The class of a value over its non-nullable part, and whether it is a union of members that lower differently.
     /// Every site asks this one question, so two sites on one node never disagree.
     pub(super) fn value_class(&mut self, t: P<Type>) -> (Receiver, bool) {
@@ -332,6 +342,8 @@ impl Extractor {
             Receiver::Set
         } else if self.definitely(t, is_string) {
             Receiver::String
+        } else if self.definitely(t, Self::is_lua_tuple_iterable_function) {
+            Receiver::LuaTupleIterFn
         } else if self.definitely(t, Self::is_iterable_function) {
             Receiver::IterFn
         } else {
@@ -356,6 +368,8 @@ impl Extractor {
                 Receiver::Set
             } else if is_string(self, part) {
                 Receiver::String
+            } else if Self::is_lua_tuple_iterable_function(self, part) {
+                Receiver::LuaTupleIterFn
             } else if Self::is_iterable_function(self, part) {
                 Receiver::IterFn
             } else {
@@ -366,10 +380,27 @@ impl Extractor {
         (receiver, classes.len() > 1)
     }
 
-    /// An integer number literal type, which a numeric `for` loop can use as a bound.
-    pub(super) fn integer_literal(&mut self, t: P<Type>) -> Option<f64> {
+    pub(super) fn possibly_roblox(&mut self, t: P<Type>) -> bool {
         let t = self.constraint(t);
-        literal_number(t).filter(|v| v.fract() == 0.0)
+        self.possibly_roblox_inner(t)
+    }
+
+    fn possibly_roblox_inner(&mut self, t: P<Type>) -> bool {
+        if t.flags().intersects(TypeFlags::UnionOrIntersection) {
+            return t.types().iter().any(|&m| self.possibly_roblox_inner(m));
+        }
+        if self.base_types(t).into_iter().any(|base| self.possibly_roblox_inner(base)) {
+            return true;
+        }
+        if t.flags().intersects(TypeFlags::TypeVariable | TypeFlags::AnyOrUnknown) || self.is_defined_type(t) {
+            return true;
+        }
+        t.symbol().is_some_and(|s| {
+            s.declarations().iter().any(|&d| {
+                tsrs_ast::get_source_file_of_node(d)
+                    .is_some_and(|f| f.file_name().replace('\\', "/").contains("/node_modules/@rbxts/types/"))
+            })
+        })
     }
 
     pub(super) fn first_defined_symbol(&mut self, t: P<Type>) -> Option<P<Symbol>> {
