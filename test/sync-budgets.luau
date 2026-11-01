@@ -79,6 +79,15 @@ local function blobs(n)
 	return n.object({ { "a", n.string }, { "b", n.string }, { "c", n.string }, { "count", n.f64 } })
 end
 
+-- One hundred optional number fields, f001 to f100.
+local function optionalFields(n)
+	local fields = {}
+	for i = 1, 100 do
+		table.insert(fields, { string.format("f%03d", i), n.union({ n["nil"], n.f64 }) })
+	end
+	return fields
+end
+
 -- Numbers 1..count in a fresh table each call, so a recompute builds an equal value with a new identity.
 local function numbers(count: number)
 	local out = table.create(count)
@@ -315,6 +324,7 @@ return {
 					Board = r.emit.replicated("Job.Board", { title = "" }, n.object({ { "title", n.string } })),
 					List = r.emit.replicated("Job.List", {}, n.array(n.f64)),
 					Tally = r.emit.replicated("Job.Tally", {}, n.map(n.string, n.f64)),
+					Rows = r.emit.replicated("Job.Rows", {}, n.array(n.object(optionalFields(n)))),
 				}
 			end,
 			serve = function(s, d, world)
@@ -322,6 +332,7 @@ return {
 					world.board = s.entry.publish(d.Board)
 					world.list = s.entry.publish(d.List)
 					world.tally = s.entry.publish(d.Tally)
+					world.rows = s.entry.publish(d.Rows)
 				end)
 			end,
 		})
@@ -361,6 +372,18 @@ return {
 		spec.eq(ok, false, "an array past the entry budget is rejected")
 		spec.has(err, "Job.List: over SYNC_FRAME_COLLECTION_ENTRIES", "by its length")
 		spec.eq(#counted[long], 0, "before any key is iterated")
+		-- Each row costs one codec visit but 102 admission visits: its node, one scan step to its undeclared key, then a
+		-- lookup by name for each of its 100 absent declared fields. 1,000 rows pass 96,000 inside every codec budget.
+		local rows = table.create(1000)
+		for i = 1, 1000 do
+			rows[i] = { junk = true }
+		end
+		ok, err = pcall(function()
+			w.rows:set(rows)
+		end)
+		spec.eq(ok, false, "a value within the codec budgets can still pass the admission budget")
+		spec.has(err, "Job.Rows", "naming the declaration")
+		spec.has(err, "over SYNC_ADMISSION_VISITS", "at the admission budget")
 		w:finish()
 	end,
 	["67 send false advances no revision and ends the view before networking's deferred cleanup"] = function()

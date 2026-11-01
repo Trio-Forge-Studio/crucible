@@ -91,7 +91,12 @@ const rules = [
 	],
 	[
 		"48",
-		["guard", D, "\tif (previous !== undefined)\n\t\terror(", "\tif (false as boolean)\n\t\terror("],
+		[
+			"guard",
+			D,
+			"\tif (previous !== undefined)\n\t\terror(",
+			"\tif (previous !== undefined && (false as boolean))\n\t\terror(",
+		],
 		["swap", D, "is published by ${previous.label} and ${label}", "is published by ${label} and ${previous.label}"],
 		["pair", "one publisher is a single check with nothing paired to it"],
 	],
@@ -159,7 +164,12 @@ const rules = [
 	],
 	[
 		"53",
-		["guard", SS, "\t\t\tif (publication === undefined) continue;\n\t\t\tthis.examining", "\t\t\tthis.examining"],
+		[
+			"guard",
+			SS,
+			"\t\t\tconst publication = declaration.publication;\n\t\t\tif (publication === undefined) continue;\n\t\t\tthis.examining",
+			'\t\t\tconst publication = declaration.publication ?? { label: "", live: true };\n\t\t\tthis.examining',
+		],
 		["swap", "an unpublished declaration is skipped with nothing to swap"],
 		["pair", "skipping is one check with nothing paired to it"],
 	],
@@ -253,7 +263,7 @@ const rules = [
 			"guard",
 			SS,
 			"\t\t\tif (accepted !== undefined && equal(accepted.value, value, work))",
-			"\t\t\tif (false as boolean)",
+			"\t\t\tif (accepted !== undefined && (false as boolean))",
 		],
 		["swap", "equality is symmetric: swapping its arguments changes only which side is iterated"],
 		[
@@ -271,7 +281,12 @@ const rules = [
 	],
 	[
 		"64",
-		["guard", CS, "\t\t\t\tif (declaration === undefined) continue;\n", "\n"],
+		[
+			"guard",
+			CS,
+			"\t\t\t\tconst declaration = declarationNamed(entry.key);\n\t\t\t\tif (declaration === undefined) continue;\n",
+			"\t\t\t\tconst declaration = declarationNamed(entry.key)!;\n",
+		],
 		["swap", "an unknown key is skipped with nothing to swap"],
 		["pair", "skipping is one check with nothing paired to it"],
 	],
@@ -384,7 +399,7 @@ const rules = [
 	],
 	[
 		"74",
-		["guard", B, "\t\towned.clear();\n\t\trollbackDeclarations();\n", "\t\towned.clear();\n"],
+		["guard", B, "\tside.network.close();\n\trollbackDeclarations();\n", "\tside.network.close();\n"],
 		["guard unseal", D, "\tsealed = false;\n}", "}"],
 		["swap", D, '\t\twrite(declaration.status, "pending");', '\t\twrite(declaration.status, "ready");'],
 		["pair", D, "\t\twrite(declaration.node, declaration.initial);\n", "\n"],
@@ -479,6 +494,7 @@ try {
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
 	for (const line of absent) console.log(line);
 	let killed = 0;
+	const problems = [];
 	const from = Number(process.argv.find((arg) => /^\d+$/.test(arg)) ?? 0);
 	const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 	let ran = 0;
@@ -488,18 +504,32 @@ try {
 		const original = originals.get(file);
 		fs.writeFileSync(path.join(scratch, file), original.replaceAll(before, after));
 		built = build();
-		assert.equal(built.status, 0, `${name} must compile\n${built.stdout}${built.stderr}`);
-		const tested = specRun(scratch, extra);
-		assert.equal(tested.status, 1, `${name} survived\n${tested.stdout}${tested.stderr}`);
-		const failure = (tested.stdout + tested.stderr).match(/FAIL ((?:sync|network)[^\n]*)/);
-		assert.ok(failure, `${name} must fail a spec assertion`);
-		console.log(`KILLED ${name} | ${path.basename(file)} | first failure: ${failure[1]}`);
-		killed++;
+		const failure =
+			built.status === 0
+				? (() => {
+						const tested = specRun(scratch, extra);
+						return (
+							tested.status === 1 &&
+							(tested.stdout + tested.stderr).match(/FAIL ((?:sync|network)[^\n]*)/)
+						);
+					})()
+				: undefined;
 		fs.writeFileSync(path.join(scratch, file), original);
+		if (built.status !== 0) {
+			console.log(`DID NOT COMPILE ${name} | ${path.basename(file)}\n${built.stdout}${built.stderr}`);
+			problems.push(name);
+		} else if (!failure) {
+			console.log(`SURVIVED ${name} | ${path.basename(file)}`);
+			problems.push(name);
+		} else {
+			console.log(`KILLED ${name} | ${path.basename(file)} | first failure: ${failure[1]}`);
+			killed++;
+		}
 	}
 	built = build();
 	assert.equal(built.status, 0, built.stdout + built.stderr);
 	console.log(`${killed}/${ran} source mutants killed; ${absent.length} operators not applicable; restored build 0`);
+	assert.deepEqual(problems, [], "every mutant compiles and is killed");
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });
 }

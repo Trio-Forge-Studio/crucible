@@ -255,7 +255,6 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		for (const s of owned) if (!hasEnded(s)) request(s, Want.Destroyed);
 		drain();
 		owned.clear();
-		rollbackDeclarations();
 		releaseBarrier();
 		error(`Crucible boot failed: ${failure}`, 0);
 	}

@@ -55,6 +55,9 @@ return {
 		spec.eq(ann.d.Score(), 9, "the client applied it")
 		w:heartbeat()
 		spec.eq(#w:frames(ann), 2, "a peer with nothing new gets nothing")
+		w.server.api.state(0):set(1)
+		w:heartbeat()
+		spec.eq(#w:frames(ann), 2, "an examination that finds nothing new sends nothing")
 		w.job.score:set(10)
 		w:heartbeat()
 		spec.eq(w:frames(ann)[3].frame.revision, 3, "revisions rise by exactly one per accepted frame")
@@ -178,8 +181,12 @@ return {
 		local first = ann.d.Profile()
 		spec.eq(table.isfrozen(first), true, "the applied value is frozen")
 		spec.eq(table.isfrozen(first.settings), true, "every new table in it")
-		local runs = 0
+		local runs, statusRuns = 0, 0
 		ann.api.scope(function()
+			ann.api.effect(function()
+				ann.api.syncStatus(ann.d.Profile)
+				statusRuns += 1
+			end)
 			ann.api.effect(function()
 				ann.d.Profile()
 				runs += 1
@@ -201,6 +208,7 @@ return {
 		spec.eq(rawequal(ann.d.Profile(), second), true, "an equal frame keeps the stored value")
 		spec.eq(runs, 2, "and writes nothing, so nothing reruns")
 		spec.eq(ann.api.syncStatus(ann.d.Profile), "ready", "still ready")
+		spec.eq(statusRuns, 1, "a status that stays ready is never rewritten, so its readers never rerun")
 		w:finish()
 	end,
 	["64 a key this client never declared is skipped without a diagnostic"] = function()

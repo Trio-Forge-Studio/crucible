@@ -327,6 +327,10 @@ return {
 		spec.eq(rawequal(stored.settings, settings), true, "sharing every kept subtree")
 		spec.eq(table.isfrozen(stored), true, "frozen")
 		spec.eq(table.isfrozen(extra), false, "the caller's table with the undeclared key is untouched")
+		local nested = { coins = 3, settings = { music = true, volume = 1, secret = "hidden" }, tags = value.tags }
+		w.profile:set(nested)
+		spec.eq(s.d.Profile().settings.secret, nil, "an undeclared key below the root is dropped too")
+		spec.eq(rawequal(s.d.Profile(), nested), false, "so the parent holding the copied subtree is copied")
 		w.profile:update(function(current)
 			return { coins = current.coins + 1, settings = current.settings, tags = { "b" } }
 		end)
