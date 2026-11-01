@@ -236,10 +236,7 @@ export class Good extends Base {
 		result.diagnostics.map((d) => d.messageText),
 		[],
 	);
-	assert.match(
-		result.output.get("src/server/good.ts"),
-		/__crucible.receive\(this, "input", Event, \(p: Player, s: string\) =>/,
-	);
+	assert.match(result.output.get("src/server/good.ts"), /__crucible.receive\(this, "input", Event, \(p, s\) =>/);
 	compile(game);
 	const bad = [
 		["CRU021", "const x = receive(Event, () => {});"],

@@ -123,12 +123,13 @@ test("K2 K9 rule 25 unknown responses accept an empty callback and the build rej
 		diagnostics.map((d) => d.messageText),
 		[],
 	);
-	const output = stripVTControlCharacters(compile(game, 1));
+	const output = stripVTControlCharacters(compile(game, 1)).replaceAll("\r\n", "\n");
 	assert.equal(output.match(/ error TS/g)?.length, 4, output);
 	for (const [file, [, code, message]] of Object.entries(negatives)) {
 		assert.deepEqual(semantic(program, game, file), [[code, message]]);
+		const reported = output.slice(output.indexOf(`${file}:`)).replace(/^\S+ - /, "");
 		assert.ok(
-			output.includes(`${file}:1:`) && output.includes(`error TS${code}: ${message}`),
+			output.includes(`${file}:`) && reported.startsWith(`error TS${code}: ${message}`),
 			`${file}\n${output}`,
 		);
 	}

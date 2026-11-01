@@ -645,53 +645,13 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		const visit = (node) => {
 			if (isMacro(node, "receive")) {
 				const name = receive(node);
-				const cb = node.arguments[1];
-				let typed = cb;
-				if (cb && (ts.isArrowFunction(cb) || ts.isFunctionExpression(cb))) {
-					const params = cb.parameters.map((p) =>
-						f.updateParameterDeclaration(
-							p,
-							p.modifiers,
-							p.dotDotDotToken,
-							p.name,
-							p.questionToken,
-							p.type ??
-								checker.typeToTypeNode(
-									checker.getTypeAtLocation(p),
-									p,
-									ts.NodeBuilderFlags.NoTruncation,
-								),
-							p.initializer,
-						),
-					);
-					typed = ts.isArrowFunction(cb)
-						? f.updateArrowFunction(
-								cb,
-								cb.modifiers,
-								cb.typeParameters,
-								params,
-								cb.type,
-								cb.equalsGreaterThanToken,
-								cb.body,
-							)
-						: f.updateFunctionExpression(
-								cb,
-								cb.modifiers,
-								cb.asteriskToken,
-								cb.name,
-								cb.typeParameters,
-								params,
-								cb.type,
-								cb.body,
-							);
-				}
 				return (
 					name &&
 					f.createCallExpression(runtime("receive"), undefined, [
 						f.createThis(),
 						str(name),
 						visitInput(node.arguments[0]),
-						visitInput(typed),
+						visitInput(node.arguments[1]),
 					])
 				);
 			}
