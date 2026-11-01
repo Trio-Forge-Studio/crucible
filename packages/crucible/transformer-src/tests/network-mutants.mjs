@@ -13,6 +13,7 @@ const receivers = "network receives rewrite";
 const globals = "network duplicate names";
 const sides = "network side entry references";
 const limits = "network schema boundaries";
+const augmentations = "network augmentations";
 const mutations = [
 	[
 		"parenthesized macro callee",
@@ -220,6 +221,168 @@ const mutations = [
 		'packageOf(sf.fileName)?.json.name !== "@trioforge/crucible"',
 		"!/[\\\\/]@trioforge[\\\\/]crucible[\\\\/]/.test(sf.fileName)",
 		"network width identity",
+	],
+	[
+		"M01 rule 64 per-candidate literal reset hoisted",
+		"for (const name of candidates) {\n\t\t\t\t\tconst seen = new Set();",
+		"const seen = new Set();\n\t\t\t\tfor (const name of candidates) {",
+		descriptors,
+	],
+	[
+		"M02 rule 64 required discriminant guard",
+		"if (!prop || prop.flags & ts.SymbolFlags.Optional) return;",
+		"if (!prop) return;",
+		negative,
+	],
+	[
+		"M03 rule 64 disjoint literal guard",
+		"if (list.some((v) => v === undefined || seen.has(`${typeof v}:${v}`))) return;",
+		"if (list.some((v) => v === undefined)) return;",
+		negative,
+	],
+	[
+		"M04 rule 63 variant sort argument swap",
+		"...variants.sort((a, b) => compare(a.value, b.value)),",
+		"...variants.sort((a, b) => compare(b.value, a.value)),",
+		descriptors,
+	],
+	[
+		"M05 rule 65 table beside variants paired check",
+		'(variants.length && typed.some((t) => t.runtime === "table"))',
+		"false",
+		negative,
+	],
+	[
+		"M06 CRU012 cleanup allowance limited to ClientReady",
+		'!(kind === "ClientReady" && t.getCallSignatures().length)',
+		"!t.getCallSignatures().length",
+		receivers,
+	],
+	[
+		"M07 CRU012 never member",
+		"!(t.flags & (flags.Void | flags.Undefined | flags.Never))",
+		"!(t.flags & (flags.Void | flags.Undefined))",
+		receivers,
+	],
+	["M08 CRU012 const binding guard", "ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const &&", "", receivers],
+	[
+		"M09 rule 1 extra argument guard",
+		'if (node.arguments.length > (kind === "askServer" ? 2 : 1))',
+		"if (false)",
+		negative,
+	],
+	[
+		"M10 rule 63 boolean fold needs both literals",
+		"parts.filter((p) => p.flags & flags.BooleanLiteral).length === 2",
+		"parts.filter((p) => p.flags & flags.BooleanLiteral).length > 0",
+		descriptors,
+	],
+	[
+		"M11 CRU010 declare global reverse scan",
+		"(node.flags & ts.NodeFlags.GlobalAugmentation || ts.isStringLiteral(node.name))",
+		"ts.isStringLiteral(node.name)",
+		globals,
+	],
+	[
+		"M12 rule 66 nonfinite key literal guard",
+		'(typeof literal(t) !== "number" || Number.isFinite(literal(t)))',
+		"true",
+		negative,
+	],
+	[
+		"M13 CRU012 Promise member paired check",
+		'(t) => t.getSymbol()?.name === "Promise" && standard(t.getSymbol(), "compiler-types"),',
+		"(t) => false,",
+		receivers,
+	],
+	["M14 rule 66 key literal sort argument swap", ".sort(compare)\n", ".sort((a, b) => compare(b, a))\n", descriptors],
+	["M15 rule 58 width single property guard", "if (props.length !== 1) return;", "", negative],
+	[
+		"M16 rule 60 engine package guard",
+		'if (!standard(symbol, "types")) return;',
+		"if (!symbol) return;",
+		descriptors,
+	],
+	[
+		"M18 rule 68 collection toClient propagation",
+		"return lower(t, location, { toClient: position.toClient, nilable: false }, depth + 1);",
+		"return lower(t, location, { toClient: false, nilable: false }, depth + 1);",
+		negative,
+	],
+	[
+		"M19 CRU024 import type clause",
+		"(ts.isLiteralTypeNode(node.parent) && ts.isImportTypeNode(node.parent.parent)) ||",
+		"",
+		sides,
+	],
+	["M20 CRU019 field path", "`${location}.${prop.name}`,\n\t\t\t\t\t\t\t{", "location,\n\t\t\t\t\t\t\t{", negative],
+	[
+		"M21 rule 5 option key name guard",
+		'prop.name.getText().replaceAll(\'"\', "").replaceAll("\'", "") !== "timeout" ||',
+		"",
+		negative,
+	],
+	[
+		"M22 CRU021 shadow guard limited to receivers",
+		'(d) => ts.isPropertyDeclaration(d) && d.initializer && isMacro(d.initializer, "receive"),',
+		"(d) => ts.isPropertyDeclaration(d),",
+		receivers,
+	],
+	[
+		"M24 rule 61 numeric name path",
+		'fail(node, `${location}.${prop.name}`, "numeric property names are not supported; use a Map");',
+		'fail(node, location, "numeric property names are not supported; use a Map");',
+		negative,
+	],
+	[
+		"M25 CRU018 duplicate across kinds",
+		"d.node !== node && d.name === name.text",
+		"d.name === name.text && d.node !== node && d.kind === kind",
+		globals,
+	],
+	[
+		"M26 CRU012 own signature",
+		"const signature = fn && checker.getSignatureFromDeclaration(fn);",
+		"const signature = fn && checker.getSignaturesOfType(checker.getTypeAtLocation(node.arguments[1]), ts.SignatureKind.Call)[0];",
+		receivers,
+	],
+	[
+		"M27 CRU024 resolved symbol walk",
+		"for (const decl of symbol?.declarations ?? []) wrongSide(node, decl.getSourceFile().fileName);",
+		"",
+		sides,
+	],
+	[
+		"CRU010 reverse scan nested namespace walk",
+		"...(ts.isModuleDeclaration(statement) ? added(statement.body) : [])",
+		"",
+		globals,
+	],
+	["CRU010 reverse scan bodiless module guard", "!body ? [] : ", "", globals],
+	[
+		"CRU010 reverse scan added declarations only",
+		"added(node.body).some((d) => reached.has(checker.getSymbolAtLocation(d.name)))",
+		"true",
+		augmentations,
+	],
+	[
+		"rule 4 project relative duplicate path",
+		'path.relative(root, sf.fileName).replaceAll("\\\\", "/")',
+		"sf.fileName",
+		globals,
+	],
+	["K4 undefined field guard", "if (value.flags & flags.Undefined)", "if (false)", negative],
+	[
+		"K4 undefined field path",
+		'`${location}.${prop.name}`,\n\t\t\t\t\t\t\t\t"a field of type undefined',
+		'location,\n\t\t\t\t\t\t\t\t"a field of type undefined',
+		negative,
+	],
+	[
+		"rule 1 type argument count swap",
+		'node.typeArguments?.length !== (kind === "askServer" ? 2 : 1)',
+		'node.typeArguments?.length !== (kind === "askServer" ? 1 : 2)',
+		descriptors,
 	],
 ];
 if (process.argv.includes("--list")) {
