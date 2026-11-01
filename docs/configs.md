@@ -52,7 +52,7 @@ What a read returns:
 - Before the global snapshot first loads, every read returns the fallback.
 - A player read returns the global snapshot's value until that player's snapshot loads, then their targeted value. A player who left, or was never seen, reads the fallback.
 - A key missing from the dashboard reads as the fallback, so deleting a key resets it.
-- A value that does not match the type keeps the last good value, or the fallback if there is none. For a player's first targeted value, the last good value is what they read until then: the global snapshot's value, else the fallback. Crucible logs one warning per key and snapshot, naming the key, the path and the reason, never the value.
+- A value that does not match the type keeps the last good value, or the fallback if there is none. For a player's first targeted value, the last good value is what they read until then: the global snapshot's value, else the fallback. That value is a copy taken when the player's snapshot is applied, so a later change to the global value does not move it. Crucible logs one warning per key and snapshot, naming the key, the path and the reason, never the value.
 - A JSON field the type does not declare is kept in the returned table, though the type does not show it.
 - Values are frozen copies.
 
