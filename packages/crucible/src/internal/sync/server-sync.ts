@@ -348,7 +348,7 @@ class ServerSync extends Subsystem {
 
 let installed = false;
 
-/** @internal Rule 56: the server entry defines ServerSync before boot loads any game module, once per realm. */
+/** @internal Rule 56: the server entry defines ServerSync once per realm, constructed before every game Subsystem. */
 export function installServerSync(send: FrameSender) {
 	sender = send;
 	if (installed) return;

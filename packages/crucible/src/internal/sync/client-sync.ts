@@ -85,7 +85,7 @@ class ClientSync extends Subsystem {
 
 let installed = false;
 
-/** @internal Rule 56: the client entry defines ClientSync before boot loads any game module, once per realm. */
+/** @internal Rule 56: the client entry defines ClientSync once per realm, constructed before every game Subsystem. */
 export function installClientSync(fault: FaultSender) {
 	sendFault = fault;
 	if (installed) return;

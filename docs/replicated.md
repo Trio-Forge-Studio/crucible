@@ -76,7 +76,7 @@ For each player whose client is ready, the projection runs like a `computed`: it
 
 ## Read a value
 
-On a client, a declaration reads the last value the server sent, or `initial` before the first frame. A per-player declaration reads the local player's value. Clients cannot write a declaration.
+On a client, a declaration reads the last value the server sent, or `initial` before the first frame. A per-player declaration reads the local player's value. Clients cannot write a declaration. The first frame reaches a client before any message a game `ClientReady` callback sends it, so a handler for such a message already reads the published values.
 
 On the server, a public declaration reads the authoritative value. Calling a per-player declaration on the server throws, because it has no single value. Read the sources its projection reads instead.
 
