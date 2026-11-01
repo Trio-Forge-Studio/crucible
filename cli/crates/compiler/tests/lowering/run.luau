@@ -23,14 +23,15 @@ end
 
 local loaded = {}
 local TS = {}
+local G = setmetatable({}, {
+	__index = function()
+		return TS
+	end,
+})
 local function load(path: string)
 	if loaded[path] == nil then
 		local file = if fs.isFile(`{root}/{path}.luau`) then `{root}/{path}.luau` else `{root}/{path}/init.luau`
-		local environment = { script = node(path), _G = setmetatable({}, {
-			__index = function()
-				return TS
-			end,
-		}) }
+		local environment = { script = node(path), _G = G }
 		loaded[path] = luau.load(fs.readFile(file), { debugName = path, environment = environment })()
 	end
 	return loaded[path]
