@@ -434,6 +434,7 @@ test("CRU025 rejects a ProcessReceipt assignment in a program that holds a grant
 		'const market = game.GetService("MarketplaceService"); market.ProcessReceipt = handler;',
 		'const market = game.GetService("MarketplaceService"); market["ProcessReceipt"] = handler;',
 		'const market = game.GetService("MarketplaceService"); (market).ProcessReceipt = handler;',
+		'const market = game.GetService("MarketplaceService"); (market.ProcessReceipt) = handler;',
 		"export function install(market: MarketplaceService) { market.ProcessReceipt = handler; }",
 	];
 	const files = { "src/shared/template.ts": store, "src/server/shop.ts": claim };
@@ -596,4 +597,89 @@ test("transformer limits equal the reactive and data contract tables and the run
 		for (const [name, value] of Object.entries(table))
 			if (values.has(name)) assert.deepEqual(values.get(name), value, `${rel} ${name}`);
 	}
+});
+
+test("persist rejections name the annotation to write and serverOnly marks follow optional fields", () => {
+	let game = project({
+		"src/shared/good.ts":
+			shared +
+			'import type { ServerOnly } from "@trioforge/crucible";\nexport const Opt = profileStore<{ a: number; b?: ServerOnly<number> }>("X.Opt", { template: { a: 0 } });\nexport const Reserved = replicated<{ set: number; update: string }>("X.Reserved", { set: 1, update: "" });\nexport const Tagged = replicated<{ by: string } & ({ kind: "a"; x: number } | { kind: "b" })>("X.Tagged", { by: "", kind: "b" });',
+		"src/server/good.ts":
+			server +
+			'export const Records = dataStore<{ insert: number; remove: string }>("X.Records", { defaults: { insert: 0, remove: "" } });',
+	});
+	let result = inspect(game);
+	assert.deepEqual(
+		result.diagnostics.map((d) => d.messageText),
+		[],
+	);
+	const found = calls(result.output.get("src/shared/good.ts"), macros);
+	assert.deepEqual(found.get("X.Opt").args.slice(2), [
+		h.O([
+			["a", h.F],
+			["b", h.U(h.Nil, h.F)],
+		]),
+		h.O([["a", h.F]]),
+		'[["b"]]',
+	]);
+	assert.equal(
+		found.get("X.Reserved").args[2],
+		h.O([
+			["set", h.F],
+			["update", h.S],
+		]),
+	);
+	assert.equal(
+		found.get("X.Tagged").args[2],
+		h.U(
+			h.V(
+				"kind",
+				"a",
+				h.O([
+					["by", h.S],
+					["x", h.F],
+				]),
+			),
+			h.V("kind", "b", h.O([["by", h.S]])),
+		),
+	);
+	assert.equal(
+		calls(result.output.get("src/server/good.ts"), macros).get("X.Records").args[2],
+		h.O([
+			["insert", h.F],
+			["remove", h.S],
+		]),
+	);
+	compile(game);
+	const store = (name, template) => `export const S${name} = profileStore("X.${name}", { template: ${template} });\n`;
+	game = project({
+		"src/shared/bad.ts":
+			shared +
+			'import type { ServerOnly } from "@trioforge/crucible";\n' +
+			store("Empty", "{ quests: [] }") +
+			store("Record", "{ upgrades: {} }") +
+			store("Undefined", "{ note: undefined }") +
+			store("Reserved", "{ coins: 0, update: 0 } as { coins: number; update: number }") +
+			store("Element", "{ jobs: [] as ServerOnly<number>[] }") +
+			store("Twice", "{ a: serverOnly({ b: serverOnly(0) }) }") +
+			'export const SState = replicated<{ x: ServerOnly<number> }>("X.State", undefined as never);',
+		"src/server/bad.ts":
+			'import type { ServerOnly } from "@trioforge/crucible";\n' +
+			server +
+			'export const D = dataStore<{ key: ServerOnly<string> }>("X.Data", { defaults: undefined as never });',
+	});
+	result = inspect(game);
+	assert.deepEqual(h.diagnosticsIn(result, game, "src/shared/bad.ts"), [
+		"CRU019: X.Empty value.quests[]: an empty array has no element type; annotate it: [] as string[]",
+		"CRU019: X.Record value.upgrades: an empty object type accepts anything; annotate an empty template table: {} as Record<string, number>",
+		"CRU019: X.Undefined value.note: a position that is always undefined; annotate it: undefined as string | undefined",
+		"CRU026: X.Reserved value.update: `update` is a handle method name (set, update, insert, remove); rename the field",
+		"CRU019: X.Element value.jobs[]: serverOnly marks a field on an object path from the template root, never an array element, a map value or a union member",
+		"CRU019: X.Twice value.a.b: this field is already inside a serverOnly field",
+		"CRU019: X.State value.x: serverOnly marks a profileStore template field; it means nothing here",
+	]);
+	assert.deepEqual(h.diagnosticsIn(result, game, "src/server/bad.ts"), [
+		"CRU019: X.Data value.key: serverOnly marks a profileStore template field; it means nothing here",
+	]);
+	compile(game, 1);
 });

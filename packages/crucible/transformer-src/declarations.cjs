@@ -98,14 +98,6 @@ const depthLimits = Object.freeze({
 	persist: dataLimits.PERSIST_DEPTH,
 });
 
-const byBytes = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b));
-const byPath = (a, b) => {
-	for (let i = 0; i < Math.min(a.length, b.length); i++) {
-		const order = byBytes(a[i], b[i]);
-		if (order) return order;
-	}
-	return a.length - b.length;
-};
 // Marks sit only on object fields from the root, so only object fields can lose every field.
 function replica(node) {
 	if (node.kind !== "object") return node;
@@ -118,11 +110,12 @@ function replica(node) {
 	}
 	return { kind: "object", fields };
 }
+// Object fields are sorted by bytes, so a depth-first walk lists paths in rule 131 order, a prefix first.
 function serverOnlyPaths(node, prefix = []) {
 	if (node.kind !== "object") return [];
-	return node.fields
-		.flatMap(([key, child]) => (child.serverOnly ? [[...prefix, key]] : serverOnlyPaths(child, [...prefix, key])))
-		.sort(byPath);
+	return node.fields.flatMap(([key, child]) =>
+		child.serverOnly ? [[...prefix, key]] : serverOnlyPaths(child, [...prefix, key]),
+	);
 }
 const SEGMENT = /^[A-Za-z][A-Za-z0-9_]*$/;
 function viewNameProblems(store, node) {
@@ -154,7 +147,6 @@ module.exports = {
 	dataLimits,
 	kinds,
 	depthLimits,
-	byBytes,
 	replica,
 	serverOnlyPaths,
 	viewNameProblems,
