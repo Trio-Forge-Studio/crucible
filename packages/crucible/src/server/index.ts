@@ -4,23 +4,28 @@ import { boot as bootSide } from "../internal/boot";
 import { installConfigRuntime } from "../internal/configs/runtime";
 import { networkPort } from "../internal/network/port";
 import { ServerSession } from "../internal/network/server-session";
+import { SyncFrameMessage } from "../internal/sync/frame";
+import { installServerSync } from "../internal/sync/server-sync";
 
 if (!game.GetService("RunService").IsServer()) error("@trioforge/crucible/server loaded on the client");
 
-installConfigRuntime();
+let session: ServerSession | undefined;
 
 export { config, playerConfig, configReady, refreshConfigs } from "../configs";
 export type { Config, PlayerConfig } from "../configs";
-
-let session: ServerSession | undefined;
+export { publish } from "./publish";
+export type { Publication } from "./publish";
 
 function active(): ServerSession {
 	return session ?? error("Crucible networking is not ready; send from a constructor, a hook, or later", 0);
 }
 
+installConfigRuntime();
+
 export function boot(options: BootOptions) {
 	const network = new ServerSession(networkPort());
 	session = network;
+	installServerSync((player, frame) => active().send(player, SyncFrameMessage, frame));
 	bootSide({ name: "server", renders: false, booted: () => {}, network }, options);
 }
 

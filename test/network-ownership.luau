@@ -215,15 +215,17 @@ return {
 		local bea = link:join("Bea", client, { boot = false })
 		first = engine.instance("first", "Model")
 		engine.addTag(first, "Door")
-		local ix = string.format("%02x", link.server.catalog.definitionAt(0).index)
-		spec.eq(link.server.catalog.definitionAt(0).name, "Own.Ask", "catalog order")
-		local bare
+		local ix, bare
 		for i = 0, link.server.catalog.catalogSize() - 1 do
-			if link.server.catalog.definitionAt(i).name == "Own.Bare" then
+			local name = link.server.catalog.definitionAt(i).name
+			if name == "Own.Ask" then
+				ix = string.format("%02x", i)
+			elseif name == "Own.Bare" then
 				bare = string.format("%02x", i)
 			end
 		end
 		assert(ix and bare, "indices")
+		spec.eq(ix < bare, true, "catalog order: Own.Ask sorts before Own.Bare")
 		link.server.remote.receive(ann.player, h.bytes(`00 {bare} 00`), {})
 		second = engine.instance("second", "Model")
 		engine.addTag(second, "Door")

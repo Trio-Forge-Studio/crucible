@@ -1,5 +1,6 @@
--- The default fake network port for realms that do not exercise networking. It publishes an empty catalog, so a client
--- realm's discovery returns at once, and records what the session asked of it so specs can assert a closed session.
+-- The default fake network port for realms that do not exercise networking. A client realm's discovery returns at once
+-- with the catalog every Crucible server publishes when its game declares no messages: sync's two framework messages.
+-- It records what the session asked of it so specs can assert a closed session.
 -- `failNext` makes the next call of that name throw once. Network specs install `network-link.luau` instead.
 return function()
 	local port = {
@@ -59,7 +60,7 @@ return function()
 		failing("discover")
 		port.listening = true
 		port.receive = receive
-		return { className = "RemoteEvent", protocol = 1, catalog = "" }
+		return { className = "RemoteEvent", protocol = 1, catalog = "Crucible.State.Fault\nCrucible.State.Frame" }
 	end
 	function port.disconnect()
 		port.listening = false

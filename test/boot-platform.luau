@@ -94,7 +94,11 @@ return {
 			entry.boot({ load = {} })
 			spec.eq(network.listening, true, "the second boot opened a session")
 			if not client then
-				spec.eq(network.published.catalog, "", "the default fake's empty catalog")
+				spec.eq(
+					network.published.catalog,
+					"Crucible.State.Fault\nCrucible.State.Frame",
+					"no game messages, only sync's two framework messages"
+				)
 			end
 			if client then
 				spec.eq(entry.BOOTED_ATTRIBUTE, "CrucibleBooted", "constant")

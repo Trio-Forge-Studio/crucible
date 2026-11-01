@@ -40,6 +40,8 @@ interface RecordBase extends SchedulerRecord {
 /** @internal */
 export interface SubsystemRecord extends RecordBase {
 	readonly kind: Kind.Subsystem;
+	/** @internal Constructed before every other Subsystem, whatever the definition order (rule 56). */
+	readonly first: boolean;
 	/** @internal */
 	state?: ObjectState;
 }
@@ -108,7 +110,7 @@ const sets = new Map<TypeId, ImplementerSet<object>>();
 let sealed: SealPlan | undefined;
 
 /** @internal */
-export function define(klass: AnyClass, emitted: EmittedClass) {
+export function define(klass: AnyClass, emitted: EmittedClass, first = false) {
 	if (sealed !== undefined)
 		error(`Crucible: ${emitted.id} registered after boot; it would never be constructed or bound`);
 	const id = emitted.id as TypeId;
@@ -129,7 +131,7 @@ export function define(klass: AnyClass, emitted: EmittedClass) {
 	};
 	let record: ClassRecord;
 	if (emitted.kind === "subsystem") {
-		record = { ...base, kind: Kind.Subsystem };
+		record = { ...base, kind: Kind.Subsystem, first };
 	} else {
 		const tag = emitted.tag;
 		(klass as unknown as { tag: string }).tag = tag;
@@ -210,6 +212,7 @@ export function plan(records: readonly ClassRecord[], side: SealSide): PlanResul
 		colour.set(record, "black");
 		order.push(record);
 	};
+	for (const record of records) if (record.kind === Kind.Subsystem && record.first) visit(record);
 	for (const record of records) if (record.kind === Kind.Subsystem) visit(record);
 	if (problems.size() > 0) return { ok: false, problems };
 	return { ok: true, plan: { providers, subsystemOrder: order } };

@@ -200,6 +200,24 @@ export function write(node: StateNode, value: unknown) {
 	markObservers(node);
 }
 
+/** @internal A node and the value it will hold. */
+export type PreparedWrite = readonly [node: StateNode, value: unknown];
+
+/**
+ * @internal
+ * Rule 62's write phase for client apply: assignments, version and epoch bumps, and marks that only enqueue. No
+ * purity guard, no admission and no user code, so nothing here can fail between two writes of one frame.
+ */
+export function commitPrepared(writes: readonly PreparedWrite[]) {
+	for (const [node, value] of writes) {
+		if (rawequal(value, node.value)) continue;
+		node.value = value;
+		node.version += 1;
+		epoch += 1;
+		markObservers(node);
+	}
+}
+
 /** @internal */
 export function update(node: StateNode, change: (current: unknown) => unknown) {
 	write(

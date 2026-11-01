@@ -34,8 +34,9 @@ local function copy(value)
 	return value
 end
 
-function link.new()
+function link.new(options)
 	local self = setmetatable({
+		globals = options and options.globals,
 		now = 0,
 		sequence = 0,
 		timers = {},
@@ -489,6 +490,7 @@ function link:realm(side: string, name: string)
 		Vector3 = roblox.Vector3,
 		Color3 = roblox.Color3,
 		CFrame = roblox.CFrame,
+		pairs = self.globals and self.globals.pairs or pairs,
 		require = function(required)
 			assert(required == module, "only the Game module loads")
 			if realm.required == nil then

@@ -3,6 +3,8 @@ import type { AskResult, AskServer, PayloadArgs, ToServer } from "../network";
 import { boot as bootSide } from "../internal/boot";
 import { ClientSession } from "../internal/network/client-session";
 import { networkPort } from "../internal/network/port";
+import { installClientSync } from "../internal/sync/client-sync";
+import { SyncFaultMessage } from "../internal/sync/frame";
 
 if (!game.GetService("RunService").IsClient()) error("@trioforge/crucible/client loaded on the server");
 
@@ -17,6 +19,7 @@ function active(): ClientSession {
 export function boot(options: BootOptions) {
 	const network = new ClientSession(networkPort());
 	session = network;
+	installClientSync((revision) => active().send(SyncFaultMessage, revision));
 	bootSide(
 		{
 			name: "client",
