@@ -71,4 +71,10 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build
       - run: cargo test --workspace --locked
+      - name: Install Lune
+        if: runner.os == 'Linux'
+        uses: Trio-Forge-Studio/tooling/.github/actions/setup@main
+      - name: Run the compiler's emitted Luau in Lune
+        if: runner.os == 'Linux'
+        run: cargo test --locked -p crucible-compiler --test lowering -- --ignored
       - run: node --test npm/package.test.mjs
