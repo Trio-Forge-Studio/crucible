@@ -392,6 +392,9 @@ test("network side entry references follow named and star barrels namespace alia
 		"src/client/good.ts": 'import { Network as N } from "@trioforge/crucible/client"; export const M = N;',
 		"src/server/good.ts":
 			'import { Network, boot } from "@trioforge/crucible/server"; export const N = Network; export const B = boot;',
+		"src/server/facade.ts":
+			'import { Network } from "@trioforge/crucible/server"; export function facade() { return Network; }',
+		"src/client/facade.ts": 'import { facade } from "../server/facade"; export const send = facade().send;',
 	});
 	const result = inspect(game);
 	for (const file of [
@@ -402,6 +405,7 @@ test("network side entry references follow named and star barrels namespace alia
 		"shared/type.ts",
 		"server/dynamic.ts",
 		"server/import-type.ts",
+		"client/facade.ts",
 	])
 		assert.ok(
 			result.diagnostics.some((d) => d.file.fileName.endsWith(file) && d.code === 90024),
