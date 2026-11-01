@@ -71,7 +71,7 @@ After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestatio
 
 `npx @trioforge/crucible-cli create my-game [path]` writes the embedded game template and installs dependencies. `--no-install` skips install. See `docs/cli.md` for arguments and exit codes.
 
-In the generated game, run `npx crucible dev` to compile on save and sync the game to Studio.
+In the generated game, run `npx crucible build`, then open `build/start.rbxl` in Studio.
 
 `crates/crucible/template` holds the real template files. `src/create.rs` embeds an explicit file table. Tokens use `__NAME__`, `__VERSION__`, and uppercase dependency names with punctuation replaced by underscores. Versions come from the Cargo package and repository manifests. The runtime and CLI version equality is checked by a Rust test. Generated template files use MIT-0 and include their own `LICENSE`, independent of the MIT-licensed CLI.
 
@@ -135,14 +135,6 @@ node --test npm/package.test.mjs
 ```
 
 The behavior tests drive the real binary against local HTTP servers. `CRUCIBLE_OC_ORIGIN` overrides Roblox origins for these tests and always prints a warning. In that mode, the download client also permits HTTP loopback URLs. It still sends no key to a download URL. API requests never follow redirects.
-
-`tests/dev.rs` runs `crucible dev` on `examples/sample-game` with the real roblox-ts. It appends a line to `src/server/main.server.ts`, waits for that line in Rojo's `/api/read` response, and restores the file. The test needs the workspace's Node dependencies and the built runtime. Run these from the repository root first.
-
-```console
-pnpm install
-pnpm --filter @trioforge/crucible build:transformer
-pnpm --filter @trioforge/crucible build
-```
 
 The live suite is ignored by default. Set `ROBLOX_ASSETS_API_KEY` and run its read-only tests explicitly.
 

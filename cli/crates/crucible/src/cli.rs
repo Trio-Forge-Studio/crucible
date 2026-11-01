@@ -18,8 +18,6 @@ pub enum Command {
     Build(crate::build::Args),
     /// Create a game and install its dependencies.
     Create(crate::create::Args),
-    /// Watch and compile the game with roblox-ts, and serve one place to Studio with Rojo.
-    Dev(crate::dev::Args),
     /// Print a Crucible guide as Markdown. Without a topic, list the topics.
     Docs {
         /// The topic to print.
@@ -33,22 +31,6 @@ pub enum Command {
     Publish(crate::publish::Args),
     /// Upgrade crucible and @trioforge/crucible, then refresh template files this project has not edited.
     Upgrade(crate::upgrade::Args),
-    /// Serve one Rojo project. crucible dev runs this in a child process.
-    #[command(name = crate::dev::ROJO_SERVE, hide = true)]
-    RojoServe {
-        /// The Rojo project file.
-        project: PathBuf,
-        /// The port to listen on.
-        #[arg(long)]
-        port: Option<u16>,
-    },
-    /// Run roblox-ts and stop it with every process it started. crucible dev runs this in a child process.
-    #[command(name = crate::dev::WATCH_GUARD, hide = true)]
-    WatchGuard {
-        /// The command to run.
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        command: Vec<std::ffi::OsString>,
-    },
     /// Build one Rojo project. crucible build runs this in a child process.
     #[command(name = crate::build::ROJO_BUILD, hide = true)]
     RojoBuild {
