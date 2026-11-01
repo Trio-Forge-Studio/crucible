@@ -272,8 +272,10 @@ export class ProfileRuntime {
 				return this.end(session, mayHaveCommitted, LOAD_FAILED_MESSAGE);
 			if (settled.kind !== "done") {
 				held = false;
-				if (settled.kind === "overloaded")
-					this.changed.park(math.min(deadline, bootClock() + LOAD_POLL_MIN_SECONDS));
+				if (settled.kind === "overloaded") {
+					const wake = math.min(deadline, bootClock() + LOAD_POLL_MIN_SECONDS);
+					while (bootClock() < wake && !this.stopped(session)) this.changed.park(wake);
+				}
 				continue;
 			}
 			const answer = decision!;
