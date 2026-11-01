@@ -292,7 +292,10 @@ export class ProfileRuntime {
 				polls += 1;
 				const jittered = base * (1 - LOAD_POLL_JITTER + 2 * LOAD_POLL_JITTER * port.random());
 				const room = answer.lease.expiresAt + TAKEOVER_GRACE_SECONDS - port.wall();
-				const wake = bootClock() + math.max(LOAD_POLL_MIN_SECONDS, math.min(jittered, room));
+				const wake = math.min(
+					deadline,
+					bootClock() + math.max(LOAD_POLL_MIN_SECONDS, math.min(jittered, room)),
+				);
 				while (bootClock() < wake && !this.stopped(session)) this.changed.park(wake);
 			}
 		}
