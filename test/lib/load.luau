@@ -38,7 +38,7 @@ end
 
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
 -- that builds a runtime starts clean.
-local function graph(defaults, loggingPort)
+local function graph(defaults, loggingPort, configPort)
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
 	local TS = {}
@@ -68,6 +68,9 @@ local function graph(defaults, loggingPort)
 			if string.match(path, "/internal/log%-output$") and loggingPort then
 				loaded[path].installLoggingPort(loggingPort)
 			end
+			if string.match(path, "/internal/configs/port$") and configPort then
+				loaded[path].installConfigPort(configPort)
+			end
 		end
 		return loaded[path]
 	end
@@ -94,8 +97,8 @@ function spec.fresh(relative: string, globals: { [string]: any }?): any
 end
 
 -- A fresh graph to load several modules that must share state, such as lifecycle and its runner.
-function spec.runtime(defaults, loggingPort)
-	return graph(defaults, loggingPort)
+function spec.runtime(defaults, loggingPort, configPort)
+	return graph(defaults, loggingPort, configPort)
 end
 
 function spec.eq(actual: any, expected: any, label: string)
