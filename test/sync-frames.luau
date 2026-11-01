@@ -1,0 +1,250 @@
+local World = require("./lib/sync-world")
+local spec = require("./lib/load")
+
+local function declare(r)
+	local n = r.n
+	return {
+		Ends = r.emit.replicated("Job.EndsAt", 0, n.f64),
+		Phase = r.emit.replicated("Job.Phase", nil, n.union({ n["nil"], n.literal("Running"), n.literal("Waiting") })),
+		Score = r.emit.replicated("Job.Score", 0, n.f64),
+		Spare = r.emit.replicated("Job.Spare", "unset", n.string),
+		Started = r.emit.replicated("Job.StartedAt", 0, n.f64),
+	}
+end
+
+local function job(s, d, w)
+	s.service("JobService", function(self)
+		self.ends = s.entry.publish(d.Ends)
+		self.phase = s.entry.publish(d.Phase)
+		self.score = s.entry.publish(d.Score)
+		self.started = s.entry.publish(d.Started)
+		w.job = self
+	end)
+end
+
+local function newWorld()
+	return World.new({ declare = declare, serve = job })
+end
+
+return {
+	["57 58 59 snapshot then update: revision 1 carries the published values and a later write arrives at revision 2"] = function()
+		local w = newWorld()
+		w.job.score:set(7)
+		w.job.phase:set("Waiting")
+		local ann = w:join("Ann")
+		spec.eq(ann.d.Score(), 7, "the snapshot's value after the first delivery")
+		spec.eq(ann.d.Phase(), "Waiting", "every published value")
+		spec.eq(ann.api.syncStatus(ann.d.Score), "ready", "ready after its value arrived")
+		local frames = w:frames(ann)
+		spec.eq(#frames, 1, "one frame at ClientReady")
+		spec.eq(frames[1].frame.kind, "snapshot", "a snapshot")
+		spec.eq(frames[1].frame.revision, 1, "revision 1")
+		spec.list(
+			World.keys(frames[1]),
+			{ "Job.EndsAt", "Job.Phase", "Job.Score", "Job.StartedAt" },
+			"published values by name"
+		)
+		w.job.score:set(9)
+		spec.eq(ann.d.Score(), 7, "the client keeps the old value until a Heartbeat")
+		w:heartbeat()
+		frames = w:frames(ann)
+		spec.eq(#frames, 2, "one update")
+		spec.eq(frames[2].frame.kind, "update", "an update")
+		spec.eq(frames[2].frame.revision, 2, "revision 2")
+		spec.list(World.keys(frames[2]), { "Job.Score" }, "only the changed value")
+		spec.eq(ann.d.Score(), 9, "the client applied it")
+		w:heartbeat()
+		spec.eq(#w:frames(ann), 2, "a peer with nothing new gets nothing")
+		w.job.score:set(10)
+		w:heartbeat()
+		spec.eq(w:frames(ann)[3].frame.revision, 3, "revisions rise by exactly one per accepted frame")
+		assert(w:finish() >= 3, "parity checked")
+	end,
+	["43 45 53 57 root undefined arrives as a ready value while an unpublished declaration stays pending at initial"] = function()
+		local w = newWorld()
+		w.job.phase:set("Running")
+		local ann = w:join("Ann")
+		spec.eq(ann.d.Phase(), "Running", "published")
+		w.job.phase:set(nil)
+		w:heartbeat()
+		local frames = w:frames(ann)
+		local value, present = World.value(frames[2], "Job.Phase")
+		spec.eq(present, true, "root undefined is a value entry")
+		spec.eq(value, nil, "carrying nil")
+		spec.eq(ann.d.Phase(), nil, "the client reads undefined")
+		spec.eq(ann.api.syncStatus(ann.d.Phase), "ready", "and its status is ready")
+		spec.eq(ann.d.Spare(), "unset", "an unpublished declaration keeps initial")
+		spec.eq(ann.api.syncStatus(ann.d.Spare), "pending", "with status pending")
+		for _, decoded in frames do
+			local _, sent = World.value(decoded, "Job.Spare")
+			spec.eq(sent, false, "an unpublished declaration is never sent")
+		end
+		spec.eq(w:logged("Job.Spare"), 0, "and never diagnosed")
+		w:finish()
+	end,
+	["58 three writes between Heartbeats are one frame carrying one value with the last write"] = function()
+		local w = newWorld()
+		local ann = w:join("Ann")
+		w.job.score:set(1)
+		w.job.score:set(2)
+		w.job.score:set(3)
+		w:heartbeat()
+		local frames = w:frames(ann)
+		spec.eq(#frames, 2, "snapshot and one update")
+		spec.list(World.keys(frames[2]), { "Job.Score" }, "one value")
+		spec.eq(World.value(frames[2], "Job.Score"), 3, "the last write")
+		w:finish()
+	end,
+	["60 62 a client effect reading two values written in one server call never sees one without the other"] = function()
+		local w = newWorld()
+		local ann = w:join("Ann")
+		local seen = {}
+		ann.api.scope(function()
+			ann.api.effect(function()
+				table.insert(seen, `{ann.d.Phase()} {ann.d.Ends()}`)
+			end)
+		end)
+		w.link:flush()
+		w.job.phase:set("Running")
+		w.job.ends:set(300)
+		w:heartbeat()
+		spec.list(seen, { "nil 0", "Running 300" }, "one run with both new values, never one alone")
+		w:finish()
+	end,
+	["T12 the worked update frame of three values is 72 bytes"] = function()
+		local w = newWorld()
+		local ann = w:join("Ann")
+		w.job.started:set(12)
+		w.job.ends:set(312)
+		w.job.phase:set("Running")
+		w:heartbeat()
+		local frames = w:frames(ann)
+		spec.list(World.keys(frames[2]), { "Job.EndsAt", "Job.Phase", "Job.StartedAt" }, "the three values")
+		spec.eq(frames[2].bytes, 72, "sync.md's worked frame")
+		w:finish()
+	end,
+	["61 an equal fresh table sends nothing and a changed one sends the whole value"] = function()
+		local w = World.new({
+			declare = function(r)
+				local n = r.n
+				return {
+					Board = r.emit.replicated(
+						"Job.Board",
+						{ title = "start", tally = 0 },
+						n.object({ { "tally", n.f64 }, { "title", n.string } })
+					),
+				}
+			end,
+			serve = function(s, d, world)
+				s.service("BoardService", function()
+					world.board = s.entry.publish(d.Board)
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		w.board:set({ title = "start", tally = 0 })
+		w:heartbeat()
+		spec.eq(#w:frames(ann), 1, "an equal fresh table sends nothing")
+		w.board:set({ title = "next", tally = 0 })
+		w:heartbeat()
+		local frames = w:frames(ann)
+		spec.eq(#frames, 2, "a changed table sends a frame")
+		local value = World.value(frames[2], "Job.Board")
+		spec.eq(value.title, "next", "the changed field")
+		spec.eq(value.tally, 0, "and the unchanged one: the whole value")
+		w:finish()
+	end,
+	["63 K13 a change to coins keeps settings rawequal on the client, new tables are frozen, and an equal frame writes nothing"] = function()
+		local w = World.new({
+			declare = function(r)
+				local n = r.n
+				local settings = n.object({ { "music", n.bool }, { "volume", n.f64 } })
+				return {
+					Profile = r.emit.replicated(
+						"Data.Profile",
+						{ coins = 0, settings = { music = true, volume = 1 } },
+						n.object({ { "coins", n.f64 }, { "settings", settings } })
+					),
+				}
+			end,
+			serve = function(s, d, world)
+				s.service("ProfileService", function()
+					world.profile = s.entry.publish(d.Profile)
+				end)
+			end,
+		})
+		w.profile:set({ coins = 5, settings = { music = false, volume = 0.5 } })
+		local ann = w:join("Ann")
+		local first = ann.d.Profile()
+		spec.eq(table.isfrozen(first), true, "the applied value is frozen")
+		spec.eq(table.isfrozen(first.settings), true, "every new table in it")
+		local runs = 0
+		ann.api.scope(function()
+			ann.api.effect(function()
+				ann.d.Profile()
+				runs += 1
+			end)
+		end)
+		w.link:flush()
+		w.profile:set({ coins = 6, settings = { music = false, volume = 0.5 } })
+		w:heartbeat()
+		local second = ann.d.Profile()
+		spec.eq(second.coins, 6, "the new coins")
+		spec.eq(rawequal(second.settings, first.settings), true, "settings kept its identity")
+		spec.eq(runs, 2, "one rerun for the change")
+		w:inject(ann, {
+			failed = {},
+			kind = "update",
+			revision = 3,
+			values = { { key = "Data.Profile", value = { coins = 6, settings = { music = false, volume = 0.5 } } } },
+		})
+		spec.eq(rawequal(ann.d.Profile(), second), true, "an equal frame keeps the stored value")
+		spec.eq(runs, 2, "and writes nothing, so nothing reruns")
+		spec.eq(ann.api.syncStatus(ann.d.Profile), "ready", "still ready")
+		w:finish()
+	end,
+	["64 a key this client never declared is skipped without a diagnostic"] = function()
+		local w = newWorld()
+		w.job.score:set(4)
+		w.job.phase:set("Running")
+		local ann = w:join("Ann", {
+			declare = function(r)
+				return { Score = r.emit.replicated("Job.Score", 0, r.n.f64) }
+			end,
+		})
+		spec.eq(ann.d.Score(), 4, "the declared key applied")
+		spec.eq(ann.api.syncStatus(ann.d.Score), "ready", "ready")
+		w.job.phase:set("Waiting")
+		w.job.score:set(5)
+		w:heartbeat()
+		spec.eq(ann.d.Score(), 5, "later frames still apply")
+		spec.eq(ann.logged("Crucible sync"), 0, "no diagnostic on the client")
+		w:finish()
+	end,
+	["68 a rejoin is a new peer at revision 1 and nothing from the old peer survives"] = function()
+		local w = newWorld()
+		local ann = w:join("Ann")
+		w.job.score:set(1)
+		w:heartbeat()
+		w.job.score:set(2)
+		w:heartbeat()
+		spec.eq(w:frames(ann)[3].frame.revision, 3, "the first session reached revision 3")
+		w.link:leave(ann)
+		w.link:flush()
+		w.job.score:set(3)
+		w:heartbeat()
+		spec.eq(#w:frames(ann), 3, "nothing reaches the left player")
+		local again = w:join("Ann")
+		local frames = w:frames(again)
+		spec.eq(#frames, 4, "one fresh frame after the old session's three on the same name")
+		spec.eq(frames[4].frame.revision, 1, "at revision 1")
+		spec.eq(frames[4].frame.kind, "snapshot", "a snapshot, not an update")
+		spec.eq(again.d.Score(), 3, "current values")
+		local players = 0
+		for _ in w:sync().peers do
+			players += 1
+		end
+		spec.eq(players, 1, "only the new peer remains")
+		w:finish()
+	end,
+}

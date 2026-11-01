@@ -63,6 +63,8 @@ class ServerSync extends Subsystem {
 	private incomplete = false;
 	private retiredSince = false;
 	private examining = "";
+	/** Visits the last Heartbeat spent, for specs of rule 70's bound. */
+	spent = 0;
 	private disconnect?: () => void;
 
 	readonly ready = claim(this, "ready", ClientReady, (player: Player) => this.snapshot(player));
@@ -115,6 +117,7 @@ class ServerSync extends Subsystem {
 
 	/** Rules 58 and 70: round robin from the first peer the last Heartbeat did not complete. */
 	private pace() {
+		this.spent = 0;
 		const ring = [...this.order];
 		if (ring.size() === 0) return;
 		if (!this.incomplete && !this.retiredSince && currentEpoch() === this.settledEpoch) return;
@@ -148,6 +151,7 @@ class ServerSync extends Subsystem {
 			}
 			bytes += result;
 		}
+		this.spent = visits;
 		if (stopped !== undefined) {
 			this.incomplete = true;
 			this.cursor = math.max(this.order.indexOf(stopped), 0);
