@@ -80,6 +80,10 @@ KILLED 70 pair | codec.ts | first failure: network-codec.luau: 66 zero-byte arra
 KILLED 71 guard | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
 KILLED 71 swap | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 KILLED 71 pair | codec.ts | first failure: network-codec.luau: 70 71 budgets varuint truncation tags counts and sidecars reject before dispatch
+KILLED 71 count minimum array | codec.ts | first failure: network-fd.luau: FD Admin.Record payload golden bytes
+KILLED 71 count minimum map | codec.ts | first failure: network-fd.luau: 71 worked map cuts reject by the wire layout of a two-byte entry
+KILLED 71 count minimum dynamic | codec.ts | first failure: network-fd.luau: FD Admin.RunCommand payload golden bytes
+KILLED 71 count minimum record | codec.ts | first failure: network-fd.luau: FD Admin.RunCommand payload golden bytes
 KILLED 73 guard | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
 KILLED 73 swap | codec.ts | first failure: network-codec.luau: 58 finite numbers and widths use little endian without wrapping
 KILLED Limits value | limits.ts | first failure: network-catalog.luau: limits parity table is the contract value of every constant
@@ -101,4 +105,4 @@ KILLED Extra guard | codec.ts | first failure: network-codec.luau: 58 finite num
 KILLED Extra guard | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 KILLED Extra pair | codec.ts | first failure: network-codec.luau: 58 60 66 69 70 exact width and budget ceilings and every dynamic datatype
 KILLED Extra pair | codec.ts | first failure: network-codec.luau: 63 64 65 canonical unions select literals kinds and variants
-82/82 source mutants killed; 21 operators not applicable; restored build 0
+86/86 source mutants killed; 21 operators not applicable; restored build 0
