@@ -1,0 +1,59 @@
+import { toServer, toClient, askServer, receive, ClientReady, ServerNetwork, ClientNetwork, PayloadArgs, ToClient, ToServer, AskServer, AskResult, u8 } from "./net";
+declare const player: Player;
+declare const door: Model;
+declare const button: BasePart;
+
+// K1: A1's literal probes, which v1 rejected.
+const Analytics = toServer<"Upgrades" | "SkinShop">("Analytics.ScreenOpened");
+ClientNetwork.send(Analytics, "Upgrades");                                   // P1
+const Teleporting = toClient<"Job" | "Warehouse" | undefined>("Loading.Teleporting");
+ServerNetwork.send(player, Teleporting, "Job");                              // P2
+const Codes = toClient<"Ok" | "Invalid" | "Expired">("Codes.Result");
+ServerNetwork.send(player, Codes, "Ok");                                     // P3
+ServerNetwork.broadcast(Codes, "Ok");                                        // P4
+const Num = toClient<1 | 2 | 3>("X.Num");
+ServerNetwork.send(player, Num, 2);                                          // P5
+const B = toClient<true | undefined>("X.B");
+ServerNetwork.send(player, B, true);                                         // P6
+// Literal request.
+const Pick = askServer<"a" | "b", number>("X.Pick");
+const picked: AskResult<number> = ClientNetwork.ask(Pick, "a");              // P7
+// Ordinary shapes still work.
+const DoorToggle = toServer<{ readonly door: Model; readonly open: boolean }>("Doors.Toggle");
+ClientNetwork.send(DoorToggle, { door, open: true });                        // P8
+const StandUp = toServer<undefined>("Seating.Stand");
+ClientNetwork.send(StandUp);                                                 // P9
+ServerNetwork.send(player, Teleporting, undefined);                          // P10
+const Notify = toClient<{ Kind: "Info" | "Error"; Text: string }>("Notifications.Notify");
+ServerNetwork.send(player, Notify, { Kind: "Info", Text: "Saved" });         // P11
+const LiftCall = toServer<{ readonly button: BasePart; readonly expectedStop: u8 }>("Lifts.Call");
+ClientNetwork.send(LiftCall, { button, expectedStop: 3 });                   // P12
+const Tree = askServer<undefined, unknown>("Admin.CommandTree");
+const tree = ClientNetwork.ask(Tree);                                        // P13
+if (tree.ok) print(tree.value);
+// Generic pass-through still compiles.
+export function relay<P>(m: ToClient<P>, ...p: PayloadArgs<P>) { ServerNetwork.broadcast(m, ...p); }  // P14
+export function relayTo<P>(who: Player, m: ToClient<P>, ...p: PayloadArgs<P>) { return ServerNetwork.send(who, m, ...p); } // P15
+export function forward<Q, R>(m: AskServer<Q, R>, ...q: PayloadArgs<Q>): AskResult<R> { return ClientNetwork.ask(m, ...q); } // P16
+
+// K16: receive under one generic signature, contextual types for every kind.
+const Prof = askServer<{ readonly userId: number }, { name: string } | undefined>("PlayerCard.Profile");
+export class S {
+	readonly toggle = receive(DoorToggle, (p, { door, open }) => { print(p.Name, door.Name, open); });     // P17
+	readonly stand = receive(StandUp, (p) => { print(p.Name); });                                         // P18
+	readonly profile = receive(Prof, (p, { userId }) => (userId > 0 ? { name: "x" } : undefined));        // P19
+	readonly tree = receive(Tree, () => undefined);                                                     // P20
+	readonly ready = receive(ClientReady, (p) => () => print(p.Name));                                   // P21
+	readonly ready2 = receive(ClientReady, (p) => { print(p.Name); });                                   // P22
+	readonly codes = receive(Codes, (result) => { print(result); });                                     // P23
+	readonly pick = receive(Pick, (p, which) => (which === "a" ? 1 : 2));                                 // P24
+}
+// K5: an erased Promise still type-checks (the runtime return check catches it).
+const erased: (player: Player) => void = async (player) => { throw "unhandled"; };
+export class T { readonly e = receive(StandUp, erased); readonly r = receive(ClientReady, erased); }   // P26
+// R5: a conditional cleanup returns (() => void) | undefined, which ReceiveCallback<ClientReady> accepts.
+declare const cond: boolean;
+export class U {
+	readonly maybe = receive(ClientReady, (player) => (cond ? () => {} : undefined));                   // P27
+	readonly early = receive(ClientReady, (player) => { if (cond) return () => print(player.Name); });   // P28
+}

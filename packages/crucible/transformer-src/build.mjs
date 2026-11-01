@@ -9,3 +9,4 @@ fs.copyFileSync(path.join(source, "index.cjs"), path.join(output, "index.js"));
 fs.copyFileSync(path.join(source, "type-id.cjs"), path.join(output, "type-id.cjs"));
 
 fs.copyFileSync(path.join(source, "diagnostics.cjs"), path.join(output, "diagnostics.cjs"));
+fs.copyFileSync(path.join(source, "network.cjs"), path.join(output, "network.cjs"));
