@@ -33,6 +33,7 @@ local function world()
 	end
 	engine.port.bindToClose = function() end
 	local services = {}
+	local function none() end
 	local g = spec.runtime({ game = fakeGame(services) }, engine.loggingPort, backend.port)
 	local w = { backend = backend, engine = engine, g = g, services = services }
 	w.server = g.module("server")
@@ -46,6 +47,7 @@ local function world()
 			name = "server",
 			renders = false,
 			booted = function() end,
+			network = { open = none, loaded = none, commit = none, close = none },
 		}, {})
 	end
 	function w.start()
