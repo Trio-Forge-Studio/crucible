@@ -7,19 +7,26 @@ local STORE = DM.STORE
 local USER = DM.USER
 local SECRET = "SECRET-payload-value"
 
-local JOB = DM.object({ id = n.string, tips = n.f64 })
-local ROOT = DM.object({
-	bonus = n.map(n.string, DM.object({ n = n.f64 })),
-	career = DM.object({ jobs = n.array(JOB), rank = n.f64 }),
-	coins = n.f64,
-	mode = n.union({
-		n.variant("kind", "A", DM.object({ a = n.f64, shared = n.f64 })),
-		n.variant("kind", "B", DM.object({ b = n.f64, shared = n.f64 })),
-	}),
-	nickname = DM.opt(n.string),
-	profile = DM.opt(DM.object({ bio = n.string, level = n.f64 })),
-	settings = DM.object({ vibration = n.bool, volume = n.f64 }),
-})
+local rootNode
+local function recordNode()
+	if rootNode then
+		return rootNode
+	end
+	local job = DM.object({ id = n.string, tips = n.f64 })
+	rootNode = DM.object({
+		bonus = n.map(n.string, DM.object({ n = n.f64 })),
+		career = DM.object({ jobs = n.array(job), rank = n.f64 }),
+		coins = n.f64,
+		mode = n.union({
+			n.variant("kind", "A", DM.object({ a = n.f64, shared = n.f64 })),
+			n.variant("kind", "B", DM.object({ b = n.f64, shared = n.f64 })),
+		}),
+		nickname = DM.opt(n.string),
+		profile = DM.opt(DM.object({ bio = n.string, level = n.f64 })),
+		settings = DM.object({ vibration = n.bool, volume = n.f64 }),
+	})
+	return rootNode
+end
 
 local function defaults()
 	return {
@@ -46,7 +53,8 @@ local function valid()
 end
 
 local function seeded(count: number?, fields, shape, base)
-	local backend, a, b = D2.world(count or 1, { defaults = base or defaults(), version = shape or { node = ROOT } })
+	local backend, a, b =
+		D2.world(count or 1, { defaults = base or defaults(), version = shape or { node = recordNode() } })
 	local seed = { schemaVersion = 0, payload = fields, epoch = 5 }
 	D2.seed(backend, nil, seed)
 	return backend, a, b, seed
@@ -100,144 +108,170 @@ local function arrayChain(levels: number)
 	return root
 end
 
-local REJECTED = {
-	{ "a boolean holding a string", n.bool, true, "hunter2", ".x", "expected boolean, got string", "hunter2" },
-	{ "a number holding a string", n.f64, 0, "12abc", ".x", "expected number, got string", "12abc" },
-	{ "a string holding a number", n.string, "", 12, ".x", "expected string, got number" },
-	{ "a literal holding another value", n.literal("a"), "a", "b", ".x", "expected the literal a" },
-	{ "a value where nothing is declared", n["nil"], nil, 5, ".x", "expected nothing" },
-	{
-		"a number where an object is declared",
-		DM.object({ y = n.f64 }),
-		{ y = 0 },
-		5,
-		".x",
-		"expected an object, got number",
-	},
-	{ "a string where an array is declared", n.array(n.f64), {}, "s", ".x", "expected an array, got string" },
-	{ "a boolean where a map is declared", n.map(n.string, n.f64), {}, true, ".x", "expected an object, got boolean" },
-	{ "a tuple of the wrong length", n.tuple({ n.f64, n.string }), { 1, "a" }, { 1 }, ".x", "expected 2 elements" },
-	{
-		"a tuple of the wrong length, longer",
-		n.tuple({ n.f64, n.string }),
-		{ 1, "a" },
-		{ 1, "a", 3 },
-		".x",
-		"expected 2 elements",
-	},
-	{
-		"a tuple element of the wrong type",
-		n.tuple({ n.f64, n.string }),
-		{ 1, "a" },
-		{ 1, 2 },
-		".x[1]",
-		"expected string, got number",
-	},
-	{
-		"a key a map does not declare",
-		n.map(n.union({ n.literal("a"), n.literal("b") }), n.f64),
-		{},
-		{ c = 1 },
-		".x.c",
-		"not a key this map declares",
-	},
-	{
-		"an array where a map is declared",
-		n.map(n.string, n.f64),
-		{},
-		{ 1, 2 },
-		".x",
-		"expected an object with string keys",
-	},
-	{ "a map value of the wrong type", n.map(n.string, n.f64), {}, { k = "v" }, ".x.k", "expected number, got string" },
-	{
-		"a boolean where a number or a string is declared",
-		n.union({ n.f64, n.string }),
-		0,
-		true,
-		".x",
-		"expected number or string, got boolean",
-	},
-	{
-		"a string where an array or a number is declared",
-		n.union({ n.f64, n.array(n.f64) }),
-		0,
-		"s",
-		".x",
-		"expected number or an array, got string",
-	},
-	{
-		"a string where an object or a number is declared",
-		n.union({ n.f64, DM.object({ y = n.f64 }) }),
-		0,
-		"s",
-		".x",
-		"expected number or an object, got string",
-	},
-	{
-		"a string where a map or a bool is declared",
-		n.union({ n.bool, n.map(n.string, n.f64) }),
-		false,
-		"s",
-		".x",
-		"expected boolean or an object, got string",
-	},
-	{
-		"a string where a tuple or a bool is declared",
-		n.union({ n.bool, n.tuple({ n.f64 }) }),
-		false,
-		"s",
-		".x",
-		"expected boolean or an array, got string",
-	},
-	{
-		"a string no literal matches",
-		n.union({ n.literal("a"), n.literal("b") }),
-		"a",
-		"c",
-		".x",
-		"expected the literal a or the literal b, got string",
-	},
-	{
-		"a variant tag no variant has",
-		n.union({ n.variant("kind", "A", DM.object({ a = n.f64 })), n.variant("kind", "B", DM.object({ b = n.f64 })) }),
-		{ kind = "A", a = 0 },
-		{ kind = "C" },
-		".x",
-		"expected the variant kind = A or the variant kind = B, got table",
-	},
-	{ "NaN", n.f64, 0, 0 / 0, ".x", "expected a finite number" },
-	{ "infinity", n.f64, 0, math.huge, ".x", "expected a finite number" },
-	{ "negative infinity", n.f64, 0, -math.huge, ".x", "expected a finite number" },
-	{ "a u8 over 255", n.u8, 0, 256, ".x", "expected an integer in [0, 255]" },
-	{ "a negative u8", n.u8, 0, -1, ".x", "expected an integer in [0, 255]" },
-	{ "a fractional u8", n.u8, 0, 1.5, ".x", "expected an integer in [0, 255]" },
-	{ "a u16 over 65535", n.u16, 0, 65536, ".x", "expected an integer in [0, 65535]" },
-	{ "a negative u16", n.u16, 0, -1, ".x", "expected an integer in [0, 65535]" },
-	{ "a fractional u16", n.u16, 0, 0.5, ".x", "expected an integer in [0, 65535]" },
-	{ "a u32 over 4294967295", n.u32, 0, 4294967296, ".x", "expected an integer in [0, 4294967295]" },
-	{ "a negative u32", n.u32, 0, -1, ".x", "expected an integer in [0, 4294967295]" },
-	{ "an f32 over its range", n.f32, 0, 3.5e38, ".x", "out of f32 range" },
-	{ "an f32 under its range", n.f32, 0, -3.5e38, ".x", "out of f32 range" },
-	{ "a string over 65536 bytes", n.string, "", string.rep("a", 65537), ".x", "a string over 65536 bytes" },
-	{ "invalid UTF-8", n.string, "", "ab" .. string.char(255), ".x", "invalid UTF-8" },
-	{ "a truncated UTF-8 sequence", n.string, "", "ab" .. string.char(195), ".x", "invalid UTF-8" },
-	{ "an array with a hole", n.array(n.f64), {}, { [1] = 1, [3] = 3 }, ".x", "expected an array" },
-	{ "an object where an array is declared", n.array(n.f64), {}, { key = 1 }, ".x", "expected an array" },
-	{
-		"an array where an object is declared",
-		DM.object({ y = n.f64 }),
-		{ y = 0 },
-		{ 1, 2 },
-		".x",
-		"expected an object",
-	},
-	{ "a string element in a number array", n.array(n.f64), {}, { 1, 2, "x" }, ".x[2]", "expected number, got string" },
-}
+local function rejected()
+	return {
+		{ "a boolean holding a string", n.bool, true, "hunter2", ".x", "expected boolean, got string", "hunter2" },
+		{ "a number holding a string", n.f64, 0, "12abc", ".x", "expected number, got string", "12abc" },
+		{ "a string holding a number", n.string, "", 12, ".x", "expected string, got number" },
+		{ "a literal holding another value", n.literal("a"), "a", "b", ".x", "expected the literal a" },
+		{ "a value where nothing is declared", n["nil"], nil, 5, ".x", "expected nothing" },
+		{
+			"a number where an object is declared",
+			DM.object({ y = n.f64 }),
+			{ y = 0 },
+			5,
+			".x",
+			"expected an object, got number",
+		},
+		{ "a string where an array is declared", n.array(n.f64), {}, "s", ".x", "expected an array, got string" },
+		{
+			"a boolean where a map is declared",
+			n.map(n.string, n.f64),
+			{},
+			true,
+			".x",
+			"expected an object, got boolean",
+		},
+		{ "a tuple of the wrong length", n.tuple({ n.f64, n.string }), { 1, "a" }, { 1 }, ".x", "expected 2 elements" },
+		{
+			"a tuple of the wrong length, longer",
+			n.tuple({ n.f64, n.string }),
+			{ 1, "a" },
+			{ 1, "a", 3 },
+			".x",
+			"expected 2 elements",
+		},
+		{
+			"a tuple element of the wrong type",
+			n.tuple({ n.f64, n.string }),
+			{ 1, "a" },
+			{ 1, 2 },
+			".x[1]",
+			"expected string, got number",
+		},
+		{
+			"a key a map does not declare",
+			n.map(n.union({ n.literal("a"), n.literal("b") }), n.f64),
+			{},
+			{ c = 1 },
+			".x.c",
+			"not a key this map declares",
+		},
+		{
+			"an array where a map is declared",
+			n.map(n.string, n.f64),
+			{},
+			{ 1, 2 },
+			".x",
+			"expected an object with string keys",
+		},
+		{
+			"a map value of the wrong type",
+			n.map(n.string, n.f64),
+			{},
+			{ k = "v" },
+			".x.k",
+			"expected number, got string",
+		},
+		{
+			"a boolean where a number or a string is declared",
+			n.union({ n.f64, n.string }),
+			0,
+			true,
+			".x",
+			"expected number or string, got boolean",
+		},
+		{
+			"a string where an array or a number is declared",
+			n.union({ n.f64, n.array(n.f64) }),
+			0,
+			"s",
+			".x",
+			"expected number or an array, got string",
+		},
+		{
+			"a string where an object or a number is declared",
+			n.union({ n.f64, DM.object({ y = n.f64 }) }),
+			0,
+			"s",
+			".x",
+			"expected number or an object, got string",
+		},
+		{
+			"a string where a map or a bool is declared",
+			n.union({ n.bool, n.map(n.string, n.f64) }),
+			false,
+			"s",
+			".x",
+			"expected boolean or an object, got string",
+		},
+		{
+			"a string where a tuple or a bool is declared",
+			n.union({ n.bool, n.tuple({ n.f64 }) }),
+			false,
+			"s",
+			".x",
+			"expected boolean or an array, got string",
+		},
+		{
+			"a string no literal matches",
+			n.union({ n.literal("a"), n.literal("b") }),
+			"a",
+			"c",
+			".x",
+			"expected the literal a or the literal b, got string",
+		},
+		{
+			"a variant tag no variant has",
+			n.union({
+				n.variant("kind", "A", DM.object({ a = n.f64 })),
+				n.variant("kind", "B", DM.object({ b = n.f64 })),
+			}),
+			{ kind = "A", a = 0 },
+			{ kind = "C" },
+			".x",
+			"expected the variant kind = A or the variant kind = B, got table",
+		},
+		{ "NaN", n.f64, 0, 0 / 0, ".x", "expected a finite number" },
+		{ "infinity", n.f64, 0, math.huge, ".x", "expected a finite number" },
+		{ "negative infinity", n.f64, 0, -math.huge, ".x", "expected a finite number" },
+		{ "a u8 over 255", n.u8, 0, 256, ".x", "expected an integer in [0, 255]" },
+		{ "a negative u8", n.u8, 0, -1, ".x", "expected an integer in [0, 255]" },
+		{ "a fractional u8", n.u8, 0, 1.5, ".x", "expected an integer in [0, 255]" },
+		{ "a u16 over 65535", n.u16, 0, 65536, ".x", "expected an integer in [0, 65535]" },
+		{ "a negative u16", n.u16, 0, -1, ".x", "expected an integer in [0, 65535]" },
+		{ "a fractional u16", n.u16, 0, 0.5, ".x", "expected an integer in [0, 65535]" },
+		{ "a u32 over 4294967295", n.u32, 0, 4294967296, ".x", "expected an integer in [0, 4294967295]" },
+		{ "a negative u32", n.u32, 0, -1, ".x", "expected an integer in [0, 4294967295]" },
+		{ "an f32 over its range", n.f32, 0, 3.5e38, ".x", "out of f32 range" },
+		{ "an f32 under its range", n.f32, 0, -3.5e38, ".x", "out of f32 range" },
+		{ "a string over 65536 bytes", n.string, "", string.rep("a", 65537), ".x", "a string over 65536 bytes" },
+		{ "invalid UTF-8", n.string, "", "ab" .. string.char(255), ".x", "invalid UTF-8" },
+		{ "a truncated UTF-8 sequence", n.string, "", "ab" .. string.char(195), ".x", "invalid UTF-8" },
+		{ "an array with a hole", n.array(n.f64), {}, { [1] = 1, [3] = 3 }, ".x", "expected an array" },
+		{ "an object where an array is declared", n.array(n.f64), {}, { key = 1 }, ".x", "expected an array" },
+		{
+			"an array where an object is declared",
+			DM.object({ y = n.f64 }),
+			{ y = 0 },
+			{ 1, 2 },
+			".x",
+			"expected an object",
+		},
+		{
+			"a string element in a number array",
+			n.array(n.f64),
+			{},
+			{ 1, 2, "x" },
+			".x[2]",
+			"expected number, got string",
+		},
+	}
+end
 
 return {
 	["rule 76 a present declared value of the wrong shape or range makes the load fail with the path, the data untouched"] = function()
-		for _, case in REJECTED do
+		for _, case in rejected() do
 			local name, node, default, stored, path, reason, leak = table.unpack(case)
 			local backend, a, _, seed = single(node, default, stored)
 			refused(name, backend, a, seed, path, reason, leak)
@@ -460,7 +494,7 @@ return {
 			end
 			return { career = { jobs = jobs } }
 		end
-		local second, b = seeded(1, payload, { node = ROOT, migrations = { fill } })
+		local second, b = seeded(1, payload, { node = recordNode(), migrations = { fill } })
 		local pb, handle = DM.begin(b)
 		second:advance(1)
 		spec.eq(handle.value, true, "with the step it loads")
@@ -486,7 +520,7 @@ return {
 		local payload = valid()
 		payload.bonus = { k = { extra = "E" } }
 		payload.mode = { kind = "B" }
-		local backend, a = seeded(1, payload, { node = ROOT, migrations = { fill } })
+		local backend, a = seeded(1, payload, { node = recordNode(), migrations = { fill } })
 		local pa, handle = DM.begin(a)
 		backend:advance(1)
 		spec.eq(handle.value, true, "the step makes both readable")

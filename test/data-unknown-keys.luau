@@ -7,8 +7,12 @@ local n = DM.n
 local STORE = DM.STORE
 local USER = DM.USER
 
-local JOB_N = DM.object({ coins = n.f64, id = n.string })
-local JOB_N1 = DM.object({ coins = n.f64, id = n.string, rating = DM.opt(n.f64) })
+local function jobN()
+	return DM.object({ coins = n.f64, id = n.string })
+end
+local function jobN1()
+	return DM.object({ coins = n.f64, id = n.string, rating = DM.opt(n.f64) })
+end
 
 local function root(job)
 	return DM.object({
@@ -62,8 +66,8 @@ local function world(builds)
 end
 
 local function builds()
-	return { shape = { node = root(JOB_N) }, defaults = defaults() }, {
-		shape = { node = root(JOB_N1) },
+	return { shape = { node = root(jobN()) }, defaults = defaults() }, {
+		shape = { node = root(jobN1()) },
 		defaults = defaults(),
 	}
 end
