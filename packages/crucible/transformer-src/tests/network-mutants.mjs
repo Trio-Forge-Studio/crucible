@@ -304,6 +304,12 @@ const mutations = [
 		descriptors,
 	],
 	[
+		"M17 rule 66 tuple optional flag",
+		"(ts.ElementFlags.Optional | ts.ElementFlags.Rest | ts.ElementFlags.Variadic)",
+		"(ts.ElementFlags.Rest | ts.ElementFlags.Variadic)",
+		negative,
+	],
+	[
 		"M18 rule 68 collection toClient propagation",
 		"return lower(t, location, { toClient: position.toClient, nilable: false }, depth + 1);",
 		"return lower(t, location, { toClient: false, nilable: false }, depth + 1);",
