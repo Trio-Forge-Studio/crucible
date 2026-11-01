@@ -10,7 +10,6 @@ import {
 import type { DataEngine, ProfileRuntime } from "./profiles";
 import { Priority } from "./scheduler";
 import { Phase, type Session } from "./session";
-import { Waiters } from "./waiters";
 
 /** @internal The part of Roblox's receipt info that data reads. */
 export interface ReceiptInfo {
@@ -44,15 +43,6 @@ export interface Marketplace {
 	ProcessReceipt: (info: ReceiptInfo) => Enum.ProductPurchaseDecision;
 }
 
-class Pending {
-	result?: ReceiptResult;
-	readonly waiters: Waiters;
-
-	constructor(engine: DataEngine) {
-		this.waiters = new Waiters(engine.port);
-	}
-}
-
 /**
  * @internal Crucible's ProcessReceipt (rules 57 to 64). Idempotency rests on two facts: a purchase id and its grant's
  * data change are one revision, and "granted" is returned only once an owned write with the session's token is
@@ -60,7 +50,6 @@ class Pending {
  */
 export class ReceiptRouter {
 	private readonly routes = new Map<number, GrantRoute>();
-	private readonly pending = new Map<string, Pending>();
 	private closed = false;
 	private service?: Marketplace;
 
@@ -131,25 +120,16 @@ export class ReceiptRouter {
 				continue;
 			}
 			if (!runtime.writable(player)) return "notYet";
-			const key = `${info.PlayerId}:${id}`;
-			const shared = this.pending.get(key);
-			if (shared !== undefined) {
-				while (shared.result === undefined) shared.waiters.park();
-				return shared.result;
-			}
 			if (session.durable.has(id)) return this.granted(session, id);
-			const pending = new Pending(engine);
-			this.pending.set(key, pending);
-			const [ok, result] = pcall(() => this.lead(route, session, player, id, info));
-			pending.result = ok ? result : "notYet";
-			this.pending.delete(key);
-			pending.waiters.wake();
-			if (!ok) error(result, 0);
-			return result;
+			return this.save(route, session, player, id, info);
 		}
 	}
 
-	private lead(route: GrantRoute, session: Session, player: Player, id: string, info: ReceiptInfo): ReceiptResult {
+	/**
+	 * Grants a new id, then waits for the write that holds it. A callback for a staged id waits without granting, so
+	 * concurrent callbacks for one purchase share one grant and one revision (rule 59).
+	 */
+	private save(route: GrantRoute, session: Session, player: Player, id: string, info: ReceiptInfo): ReceiptResult {
 		const runtime = route.runtime;
 		const engine = this.engine;
 		if (!session.receipts.includes(id)) {
@@ -169,9 +149,8 @@ export class ReceiptRouter {
 				if (!typeIs(effect, "function")) error("afterGrant takes a function", 2);
 				effects.push(effect);
 			};
-			const [ok, wrote] = pcall(() =>
-				runtime.write(
-					player,
+			const [ok] = pcall(() =>
+				session.write(
 					(data) => route.grant(player, data, purchase, afterGrant),
 					() => {
 						session.stage(id);
@@ -186,7 +165,6 @@ export class ReceiptRouter {
 				);
 				return "notYet";
 			}
-			if (!wrote) return "notYet";
 		}
 		runtime.requestWrite(session, Priority.Receipt);
 		const timeout = bootClock() + RECEIPT_SAVE_TIMEOUT_SECONDS;

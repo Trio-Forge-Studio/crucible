@@ -45,7 +45,6 @@ function retryAfter(attempts: number): number {
 /** @internal One profile store's offline inbox: its receivers, its sends and the session-side delivery (rules 65 to 73). */
 export class Inbox {
 	private readonly receivers = new Map<string, Receiver>();
-	private readonly timers = new Map<Session, thread>();
 
 	private readonly engine: DataEngine;
 	private readonly store: string;
@@ -194,12 +193,7 @@ export class Inbox {
 	}
 
 	private apply(session: Session) {
-		const timer = this.timers.get(session);
-		if (timer !== undefined) {
-			this.engine.port.cancel(timer);
-			this.timers.delete(session);
-		}
-		if (session.phase !== Phase.Active || this.engine.finalPhase || this.engine.settled) return;
+		if (!this.runtime.accept(session)) return;
 		const present = new Set<string>();
 		for (const item of session.inbox) present.add(item.id);
 		for (const [id] of session.retryAt) if (!present.has(id)) session.retryAt.delete(id);
@@ -240,9 +234,8 @@ export class Inbox {
 				staged = true;
 				continue;
 			}
-			const [ok, wrote] = pcall(() =>
-				this.runtime.write(
-					session.player,
+			const [ok] = pcall(() =>
+				session.write(
 					(data) => receiver.receive(session.player, data, admitted.value),
 					() => session.acks.set(item.id, session.revision + 1),
 				),
@@ -261,19 +254,12 @@ export class Inbox {
 					`${this.store}: ${session.userId}'s inbox item ${item.id} (${item.name}) failed attempt ${attempts}`,
 				);
 				staged = true;
-			} else if (wrote) staged = true;
-			else break;
+			} else staged = true;
 		}
 		if (staged) this.runtime.requestWrite(session, Priority.Renew);
 		if (soonest !== undefined) {
 			const at = soonest;
-			this.timers.set(
-				session,
-				this.engine.port.delay(math.max(at - bootClock(), 0), () => {
-					this.timers.delete(session);
-					this.apply(session);
-				}),
-			);
+			this.engine.port.delay(math.max(at - bootClock(), 0), () => this.apply(session));
 		}
 	}
 }

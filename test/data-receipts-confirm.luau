@@ -58,6 +58,9 @@ return {
 		)
 		backend:advance(60)
 		spec.list(order, { "first", "second", "returned" }, "and never again")
+		local repeated = D2.purchase(a, D2.info("R1"))
+		spec.eq(repeated.value, "granted", "a repeat callback is acknowledged")
+		spec.eq(#order, 3, "without running the effects again")
 	end,
 	["rule 61 no effect runs for an id that was already durable or whose grant never ran"] = function()
 		local backend, a, b = D2.world(2)
@@ -205,25 +208,46 @@ return {
 		spec.eq(#route.calls, 1, "without a grant")
 		spec.eq(#D2.stored(backend).receipts, 8192, "nothing was evicted")
 	end,
-	["rule 62 a new id is refused before its grant at RECEIPTS_MAX_BYTES"] = function()
-		local backend, a = D2.world()
-		local seeded = {}
-		for index = 1, 5867 do
-			seeded[index] = string.rep("x", 59) .. string.format("-%04d", index)
+	["rule 62 a new id is refused before its grant at RECEIPTS_MAX_BYTES, to the byte"] = function()
+		local function world(tuning: number)
+			local backend, a = D2.world()
+			local seeded = {}
+			for index = 1, 5867 do
+				seeded[index] = string.rep("x", 59) .. string.format("-%04d", index)
+			end
+			table.insert(seeded, string.rep("t", tuning))
+			D2.seed(backend, nil, { receipts = seeded })
+			D2.join(backend, a)
+			return backend, a, D2.route(a, PRODUCT, 25)
 		end
-		D2.seed(backend, nil, { receipts = seeded })
-		D2.join(backend, a)
-		local route = D2.route(a, PRODUCT, 25)
+		local backend, a, route = world(56)
 		local fits = D2.purchase(a, D2.info(string.rep("y", 64)))
 		backend:advance(1)
-		spec.eq(fits.value, "granted", "a 64-byte id that brings the array to exactly 393,157 bytes fits")
-		local refused = D2.purchase(a, D2.info(string.rep("z", 64)))
-		spec.eq(refused.value, "notYet", "the next 64-byte id would pass 393,216 and is refused")
+		spec.eq(fits.value, "granted", "a 64-byte id that brings the array to exactly 393,216 bytes fits")
+		spec.eq(#route.calls, 1, "its grant ran")
+		local second = D2.purchase(a, D2.info("abcd"))
+		spec.eq(second.value, "notYet", "the next id passes the cap and is refused")
 		spec.eq(#route.calls, 1, "before its grant ran")
-		local short = D2.purchase(a, D2.info("abcd"))
-		backend:advance(1)
-		spec.eq(short.value, "granted", "a short id still fits")
-		spec.eq(#route.calls, 2, "and its grant ran")
+		local other, b, again = world(57)
+		local refused = D2.purchase(b, D2.info(string.rep("y", 64)))
+		spec.eq(refused.value, "notYet", "one byte more and the same id is refused")
+		spec.eq(#again.calls, 0, "before its grant ran")
+		spec.eq(b.engine.logged("receipt capacity reached for FD.Players 4120"), 1, "with the diagnostic")
+		assert(other ~= nil, "present")
+	end,
+	["rule 34 and 63 a receipt save outranks ordinary work, so a purchase lands while ordinary sends are stalled"] = function()
+		local backend, a = D2.world()
+		D2.join(backend, a)
+		D2.route(a, PRODUCT, 25)
+		local decl = D2.message("grant")
+		for index = 1, 3 do
+			backend:fail("stall", { server = a.id, key = tostring(D2.USER + index) }, 1, { seconds = 20 })
+			D2.send(a, decl, { amount = 1 }, D2.id(D2.WALL, `s{index}`), D2.USER + index)
+		end
+		backend:advance(0.2)
+		local handle = D2.purchase(a, D2.info("R1"))
+		backend:advance(2)
+		spec.eq(handle.value, "granted", "the receipt save took a slot the ordinary work could not")
 	end,
 	["rule 63 a save that cannot land returns NotProcessedYet at RECEIPT_SAVE_TIMEOUT_SECONDS and the id saves later"] = function()
 		local backend, a = D2.world()

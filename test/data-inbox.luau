@@ -17,6 +17,32 @@ local function inbox(backend)
 end
 
 return {
+	["Limits receipt and inbox rows hold the contract values"] = function()
+		local _, a = D2.world()
+		local limits = a.limits
+		local expected = {
+			RECEIPT_SAVE_TIMEOUT_SECONDS = 30,
+			MAX_PURCHASE_IDS = 8192,
+			RECEIPTS_MAX_BYTES = 393216,
+			PURCHASE_ID_MAX_BYTES = 64,
+			INBOX_MAX_MESSAGES = 128,
+			INBOX_MAX_BYTES = 131072,
+			QUARANTINE_MAX_MESSAGES = 8,
+			QUARANTINE_MAX_BYTES = 69632,
+			MESSAGE_PAYLOAD_MAX_BYTES = 8192,
+			MESSAGE_ID_MAX_AGE_SECONDS = 604800,
+			ID_FUTURE_SKEW_SECONDS = 5,
+			ID_EVICT_MIN_AGE_SECONDS = 60,
+			OPERATION_ID_MAX_BYTES = 64,
+			SEEN_MAX_MESSAGES = 1024,
+			SEEN_MAX_BYTES = 69632,
+			INBOX_MAX_ATTEMPTS = 5,
+		}
+		for name, value in expected do
+			spec.eq(limits[name], value, name)
+		end
+		spec.list(limits.INBOX_RETRY_SECONDS, { 5, 15, 60, 60 }, "INBOX_RETRY_SECONDS")
+	end,
 	["rule 66 an invalid or oversize payload and a bad id throw at the call with nothing dispatched"] = function()
 		local backend, a = D2.world()
 		local decl = D2.message("grant")
@@ -355,9 +381,10 @@ return {
 		local after = D2.stored(backend)
 		spec.eq(after.payload.coins, 11, "Y applied, which pushed X out of the full ring")
 		spec.eq(after.seenFloor, W - 3600, "the floor is X's creation time")
+		backend:advance(25)
 		local late = D2.send(a, decl, { amount = 1 }, x)
 		backend:advance(1)
-		spec.eq(late.value.kind, "expired", "X is refused once evicted")
+		spec.eq(late.value.kind, "expired", "X is refused once evicted, also after the next renewal")
 		spec.eq(D2.stored(backend).payload.coins, 11, "so it is never applied twice")
 		assert(pa ~= nil, "present")
 	end,
