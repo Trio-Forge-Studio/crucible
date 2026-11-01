@@ -30,6 +30,23 @@ export type Released = "committed" | "fenced" | "given up";
 
 const callbackThreads = new Set<thread>();
 
+/** @internal Runs a data callback on a no-yield worker whose thread may not write data (rule 13); a yield or throw is thrown here. */
+export function dataCallback<A, B>(work: (a: A, b: B) => unknown, a: A, b: B): unknown {
+	let worker: thread | undefined;
+	const [status, value] = call(
+		(x: A, y: B) => {
+			worker = coroutine.running();
+			callbackThreads.add(worker);
+			return work(x, y);
+		},
+		a,
+		b,
+	);
+	if (worker !== undefined) callbackThreads.delete(worker);
+	if (status !== CallResult.Ok) error(value, 0);
+	return value;
+}
+
 /** @internal Rule 13: no data write on a data callback's own thread. */
 export function assertOutsideCallback() {
 	if (callbackThreads.has(coroutine.running())) error("a write inside a data callback; return the data instead", 3);
@@ -130,19 +147,7 @@ export class Session {
 	}
 
 	callback<A, B>(work: (a: A, b: B) => unknown, a: A, b: B): unknown {
-		let worker: thread | undefined;
-		const [status, value] = call(
-			(x: A, y: B) => {
-				worker = coroutine.running();
-				callbackThreads.add(worker);
-				return work(x, y);
-			},
-			a,
-			b,
-		);
-		if (worker !== undefined) callbackThreads.delete(worker);
-		if (status !== CallResult.Ok) error(value, 0);
-		return value;
+		return dataCallback(work, a, b);
 	}
 
 	/** Rule 14's prepare: throws naming the store, never the value, and changes nothing. */

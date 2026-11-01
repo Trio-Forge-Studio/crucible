@@ -37,3 +37,5 @@ export type {
 	u16,
 	u32,
 } from "./network";
+
+export type { Json, JsonRecord, Migration } from "./data";

@@ -172,7 +172,8 @@ return {
 	["rule 47 resume never acquires past an unsettled release, even one pacing holds back"] = function()
 		local backend, a = world(1)
 		local pa = loaded(backend, a)
-		local blob = string.rep("x", 250000)
+		local chunk = string.rep("x", 62500)
+		local blob = { chunk, chunk, chunk, chunk }
 		for coins = 1, 12 do
 			a.run(function()
 				a.store:write(pa, function(current)
