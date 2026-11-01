@@ -4,7 +4,6 @@ mod call;
 mod child;
 mod cli;
 mod create;
-mod dev;
 mod discover;
 mod docs;
 mod exec;
@@ -34,14 +33,11 @@ fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(Cli { command: Command::Build(args) }) => return build::main(args),
         Ok(Cli { command: Command::Create(args) }) => return create::main(args),
-        Ok(Cli { command: Command::Dev(args) }) => return dev::main(args),
         Ok(Cli { command: Command::Docs { topic } }) => return docs::run(topic.as_deref()),
         Ok(Cli { command: Command::Oc(cli) }) => cli,
         Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::Upgrade(args) }) => return upgrade::main(args),
         Ok(Cli { command: Command::RojoBuild { project, output } }) => return build::rojo_main(project, output),
-        Ok(Cli { command: Command::RojoServe { project, port } }) => return dev::rojo_main(project, port),
-        Ok(Cli { command: Command::WatchGuard { command } }) => return dev::guard_main(command),
         Ok(Cli { command: Command::UpgradeApply { from, crucible, runtime } }) => {
             return upgrade::apply_main(from, crucible, runtime);
         }
