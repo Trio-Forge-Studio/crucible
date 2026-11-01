@@ -476,6 +476,96 @@ test("network augmentations of a base reached through a typeof query or a call e
 	);
 });
 
+const flattenedClasses = [
+	"KReturn",
+	"KConst",
+	"KDefault",
+	"KPayload",
+	"KMapped",
+	"KMixin",
+	"KField",
+	"KRecord",
+	"KRecordReturn",
+	"KParam",
+	"KUnreached",
+];
+const flattenedGame = () =>
+	project({
+		"src/shared/base.ts": [
+			...flattenedClasses
+				.filter((name) => name !== "KParam")
+				.map((name) => `export class ${name} { k = 1; keep = 1; }`),
+			"export class KParam { constructor(public k: number, public keep: number) {} }",
+			"export const makeParam = () => new KParam(1, 2);",
+			"export const make = () => new KReturn();",
+			"export const ConstAlias = KConst;",
+			"export const makePayload = () => new KPayload();",
+			"export const makeMapped = () => new KMapped();",
+			"export const makeField = () => new KField();",
+			"export const makeRecord = () => new KRecordReturn();",
+			"export const makeUnreached = () => new KUnreached();",
+			"export function mixin<T extends new () => object>(base: T): new () => Omit<InstanceType<T>, 'k'> { return base as never; }",
+		].join("\n"),
+		"src/shared/model.ts": [
+			`import { ${flattenedClasses.join(", ")}, make, ConstAlias, makePayload, makeMapped, makeField, makeRecord, makeParam, makeUnreached, mixin } from "./base";`,
+			"export interface ViaReturn extends Omit<ReturnType<typeof make>, 'k'> { own: string }",
+			"export interface ViaConst extends Omit<InstanceType<typeof ConstAlias>, 'k'> { own: string }",
+			"export interface Holder<T = KDefault> { v: Omit<T, 'k'> }",
+			"export interface ViaDefault extends Holder { own: string }",
+			"export type ViaPayload = Omit<ReturnType<typeof makePayload>, 'k'>;",
+			"export type Flat<T> = { [P in keyof T]: T[P] };",
+			"export type ViaMapped = Flat<ReturnType<typeof makeMapped>>;",
+			"export class ViaMixin extends mixin(KMixin) { own = 1; }",
+			"export interface ViaField { inner: Omit<ReturnType<typeof makeField>, 'k'> }",
+			"export type ViaRecord = Record<keyof InstanceType<typeof KRecord>, string>;",
+			"export type ViaRecordReturn = Record<keyof ReturnType<typeof makeRecord>, string>;",
+			"export type ViaParam = Omit<ReturnType<typeof makeParam>, 'k'>;",
+			"export interface ViaUnreached extends Omit<ReturnType<typeof makeUnreached>, 'k'> { own: string }",
+		].join("\n"),
+		"src/shared/messages.ts":
+			imports +
+			[
+				'import { ViaReturn, ViaConst, ViaDefault, ViaPayload, ViaMapped, ViaMixin, ViaField, ViaRecord, ViaRecordReturn, ViaParam } from "./model";',
+				'export const A = toServer<ViaReturn>("X.A");',
+				'export const B = toServer<ViaConst>("X.B");',
+				'export const C = toServer<ViaDefault>("X.C");',
+				'export const D = toServer<ViaPayload>("X.D");',
+				'export const E = toServer<ViaMapped>("X.E");',
+				'export const F = toServer<ViaMixin>("X.F");',
+				'export const G = toServer<ViaField>("X.G");',
+				'export const H = toServer<ViaRecord>("X.H");',
+				'export const I = toServer<ViaRecordReturn>("X.I");',
+				'export const J = toServer<ViaParam>("X.J");',
+			].join("\n"),
+		...Object.fromEntries(
+			flattenedClasses.map((name) => [
+				`src/util/${name.toLowerCase()}.ts`,
+				augmentation("../shared/base", `interface ${name} { extra: string }`),
+			]),
+		),
+	});
+
+test("network augmentations of a class a payload reaches only through a function return or a flattened type fail", () => {
+	const game = flattenedGame();
+	const expected = [
+		"kconst",
+		"kdefault",
+		"kfield",
+		"kmapped",
+		"kmixin",
+		"kparam",
+		"kpayload",
+		"krecord",
+		"krecordreturn",
+		"kreturn",
+	];
+	assert.deepEqual(flagged(game), expected);
+	assert.deepEqual(
+		utilDiagnostics(compile(game, 1)),
+		expected.map((name) => `src/util/${name}.ts`),
+	);
+});
+
 test("network augmentations of any base of a multi-base or merged interface fail at the augmentation", () => {
 	const game = project({
 		"src/shared/base.ts":
@@ -588,6 +678,7 @@ test("network transformer faults other than a stack overflow keep their own mess
 		[new RangeError("Invalid array length"), "Invalid array length"],
 		[new Error("checker exploded"), "checker exploded"],
 		[new TypeError("x is not a function"), "x is not a function"],
+		[new RangeError("Invalid call stack frame"), "Invalid call stack frame"],
 	];
 	for (const [fault, message] of faults) {
 		const { diagnostics } = inspect(game, undefined, fault);
@@ -596,6 +687,55 @@ test("network transformer faults other than a stack overflow keep their own mess
 			assert.equal(diagnostic.code, 90000);
 			assert.equal(diagnostic.messageText, "Crucible: Cannot transform input: " + message);
 		}
+	}
+});
+
+const nesting =
+	"Crucible: Cannot transform input: the type checker ran out of stack. A type in this file nests or inherits too deeply to analyse.";
+const overflow = () => new RangeError("Maximum call stack size exceeded");
+const crucibleOnly = (result, message) => {
+	assert.equal(result.thrown, undefined);
+	assert.ok(result.diagnostics.length > 0);
+	for (const diagnostic of result.diagnostics) {
+		assert.equal(diagnostic.code, 90000);
+		assert.equal(diagnostic.messageText, message);
+	}
+};
+
+const entryGame = () =>
+	project({
+		"src/shared/messages.ts": imports + 'export const One = toServer<{ a: string }>("X.One");',
+		"src/server/main.ts": 'import "@trioforge/crucible/server";',
+	});
+
+test("network checker faults in the startup scans of the network program end in Crucible diagnostics", () => {
+	const game = entryGame();
+	for (const method of ["getExportsOfModule", "getSymbolAtLocation"]) {
+		crucibleOnly(inspect(game, undefined, { error: overflow(), method }), nesting);
+		for (const message of ["checker exploded", "Invalid array length"])
+			crucibleOnly(
+				inspect(game, undefined, { error: new Error(message), method }),
+				"Crucible: Cannot transform input: " + message,
+			);
+	}
+});
+
+test("network package metadata that cannot be read is reported as a package.json problem", () => {
+	const game = project({
+		"src/shared/messages.ts": imports + 'export const One = toServer<{ a: string }>("X.One");',
+		"src/shared/package.json": "{ not json",
+	});
+	crucibleOnly(inspect(game), "Crucible: Cannot read package metadata. Check the project's package.json files.");
+});
+
+test("network checker faults while the package exports are scanned keep their own message", () => {
+	const game = entryGame();
+	for (const method of ["getExportsOfModule", "getSymbolAtLocation"]) {
+		crucibleOnly(inspect(game, undefined, { error: overflow(), method, during: "creation" }), nesting);
+		crucibleOnly(
+			inspect(game, undefined, { error: new Error("checker exploded"), method, during: "creation" }),
+			"Crucible: Cannot transform input: checker exploded",
+		);
 	}
 });
 
