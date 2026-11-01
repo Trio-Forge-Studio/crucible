@@ -210,13 +210,14 @@ export class Inbox {
 				);
 				continue;
 			}
-			if (item.attempts > 0) {
-				const at = session.retryAt.get(item.id) ?? now + retryAfter(item.attempts);
+			let at = session.retryAt.get(item.id);
+			if (at === undefined && item.attempts > 0) {
+				at = now + retryAfter(item.attempts);
 				session.retryAt.set(item.id, at);
-				if (now < at) {
-					soonest = math.min(soonest ?? at, at);
-					continue;
-				}
+			}
+			if (at !== undefined && now < at) {
+				soonest = math.min(soonest ?? at, at);
+				continue;
 			}
 			const admitted = receiver.message.admit(item.payload);
 			if (!admitted.ok) {

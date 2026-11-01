@@ -203,13 +203,13 @@ return {
 		local good = D2.id(W - 10, "g1")
 		D2.seed(backend, nil, {
 			inbox = {
-				D2.item(bad, "grant", { amount = "many", future = { kept = true } }),
+				D2.item(bad, "grant", { amount = "many", future = { kept = true } }, { generation = 2, attempts = 1 }),
 				D2.item(good, "grant", { amount = 2 }),
 			},
 		})
 		local record = D2.receiver(a, D2.message("grant"))
 		D2.join(backend, a)
-		backend:advance(5)
+		backend:advance(10)
 		spec.eq(#record.calls, 1, "only the valid item reached the receiver")
 		local envelope = D2.stored(backend)
 		spec.eq(#envelope.inbox, 0, "both left the inbox")
@@ -217,8 +217,8 @@ return {
 		local item = envelope.quarantine[1]
 		spec.eq(item.id, bad, "the invalid one")
 		spec.eq(item.reason, "payload", "reason payload")
-		spec.eq(item.generation, 1, "its generation rose once")
-		spec.eq(item.attempts, 0, "with no attempts")
+		spec.eq(item.generation, 3, "its generation rose once")
+		spec.eq(item.attempts, 1, "keeping its attempts")
 		spec.eq(item.payload.future.kept, true, "the payload keeps its unknown keys")
 		spec.list(envelope.seen, { good }, "the valid one is acknowledged")
 		spec.eq(a.engine.logged("refuses"), 1, "diagnosed once")
@@ -350,12 +350,12 @@ return {
 		spec.eq(#inbox(backend), 0, "and appends nothing")
 	end,
 	["rule 72 a full quarantine leaves an item live and unapplied, diagnosed once, by count and by bytes"] = function()
-		for _, variant in { "count", "bytes" } do
+		for _, variant in { "count", "bytes", "seven" } do
 			local backend, a = D2.world()
 			local held = {}
 			local note = string.rep("q", 20000)
-			if variant == "count" then
-				for index = 1, 8 do
+			if variant == "count" or variant == "seven" then
+				for index = 1, if variant == "count" then 8 else 7 do
 					held[index] = D2.item(
 						D2.id(W - 500 - index, `h{index}`),
 						"grant",
@@ -386,11 +386,22 @@ return {
 			D2.join(backend, a)
 			backend:advance(200)
 			local envelope = D2.stored(backend)
+			if variant == "seven" then
+				spec.eq(#envelope.quarantine, 8, "seven: the eighth item fits")
+				spec.eq(#envelope.inbox, 0, "seven: and left the live inbox")
+				spec.eq(a.engine.logged("quarantine full"), 0, "seven: nothing to diagnose")
+				continue
+			end
 			spec.eq(#envelope.quarantine, #held, `{variant}: the quarantine did not grow`)
 			spec.eq(#envelope.inbox, 1, `{variant}: the item stays live`)
 			spec.eq(envelope.inbox[1].id, bad, `{variant}: it is the refused one`)
 			spec.eq(#record.calls, 1, `{variant}: the receiver saw only the valid item`)
 			spec.eq(envelope.payload.coins, 2, `{variant}: which was applied`)
+			local generation = envelope.inbox[1].generation
+			assert(
+				generation >= 3 and generation <= 5,
+				`{variant}: re-marked about once a minute, not at every save: {generation}`
+			)
 			spec.eq(
 				a.engine.logged("quarantine full for FD.Players 4120; clear it with clearQuarantined"),
 				1,
@@ -555,6 +566,148 @@ return {
 		backend:advance(2)
 		spec.eq(#record.calls, 1, "an added optional field does not fail the receiver")
 		spec.eq(D2.stored(backend).payload.coins, 2, "applied")
+	end,
+	["rule 73 clearQuarantined refuses an id over 64 bytes at the call, and a retry fits a 128th item exactly"] = function()
+		local backend, a = D2.world()
+		local outcome = {}
+		a.run(function()
+			outcome.ok, outcome.err = pcall(function()
+				return a.store.inbox:clearQuarantined(D2.USER, { string.rep("x", 65) }, "retry")
+			end)
+		end)
+		spec.eq(outcome.ok, false, "an oversize id throws")
+		spec.eq(#backend.calls, 0, "before any call")
+		local items = {}
+		for index = 1, 127 do
+			items[index] = D2.item(D2.id(W - 1000 - index, `m{index}`), "unhandled", { amount = 1 })
+		end
+		local id = D2.id(W - 20, "q1")
+		D2.seed(backend, nil, {
+			inbox = items,
+			quarantine = { D2.item(id, "grant", { amount = 6 }, { reason = "payload", generation = 1 }) },
+		})
+		local result = clearQuarantined(a, { id }, "retry")
+		backend:advance(1)
+		spec.eq(result.value.value, 1, "the 128th item fits")
+		spec.eq(#inbox(backend), 128, "and returned to the inbox")
+	end,
+	["rule 72 a confirmed envelope retires the acks it holds and the marks it proves applied or gone"] = function()
+		local backend, a = D2.world()
+		local player = D2.join(backend, a)
+		local session = D2.session(a, player)
+		local function item(id, generation, attempts)
+			return D2.item(id, "none", { amount = 1 }, { generation = generation, attempts = attempts })
+		end
+		session.confirmed = 3
+		session.acks["x1"] = 1
+		session.acks["x2"] = 4
+		session.marks["m1"] = { id = "m1", generation = 2, attempts = 1 }
+		session.marks["m2"] = { id = "m2", generation = 2, attempts = 1 }
+		session.marks["m3"] = { id = "m3", generation = 2, attempts = 1 }
+		session.marks["m4"] = { id = "m4", generation = 2, attempts = 0, quarantine = "payload" }
+		session.marks["m5"] = { id = "m5", generation = 2, attempts = 1, quarantine = "attempts" }
+		a.store.inbox:deliver(
+			session,
+			{ inbox = { item("m1", 2, 1), item("m2", 3, 1), item("m4", 3, 0), item("m5", 3, 5) } }
+		)
+		spec.eq(session.acks["x1"], nil, "an ack at a confirmed revision is retired")
+		spec.eq(session.acks["x2"], 4, "an ack above the confirmed revision stays")
+		assert(session.marks["m1"] ~= nil, "a mark whose item still has its generation stays")
+		spec.eq(session.marks["m2"], nil, "a mark whose item moved to a higher generation is retired")
+		spec.eq(session.marks["m3"], nil, "a mark whose item is gone is retired")
+		spec.eq(session.marks["m4"], nil, "a quarantine mark that left the item live is retired")
+		spec.eq(session.marks["m5"], nil, "and so is one whose attempts moved")
+		spec.eq(a.engine.logged("quarantine full"), 1, "only the unmoved one was a full quarantine")
+		spec.eq(#session.inbox, 4, "the session keeps the envelope it read")
+	end,
+	["rule 73 a retried item is attempted at once, not after its old retry delay"] = function()
+		local backend, a = D2.world()
+		local id = D2.id(W - 10, "m1")
+		D2.seed(backend, nil, { inbox = { D2.item(id, "grant", { amount = "bad" }) } })
+		D2.receiver(a, D2.message("grant"))
+		D2.join(backend, a)
+		backend:advance(2)
+		spec.eq(#D2.stored(backend).quarantine, 1, "quarantined for its payload")
+		local calls = 0
+		a.store.inbox:receive(D2.lenient("grant"), function(_, data)
+			calls += 1
+			local value = table.clone(data)
+			value.coins += 100
+			return value
+		end)
+		local cleared = clearQuarantined(a, { id }, "retry")
+		backend:advance(1.5)
+		spec.eq(cleared.value.value, 1, "the operator retried it")
+		spec.eq(calls, 1, "and the session applied it within a round trip")
+		spec.eq(D2.stored(backend).payload.coins, 100, "once")
+	end,
+	["rule 73 a marked item is not attempted again by a later scan, and waiting items wake at the earliest due time"] = function()
+		local backend, a = D2.world()
+		local poison = D2.id(W - 30, "p1")
+		local later = D2.id(W - 20, "j1")
+		local sooner = D2.id(W - 10, "j2")
+		D2.seed(backend, nil, {
+			inbox = {
+				D2.item(poison, "grant", { amount = 13 }),
+				D2.item(later, "grant", { amount = 100 }, { attempts = 2, generation = 3 }),
+				D2.item(sooner, "grant", { amount = 10 }, { attempts = 1, generation = 1 }),
+			},
+		})
+		local record = D2.receiver(a, D2.message("grant"), {
+			throws = function(payload)
+				return payload.amount == 13
+			end,
+		})
+		local gate = backend:gate("transform", { server = a.id, index = 2 })
+		local player = D2.join(backend, a)
+		backend:advance(1)
+		spec.eq(#record.calls, 1, "the poisoned item failed once")
+		backend:advance(5)
+		spec.eq(#record.calls, 2, "the item due first ran at its own time")
+		spec.eq(D2.session(a, player).value.coins, 10, "and only that one")
+		backend:advance(10)
+		spec.eq(#record.calls, 3, "the other ran when it came due")
+		spec.eq(
+			D2.session(a, player).value.coins,
+			110,
+			"the pending mark kept the poisoned item out of every later scan"
+		)
+		gate.release()
+		backend:advance(2)
+	end,
+	["rule 29 and 72 a sealed session's pending mark rides the next acquisition and applies by its generation"] = function()
+		local backend, a = D2.world()
+		local id = D2.id(W - 10, "m1")
+		D2.seed(backend, nil, { inbox = { D2.item(id, "grant", { amount = 13 }) } })
+		D2.receiver(a, D2.message("grant"), {
+			throws = function()
+				return true
+			end,
+		})
+		backend:fail("transient", { server = a.id }, 100000, { after = 1 })
+		local player = D2.join(backend, a)
+		D2.set(a, player, function()
+			return { coins = 5, gems = 0 }
+		end)
+		spec.eq(D2.session(a, player).marks[id].attempts, 1, "the failed attempt is staged")
+		local handoff = a.run(function()
+			return a.store:handoff(player)
+		end)
+		backend:advance(11)
+		spec.eq(handoff.value, "uncertain", "the release cannot land")
+		spec.eq(#inbox(backend), 1, "the item is still queued")
+		spec.eq(inbox(backend)[1].attempts, 0, "the mark never reached the disk")
+		backend:advance(70)
+		clear(backend)
+		local resumed = a.run(function()
+			return a.store:resume(player)
+		end)
+		D2.untilDone(backend, resumed, 60)
+		spec.eq(resumed.value, true, "resumed")
+		local envelope = D2.stored(backend)
+		spec.eq(envelope.payload.coins, 5, "the acquisition carried the sealed revision")
+		spec.eq(envelope.inbox[1].attempts, 1, "and the mark, applied by its generation")
+		spec.eq(envelope.inbox[1].generation, 1, "which raised it")
 	end,
 	["rule 52 and 67 sends are accepted until the dispatch cutoff and return closing after it"] = function()
 		local backend, a = D2.sweepWorld(function(realm)

@@ -62,9 +62,17 @@ return {
 		local over = send(overLimit)
 		spec.eq(over.ok, false, "an oversize payload throws")
 		spec.has(over.err, "8193 bytes, over 8192", "naming the sizes")
-		spec.eq(send({ amount = 1 }, "abc").ok, false, "an id operationId() did not make throws")
-		spec.eq(send({ amount = 1 }, D2.id(W, string.rep("a", 70))).ok, false, "an id over 64 bytes throws")
-		spec.eq(send({ amount = 1 }, 5).ok, false, "a non-string id throws")
+		for label, id in
+			{
+				["an id operationId() did not make"] = "abc",
+				["an id over 64 bytes"] = D2.id(W, string.rep("a", 70)),
+				["a non-string id"] = 5,
+			}
+		do
+			local outcome = send({ amount = 1 }, id)
+			spec.eq(outcome.ok, false, `{label} throws`)
+			spec.has(outcome.err, "operationId()", `{label}: naming where ids come from`)
+		end
 		spec.eq(#backend.calls, 0, "nothing was dispatched")
 		local fits = send(atLimit)
 		backend:advance(1)
@@ -261,6 +269,22 @@ return {
 		spec.eq(send(decl, { amount = 1 }, neighbour), "ok", "an id one character apart is another id")
 		spec.eq(#inbox(backend), 1, "so it was appended")
 	end,
+	["rule 69 a send without an id makes an operationId that carries its creation second"] = function()
+		local backend, a = D2.world()
+		local decl = D2.message("grant")
+		D2.send(a, decl, { amount = 1 })
+		D2.send(a, decl, { amount = 2 })
+		backend:advance(1)
+		local items = inbox(backend)
+		spec.eq(#items, 2, "each call made its own id")
+		assert(items[1].id ~= items[2].id, "distinct ids")
+		for _, item in items do
+			local seconds, suffix = string.match(item.id, "^o1%-(%w+)%-(%w+)$")
+			assert(seconds ~= nil and suffix ~= nil, `the shape o1-<second>-<guid>: {item.id}`)
+			spec.eq(tonumber(seconds, 36), W, "the creation second in base 36")
+			assert(#item.id <= 64, "at most 64 bytes")
+		end
+	end,
 	["rule 69 an id outside its age horizon is expired before dispatch or again inside the transform"] = function()
 		local backend, a = D2.world()
 		local decl = D2.message("grant")
@@ -404,6 +428,17 @@ return {
 		for index = 1, 128 do
 			spec.eq(stored[index].id, items[index].id, `item {index} kept its place`)
 		end
+
+		local roomy, d = D2.world()
+		local almost = {}
+		for index = 1, 127 do
+			almost[index] = D2.item(D2.id(W - 1000 - index, `m{index}`), "grant", { amount = index })
+		end
+		D2.seed(roomy, nil, { inbox = almost })
+		local last = D2.send(d, decl, { amount = 1 }, D2.id(W, "last"))
+		roomy:advance(1)
+		spec.eq(last.value.kind, "ok", "the 128th message fits")
+		spec.eq(#inbox(roomy), 128, "and is queued")
 
 		local big, c = D2.world()
 		local note = string.rep("n", 4000)

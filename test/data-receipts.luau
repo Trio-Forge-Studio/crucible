@@ -72,7 +72,9 @@ return {
 		end
 		refused(D2.info("R1", 99), "an unknown product")
 		refused(D2.info("R1", 99), "an unknown product again")
+		refused(D2.info("R1", 98), "another unknown product")
 		spec.eq(a.engine.logged("product 99"), 1, "an unknown product is diagnosed once per product")
+		spec.eq(a.engine.logged("product 98"), 1, "and each product has its own")
 		refused(D2.info(""), "an empty purchase id")
 		refused(D2.info(string.rep("x", 65)), "a purchase id over 64 bytes")
 		refused(D2.info(5), "a purchase id that is not a string")
