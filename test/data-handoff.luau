@@ -127,10 +127,17 @@ return {
 		call(a, "handoff", pa)
 		backend:advance(1)
 		loaded(backend, b)
+		local start = backend.now
 		local resumed = call(a, "resume", pa)
-		backend:advance(125)
+		backend:advance(a.limits.LOAD_DEADLINE_SECONDS - 0.1)
+		spec.eq(resumed.done, false, "K8: resume polls the live lease until the load deadline")
+		spec.eq(a.kicked(pa), nil, "and kicks no one before it")
+		assert(#backend:callsTo({ server = a.id }) > 10, "every poll was an acquisition attempt")
+		backend:advance(0.35)
 		spec.eq(resumed.value, false, "never steals the destination's lease")
 		spec.eq(a.kicked(pa), a.limits.LOAD_BUSY_MESSAGE, "kicked busy")
+		local late = a.kicks[1].at - start - a.limits.LOAD_DEADLINE_SECONDS
+		assert(late >= 0 and late <= 0.25, `K8: refused at the load deadline, {late} s after it`)
 		spec.eq(stored(backend).lease.serverId, b.id, "destination keeps its lease")
 	end,
 	["rule 47 K6 resume during a release's backoff waits for it to settle"] = function()
