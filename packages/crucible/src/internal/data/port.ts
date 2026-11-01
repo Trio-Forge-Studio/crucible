@@ -35,6 +35,7 @@ export interface DataPort {
 	readonly players: {
 		readonly count: () => number;
 		readonly present: (player: Player) => boolean;
+		readonly byUserId: (userId: number) => Player | undefined;
 		readonly kick: (player: Player, message: string) => void;
 	};
 }
@@ -172,6 +173,7 @@ export function createRobloxDataPort(): DataPort {
 		players: {
 			count: () => players.GetPlayers().size(),
 			present: (player) => player.Parent === players,
+			byUserId: (userId) => players.GetPlayerByUserId(userId),
 			kick: (player, message) => player.Kick(message),
 		},
 	};

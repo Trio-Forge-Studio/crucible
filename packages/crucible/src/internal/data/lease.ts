@@ -1,4 +1,5 @@
 import { emptyEnvelope, envelopeBytes, parseEnvelope, type Envelope, type Lease } from "./envelope";
+import { applyAcks, applyMarks, type InboxMark } from "./inbox-transforms";
 import { LEASE_SECONDS, MAX_ENVELOPE_BYTES, TAKEOVER_GRACE_SECONDS } from "./limits";
 import type { StoredValue } from "./port";
 
@@ -8,6 +9,10 @@ export interface Snapshot {
 	readonly schemaVersion: number;
 	readonly payload: object;
 	readonly receipts: readonly string[];
+	/** Inbox ids applied in revisions up to `revision` (rule 72). */
+	readonly acks: readonly string[];
+	/** Staged attempt counts and quarantine moves, applied whatever the payload revision (rule 72). */
+	readonly marks: readonly InboxMark[];
 }
 
 /** @internal A sealed session of this server whose release settled, keyed by its token in `supersedes` (rule 29). */
@@ -66,20 +71,27 @@ function union(stored: readonly string[], staged: readonly string[]): readonly s
 	return result;
 }
 
-function stored(current: StoredValue | undefined, userId: number, envelope: Envelope): StoredValue {
+/** @internal */
+export function stored(current: StoredValue | undefined, userId: number, envelope: Envelope): StoredValue {
 	const userIds = [...(current?.userIds ?? [])];
 	if (!userIds.includes(userId)) userIds.push(userId);
 	return { value: envelope, userIds, metadata: current?.metadata ?? {} };
 }
 
 function withSnapshot(envelope: Envelope, snapshot: Snapshot, commit: Envelope["commit"]): Envelope {
-	return {
-		...envelope,
-		payload: snapshot.payload,
-		schemaVersion: snapshot.schemaVersion,
-		receipts: union(envelope.receipts, snapshot.receipts),
-		commit,
-	};
+	return applyMarks(
+		applyAcks(
+			{
+				...envelope,
+				payload: snapshot.payload,
+				schemaVersion: snapshot.schemaVersion,
+				receipts: union(envelope.receipts, snapshot.receipts),
+				commit,
+			},
+			snapshot.acks,
+		),
+		snapshot.marks,
+	);
 }
 
 /** @internal Takes the lease only when absent, our own settled sealed token's, or past expiry plus grace (rule 24). */
@@ -173,7 +185,9 @@ export function ownedWrite(
 	const revision = commit?.token === input.token ? commit.revision : -1;
 	const marker = { token: input.token, revision: math.max(input.snapshot.revision, revision), op: input.op };
 	const written: Envelope = {
-		...(input.snapshot.revision > revision ? withSnapshot(envelope, input.snapshot, marker) : envelope),
+		...(input.snapshot.revision > revision
+			? withSnapshot(envelope, input.snapshot, marker)
+			: applyMarks(envelope, input.snapshot.marks)),
 		lease: input.release ? undefined : { ...lease, expiresAt: wall + LEASE_SECONDS },
 		commit: marker,
 	};

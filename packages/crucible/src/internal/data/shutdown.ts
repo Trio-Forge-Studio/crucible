@@ -28,6 +28,7 @@ export function shutdownData(engine: DataEngine, subsystem?: Subsystem) {
 	const settleAt = deadline - SETTLE_MARGIN_SECONDS;
 	engine.scheduler.setDispatchCutoff(cutoff);
 	engine.closing = true;
+	engine.receipts.close();
 	for (const runtime of engine.profiles)
 		for (const [, session] of runtime.sessions) {
 			if (session.phase === Phase.Loading) session.abandoned = true;

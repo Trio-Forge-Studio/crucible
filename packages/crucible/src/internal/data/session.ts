@@ -1,7 +1,8 @@
 import { bootClock } from "../boot";
 import { call, CallResult } from "../runner";
 import { admitWrite, type Schema } from "./admission";
-import { jsonBytes } from "./envelope";
+import { jsonBytes, type InboxItem } from "./envelope";
+import type { InboxMark } from "./inbox-transforms";
 import type { Snapshot } from "./lease";
 import { PAYLOAD_MAX_BYTES } from "./limits";
 import type { Priority, Ticket } from "./scheduler";
@@ -52,6 +53,16 @@ export class Session {
 	readonly receipts = new Array<string>();
 	/** Exactly the receipts of the last envelope a confirming owned write returned or found (rule 28). */
 	durable = new Set<string>();
+	/** afterGrant effects staged with their grant, run once its id is durable (rule 61). */
+	readonly effects = new Map<string, Array<() => void>>();
+	/** Applied inbox ids by the revision that applied them, kept until a confirmed write holds that revision (rule 72). */
+	readonly acks = new Map<string, number>();
+	/** At most one mark per item, against the generation last read (rule 72). */
+	readonly marks = new Map<string, InboxMark>();
+	/** The inbox of the newest envelope this session read, which acks and marks adjust (rules 71, 72). */
+	inbox: readonly InboxItem[] = [];
+	/** When an item may be attempted again, by id (rule 73). */
+	readonly retryAt = new Map<string, number>();
 	writing?: Ticket;
 	/** The revision the current operation's latest attempt carries. */
 	carrying = NONE;
@@ -76,11 +87,19 @@ export class Session {
 	}
 
 	snapshot(): Snapshot {
+		const applied = new Array<[string, number]>();
+		for (const [id, revision] of this.acks) applied.push([id, revision]);
+		applied.sort((a, b) => a[1] < b[1]);
+		const acks = applied.map(([id]) => id);
+		const marks = new Array<InboxMark>();
+		for (const [, mark] of this.marks) marks.push(mark);
 		return {
 			revision: this.revision,
 			schemaVersion: this.schema.version,
 			payload: this.value,
 			receipts: [...this.receipts],
+			acks,
+			marks,
 		};
 	}
 
