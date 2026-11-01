@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { stripVTControlCharacters } = require("node:util");
 const ts = require("typescript");
 const transform = require("../index.cjs");
 const { setup } = require("./side-harness.cjs");
@@ -69,6 +70,13 @@ function compile(game, expected = 0) {
 	assert.equal(result.status, expected, output);
 	return output;
 }
+function buildDiagnostics(output, code) {
+	const plain = stripVTControlCharacters(output);
+	const files = [...plain.matchAll(/^(\S+\.ts):\d+:\d+ - error TS\d+: (CRU\d+)/gm)]
+		.filter((match) => match[2] === code)
+		.map((match) => match[1].replaceAll("\\", "/"));
+	return [...new Set(files)].sort();
+}
 function descriptorExpressions(text) {
 	const sf = ts.createSourceFile("emitted.ts", text, ts.ScriptTarget.Latest, true);
 	const found = new Map();
@@ -88,4 +96,4 @@ function descriptorExpressions(text) {
 	walk(sf);
 	return found;
 }
-module.exports = { project, inspect, compile, descriptorExpressions, ts, fs, path, repo };
+module.exports = { project, inspect, compile, buildDiagnostics, descriptorExpressions, ts, fs, path, repo };
