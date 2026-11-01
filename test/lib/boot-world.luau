@@ -24,6 +24,9 @@ return function()
 		assert(coroutine.resume(thread))
 	end
 	w.engine.port.bindToClose = function(callback)
+		if w.bindToCloseError then
+			error(w.bindToCloseError)
+		end
 		table.insert(w.closers, callback)
 	end
 	function w.service(id, methods, options)
@@ -44,13 +47,17 @@ return function()
 		)
 		return class, w.registry.recordOf(class)
 	end
-	function w.boot(options, client)
+	-- `overrides.booted` and `overrides.commit` replace the finalization steps the network specs inject faults into.
+	function w.boot(options, client, overrides)
+		overrides = overrides or {}
+		local function none() end
 		w.bootModule.ignite(w.engine.port, {
 			name = if client then "client" else "server",
 			renders = client == true,
-			booted = function()
+			booted = overrides.booted or function()
 				table.insert(w.events, "booted")
 			end,
+			network = { open = none, loaded = none, commit = overrides.commit or none, close = none },
 		}, options or {})
 	end
 	function w.empty()

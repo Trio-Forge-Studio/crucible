@@ -3,6 +3,7 @@ local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
 local task = require("@lune/task")
 local engine = require("./engine")
+local networkPort = require("./network-port")
 
 roblox.implementMethod("Instance", "WaitForChild", function(instance, name: string)
 	return assert(instance:FindFirstChild(name), `{instance:GetFullName()} has no child {name}`)
@@ -85,6 +86,9 @@ return function(client: boolean?)
 			loaded[module] = { value = chunk() }
 			if module.Name == "log-output" and module.Parent.Name == "internal" then
 				loaded[module].value.installLoggingPort(e.loggingPort)
+			end
+			if module.Name == "port" and module.Parent.Name == "network" then
+				loaded[module].value.installNetworkPort(networkPort())
 			end
 		end
 		return loaded[module].value
