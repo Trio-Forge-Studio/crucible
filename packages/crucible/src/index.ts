@@ -15,3 +15,5 @@ export type { Logger, LogRecord, LogSink, SinkSubscription, LogContext, LogPrope
 
 export { state, computed, effect, watch, untracked, scope, onCleanup } from "./reactive";
 export type { Readable, State } from "./reactive";
+
+export type { Json, JsonRecord, Migration } from "./data";

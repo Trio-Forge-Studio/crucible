@@ -440,6 +440,9 @@ function Backend:realm(options)
 	realm.shutdown = realm.graph.module("internal/data/shutdown")
 	local profiles = realm.graph.module("internal/data/profiles")
 	realm.data = profiles.DataEngine.new(realm.port)
+	realm.n = realm.graph.module("internal/network/schema").n
+	realm.records = realm.graph.module("internal/data/records")
+	realm.admission = realm.graph.module("internal/data/admission")
 
 	-- Defines framework-shaped Subsystems, then ignites the realm so bootClock() is this realm's clock (rule 25).
 	local emit = realm.graph.module("emit")
@@ -456,11 +459,31 @@ function Backend:realm(options)
 	end
 	realm.boot.ignite(boot, { name = "server", renders = false, booted = function() end }, {})
 
-	-- A profile store's engine with the D1 seams: identity load, no claims, and a recorded slot.
-	function realm.profile(name: string, defaults, version: number?)
+	-- The schema an engine takes: with `shape.migrations` the version is their count (rule 74), and with `shape.node` the
+	-- descriptor admits. Without a node every key is undeclared and kept in place.
+	function realm.schema(name: string, defaults, shape)
+		shape = shape or {}
+		return {
+			name = name,
+			version = if shape.migrations then #shape.migrations else shape.version or 0,
+			defaults = defaults or {},
+			node = shape.node,
+			migrations = shape.migrations,
+		}
+	end
+
+	-- A generic store's engine on this realm's scheduler (rules 85 to 91).
+	function realm.recordStore(name: string, defaults, shape)
+		return realm.records.RecordStore.new(realm.data, realm.schema(name, defaults, shape))
+	end
+
+	-- A profile store's engine with the D1 seams: identity load, no claims, and a recorded slot. `version` is a number
+	-- or a schema shape table (`node`, `migrations`).
+	function realm.profile(name: string, defaults, version: number | { [string]: any }?)
 		local published = {}
 		local reasons = {}
-		local runtime = realm.data:profile({ name = name, version = version or 0, defaults = defaults or {} }, {
+		local shape = if type(version) == "table" then version else { version = version }
+		local runtime = realm.data:profile(realm.schema(name, defaults, shape), {
 			onLoad = function(_, value, reason)
 				table.insert(reasons, reason)
 				return value

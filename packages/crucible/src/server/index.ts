@@ -8,6 +8,9 @@ installConfigRuntime();
 
 export { config, playerConfig, configReady, refreshConfigs } from "../configs";
 export type { Config, PlayerConfig } from "../configs";
+export { dataStore, operationId } from "./data";
+export type { DataStore, StoreOptions, UpdateResult } from "./data";
+export type { OperationId, StoreFailure, StoreResult } from "../data";
 
 export function boot(options: BootOptions) {
 	bootSide({ name: "server", renders: false, booted: () => {} }, options);

@@ -370,10 +370,11 @@ return {
 	["rule 14 and rule 110 prepare refuses an oversized payload, naming the store and never the value"] = function()
 		local backend, a = world()
 		local pa = loaded(backend, a)
-		local secret = "SECRET" .. string.rep("x", 262144)
+		local secret = "SECRET" .. string.rep("x", 60000)
+		local filler = string.rep("x", 60000)
 		local result = attempt(a, function()
 			a.store:write(pa, function()
-				return { coins = 1, note = secret }
+				return { coins = 1, note = { secret, filler, filler, filler, filler } }
 			end)
 		end)
 		spec.eq(result.ok, false, "refused at the call")
