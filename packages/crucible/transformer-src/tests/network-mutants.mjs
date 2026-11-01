@@ -423,13 +423,13 @@ const mutations = [
 		"V1 heritage clauses of reached types are followed",
 		"for (const clause of decl.heritageClauses ?? [])",
 		"for (const clause of [])",
-		"network augmentations of a base interface",
+		"network augmentations that add a base to an interface a payload reaches by heritage",
 	],
 	[
 		"V1 class heritage is followed",
 		"if (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
 		"if (ts.isInterfaceDeclaration(decl))",
-		"network augmentations of a base interface",
+		"network augmentations that add a base to an interface a payload reaches by heritage",
 	],
 	[
 		"V1 heritage expressions resolve as references",
@@ -475,31 +475,31 @@ const mutations = [
 		"F1 heritage bases resolve through the checker",
 		"mention(checker.getTypeAtLocation(base), location);",
 		"",
-		"network augmentations of a base reached through a typeof query",
+		"network augmentations that add a base to a class reached through a typeof query",
 	],
 	[
 		"F1 intersection bases reach every part",
 		"if (type.isIntersection()) for (const part of type.types) mention(part, location);",
 		"",
-		"network augmentations of a base reached through a typeof query",
+		"network augmentations that add a base to a class reached through a typeof query",
 	],
 	[
 		"F1 typeof queries are references",
 		"if (ts.isTypeQueryNode(syntax))",
 		"if (false)",
-		"network augmentations of a base reached through a typeof query",
+		"network augmentations that add a base to a class reached through a typeof query",
 	],
 	[
 		"F2 every type of a heritage clause is followed",
 		"for (const base of clause.types) {",
 		"for (const base of clause.types.slice(0, 1)) {",
-		"network augmentations of any base of a multi-base",
+		"network augmentations that add a base to any base of a multi-base",
 	],
 	[
 		"F2 every declaration of a merged symbol contributes heritage",
 		"for (const decl of decls)\n\t\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
 		"for (const decl of decls.slice(0, 1))\n\t\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
-		"network augmentations of any base of a multi-base",
+		"network augmentations that add a base to any base of a multi-base",
 	],
 	[
 		"F2 heritage cycle guard",
@@ -596,14 +596,8 @@ const mutations = [
 	],
 	[
 		"L1 properties reach the class or interface that declares them",
-		"reached.add(checker.getSymbolAtLocation(owner.name));",
+		"reached.add(checker.getSymbolAtLocation(decl.parent.name));",
 		"void 0;",
-		"network augmentations of a class a payload reaches only through a function return",
-	],
-	[
-		"L1 parameter properties reach their class",
-		"ts.isParameter(decl) ? decl.parent.parent : decl.parent",
-		"decl.parent",
 		"network augmentations of a class a payload reaches only through a function return",
 	],
 	[

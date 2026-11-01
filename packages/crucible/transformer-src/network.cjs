@@ -225,11 +225,9 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				kind: "object",
 				fields: props.map((prop) => {
 					const at = prop.valueDeclaration ?? prop.declarations?.[0] ?? node;
-					for (const decl of prop.declarations ?? []) {
-						const owner = ts.isParameter(decl) ? decl.parent.parent : decl.parent;
-						if (owner && (ts.isClassLike(owner) || ts.isInterfaceDeclaration(owner)) && owner.name)
-							reached.add(checker.getSymbolAtLocation(owner.name));
-					}
+					for (const decl of prop.declarations ?? [])
+						if (ts.isInterfaceDeclaration(decl.parent))
+							reached.add(checker.getSymbolAtLocation(decl.parent.name));
 					references(at.type, `${location}.${prop.name}`);
 					if (prop.escapedName.toString().startsWith("__@"))
 						fail(node, location, "symbol property names cannot cross the network");

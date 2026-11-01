@@ -486,17 +486,12 @@ const flattenedClasses = [
 	"KField",
 	"KRecord",
 	"KRecordReturn",
-	"KParam",
 	"KUnreached",
 ];
 const flattenedGame = () =>
 	project({
 		"src/shared/base.ts": [
-			...flattenedClasses
-				.filter((name) => name !== "KParam")
-				.map((name) => `export class ${name} { k = 1; keep = 1; }`),
-			"export class KParam { constructor(public k: number, public keep: number) {} }",
-			"export const makeParam = () => new KParam(1, 2);",
+			...flattenedClasses.map((name) => `export class ${name} { k = 1; keep = 1; }`),
 			"export const make = () => new KReturn();",
 			"export const ConstAlias = KConst;",
 			"export const makePayload = () => new KPayload();",
@@ -504,10 +499,10 @@ const flattenedGame = () =>
 			"export const makeField = () => new KField();",
 			"export const makeRecord = () => new KRecordReturn();",
 			"export const makeUnreached = () => new KUnreached();",
-			"export function mixin<T extends new () => object>(base: T): new () => Omit<InstanceType<T>, 'k'> { return base as never; }",
+			"export function mixin<T extends new (...args: never[]) => object>(base: T): new () => Omit<InstanceType<T>, 'k'> { return base as never; }",
 		].join("\n"),
 		"src/shared/model.ts": [
-			`import { ${flattenedClasses.join(", ")}, make, ConstAlias, makePayload, makeMapped, makeField, makeRecord, makeParam, makeUnreached, mixin } from "./base";`,
+			`import { ${flattenedClasses.join(", ")}, make, ConstAlias, makePayload, makeMapped, makeField, makeRecord, makeUnreached, mixin } from "./base";`,
 			"export interface ViaReturn extends Omit<ReturnType<typeof make>, 'k'> { own: string }",
 			"export interface ViaConst extends Omit<InstanceType<typeof ConstAlias>, 'k'> { own: string }",
 			"export interface Holder<T = KDefault> { v: Omit<T, 'k'> }",
@@ -519,13 +514,12 @@ const flattenedGame = () =>
 			"export interface ViaField { inner: Omit<ReturnType<typeof makeField>, 'k'> }",
 			"export type ViaRecord = Record<keyof InstanceType<typeof KRecord>, string>;",
 			"export type ViaRecordReturn = Record<keyof ReturnType<typeof makeRecord>, string>;",
-			"export type ViaParam = Omit<ReturnType<typeof makeParam>, 'k'>;",
 			"export interface ViaUnreached extends Omit<ReturnType<typeof makeUnreached>, 'k'> { own: string }",
 		].join("\n"),
 		"src/shared/messages.ts":
 			imports +
 			[
-				'import { ViaReturn, ViaConst, ViaDefault, ViaPayload, ViaMapped, ViaMixin, ViaField, ViaRecord, ViaRecordReturn, ViaParam } from "./model";',
+				'import { ViaReturn, ViaConst, ViaDefault, ViaPayload, ViaMapped, ViaMixin, ViaField, ViaRecord, ViaRecordReturn } from "./model";',
 				'export const A = toServer<ViaReturn>("X.A");',
 				'export const B = toServer<ViaConst>("X.B");',
 				'export const C = toServer<ViaDefault>("X.C");',
@@ -535,7 +529,6 @@ const flattenedGame = () =>
 				'export const G = toServer<ViaField>("X.G");',
 				'export const H = toServer<ViaRecord>("X.H");',
 				'export const I = toServer<ViaRecordReturn>("X.I");',
-				'export const J = toServer<ViaParam>("X.J");',
 			].join("\n"),
 		...Object.fromEntries(
 			flattenedClasses.map((name) => [
@@ -553,7 +546,6 @@ test("network augmentations of a class a payload reaches only through a function
 		"kfield",
 		"kmapped",
 		"kmixin",
-		"kparam",
 		"kpayload",
 		"krecord",
 		"krecordreturn",
@@ -579,6 +571,91 @@ test("network augmentations of any base of a multi-base or merged interface fail
 		"src/util/b.ts": augmentation("../shared/base", "interface B { extra: string }"),
 		"src/util/c.ts": augmentation("../shared/base", "interface C { extra: string }"),
 		"src/util/d.ts": augmentation("../shared/base", "interface D { extra: string }"),
+	});
+	assert.deepEqual(flagged(game), ["a", "b", "c", "d"]);
+	assert.deepEqual(utilDiagnostics(compile(game, 1)), [
+		"src/util/a.ts",
+		"src/util/b.ts",
+		"src/util/c.ts",
+		"src/util/d.ts",
+	]);
+});
+
+const addedBase = (module, name) =>
+	`import { Added } from "${module}"; declare module "${module}" { interface ${name} extends Added {} }`;
+
+test("network augmentations that add a base to an interface a payload reaches by heritage fail at the augmentation", () => {
+	const game = project({
+		"src/shared/base.ts":
+			"export interface Added { added: string } export interface Base {} export interface Root {} export class KBase {}",
+		"src/shared/model.ts":
+			'import { Base, Root, KBase } from "./base"; export interface Child extends Base { child: string } export interface Middle extends Root { middle: string } export interface Top extends Middle { top: string } export class Klass extends KBase { own = 2; }',
+		"src/shared/messages.ts":
+			imports +
+			'import { Child, Top, Klass } from "./model"; export const One = toServer<Child>("X.One"); export const Two = toServer<Top>("X.Two"); export const Three = toServer<Klass>("X.Three");',
+		"src/util/base.ts": addedBase("../shared/base", "Base"),
+		"src/util/root.ts": addedBase("../shared/base", "Root"),
+		"src/util/kbase.ts": addedBase("../shared/base", "KBase"),
+	});
+	assert.deepEqual(flagged(game), ["base", "kbase", "root"]);
+	assert.match(compile(game, 1), /CRU010/);
+});
+
+test("network augmentations that add a base to a class reached through a typeof query or a call expression fail", () => {
+	const classes = ["KQuery", "KMix", "KAlias", "KInline", "KLeft", "KRight", "KOther"];
+	const game = project({
+		"src/shared/base.ts": [
+			"export interface Added { added: string }",
+			...classes.map((name) => `export class ${name} {}`),
+			"export function mix<T extends new () => object>(base: T): T { return base; }",
+			"export function both<A extends new () => object, B extends new () => object>(a: A, b: B): new () => InstanceType<A> & InstanceType<B> { return a as never; }",
+		].join("\n"),
+		"src/shared/model.ts": [
+			"import { " + classes.join(", ") + ', mix, both } from "./base";',
+			"export interface ViaQuery extends InstanceType<typeof KQuery> { own: string }",
+			"export class ViaMix extends mix(KMix) { own = 1; }",
+			"export class ViaBoth extends both(KLeft, KRight) { own = 1; }",
+			'export interface ViaAlias extends Omit<InstanceType<typeof KAlias>, "k"> { own: string }',
+			"export interface Unreached extends InstanceType<typeof KOther> { own: string }",
+		].join("\n"),
+		"src/shared/messages.ts":
+			imports +
+			[
+				'import { KInline } from "./base";',
+				'import { ViaQuery, ViaMix, ViaBoth, ViaAlias } from "./model";',
+				'export const One = toServer<ViaQuery>("X.One");',
+				'export const Two = toServer<ViaMix>("X.Two");',
+				'export const Three = toServer<ViaBoth>("X.Three");',
+				'export const Four = toServer<ViaAlias>("X.Four");',
+				'export const Five = toServer<Omit<InstanceType<typeof KInline>, "k">>("X.Five");',
+			].join("\n"),
+		...Object.fromEntries(
+			classes.map((name) => [`src/util/${name.toLowerCase()}.ts`, addedBase("../shared/base", name)]),
+		),
+	});
+	const expected = ["kalias", "kinline", "kleft", "kmix", "kquery", "kright"];
+	assert.deepEqual(flagged(game), expected);
+	assert.deepEqual(
+		utilDiagnostics(compile(game, 1)),
+		expected.map((name) => `src/util/${name}.ts`),
+	);
+});
+
+test("network augmentations that add a base to any base of a multi-base or merged interface fail", () => {
+	const game = project({
+		"src/shared/base.ts":
+			"export interface Added { added: string } export interface A {} export interface B {} export interface C {} export interface D {}",
+		"src/shared/model.ts":
+			'import { A, B, C, D } from "./base"; export interface Multi extends A, B { own: string } export interface Merged extends C { first: string } export interface Merged extends D { second: string }',
+		"src/shared/messages.ts":
+			imports +
+			'import { Multi, Merged } from "./model"; export const One = toServer<Multi>("X.One"); export const Two = toServer<Merged>("X.Two");',
+		...Object.fromEntries(
+			["A", "B", "C", "D"].map((name) => [
+				`src/util/${name.toLowerCase()}.ts`,
+				addedBase("../shared/base", name),
+			]),
+		),
 	});
 	assert.deepEqual(flagged(game), ["a", "b", "c", "d"]);
 	assert.deepEqual(utilDiagnostics(compile(game, 1)), [
