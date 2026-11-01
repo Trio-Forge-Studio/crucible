@@ -40,7 +40,7 @@ fn docs_topic_prints_the_file_verbatim() {
 
 #[test]
 fn unknown_topic_is_a_usage_error_naming_the_topics() {
-    let out = crucible(&["docs", "networking"]);
+    let out = crucible(&["docs", "no-such-topic"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty());
     let stderr = String::from_utf8(out.stderr).unwrap();
