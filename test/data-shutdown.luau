@@ -172,6 +172,56 @@ return {
 		spec.eq(final.payload.coins, 7, "the open-phase write was saved")
 		assert(realm.events.dataEnd - realm.events.dataStart < 3, "the hook returned once released")
 	end,
+	["rule 26 K15 an early flush in flight at the safe bound is not sent after it, only the release"] = function()
+		local backend, realm = world(function(r)
+			while true do
+				r.wait(1)
+			end
+		end)
+		local player = loaded(backend, realm)
+		backend:advance(0.2)
+		local issued
+		for _, call in backend:callsTo({ server = realm.id }) do
+			if call.committed then
+				issued = call.at
+			end
+		end
+		realm.port.random = function()
+			return 0
+		end
+		backend:fail("throttle", { server = realm.id }, 100000)
+		local bound = issued + realm.limits.LOCAL_AUTHORITY_SECONDS
+		local old = realm.store.sessions[player]
+		backend:advance(issued + 50 - backend.now)
+		set(realm, player, 3)
+		realm.close()
+		backend:advance(issued + 55 - backend.now)
+		assert(old.writing ~= nil and old.want ~= nil, "a renewal is retrying, the flush waits behind it")
+		for _, plan in backend.plans do
+			plan.remaining = 0
+		end
+		backend:fail("reject", { server = realm.id }, 1)
+		backend:fail("throttle", { server = realm.id }, 100000)
+		backend:advance(1)
+		backend:advance(issued + 69 - backend.now)
+		assert(old.writing ~= nil, "the flush is in flight")
+		assert(old.sealedBy == "shutdown", "sealed by the final phase")
+		backend:advance(bound + 2 - backend.now)
+		for _, plan in backend.plans do
+			plan.remaining = 0
+		end
+		backend:advance(3)
+		local count = 0
+		for _, call in backend:callsTo({ server = realm.id }) do
+			if call.committed and call.at > bound then
+				count += 1
+			end
+		end
+		spec.eq(count, 1, "one commit after the safe bound")
+		spec.eq(old.released, "committed", "and it is the release")
+		spec.eq(stored(backend).lease, nil, "the lease is released")
+		spec.eq(stored(backend).payload.coins, 3, "with the sealed revision")
+	end,
 	["rule 53 stalled hook: the final phase starts at deadline minus 10"] = function()
 		local backend, realm = world(function(r)
 			while true do
