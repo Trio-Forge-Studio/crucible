@@ -293,8 +293,44 @@ definitions["Worked.Map"] = r.catalog.define({
 local published = r.catalog.seal()
 
 local function byte(value)
-	assert(value < 128, "one-byte varuint")
-	return string.format("%02x", value)
+	local out = {}
+	repeat
+		local low = value % 128
+		value = value // 128
+		table.insert(out, string.format("%02x", if value > 0 then low + 128 else low))
+	until value == 0
+	return table.concat(out, " ")
+end
+
+local function cutReasons(node, packet, sidecar, slots)
+	local reads = {}
+	local reader = r.codec.Reader.new(packet, 0, sidecar, slots)
+	local take, count = reader.take, reader.count
+	function reader.take(self, size)
+		local offset = take(self, size)
+		table.insert(reads, { stop = offset + size })
+		return offset
+	end
+	function reader.count(self, minBytes, path)
+		local entries = count(self, minBytes, path)
+		table.insert(reads, { stop = self.cursor, entries = entries, minBytes = minBytes })
+		return entries
+	end
+	r.codec.compile(node).decode(reader, "payload")
+	local reasons = {}
+	for length = 0, buffer.len(packet) - 1 do
+		for _, read in reads do
+			if read.entries == nil and read.stop > length then
+				reasons[length] = "truncated packet"
+				break
+			elseif read.entries ~= nil and read.minBytes > 0 and read.entries * read.minBytes > length - read.stop then
+				reasons[length] = "count exceeds remaining bytes"
+				break
+			end
+		end
+		assert(reasons[length] ~= nil, `cut {length} has an expected rejection`)
+	end
+	return reasons
 end
 
 local function header(opcode, fields, reason)
@@ -333,6 +369,25 @@ tests["9 12 FD names seal into one realm catalog in byte order"] = function()
 	end
 end
 
+tests["9 index 128 frames as a two-byte varuint after 128 earlier sorted names"] = function()
+	local large = h.realm()
+	local node = large.n.object({ { "door", large.n.instance({ "Model" }) }, { "open", large.n.bool } })
+	local toggle = large.catalog.define({ name = "Doors.Toggle", kind = "to-server", input = node })
+	for i = 127, 0, -1 do
+		large.catalog.define({ name = string.format("Admin.M%03d", i), kind = "to-server", input = large.n["nil"] })
+	end
+	large.catalog.define({ name = "Zones.Last", kind = "to-server", input = large.n["nil"] })
+	large.catalog.seal()
+	spec.eq(large.catalog.catalogSize(), 130, "130 sealed declarations")
+	spec.eq(large.catalog.definitionAt(127).name, "Admin.M127", "last one-byte index")
+	spec.eq(toggle.index, 128, "Doors.Toggle sorts after the 128 Admin names")
+	spec.eq(large.catalog.definitionAt(128), toggle, "index 128 resolves")
+	local framed = message(toggle, { door = model, open = true })
+	spec.eq(h.hex(framed), "00 80 01 01 01", "index 128 is the varuint 80 01")
+	local reader = large.codec.Reader.new(framed, 1, {}, 0)
+	spec.eq(reader:varuint(), 128, "header index decodes")
+end
+
 for _, fixture in fixtures do
 	tests[`FD {fixture[1]} payload golden bytes`] = function()
 		local node, value, golden = fixture[2], fixture[3], fixture[4]
@@ -347,12 +402,13 @@ for _, fixture in fixtures do
 		spec.eq(h.hex(framed), expected, "header from the realm's sealed index, then the payload")
 		local decoded = h.decode(r, node, packet, sidecar, slots)
 		spec.eq(h.hex(h.encode(r, node, decoded)), golden, "decoded round trip")
+		local reasons = cutReasons(node, packet, sidecar, slots)
 		for length = 0, buffer.len(packet) - 1 do
 			local cut = buffer.create(length)
 			buffer.copy(cut, 0, packet, 0, length)
 			h.rejects(function()
 				h.decode(r, node, cut, sidecar, slots)
-			end)
+			end, reasons[length])
 		end
 	end
 end

@@ -322,15 +322,32 @@ tests["69 dynamic tags patches copies and hostile tables"] = function()
 		h.encode(r, r.n.dynamic, cycle)
 	end)
 	spec.eq(failure.reason, "cycle", "cycle detected before a budget is exhausted")
-	for _, bad in { cycle, { [2] = 1 }, { [1] = 1, a = 2 }, function() end, buffer.create(0), setmetatable({}, {}) } do
+	for _, bad in
+		{
+			{ cycle, "cycle" },
+			{ { [2] = 1 }, "expected dense array" },
+			{ { [1] = 1, a = 2 }, "mixed dynamic table" },
+			{ function() end, "expected table" },
+			{ buffer.create(0), "expected table" },
+			{ setmetatable({}, {}), "dynamic metatable" },
+		}
+	do
 		h.rejects(function()
-			h.encode(r, r.n.dynamic, bad)
-		end)
+			h.encode(r, r.n.dynamic, bad[1])
+		end, bad[2])
 	end
-	for _, bad in { "ff", "05 01 00", "05 01 0a", "06 01 01 61 00", "06 02 01 61 01 01 61 02" } do
+	for _, bad in
+		{
+			{ "ff", "bad dynamic tag" },
+			{ "05 01 00", "nil nested dynamic value" },
+			{ "05 01 0a", "Instance array element" },
+			{ "06 01 01 61 00", "nil nested dynamic value" },
+			{ "06 02 01 61 01 01 61 02", "record keys not strictly ascending" },
+		}
+	do
 		h.rejects(function()
-			h.decode(r, r.n.dynamic, h.bytes(bad))
-		end)
+			h.decode(r, r.n.dynamic, h.bytes(bad[1]))
+		end, bad[2])
 	end
 end
 
@@ -343,16 +360,24 @@ tests["70 71 budgets varuint truncation tags counts and sidecars reject before d
 		local reader = r.codec.Reader.new(packet, 0, {}, 0)
 		spec.eq(reader:varuint(), value, "minimal varuint")
 	end
-	for _, bad in { "80 00", "80", "ff ff ff ff 10", "80 80 80 80 80 00" } do
+	for _, bad in
+		{
+			{ "80 00", "non-minimal varuint" },
+			{ "80", "truncated packet" },
+			{ "ff ff ff ff 10", "varuint overflow" },
+			{ "80 80 80 80 80 00", "varuint overflow" },
+		}
+	do
 		h.rejects(function()
-			r.codec.Reader.new(h.bytes(bad), 0, {}, 0):varuint()
-		end)
+			r.codec.Reader.new(h.bytes(bad[1]), 0, {}, 0):varuint()
+		end, bad[2])
 	end
-	for _, bad in { "02", "01 00" } do
-		h.rejects(function()
-			h.decode(r, r.n.bool, h.bytes(bad))
-		end)
-	end
+	h.rejects(function()
+		h.decode(r, r.n.bool, h.bytes("02"))
+	end, "invalid boolean")
+	h.rejects(function()
+		h.decode(r, r.n.bool, h.bytes("01 00"))
+	end, "trailing bytes")
 	for _, sidecar in
 		{
 			{ ["01"] = h.roblox.Instance.new("Model") },
@@ -379,27 +404,27 @@ tests["70 71 budgets varuint truncation tags counts and sidecars reject before d
 	end, "invalid sidecar slot")
 	h.rejects(function()
 		h.decode(r, r.n["nil"], buffer.create(0), {}, 1)
-	end)
+	end, "unconsumed slots")
 	h.rejects(function()
 		r.codec.Reader.new(buffer.create(262145), 0, {}, 0)
-	end)
+	end, "invalid packet")
 	h.rejects(function()
 		h.encode(r, r.n.string, string.rep("x", 65537))
-	end)
+	end, "string too long")
 	local nested = true
 	for _ = 1, 33 do
 		nested = { nested }
 	end
 	h.rejects(function()
 		h.encode(r, r.n.dynamic, nested)
-	end)
+	end, "depth budget exhausted")
 	local budget = r.codec.Budget.new()
 	for _ = 1, 65536 do
 		budget:visit("payload")
 	end
 	h.rejects(function()
 		budget:visit("payload")
-	end)
+	end, "visit budget exhausted")
 end
 
 tests["70 shared budgets enforce exact visits depth entries bytes and slots"] = function()
@@ -420,18 +445,18 @@ tests["70 shared budgets enforce exact visits depth entries bytes and slots"] = 
 	local quartet = n.array(n.tuple({ n.bool, n.bool, n.bool, n.bool }))
 	h.rejects(function()
 		h.encode(r, quartet, table.create(16384, { true, false, true, false }))
-	end)
+	end, "visit budget exhausted")
 	local tooManyVisits = buffer.create(3 + 16384 * 4)
 	buffer.writeu8(tooManyVisits, 0, 128)
 	buffer.writeu8(tooManyVisits, 1, 128)
 	buffer.writeu8(tooManyVisits, 2, 1)
 	h.rejects(function()
 		h.decode(r, quartet, tooManyVisits)
-	end)
+	end, "visit budget exhausted")
 	local depthBytes = string.rep("\5\1", 33) .. "\1"
 	h.rejects(function()
 		h.decode(r, n.dynamic, buffer.fromstring(depthBytes))
-	end)
+	end, "depth budget exhausted")
 	local slots = n.array(n.instance({ "Model" }))
 	local model = h.roblox.Instance.new("Model")
 	local slotPacket, sidecar, count = h.encode(r, slots, table.create(256, model))
@@ -439,10 +464,10 @@ tests["70 shared budgets enforce exact visits depth entries bytes and slots"] = 
 	spec.eq(#h.decode(r, slots, slotPacket, sidecar, count), 256, "all slots consumed")
 	h.rejects(function()
 		h.encode(r, slots, table.create(257, model))
-	end)
+	end, "slot budget exhausted")
 	h.rejects(function()
 		r.codec.Reader.new(slotPacket, 0, sidecar, 257)
-	end)
+	end, "integer out of range")
 	local writer = r.codec.Writer.new()
 	for _ = 1, 262144 do
 		writer:u8(0)
@@ -450,27 +475,27 @@ tests["70 shared budgets enforce exact visits depth entries bytes and slots"] = 
 	spec.eq(buffer.len(writer:finish(buffer.create(0))), 262144, "packet ceiling accepted")
 	h.rejects(function()
 		writer:u8(0)
-	end)
+	end, "packet too large")
 	h.rejects(function()
 		writer:finish(buffer.create(1))
-	end)
+	end, "packet too large")
 	h.rejects(function()
 		r.codec.Reader.new(h.bytes("01"), 0, {}, 0):count(8, "payload")
-	end)
+	end, "count exceeds remaining bytes")
 	local floating = buffer.create(24)
 	buffer.writef64(floating, 0, 1e300)
 	for _, node in { n.vector3, n.color3 } do
 		h.rejects(function()
 			h.decode(r, node, floating)
-		end)
+		end, "expected finite number")
 	end
 	local tooManyEntries = n.array(n.array(n.literal("Tick")))
 	h.rejects(function()
 		h.encode(r, tooManyEntries, { table.create(8192, "Tick"), table.create(8192, "Tick") })
-	end)
+	end, "entry budget exhausted")
 	h.rejects(function()
 		h.decode(r, tooManyEntries, h.bytes("02 80 40 80 40"))
-	end)
+	end, "entry budget exhausted")
 end
 
 tests["57 62 descriptors freeze copy and reject malformed or oversized graphs"] = function()
