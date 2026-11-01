@@ -1,0 +1,46 @@
+{
+	"source": "data round extraction",
+	"files": [
+		{
+			"file": "src/core/Input/shared/keybinds.ts",
+			"declarations": ["rebindableActions", "RebindableAction", "Keybinds"],
+			"sha256": "1a30d317959eae3a0e25962d8e5dbaeb1ef16bb534391738d6d883bb9779db9b"
+		},
+		{
+			"file": "src/core/Career/shared/career.ts",
+			"declarations": ["ItemTallies", "JobRecord", "Career", "PlayedAnchor"],
+			"sha256": "4cd72c640ced2afaaa2f3a86b0e2e0489a58982db5a813a0aba08b0bbb41e782"
+		},
+		{
+			"file": "src/core/Data/shared/template.ts",
+			"declarations": [
+				"VolumeChannel",
+				"ButtonPrompts",
+				"FreeCursorMode",
+				"GraphicsQuality",
+				"PlayerSettings",
+				"DailyRewardHistory",
+				"EntranceSettings",
+				"CoreData",
+				"PlayerData",
+				"OwnerData"
+			],
+			"sha256": "3060593a8fd44547bef2f86e66c74dfb5bdb15a0b9c133bf947b00847023027a"
+		},
+		{
+			"file": "src/core/Admin/server/data-edits.ts",
+			"declarations": ["AdminEdit"],
+			"sha256": "625ce5b96b55ddc0faf73f2249b24f508fce1e3d1f1416524b32f6f30e252ccc"
+		},
+		{
+			"file": "src/core/Commands/shared/command-types.ts",
+			"declarations": ["LogEntry"],
+			"sha256": "6578f9f1cce9ffa66996a23f9a82ce9835b059b414ed25ae9ec68348db335b8d"
+		},
+		{
+			"file": "src/core/Commands/server/audit-buffer.ts",
+			"declarations": ["SavedEntry"],
+			"sha256": "89ef695c66acfb38dda0a12e84810a64fca2a1cf0e80869ebf753838622ad0fc"
+		}
+	]
+}

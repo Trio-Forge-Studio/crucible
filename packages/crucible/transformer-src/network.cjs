@@ -165,7 +165,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			}
 			ts.forEachChild(syntax, (child) => references(child, location));
 		};
-		for (const type of node.typeArguments ?? []) references(type, "payload");
+		for (const type of node.typeArguments ?? []) references(type, state ? "value" : "payload");
 		const instance = (classes, location, position) => {
 			if (state)
 				return fail(
