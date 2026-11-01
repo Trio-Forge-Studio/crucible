@@ -655,6 +655,18 @@ const mutants = [
 		],
 	],
 	[
+		"barrier released between booted and the network commit",
+		"swap",
+		[76],
+		BOOT,
+		[
+			[
+				"			unbooted = side.booted();\n			side.network.commit();",
+				"			unbooted = side.booted();\n			releaseBarrier();\n			side.network.commit();",
+			],
+		],
+	],
+	[
 		"barrier released before the rollback",
 		"pair",
 		[36, 76],
