@@ -190,8 +190,8 @@ const kindNegatives = [
 	[
 		"profileStore name too long",
 		"src/shared",
-		"CRU018",
-		`export const S = profileStore("X.${"a".repeat(49)}", { template: { a: 0 } });`,
+		"CRU018: Store names are 1 to 50 bytes",
+		`export const S = profileStore("X.${"a".repeat(49)}", { template: { a: serverOnly(0) } });`,
 	],
 	[
 		"profileStore reserved name",
@@ -240,7 +240,7 @@ const kindNegatives = [
 	[
 		"dataStore name too long",
 		"src/server",
-		"CRU018",
+		"CRU018: Store names are 1 to 50 bytes",
 		`export const D = dataStore<{ a: number }>("X.${"a".repeat(49)}", { defaults: { a: 0 } });`,
 	],
 	[
@@ -260,7 +260,7 @@ const kindNegatives = [
 	[
 		"profileMessage name too long",
 		"src/server",
-		"CRU018",
+		"CRU018: Profile message names are 1 to 64 bytes",
 		`export const P = profileMessage<string>("X.${"a".repeat(63)}");`,
 	],
 	[
@@ -271,7 +271,12 @@ const kindNegatives = [
 	],
 	["profileMessage macro value", "src/server", "CRU023", "export const f = profileMessage;"],
 	["config missing type", "src/server", "CRU017", 'export const C = config("X.Config", 1 as never);'],
-	["config name too long", "src/server", "CRU018", `export const C = config<number>("X.${"a".repeat(63)}", 0);`],
+	[
+		"config name too long",
+		"src/server",
+		"CRU018: Config names are 1 to 64 bytes",
+		`export const C = config<number>("X.${"a".repeat(63)}", 0);`,
+	],
 	[
 		"config serverOnly",
 		"src/server",
@@ -666,7 +671,8 @@ test("persist rejections name the annotation to write and serverOnly marks follo
 		"src/server/bad.ts":
 			'import type { ServerOnly } from "@trioforge/crucible";\n' +
 			server +
-			'export const D = dataStore<{ key: ServerOnly<string> }>("X.Data", { defaults: undefined as never });',
+			'export const D = dataStore<{ key: ServerOnly<string> }>("X.Data", { defaults: undefined as never });\n' +
+			'export const U = dataStore<unknown>("X.Unknown", { defaults: undefined as never });',
 	});
 	result = inspect(game);
 	assert.deepEqual(h.diagnosticsIn(result, game, "src/shared/bad.ts"), [
@@ -680,6 +686,29 @@ test("persist rejections name the annotation to write and serverOnly marks follo
 	]);
 	assert.deepEqual(h.diagnosticsIn(result, game, "src/server/bad.ts"), [
 		"CRU019: X.Data value.key: serverOnly marks a profileStore template field; it means nothing here",
+		"CRU019: X.Unknown value: unknown cannot be stored or replicated state; give the value a declared type",
 	]);
+	compile(game, 1);
+});
+
+test("persist depth stops at PERSIST_DEPTH", () => {
+	const nested = (n) => "{v:".repeat(n) + "string" + "}".repeat(n);
+	let game = project({
+		"src/shared/deep.ts":
+			shared + `export const Deep = profileStore<${nested(27)}>("X.Deep", { template: undefined as never });`,
+	});
+	assert.deepEqual(
+		inspect(game).diagnostics.map((d) => d.messageText),
+		[],
+	);
+	game = project({
+		"src/server/deep.ts": server + `export const Deep = config<${nested(28)}>("X.Deep", undefined as never);`,
+	});
+	assert.match(
+		inspect(game)
+			.diagnostics.map((d) => d.messageText)
+			.join("\n"),
+		/CRU019: X\.Deep value(\.v)+: schema exceeds the depth limit of 28/,
+	);
 	compile(game, 1);
 });

@@ -6,7 +6,7 @@ const { fs, path, F, S, Nil, L, U, O, M } = h;
 const fd = fs.readFileSync(path.join(h.fixture, "fd.ts"), "utf8");
 const shapes = (name) => fs.readFileSync(path.join(h.fixture, name), "utf8");
 const reactive = verdicts("reactive-lower.out");
-const imports = 'import { replicated, replicatedPerPlayer, toServer, Replicated } from "@trioforge/crucible";\n';
+const imports = 'import { replicated, replicatedPerPlayer, toServer, u8, Replicated } from "@trioforge/crucible";\n';
 const declare = (type, name = "X.State", macro = "replicated", initial = "undefined as never") =>
 	`export const Value = ${macro}<${type}>("${name}", ${initial});`;
 
@@ -182,6 +182,16 @@ const declarationNegatives = [
 	["namespace value", "CRU023", 'import * as C from "@trioforge/crucible"; export const f = C.replicated;'],
 	["bracket value", "CRU023", 'import * as C from "@trioforge/crucible"; export const f = C["replicatedPerPlayer"];'],
 	["server state", "CRU019: X.State value", declare("ServerOnlyLike", "X.State")],
+	[
+		"state width key",
+		"CRU019: X.State value.key: state maps are keyed by string",
+		declare("ReadonlyMap<u8, string>"),
+	],
+	[
+		"state number literal key",
+		"CRU019: X.State value.key: state maps are keyed by string",
+		declare("ReadonlyMap<1 | 2, string>"),
+	],
 ];
 
 test("replicated declarations take networking's declaration, name and escape checks", () => {

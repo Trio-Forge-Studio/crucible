@@ -131,9 +131,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		const persist = spec.position === "persist";
 		const depthLimit = depthLimits[spec.position];
 		const active = new Set();
-		let failures = 0;
 		const fail = (at, location, reason, code = "CRU019") => {
-			failures++;
 			report(at, code, `${node.arguments[0]?.text ?? kind} ${location}: ${reason}`);
 			return { kind: "nil" };
 		};
@@ -542,7 +540,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			const target = targetOf(node);
 			if (!target) return [];
 			const value = lower(target, "value", { toClient: false, nilable: false, path: true });
-			if (spec.store && value.kind !== "object" && value.kind !== "map" && !failures)
+			if (spec.store && value.kind !== "object" && value.kind !== "map")
 				fail(node, "value", `a store's value is a record; wrap a ${checker.typeToString(target)} in an object`);
 			result = [value];
 		}
