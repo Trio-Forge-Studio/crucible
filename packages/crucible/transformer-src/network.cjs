@@ -604,11 +604,10 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						lowerMessage(declaration.node, declaration.kind, () => {}, reached);
 				}
 				const added = (body) =>
-					(body && ts.isModuleBlock(body) ? body.statements : [body]).flatMap((statement) =>
-						statement?.name
-							? [statement, ...(ts.isModuleDeclaration(statement) ? added(statement.body) : [])]
-							: [],
-					);
+					(!body ? [] : ts.isModuleBlock(body) ? body.statements : [body]).flatMap((statement) => [
+						statement,
+						...(ts.isModuleDeclaration(statement) ? added(statement.body) : []),
+					]);
 				if (added(node.body).some((d) => reached.has(checker.getSymbolAtLocation(d.name))))
 					report(
 						node,
