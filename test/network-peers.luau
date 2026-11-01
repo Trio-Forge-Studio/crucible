@@ -384,6 +384,11 @@ return {
 			}, { deps = { "Late" } })
 		end)
 		spec.eq(frozen.server.bootError, nil, "boot commits")
+		local held = frozen.server.registry.recordOf(late).state.object.ping
+		spec.eq(type(held), "table", "rule 27: an opaque Receiver")
+		spec.eq(next(held), nil, "holding no connection")
+		assert(table.isfrozen(held), "frozen")
+		spec.eq(pcall(held), false, "not callable")
 		local record = frozen.server.registry.recordOf(late)
 		local again = frozen.server.life.track(record)
 		frozen.server.life.admit({ again })

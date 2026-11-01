@@ -147,7 +147,7 @@ function plain(err: unknown): string {
 function describe(name: string, path: string, err: unknown): string {
 	if (typeIs(err, "table") && (err as CodecFailure).codecFailure === true) {
 		const failure = err as CodecFailure;
-		return `${name} ${failure.path}: ${failure.reason}`;
+		return `${name} ${failure.path}: ${plain(failure.reason)}`;
 	}
 	return `${name} ${path}: ${plain(err)}`;
 }
@@ -208,7 +208,7 @@ export function missingInstance(err: unknown): boolean {
 export function failureReason(err: unknown): string {
 	if (typeIs(err, "table") && (err as CodecFailure).codecFailure === true) {
 		const failure = err as CodecFailure;
-		return `${failure.path}: ${failure.reason}`;
+		return `${failure.path}: ${plain(failure.reason)}`;
 	}
 	return plain(err);
 }

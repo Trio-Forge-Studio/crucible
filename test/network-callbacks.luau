@@ -211,6 +211,27 @@ return {
 		spec.eq(asked.value.value, "late", "the request past its lifetime still replies")
 		link:assertClean()
 	end,
+	["76 ending a peer cancels its lifetime timers and no callback"] = function()
+		local link = Link.new()
+		local held
+		server(link, {
+			slow = function()
+				held = coroutine.running()
+				coroutine.yield()
+			end,
+		})
+		local ann = link:join("Ann", client)
+		ann.Network.send(ann.m.Slow, "x")
+		link:flush()
+		link:leave(ann)
+		spec.eq(link:pending(), 0, "the lifetime timer was cancelled")
+		link:advance(60)
+		spec.eq(link.server.logged("still running"), 0, "no overrun after the end")
+		spec.eq(coroutine.status(held), "suspended", "the callback was not cancelled")
+		link:resume(held)
+		spec.eq(#link.server.diagnostics(), 0, "it finished cleanly")
+		link:assertClean()
+	end,
 	["75 76 R4 failures after the peer ended use the session key, once per field, never recreating the peer's set"] = function()
 		local link = Link.new()
 		local held = {}

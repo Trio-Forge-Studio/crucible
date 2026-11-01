@@ -159,6 +159,21 @@ return {
 		spec.eq(link:pending(), 0, "the deadline was cancelled")
 		link:assertClean()
 	end,
+	["5 37 an ask with no declared timeout settles timeout at DEFAULT_ASK_TIMEOUT_SECONDS"] = function()
+		local link = Link.new()
+		server(link, function()
+			coroutine.yield()
+		end)
+		local ann = link:join("Ann", client)
+		local asked = link:run(function()
+			return ann.Network.ask(ann.m.Echo, "x")
+		end)
+		link:advance(9.9)
+		spec.eq(asked.done, nil, "pending before 10 seconds")
+		link:advance(0.1)
+		spec.eq(asked.value.reason, "timeout", "timeout at 10 seconds")
+		link:assertClean()
+	end,
 	["44 a cancelled caller's reply is dropped and its entry counts toward MAX_PENDING_ASKS until then"] = function()
 		local link = Link.new()
 		local held = {}

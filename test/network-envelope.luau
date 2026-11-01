@@ -111,6 +111,52 @@ return {
 		spec.eq(gone.value.reason, "unavailable", "ERROR settles")
 		link:assertClean()
 	end,
+	["19 an invalid payload throws at the call site naming the message, the property path and the reason"] = function()
+		local link = Link.new()
+		local m
+		link:boot(function(s)
+			m = declare(s)
+		end)
+		local ann = link:join("Ann", function(c)
+			c.m = declare(c)
+		end)
+		local before = #link:sent()
+		local part = link:instance("Part", "NotAModel")
+		for _, case in
+			{
+				{
+					function()
+						link.server.Network.send(ann.player, m.Rang, { chime = "loud" })
+					end,
+					"Doorbell.Rang payload.chime: expected datatype",
+				},
+				{
+					function()
+						link.server.Network.broadcast(m.Keys, { a = 300 })
+					end,
+					"Keys.Map payload[]: integer out of range",
+				},
+				{
+					function()
+						ann.Network.send(ann.m.Toggle, { door = part, open = true })
+					end,
+					"Doors.Toggle payload.door: expected declared Instance class",
+				},
+				{
+					function()
+						ann.Network.ask(ann.m.Strict, -1)
+					end,
+					"Z.Strict request: integer out of range",
+				},
+			}
+		do
+			local ok, err = pcall(case[1])
+			spec.eq(ok, false, "throws")
+			spec.eq(err, case[2], "message, path and reason")
+		end
+		spec.eq(#link:sent(), before, "nothing was sent or queued")
+		link:assertClean()
+	end,
 	["50 77 FAIL overflow is the two bytes 05 00"] = function()
 		local link = Link.new()
 		local m
