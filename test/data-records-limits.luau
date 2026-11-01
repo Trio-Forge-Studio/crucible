@@ -5,6 +5,7 @@ local R = require("./lib/data-records")
 local WALL = R.WALL
 local MAX_ENVELOPE_BYTES = 1048576
 local RECORD_SECTIONS_BYTES = 4096 + 1000000 + 18432
+local KEY_WRITE_BYTES_PER_MINUTE = 3145728
 
 local function noop(current)
 	return current
@@ -90,6 +91,20 @@ return {
 		spec.eq(RECORD_SECTIONS_BYTES, 1022528, "which is 4,096 + 1,000,000 + 18,432")
 		spec.eq(RECORD_SECTIONS_BYTES < MAX_ENVELOPE_BYTES, true, "below the envelope cap")
 	end,
+	["rule 87 a no-op update of a stored record over 1,000,000 bytes stores no payload and records the id"] = function()
+		local backend, realm, store = R.bulkWorld()
+		local chunks = R.chunks(1020000)
+		backend:seed("FD.Bulk", "over", bulkEnvelope({ payload = { chunks = chunks } }), {}, {})
+		local id = R.id(WALL - 5, "o1")
+		local result = R.update(backend, realm, store, "over", noop, id)
+		spec.eq(result.kind, "ok", "the unchanged record is not measured against the payload cap")
+		spec.eq(result.replayed, false, "a new id")
+		R.same(
+			R.stored(backend, "over", "FD.Bulk"),
+			bulkEnvelope({ payload = { chunks = chunks }, operations = { id } }),
+			"the id is recorded and the payload is as it was"
+		)
+	end,
 	["rule 87 a record over 1,000,000 bytes throws at the call naming the store and key, stores nothing and records no id"] = function()
 		local backend, realm, store = R.bulkWorld()
 		local chunks = R.chunks(1000001, R.SECRET)
@@ -99,7 +114,7 @@ return {
 		end)
 		spec.eq(ok, false, "the call throws")
 		spec.has(err, "FD.Bulk: big", "naming the store and key")
-		spec.has(err, "1000001", "and the size")
+		spec.has(err, "is 1000001 bytes, over 1000000", "and the size against the cap")
 		spec.eq(string.find(err, R.SECRET, 1, true), nil, "never a value")
 		spec.eq(R.stored(backend, "big", "FD.Bulk"), nil, "nothing was stored")
 		spec.eq(R.committed(backend, "FD.Bulk"), 0, "nothing was written")
@@ -171,6 +186,174 @@ return {
 		spec.eq(string.find(R.logText(realm), R.SECRET, 1, true), nil, "never a value")
 	end,
 
+	["rule 32 generic reads and updates are ordinary: they wait while the budget is at the reserve"] = function()
+		local backend, realm, store = R.world()
+		realm.budget.read = 12
+		local read = R.read(backend, realm, store, "k", 31)
+		spec.eq(read.kind, "timeout", "a read at the reserve of 12 settles timeout")
+		spec.eq(#backend.calls, 0, "and sent nothing")
+		realm.budget.read = 1000
+		realm.budget.update = 12
+		local update = R.update(backend, realm, store, "k", noop, R.id(WALL - 5, "b1"), 31)
+		spec.eq(update.kind, "timeout", "an update at the reserve settles timeout")
+		spec.eq(#backend.calls, 0, "and sent nothing")
+		realm.budget.update = 13
+		local after = R.update(backend, realm, store, "k", noop, R.id(WALL - 5, "b2"), 2)
+		spec.eq(after.kind, "ok", "one above the reserve goes out")
+	end,
+	["rule 36 updates to a key that stores a large record are paced by that record's size"] = function()
+		local backend, realm, store = R.bulkWorld()
+		local first = R.update(backend, realm, store, "heavy", chunked(R.chunks(600000)), R.id(WALL - 5, "h0"))
+		spec.eq(first.kind, "ok", "the large record is stored")
+		for index = 1, 5 do
+			local result = R.update(backend, realm, store, "heavy", noop, R.id(WALL - 5, `h{index}`), 0.2)
+			spec.eq(result.kind, "ok", `update {index} is within the minute's 3,145,728 bytes`)
+		end
+		spec.eq(R.updates(backend, "FD.Bulk", "heavy"), 6, "six updates went out")
+		local held = realm.run(function()
+			return store:update("heavy", noop, R.id(WALL - 5, "h6"))
+		end)
+		backend:advance(10)
+		spec.eq(held.done, false, "a seventh would carry 3.6 million bytes in the minute and waits")
+		spec.eq(R.updates(backend, "FD.Bulk", "heavy"), 6, "so nothing was sent")
+		backend:advance(25)
+		spec.eq(held.value.kind, "timeout", "it settles timeout at its 30 second deadline")
+		spec.eq(R.updates(backend, "FD.Bulk", "heavy"), 6, "having sent nothing")
+		backend:advance(30)
+		local later = R.update(backend, realm, store, "heavy", noop, R.id(WALL - 5, "h7"))
+		spec.eq(later.kind, "ok", "a call after the minute has passed goes out")
+	end,
+	["rule 36 reads of a key with a large record are paced by that record's size"] = function()
+		local backend, realm, store = R.bulkWorld()
+		R.seed(backend, "heavy", { schemaVersion = 0, payload = { chunks = R.chunks(900000) } }, "FD.Bulk")
+		for index = 1, 24 do
+			local result = R.read(backend, realm, store, "heavy", 0.2)
+			spec.eq(result.kind, "ok", `read {index} is within the minute's 20,971,520 bytes`)
+		end
+		local reads = { kind = "read", store = "FD.Bulk", key = "heavy" }
+		spec.eq(#backend:callsTo(reads), 24, "24 reads went out")
+		local held = realm.run(function()
+			return store:read("heavy")
+		end)
+		backend:advance(10)
+		spec.eq(held.done, false, "a 25th would carry 21.6 million bytes in the minute and waits")
+		spec.eq(#backend:callsTo(reads), 24, "so nothing was sent")
+		backend:advance(25)
+		spec.eq(held.value.kind, "timeout", "it settles timeout at its 30 second deadline")
+		spec.eq(#backend:callsTo(reads), 24, "having sent nothing")
+		backend:advance(30)
+		local later = R.read(backend, realm, store, "heavy")
+		spec.eq(later.kind, "ok", "a read after the minute has passed goes out")
+	end,
+	["rule 36 a record that shrinks stops weighing what it did"] = function()
+		local backend, realm, store = R.bulkWorld()
+		R.update(backend, realm, store, "shrink", chunked(R.chunks(600000)), R.id(WALL - 5, "k0"))
+		R.update(backend, realm, store, "shrink", chunked({ "a" }), R.id(WALL - 5, "k1"), 0.2)
+		for index = 2, 11 do
+			local result = R.update(backend, realm, store, "shrink", noop, R.id(WALL - 5, `k{index}`), 0.2)
+			spec.eq(result.kind, "ok", `update {index} of a small record is not paced`)
+		end
+		spec.eq(R.updates(backend, "FD.Bulk", "shrink"), 12, "all twelve went out inside the minute")
+	end,
+	["rule 36 a first update is weighed at 1,024 bytes and the bound is exact"] = function()
+		local function run(chunkBytes: number)
+			local backend, realm, store = R.bulkWorld()
+			local total = 0
+			local function step(change, tag: string)
+				R.update(backend, realm, store, "edge", change, R.id(WALL - 5, tag), 0.2)
+				total += R.encodedBytes(R.stored(backend, "edge", "FD.Bulk"))
+			end
+			step(chunked(R.chunks(chunkBytes)), "e0")
+			for index = 1, 4 do
+				step(noop, `e{index}`)
+			end
+			local probe = realm.run(function()
+				return store:update("edge", noop, R.id(WALL - 5, "e5"))
+			end)
+			backend:advance(3)
+			return total, probe.done
+		end
+		local calibration = run(300000)
+		local chunkBytes = 300000 + (KEY_WRITE_BYTES_PER_MINUTE - 1024 - calibration) // 5
+		local total, sent = run(chunkBytes)
+		local slack = KEY_WRITE_BYTES_PER_MINUTE - (total + 1024)
+		spec.eq(slack >= 0 and slack < 5, true, `the sixth update is within five bytes under the bound: {slack}`)
+		spec.eq(sent, true, "so it goes out at once")
+		local over, held = run(chunkBytes + 2)
+		spec.eq(KEY_WRITE_BYTES_PER_MINUTE - (over + 1024) < 0, true, "ten more bytes put it over")
+		spec.eq(held, false, "and it waits")
+	end,
+	["rule 36 a record of exactly 4,096 bytes is weighed at the floor"] = function()
+		local function run(chunkBytes: number, shrinkBytes: number)
+			local backend, realm, store = R.bulkWorld()
+			local sizes = {}
+			local function step(change, tag: string)
+				R.update(backend, realm, store, "edge", change, R.id(WALL - 5, tag), 0.2)
+				table.insert(sizes, R.encodedBytes(R.stored(backend, "edge", "FD.Bulk")))
+			end
+			step(chunked(R.chunks(chunkBytes)), "f0")
+			step(noop, "f1")
+			step(noop, "f2")
+			step(noop, "f3")
+			step(chunked({ string.rep("a", shrinkBytes) }), "f4")
+			local probe = realm.run(function()
+				return store:update("edge", noop, R.id(WALL - 5, "f5"))
+			end)
+			backend:advance(3)
+			return sizes, probe.done
+		end
+		local calibration = run(300000, 0)
+		local shrinkBytes = 4096 - calibration[5]
+		local fitted = run(300000, shrinkBytes)
+		local big = fitted[1] + fitted[2] + fitted[3] + fitted[4]
+		local chunkBytes = 300000 + (KEY_WRITE_BYTES_PER_MINUTE - 2048 - big) // 4
+		local sizes, sent = run(chunkBytes, shrinkBytes)
+		spec.eq(sizes[5], 4096, "the shrunk record's envelope is exactly 4,096 bytes")
+		local slack = KEY_WRITE_BYTES_PER_MINUTE - (2048 + sizes[1] + sizes[2] + sizes[3] + sizes[4])
+		spec.eq(slack >= 0 and slack < 4, true, `the update after it fits under the bound only at 1,024 bytes: {slack}`)
+		spec.eq(sent, true, "so it goes out at once")
+	end,
+	["rule 110 an unreadable envelope, a newer record and an oversize envelope are three diagnostics, and a second store has its own"] = function()
+		local backend, realm, store = R.world()
+		local other = realm.recordStore("FD.Other", { entries = {}, tallies = {}, total = 0 }, {
+			node = R.node(realm.n),
+			migrations = R.MIGRATIONS,
+		})
+		R.seed(backend, "f1", { format = 2, payload = { entries = {}, tallies = {}, total = 1 } })
+		R.seed(backend, "n1", { schemaVersion = 3, payload = { entries = {}, tallies = {}, total = 1 } })
+		backend:seed("FD.Other", "f2", R.envelope({ format = 2 }), {}, {})
+		R.read(backend, realm, store, "f1")
+		R.read(backend, realm, store, "n1")
+		R.read(backend, realm, other, "f2")
+		spec.eq(realm.engine.logged("FD.CommandLog: f1 is unreadable"), 1, "the unreadable envelope is logged")
+		spec.eq(
+			realm.engine.logged("FD.CommandLog: n1 was written by a newer build"),
+			1,
+			"the newer record under its own code"
+		)
+		spec.eq(
+			realm.engine.logged("FD.Other: f2 is unreadable"),
+			1,
+			"and the same code in another store is logged again"
+		)
+		local bulkBackend, bulkRealm, bulk = R.bulkWorld()
+		bulkBackend:seed("FD.Bulk", "bad", R.envelope({ format = 2 }), {}, {})
+		local base = R.chunks(500000)
+		local list = items(128, 3900)
+		bulkBackend:seed("FD.Bulk", "d1", bulkEnvelope({ payload = { chunks = base }, inbox = list }), {}, {})
+		R.read(bulkBackend, bulkRealm, bulk, "bad")
+		R.update(bulkBackend, bulkRealm, bulk, "d1", function(current)
+			local chunks = table.clone(current.chunks)
+			table.insert(chunks, string.rep("a", 60000))
+			return { chunks = chunks }
+		end, R.id(WALL - 5, "d1"))
+		spec.eq(bulkRealm.engine.logged("FD.Bulk: bad is unreadable"), 1, "an unreadable envelope in the bulk store")
+		spec.eq(
+			bulkRealm.engine.logged("FD.Bulk: d1 would make the envelope"),
+			1,
+			"and the oversize envelope under its own code"
+		)
+	end,
 	["rule 90 a request that was never dispatched settles timeout at the 30 second deadline"] = function()
 		local backend, realm, store = R.world()
 		realm.budget.update = 0

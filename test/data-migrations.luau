@@ -63,6 +63,8 @@ local function failingShape(mode: string, failing: number, holder, ran)
 			return "not a record"
 		elseif mode == "number" then
 			return 42
+		elseif mode == "array" then
+			return { 1, 2 }
 		end
 		return nil
 	end
@@ -340,7 +342,16 @@ return {
 	end,
 	["rule 75 a step that throws, yields or returns a non-record fails the load at once and leaves the data untouched"] = function()
 		local payload = { coins = 7, gems = 3, secret = SECRET }
-		for _, mode in { "throws", "yields", "waits", "string", "number", "nil" } do
+		local tails = {
+			throws = "threw",
+			yields = "yielded",
+			waits = "yielded",
+			string = "returned string, not a record",
+			number = "returned number, not a record",
+			array = "returned table, not a record",
+			["nil"] = "returned nil, not a record",
+		}
+		for _, mode in { "throws", "yields", "waits", "string", "number", "array", "nil" } do
 			for failing = 0, 1 do
 				local label = `{mode} at step {failing}`
 				local holder, ran = {}, {}
@@ -353,7 +364,11 @@ return {
 				spec.list(ran, if failing == 0 then { 0 } else { 0, 1 }, `{label}: steps that ran`)
 				local messages = DM.logged(a, "migrations[")
 				spec.eq(#messages, 1, `{label}: one diagnostic`)
-				spec.has(messages[1], `migrations[{failing}]`, `{label}: names the failing step`)
+				spec.eq(
+					messages[1],
+					`{STORE}: {USER}'s record did not load: {STORE}: migrations[{failing}] {tails[mode]}`,
+					`{label}: the diagnostic`
+				)
 				spec.has(messages[1], STORE, `{label}: names the store`)
 				spec.has(messages[1], tostring(USER), `{label}: names the user`)
 				spec.eq(a.engine.logged(`migrations[{1 - failing}]`), 0, `{label}: and not the other step`)
@@ -361,6 +376,107 @@ return {
 				spec.eq(a.engine.logged("secret-boom"), 0, `{label}: nor the step's error text`)
 			end
 		end
+	end,
+	["rule 76 a default fills a field missing from a frozen table a migration step returned"] = function()
+		local settings = DM.object({ vibration = n.bool, volume = n.f64 })
+		local shape = {
+			node = DM.object({ coins = n.f64, settings = settings }),
+			migrations = {
+				function()
+					return { settings = table.freeze({ vibration = false }) }
+				end,
+			},
+		}
+		local backend, a =
+			D2.world(1, { version = shape, defaults = { coins = 0, settings = { vibration = true, volume = 0.5 } } })
+		D2.seed(backend, nil, untouchedSeed({ coins = 1 }))
+		local player = DM.load(backend, a)
+		local value = DM.session(a, player).value
+		spec.eq(value.settings.vibration, false, "the step's field")
+		spec.eq(value.settings.volume, 0.5, "the default fills the field the step left out")
+		spec.eq(value.coins, 1, "and the rest is kept")
+	end,
+	["rule 110 a failed migration and a failed admission are diagnosed under separate codes"] = function()
+		local shape = {
+			node = ROOT,
+			migrations = {
+				function(old)
+					if old.coins == 13 then
+						error("secret-boom")
+					elseif old.coins == 14 then
+						coroutine.yield()
+					elseif old.coins == 15 then
+						return "not a record"
+					end
+					return { coins = old.coins + 1 }
+				end,
+			},
+		}
+		local backend, a = D2.world(1, { version = shape })
+		D2.seed(backend, 4120, untouchedSeed({ coins = 13, gems = 1 }))
+		D2.seed(backend, 4123, untouchedSeed({ coins = 14, gems = 1 }))
+		D2.seed(backend, 4124, untouchedSeed({ coins = 15, gems = 1 }))
+		D2.seed(backend, 4121, untouchedSeed({ coins = 2, gems = SECRET }))
+		D2.seed(backend, 4122, { schemaVersion = 1, payload = { coins = 2, gems = SECRET }, epoch = 5 })
+		for _, user in { 4120, 4123, 4124, 4121, 4122 } do
+			local player = DM.begin(a, user)
+			backend:advance(1)
+			spec.eq(a.kicked(player), a.limits.LOAD_FAILED_MESSAGE, `kick of {user}`)
+		end
+		local migration = DM.logged(a, "did not load: FD.Players: migrations[0] threw")
+		spec.eq(#migration, 1, "the thrown step is diagnosed")
+		spec.has(migration[1], "4120", "for the first user")
+		spec.eq(
+			#DM.logged(a, "migrations[0] yielded"),
+			0,
+			"and a yielding step shares its code, so it is not logged again"
+		)
+		spec.eq(#DM.logged(a, "not a record"), 0, "as does a step that returns a non-record")
+		local admission = DM.logged(a, "did not load: FD.Players.gems: expected number, got string")
+		spec.eq(#admission, 1, "and the failed admissions are diagnosed once under their own code")
+		spec.has(admission[1], "4121", "for the user whose record was migrated")
+		spec.has(admission[1], "(after migrating from version 0)", "saying so")
+		local unmigrated = DM.logged(a, "4122")
+		spec.eq(#unmigrated, 0, "the user whose record is current shares that code and is not logged again")
+		spec.eq(a.engine.logged(SECRET), 0, "no value")
+	end,
+	["rule 110 an unreadable envelope is diagnosed once per user with the store and the user, and kicks at once"] = function()
+		local backend, a = D2.world(1, { version = { node = ROOT } })
+		for _, user in { 4120, 4121 } do
+			D2.seed(backend, user, { format = 2, payload = { coins = 3, gems = SECRET } })
+		end
+		local first = DM.begin(a, 4120)
+		backend:advance(1)
+		spec.eq(a.kicked(first), a.limits.LOAD_FAILED_MESSAGE, "the first user is kicked as failed")
+		a.leave(first)
+		local again = DM.begin(a, 4120)
+		backend:advance(1)
+		spec.eq(a.kicked(again), a.limits.LOAD_FAILED_MESSAGE, "and again on a rejoin")
+		local second = DM.begin(a, 4121)
+		backend:advance(1)
+		spec.eq(a.kicked(second), a.limits.LOAD_FAILED_MESSAGE, "the second user is kicked as failed")
+		local messages = DM.logged(a, "record is unreadable: ")
+		spec.eq(#messages, 2, "one diagnostic per user, not per attempt")
+		local one, two = "FD.Players: 4120's record is unreadable: ", "FD.Players: 4121's record is unreadable: "
+		spec.eq(string.sub(messages[1], 1, #one), one, "the first")
+		spec.eq(string.sub(messages[2], 1, #two), two, "the second")
+		spec.eq(a.engine.logged(SECRET), 0, "no value")
+	end,
+	["rule 110 a failed admission of a record at the current version names no migration"] = function()
+		local shape = { node = ROOT, migrations = {
+			function(old)
+				return { coins = old.coins }
+			end,
+		} }
+		local backend, a = D2.world(1, { version = shape })
+		D2.seed(backend, nil, { schemaVersion = 1, payload = { coins = 2, gems = SECRET }, epoch = 5 })
+		DM.begin(a)
+		backend:advance(1)
+		local messages = DM.logged(a, "did not load")
+		spec.eq(#messages, 1, "one diagnostic")
+		spec.has(messages[1], "FD.Players.gems: expected number, got string", "the path and reason")
+		spec.eq(string.find(messages[1], "migrating", 1, true), nil, "and no mention of a migration")
+		spec.eq(a.engine.logged(SECRET), 0, "no value")
 	end,
 	["rule 110 a failed migration is diagnosed once for a user who rejoins, with the store, user and step"] = function()
 		local holder, ran = {}, {}

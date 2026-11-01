@@ -235,6 +235,17 @@ return {
 		spec.eq(read.kind, "ok", "reads ok")
 		spec.eq(read.value, nil, "and undefined")
 	end,
+	["rule 87 a change that returns something other than a table throws naming the store"] = function()
+		local backend, realm, store = R.world()
+		local ok, err = R.try(backend, realm, function()
+			return store:update("odd", function()
+				return 5
+			end, R.id(WALL - 5, "v1"))
+		end)
+		spec.eq(ok, false, "the call throws")
+		spec.has(err, "FD.CommandLog: a store's value is a record, got number", "with the store and what it got")
+		spec.eq(R.stored(backend, "odd"), nil, "nothing was stored")
+	end,
 	["rule 87 a throw in change cancels the write, is rethrown at the call and leaves the id unrecorded"] = function()
 		local backend, realm, store = R.world()
 		local id = R.id(WALL - 5, "t1")
@@ -435,6 +446,57 @@ return {
 		spec.eq(runs, 1, "change ran once")
 		spec.eq(R.committed(backend), 2, "the replay wrote nothing")
 	end,
+	["rule 86 and 87 an envelope with no payload is never newer, whatever version it carries"] = function()
+		local backend, realm, store = R.world()
+		local marker = R.id(WALL - 5, "n1")
+		R.seed(backend, "bare", { schemaVersion = 7, operations = { marker } })
+		local read = R.read(backend, realm, store, "bare")
+		spec.eq(read.kind, "ok", "a read is ok")
+		spec.eq(read.value, nil, "with no value")
+		local id = R.id(WALL - 5, "n2")
+		local updated = R.update(backend, realm, store, "bare", function(current)
+			return { entries = current.entries, tallies = current.tallies, total = 4 }
+		end, id)
+		spec.eq(updated.kind, "ok", "an update runs")
+		R.same(updated.value, { entries = {}, tallies = {}, total = 4 }, "from the defaults")
+		R.same(
+			R.stored(backend, "bare"),
+			R.envelope({
+				schemaVersion = 2,
+				payload = { entries = {}, tallies = {}, total = 4 },
+				operations = { marker, id },
+			}),
+			"and stores the record at this build's version"
+		)
+		spec.eq(realm.engine.logged("newer build"), 0, "nothing was diagnosed")
+	end,
+	["rule 88 a replay of an id held by a record stored at an older version returns the record migrated"] = function()
+		local backend, realm, store = R.world()
+		local id = R.id(WALL - 5, "q1")
+		local fields = { schemaVersion = 1, payload = { entries = {}, total = 2 }, operations = { id } }
+		R.seed(backend, "old", fields)
+		local replay = R.update(backend, realm, store, "old", noop, id)
+		spec.eq(replay.kind, "ok", "ok")
+		spec.eq(replay.replayed, true, "a replay")
+		R.same(
+			replay.value,
+			{ entries = {}, label = "m2", tallies = {}, total = 2 },
+			"migrated from version 1 by one step"
+		)
+		R.same(R.stored(backend, "old"), R.envelope(fields), "and nothing was stored")
+		spec.eq(R.committed(backend), 0, "no commit")
+	end,
+	["rule 88 a replay of an id held by a record that no longer loads is unavailable"] = function()
+		local backend, realm, store = R.world()
+		local id = R.id(WALL - 5, "q2")
+		local fields = { schemaVersion = 2, payload = payload({ total = R.SECRET }), operations = { id } }
+		R.seed(backend, "bad", fields)
+		local replay = R.update(backend, realm, store, "bad", noop, id)
+		spec.eq(replay.kind, "unavailable", "unavailable")
+		spec.eq(replay.value, nil, "with no value")
+		R.same(R.stored(backend, "bad"), R.envelope(fields), "nothing was stored")
+		spec.eq(string.find(R.logText(realm), R.SECRET, 1, true), nil, "never a value")
+	end,
 	["rule 88 a no-op with a default id retried after an ambiguous commit replays once"] = function()
 		local backend, realm, store = R.world()
 		backend:fail("committed", { kind = "update", store = R.STORE }, 1)
@@ -532,12 +594,55 @@ return {
 		spec.eq(under.kind, "ok", "3,599.5 seconds old is accepted")
 		spec.eq(underCalls, 1, "and sent")
 	end,
+	["rule 88 an id created five seconds ahead is accepted and six seconds ahead is expired before any call"] = function()
+		local ahead, calls = {}, {}
+		for _, offset in { 5, 6 } do
+			local backend, realm, store = R.world()
+			ahead[offset] = R.update(backend, realm, store, "future", noop, R.id(WALL + offset, "f1"))
+			calls[offset] = R.updates(backend)
+		end
+		spec.eq(ahead[5].kind, "ok", "five seconds ahead is within the skew")
+		spec.eq(calls[5], 1, "and sent")
+		spec.eq(ahead[6].kind, "expired", "six seconds ahead is expired")
+		spec.eq(calls[6], 0, "refused before any call")
+	end,
+	["rule 110 an update and a read of a record that does not load carry the same exact diagnostic"] = function()
+		local expected = "FD.CommandLog: bad did not load: FD.CommandLog.total: expected number, got string"
+		local fields = { payload = payload({ total = R.SECRET }) }
+		local backend, realm, store = R.world()
+		R.seed(backend, "bad", fields)
+		local updated = R.update(backend, realm, store, "bad", noop, R.id(WALL - 5, "z1"))
+		spec.eq(updated.kind, "unavailable", "the update is unavailable")
+		spec.eq(R.logText(realm), expected, "the diagnostic")
+		local readBackend, readRealm, readStore = R.world()
+		R.seed(readBackend, "bad", fields)
+		local read = R.read(readBackend, readRealm, readStore, "bad")
+		spec.eq(read.kind, "unavailable", "the read is unavailable")
+		spec.eq(R.logText(readRealm), expected, "and so is its diagnostic")
+	end,
+	["rule 13 a worker that ran a data callback is clean when the pool hands it to the next call"] = function()
+		local backend, realm, store = R.world()
+		R.update(backend, realm, store, "first", noop, R.id(WALL - 5, "w1"))
+		local runner = realm.graph.module("internal/runner")
+		local outcome = R.call(backend, realm, function()
+			local status, value = runner.call(function()
+				return store:update("second", noop, R.id(WALL - 5, "w2"))
+			end, nil, nil)
+			return { status = status, value = value }
+		end, 0.1)
+		spec.eq(
+			string.find(tostring(outcome.value), "a write inside a data callback", 1, true),
+			nil,
+			"no false callback error"
+		)
+		spec.eq(outcome.status, 2, "the call yielded: its worker is not a data callback thread")
+	end,
 	["rule 88 an id over 64 bytes or not made by operationId throws at the call naming the store and sends nothing"] = function()
 		local backend, realm, store = R.world()
 		local long = R.ring(1, WALL - 5, "n", 65)[1]
 		local exact = R.ring(1, WALL - 5, "n", 64)[1]
 		spec.eq(#long, 65, "a 65 byte id")
-		for _, bad in { long, "plain", "o1-zz", 12 } do
+		for _, bad in { long, "plain", "o1-zz", 12, "xo1-5-ab", "o1-5-ab!", "o1-5-ab-c", "o1-5-", "O1-5-ab", "o1-5-AB" } do
 			local ok, err = R.try(backend, realm, function()
 				return store:update("ids", noop, bad)
 			end)
@@ -545,9 +650,45 @@ return {
 			spec.has(err, "FD.CommandLog: an operation id comes from operationId()", `{tostring(bad)} names the store`)
 		end
 		spec.eq(#backend.calls, 0, "nothing was sent")
+		local old = R.update(backend, realm, store, "ids", noop, "o1-5-ab")
+		spec.eq(old.kind, "expired", "the smallest well-formed id is read as an old one")
 		local result = R.update(backend, realm, store, "ids", noop, exact)
 		spec.eq(result.kind, "ok", "a 64 byte id is accepted")
 		spec.list(R.stored(backend, "ids").operations, { exact }, "and recorded exactly")
+	end,
+	["rule 88 a full ring whose oldest entry is not an operation id evicts it and leaves the floor"] = function()
+		local backend, realm, store = R.world()
+		local ids = R.ring(256, WALL - 3000, "m")
+		ids[1] = "legacy-entry"
+		backend:seed(R.STORE, "legacy", R.envelope({ operations = ids, operationFloor = WALL - 4000 }), {}, {})
+		local id = R.id(WALL - 5, "m9")
+		local result = R.update(backend, realm, store, "legacy", noop, id)
+		spec.eq(result.kind, "ok", "the update goes through")
+		local expected = {}
+		for index = 2, 256 do
+			table.insert(expected, ids[index])
+		end
+		table.insert(expected, id)
+		local stored = R.stored(backend, "legacy")
+		spec.list(stored.operations, expected, "the entry left and the new id joined")
+		spec.eq(stored.operationFloor, WALL - 4000, "the floor did not move")
+	end,
+	["rule 87 an update keeps the key's user ids and metadata"] = function()
+		local backend, realm, store = R.world()
+		backend:seed(R.STORE, "keep", R.envelope({}), { 11, 12 }, { tag = "x" })
+		local result = R.update(backend, realm, store, "keep", noop, R.id(WALL - 5, "u1"))
+		spec.eq(result.kind, "ok", "the update goes through")
+		local entry = backend:stored(R.STORE, "keep")
+		spec.list(entry.userIds, { 11, 12 }, "the user ids")
+		spec.eq(entry.metadata.tag, "x", "the metadata")
+	end,
+	["rule 90 an attempt after an ambiguous commit that fails for good is unavailable, not the first attempt's result"] = function()
+		local backend, realm, store = R.world()
+		backend:fail("committed", { kind = "update", store = R.STORE }, 1)
+		backend:fail("reject", { kind = "update", store = R.STORE }, 1, { after = 1, code = 403 })
+		local result = R.update(backend, realm, store, "stale", noop, R.id(WALL - 5, "r1"), 5)
+		spec.eq(result.kind, "unavailable", "unavailable")
+		spec.eq(R.updates(backend), 2, "two attempts")
 	end,
 	["rule 88 a ring head exactly 60 seconds old at the transform is too young"] = function()
 		local backend, realm, store = R.world()
