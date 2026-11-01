@@ -147,6 +147,10 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						`${symbol.name} must be declared in one imported module; incremental builds cannot see global declarations or merges.`,
 						"CRU010",
 					);
+				for (const decl of decls)
+					if (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))
+						for (const clause of decl.heritageClauses ?? [])
+							for (const base of clause.types) references(base, location);
 			}
 		};
 		const declared = (type, location) => checkSymbols([type.aliasSymbol, type.getSymbol()], location);
@@ -154,8 +158,10 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		const references = (syntax, location) => {
 			if (!syntax || referenced.has(syntax)) return;
 			referenced.add(syntax);
-			if (ts.isTypeReferenceNode(syntax)) {
-				const symbol = unalias(checker.getSymbolAtLocation(syntax.typeName));
+			if (ts.isTypeReferenceNode(syntax) || ts.isExpressionWithTypeArguments(syntax)) {
+				const symbol = unalias(
+					checker.getSymbolAtLocation(ts.isTypeReferenceNode(syntax) ? syntax.typeName : syntax.expression),
+				);
 				checkSymbols([symbol], location);
 				for (const decl of symbol?.declarations ?? [])
 					if (ts.isTypeAliasDeclaration(decl) && !exempt(decl.getSourceFile()))
@@ -754,7 +760,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				}
 				const added = (body) =>
 					(!body ? [] : ts.isModuleBlock(body) ? body.statements : [body]).flatMap((statement) => [
-						statement,
+						...(ts.isVariableStatement(statement) ? statement.declarationList.declarations : [statement]),
 						...(ts.isModuleDeclaration(statement) ? added(statement.body) : []),
 					]);
 				if (added(node.body).some((d) => reached.has(checker.getSymbolAtLocation(d.name))))

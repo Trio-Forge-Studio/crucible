@@ -321,6 +321,13 @@ const mutations = [
 		N,
 	],
 	[
+		"N1 K12 record root covers literal-keyed maps",
+		'else if (spec.handles && value.kind === "map")',
+		'else if (spec.handles && value.kind === "map" && value.key.kind === "string")',
+		K12,
+		N,
+	],
+	[
 		"rule 134 view name segment allows digits",
 		"const SEGMENT = /^[A-Za-z][A-Za-z0-9_]*$/;",
 		"const SEGMENT = /^[A-Za-z][A-Za-z_]*$/;",

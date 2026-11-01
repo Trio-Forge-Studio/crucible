@@ -886,6 +886,7 @@ test("K12 a profileStore root is an object with declared fields and a dataStore 
 			declareStore("Record", "Record<string, number>") +
 			declareStore("Map", "Map<string, number>") +
 			declareStore("Index", "{ [key: string]: number }") +
+			declareStore("Union", 'Map<"a" | "b", number>') +
 			'export const SInferred = profileStore("X.Inferred", { template: {} as Record<string, number> });\n' +
 			declareStore("Wrapped", "{ upgrades: Record<string, number> }"),
 		"src/server/records.ts":
@@ -896,7 +897,7 @@ test("K12 a profileStore root is an object with declared fields and a dataStore 
 	const result = inspect(game);
 	assert.deepEqual(
 		h.diagnosticsIn(result, game, "src/shared/records.ts"),
-		["Record", "Map", "Index", "Inferred"].map((name) => `CRU019: X.${name} value: ${message}`),
+		["Record", "Map", "Index", "Union", "Inferred"].map((name) => `CRU019: X.${name} value: ${message}`),
 	);
 	assert.deepEqual(h.diagnosticsIn(result, game, "src/server/records.ts"), []);
 	const found = calls(result.output.get("src/server/records.ts"), macros);
