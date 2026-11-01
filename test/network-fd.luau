@@ -1,5 +1,6 @@
 local spec = require("./lib/load")
 local h = require("./lib/network-codec")
+local layout = require("./lib/wire-layout")
 
 local tests = {}
 local r = h.realm()
@@ -285,10 +286,11 @@ for _, fixture in fixtures do
 		output = if ask then n.dynamic else nil,
 	})
 end
+local workedMap = n.map(literals({ "a", "b" }), n.u8)
 definitions["Worked.Map"] = r.catalog.define({
 	name = "Worked.Map",
 	kind = "to-client",
-	input = n.map(literals({ "a", "b" }), n.u8),
+	input = workedMap,
 })
 local published = r.catalog.seal()
 
@@ -302,35 +304,15 @@ local function byte(value)
 	return table.concat(out, " ")
 end
 
-local function cutReasons(node, packet, sidecar, slots)
-	local reads = {}
-	local reader = r.codec.Reader.new(packet, 0, sidecar, slots)
-	local take, count = reader.take, reader.count
-	function reader.take(self, size)
-		local offset = take(self, size)
-		table.insert(reads, { stop = offset + size })
-		return offset
-	end
-	function reader.count(self, minBytes, path)
-		local entries = count(self, minBytes, path)
-		table.insert(reads, { stop = self.cursor, entries = entries, minBytes = minBytes })
-		return entries
-	end
-	r.codec.compile(node).decode(reader, "payload")
-	local reasons = {}
+local function rejectsEveryCut(node, packet, sidecar, slots)
+	local reasons = layout.cutReasons(node, packet)
 	for length = 0, buffer.len(packet) - 1 do
-		for _, read in reads do
-			if read.entries == nil and read.stop > length then
-				reasons[length] = "truncated packet"
-				break
-			elseif read.entries ~= nil and read.minBytes > 0 and read.entries * read.minBytes > length - read.stop then
-				reasons[length] = "count exceeds remaining bytes"
-				break
-			end
-		end
-		assert(reasons[length] ~= nil, `cut {length} has an expected rejection`)
+		local cut = buffer.create(length)
+		buffer.copy(cut, 0, packet, 0, length)
+		h.rejects(function()
+			h.decode(r, node, cut, sidecar, slots)
+		end, reasons[length])
 	end
-	return reasons
 end
 
 local function header(opcode, fields, reason)
@@ -402,15 +384,14 @@ for _, fixture in fixtures do
 		spec.eq(h.hex(framed), expected, "header from the realm's sealed index, then the payload")
 		local decoded = h.decode(r, node, packet, sidecar, slots)
 		spec.eq(h.hex(h.encode(r, node, decoded)), golden, "decoded round trip")
-		local reasons = cutReasons(node, packet, sidecar, slots)
-		for length = 0, buffer.len(packet) - 1 do
-			local cut = buffer.create(length)
-			buffer.copy(cut, 0, packet, 0, length)
-			h.rejects(function()
-				h.decode(r, node, cut, sidecar, slots)
-			end, reasons[length])
-		end
+		rejectsEveryCut(node, packet, sidecar, slots)
 	end
+end
+
+tests["71 worked map cuts reject by the wire layout of a two-byte entry"] = function()
+	local packet = h.bytes("02 00 01 01 02")
+	spec.eq(h.hex(h.encode(r, workedMap, { a = 1, b = 2 })), h.hex(packet), "worked map payload")
+	rejectsEveryCut(workedMap, packet)
 end
 
 tests["worked bytes command responses absent button and Party Leave variant"] = function()
