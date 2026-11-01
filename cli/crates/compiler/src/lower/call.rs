@@ -14,6 +14,26 @@ fn calls_super(call: Node) -> bool {
             && skip_parens_and_assertions(callee.expression()).kind() == Kind::SuperKeyword)
 }
 
+/// The expansions that index the object or apply an operator to it, where Luau reads a local object after the
+/// arguments. The others pass it to a call first.
+fn reads_object_after_arguments(m: Macro) -> bool {
+    matches!(
+        m,
+        Macro::ReadonlySetHas
+            | Macro::ReadonlyMapHas
+            | Macro::ReadonlyMapGet
+            | Macro::SetAdd
+            | Macro::MapSet
+            | Macro::SetDelete
+            | Macro::MapDelete
+    ) || m.owner().is_some_and(|owner| {
+        matches!(
+            owner,
+            "CFrame" | "UDim" | "UDim2" | "Vector2" | "Vector2int16" | "Vector3" | "Vector3int16" | "Number"
+        )
+    })
+}
+
 /// Luau types `type()` reports. Any other name needs `typeof()`.
 const PRIMITIVE_TYPES: &[&str] =
     &["nil", "boolean", "string", "number", "table", "userdata", "function", "thread", "vector", "buffer"];
@@ -92,7 +112,7 @@ impl Lower<'_> {
                 let name: Name = Cow::Borrowed(name.text());
                 let base = self.expr(object);
                 let (args, block) = self.capture(|l| l.arguments(n));
-                let base = self.store_before(base, &block);
+                let base = self.store_before(base, &block, &[]);
                 self.current_block.extend(block);
                 Some(match kind {
                     Callee::Method => self.method_call(base, name, args),
@@ -107,17 +127,17 @@ impl Lower<'_> {
                 if kind == Callee::Method {
                     let (args, block) = self.capture(|l| l.arguments(n));
                     let base = self.push_temp_if_complex(base);
-                    let base = self.store_before(base, &block);
+                    let base = self.store_before(base, &block, &[]);
                     let key = self.push_temp_if_complex(key);
-                    let key = self.store_before(key, &block);
+                    let key = self.store_before(key, &block, &[]);
                     self.current_block.extend(block);
                     let mut all = vec![base.clone()];
                     all.extend(args);
                     Some(base.index(key).call(all))
                 } else {
                     let (args, block) = self.capture(|l| l.arguments(n));
-                    let base = self.store_before(base, &block);
-                    let key = self.store_before(key, &block);
+                    let base = self.store_before(base, &block, &[]);
+                    let key = self.store_before(key, &block, &[]);
                     self.current_block.extend(block);
                     Some(base.index(key).call(args))
                 }
@@ -125,7 +145,7 @@ impl Lower<'_> {
             _ => {
                 let function = self.expr(callee);
                 let (args, block) = self.capture(|l| l.arguments(n));
-                let function = self.store_before(function, &block);
+                let function = self.store_before(function, &block, &[]);
                 self.current_block.extend(block);
                 Some(function.call(args))
             }
@@ -190,7 +210,7 @@ impl Lower<'_> {
         }
         let class = self.expr(callee);
         let (args, block) = self.capture(|l| l.arguments(n));
-        let class = self.store_before(class, &block);
+        let class = self.store_before(class, &block, &[]);
         self.current_block.extend(block);
         class.field("new").call(args)
     }
@@ -336,7 +356,8 @@ impl Lower<'_> {
         let statement = usage == Usage::Statement;
         let arg_nodes: Vec<Node> = n.arguments().iter().collect();
         let (args, block) = self.capture(|l| l.ordered(arg_nodes.iter().copied(), |l, a| l.expr(a)));
-        let object = self.store_before(object, &block);
+        let read_after: &[Expr] = if reads_object_after_arguments(m) { &args } else { &[] };
+        let object = self.store_before(object, &block, read_after);
         self.current_block.extend(block);
         let mut args = args.into_iter();
         let mut arg = || args.next().unwrap_or(Expr::Nil);

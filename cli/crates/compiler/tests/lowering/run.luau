@@ -78,6 +78,9 @@ eq("for-of over a string", control.letters("abc"), "a-b-c")
 eq("closures capture each pass", control.captured(), "0,1,2")
 eq("closures see their own pass", control.capturedAndChanged(), "1,3,5")
 eq("continue keeps a changed variable", control.capturedWithContinue(), "0,4,5")
+eq("a body variable hides the head's", control.shadowedCapture(true), "3:10,10,10")
+eq("a body variable hides the head's without continue", control.shadowedCapture(false), "3:11,11,11")
+eq("continue under a shadowing declaration", control.capturedWithShadowedContinue(), "0,1,2")
 eq("increment reads the head's scope", control.shadowedIncrement(), 30)
 eq("do-while condition reads the outer scope", control.shadowedCondition(), 3)
 
@@ -128,6 +131,8 @@ eq(
 	4
 )
 list("operands keep their order", operators.order(), { "0,0", "ab", 6 })
+list("a compound property assignment reads first", operators.propertyCompound(), { 6, 8 })
+list("a call that assigns a local runs after its read", operators.closureOperands(), { 2, 2, 10, 99, 30 })
 eq("&& keeps NaN falsy", operators.eitherOr(0 / 0), "fallback")
 eq("&& keeps zero falsy", operators.eitherOr(0), "fallback")
 eq("&& passes a truthy value", operators.eitherOr(1), "s")

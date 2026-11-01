@@ -71,3 +71,33 @@ export function order() {
 export function eitherOr(n: number) {
 	return (n && "s") || "fallback";
 }
+
+export function propertyCompound() {
+	const o = { x: 1, y: 1 };
+	o.x += o.x = 5;
+	const box = { value: 2 };
+	box.value *= (box.value = 3) + 1;
+	return [o.x, box.value];
+}
+
+export function closureOperands() {
+	let x = 1;
+	const bump = () => {
+		x = 5;
+		return 1;
+	};
+	const sum = x + bump();
+	x = 1;
+	x += bump();
+	const compound = x;
+	let list = [10, 20];
+	const swap = () => {
+		list = [30, 40];
+		return 0;
+	};
+	const element = list[swap()];
+	list = [10, 20];
+	const first = list;
+	list[swap()] = 99;
+	return [sum, compound, element, first[0], list[0]];
+}

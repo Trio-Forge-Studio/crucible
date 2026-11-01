@@ -93,6 +93,31 @@ export function capturedWithContinue() {
 	return reads.map((read) => read()).join(",");
 }
 
+export function shadowedCapture(skip: boolean) {
+	const reads = new Array<() => number>();
+	let passes = 0;
+	for (let i = 0; i < 3; i++) {
+		passes++;
+		let i = 10;
+		reads.push(() => i);
+		if (skip) continue;
+		i++;
+	}
+	return `${passes}:${reads.map((read) => read()).join(",")}`;
+}
+
+export function capturedWithShadowedContinue() {
+	const reads = new Array<() => number>();
+	for (let i = 0; i < 3; i++) {
+		reads.push(() => i);
+		{
+			const i = 10;
+			if (i > 5) continue;
+		}
+	}
+	return reads.map((read) => read()).join(",");
+}
+
 export function shadowedIncrement() {
 	const step = 1;
 	let total = 0;
