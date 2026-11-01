@@ -1,0 +1,154 @@
+7 swap: not applicable, each macro throws one constant and takes no second argument of its type
+7 pair: not applicable, a macro is a single throw with nothing paired to it
+8 swap: not applicable, isolation is an import graph with no call to swap
+8 pair: not applicable, isolation is an import graph with no paired operation
+13 swap: not applicable, discovery compares each attribute with one constant
+16 swap: not applicable, each facade forwards one token and one payload of different types
+17 swap: not applicable, the readiness check compares the stage with constants
+18 guard: not applicable, every payload is read only inside encodeBody at the call; nothing later reads it
+18 swap: not applicable, encodeBody's arguments differ in type except name and path, swapped under rule 19
+18 pair: not applicable, no deferred encode exists to pair with the call
+20 swap: not applicable, deliver takes a peer and a packet
+21 guard: not applicable, broadcast has no guard of its own; deliver's guards belong to rules 20 and 50
+21 swap: not applicable, broadcast delivers one packet to one peer at a time
+22 swap: not applicable, a ready send is one fire of one packet
+22 pair: not applicable, nothing batches, so there is no flush to pair with a ready send
+24 swap: not applicable, the side check compares one kind with one side
+27 swap: not applicable, the field holds one value
+27 pair: not applicable, a Receiver pairs with nothing
+28 swap: not applicable, the freeze and the commit check take no arguments to swap
+30 swap: not applicable, the engine sender and the payload differ in type
+30 pair: not applicable, the sender is read once from the engine
+31 swap: not applicable, ClientReady is one frozen value
+31 pair: not applicable, ClientReady never enters the catalog, so nothing pairs with it there
+33 swap: not applicable, a pass runs one claim for one player at a time
+35 swap: not applicable, deferCleanup takes a peer and a cleanup of different types
+36 swap: not applicable, the liveness check reads one claim
+37 swap: not applicable, the deadline takes one timeout and one callback
+39 guard: not applicable, the writer's range check is the only guard, and it is the codec's
+40 swap: not applicable, a queued ask leaves the queue by its own packet
+43 swap: not applicable, a reply settles one nonce against one definition
+44 swap: not applicable, settle takes one nonce and one result
+45 swap: not applicable, networking cancels nothing, so no call takes two threads
+45 pair: not applicable, no cancel exists to pair with a start
+46 swap: not applicable, READY carries no fields
+47 swap: not applicable, the phase checks compare one state with one constant
+48 guard: not applicable, order comes from one FIFO queue and one remote
+48 pair: not applicable, the queue drains in the order it filled
+49 swap: not applicable, a peer is keyed by one engine Player
+51 swap: not applicable, decode takes one codec and one reader
+51 pair: not applicable, decode completes before the one start that follows it
+52 guard: not applicable, a callback thread has one owner, set once
+52 swap: not applicable, own takes a thread and an ObjectState
+54 swap: not applicable, the ceiling compares one count with one constant
+55 swap: not applicable, the lifetime timer takes one duration and one callback
+56 swap: not applicable, the diagnostic names one message
+76 swap: not applicable, ending takes one peer
+77 swap: not applicable, a kick takes one Player and one message
+78 swap: not applicable, close takes no arguments
+KILLED 7 guard | network.ts | first failure: network-peers.luau: 7 untransformed macros throw at module evaluation
+KILLED 8 guard | network.ts | first failure: network-peers.luau: 8 the root and emit never reach a session, a port, the envelope or a side entry
+KILLED 12 guard | server-session.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
+KILLED 12 swap | roblox-network-port.ts | first failure: network-boot.luau: 12 the Roblox port sets Protocol and Catalog before parenting and discovery reads them
+KILLED 12 pair | server-session.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 13 guard | client-session.ts | first failure: network-boot.luau: 13 79 client discovery timing out or finding a wrong class Protocol or Catalog fails before load
+KILLED 13 pair | client-session.ts | first failure: network-boot.luau: 13 79 client discovery timing out or finding a wrong class Protocol or Catalog fails before load
+KILLED 16 guard | server-session.ts | first failure: network-envelope.luau: 16 19 an invalid payload or a wrong-direction token throws at the call site naming the message, the property path and the reason
+KILLED 16 pair | client-session.ts | first failure: network-envelope.luau: 16 19 an invalid payload or a wrong-direction token throws at the call site naming the message, the property path and the reason
+KILLED 17 guard | session.ts | first failure: network-boot.luau: 17 sends throw before boot loaded its modules and fail softly after a failed boot
+KILLED 17 pair | server-session.ts | first failure: network-handshake.luau: 46 48 79 READY flushes constructor awake and start sends in call order and ClientReady follows the drain
+KILLED 19 guard | envelope.ts | first failure: network-asks.luau: 38 14 asks fail locally as unavailable overloaded or disconnected without sending
+KILLED 19 swap | envelope.ts | first failure: network-asks.luau: 38 14 asks fail locally as unavailable overloaded or disconnected without sending
+KILLED 19 pair | envelope.ts | first failure: network-envelope.luau: 16 19 an invalid payload or a wrong-direction token throws at the call site naming the message, the property path and the reason
+KILLED 20 guard | server-session.ts | first failure: network-handshake.luau: 50 49 a peer that never readies keeps its queue until it boots or leaves
+KILLED 20 pair | session.ts | first failure: network-handshake.luau: 50 77 queues hold 256 packets and 1 MiB of charge; the next send fails the peer, clears it and kicks
+KILLED 21 pair | server-session.ts | first failure: network-peers.luau: 20 21 broadcast encodes once to every live peer now; later joiners miss it and an overflow fails one peer
+KILLED 22 guard | session.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 24 guard | claims.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 24 pair | client-session.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 26 guard | claims.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 26 swap | claims.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 26 pair | claims.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 27 guard | claims.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 28 guard | claims.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 28 guard before commit | server-session.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 28 pair | server-session.ts | first failure: network-peers.luau: 24 26 28 claims are checked on construction, unique per message and frozen at commit
+KILLED 29 guard | server-session.ts | first failure: network-ownership.luau: 29 45 retirement replies unavailable to an in-flight request and leaves events running
+KILLED 29 swap | server-session.ts | first failure: network-ownership.luau: 29 45 retirement replies unavailable to an in-flight request and leaves events running
+KILLED 29 pair | claims.ts | first failure: network-ownership.luau: 29 45 retirement replies unavailable to an in-flight request and leaves events running
+KILLED 30 guard | server-session.ts | first failure: network-callbacks.luau: 53 75 a throwing callback faults nothing, later packets still start, and failures are per player
+KILLED 31 guard | server-session.ts | first failure: network-ready.luau: 31 32 ClientReady is a receive target only and one per Subsystem
+KILLED 32 guard | claims.ts | first failure: network-ready.luau: 31 32 ClientReady is a receive target only and one per Subsystem
+KILLED 32 swap | claims.ts | first failure: network-ready.luau: 31 32 ClientReady is a receive target only and one per Subsystem
+KILLED 32 pair | claims.ts | first failure: network-boot.luau: 79 the client flush throwing after READY closes with FAIL closing
+KILLED 33 guard | server-session.ts | first failure: network-ready.luau: 33 35 R3 a callback that ends its peer stops the pass and its cleanup runs after the end's
+KILLED 33 pair | server-session.ts | first failure: network-handshake.luau: 46 48 79 READY flushes constructor awake and start sends in call order and ClientReady follows the drain
+KILLED 34 guard | session.ts | first failure: network-callbacks.luau: 75 76 R4 failures after the peer ended use the session key, once per field, never recreating the peer's set
+KILLED 34 swap | session.ts | first failure: network-callbacks.luau: 75 76 R4 failures after the peer ended use the session key, once per field, never recreating the peer's set
+KILLED 34 pair | server-session.ts | first failure: network-ready.luau: 34 a ClientReady yield throw or bad return is a callback failure that faults nothing and later callbacks run
+KILLED 35 guard | session.ts | first failure: network-ready.luau: 29 35 36 R3 an owner retiring during its own callback runs the returned cleanup once and never stores it
+KILLED 35 order | session.ts | first failure: network-ready.luau: 35 76 cleanups run deferred on leave and failure in reverse ClientReady order, and on owner fault per peer
+KILLED 35 pair | session.ts | first failure: network-ready.luau: 25 35 a conditional cleanup keeps a function for one player and nothing for another
+KILLED 36 guard | server-session.ts | first failure: network-ready.luau: 33 36 R3 a callback that retires a later owner skips that owner in the same pass and later
+KILLED 36 pair | claims.ts | first failure: network-ready.luau: 29 35 36 R3 an owner retiring during its own callback runs the returned cleanup once and never stores it
+KILLED 37 guard | client-session.ts | first failure: network-asks.luau: 40 37 an ask that times out in the pre-ready queue leaves it and nonces reach the wire with a gap
+KILLED 37 pair | client-session.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 38 guard | client-session.ts | first failure: network-asks.luau: 43 77 a reply naming another message or an unknown ERROR reason fails the client session
+KILLED 38 swap | client-session.ts | first failure: network-asks.luau: 38 14 asks fail locally as unavailable overloaded or disconnected without sending
+KILLED 38 pair | client-session.ts | first failure: network-asks.luau: 44 a cancelled caller's reply is dropped and its entry counts toward MAX_PENDING_ASKS until then
+KILLED 39 swap | client-session.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 39 pair | client-session.ts | first failure: network-asks.luau: 38 39 overlapping asks settle by nonce and undefined and false are values
+KILLED 40 guard | client-session.ts | first failure: network-asks.luau: 40 37 an ask that times out in the pre-ready queue leaves it and nonces reach the wire with a gap
+KILLED 40 pair | client-session.ts | first failure: network-asks.luau: 40 37 an ask that times out in the pre-ready queue leaves it and nonces reach the wire with a gap
+KILLED 41 guard | server-session.ts | first failure: network-asks.luau: 41 74 the nonce mark advances at admission and replays drop without a reply
+KILLED 41 swap | server-session.ts | first failure: network-asks.luau: 41 74 the nonce mark advances at admission and replays drop without a reply
+KILLED 41 pair | server-session.ts | first failure: network-asks.luau: 41 74 the nonce mark advances at admission and replays drop without a reply
+KILLED 42 guard | server-session.ts | first failure: network-callbacks.luau: 54 an event at MAX_ACTIVE_HANDLERS fails the peer and a request there gets overloaded
+KILLED 42 swap | session.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 42 pair | server-session.ts | first failure: network-asks.luau: 38 14 asks fail locally as unavailable overloaded or disconnected without sending
+KILLED 43 guard | client-session.ts | first failure: network-asks.luau: 43 77 a reply naming another message or an unknown ERROR reason fails the client session
+KILLED 43 pair | client-session.ts | first failure: network-instances.luau: 68 43 a client drops an event and settles a reply invalid when a required Player arrived nil
+KILLED 44 guard | client-session.ts | first failure: network-asks.luau: 44 a cancelled caller's reply is dropped and its entry counts toward MAX_PENDING_ASKS until then
+KILLED 44 pair | client-session.ts | first failure: network-asks.luau: 44 a cancelled caller's reply is dropped and its entry counts toward MAX_PENDING_ASKS until then
+KILLED 45 guard | session.ts | first failure: network-peers.luau: 45 76 49 a request finishing after its peer ended sends nothing and a packet with no peer is reported once
+KILLED 46 guard | client-session.ts | first failure: network-handshake.luau: 47 77 a game packet reaching a client before its READY fails its session and the server kicks
+KILLED 46 pair | client-session.ts | first failure: network-asks.luau: 40 37 an ask that times out in the pre-ready queue leaves it and nonces reach the wire with a gap
+KILLED 47 guard | server-session.ts | first failure: network-handshake.luau: 47 74 a game packet before READY and a second READY drop under the sentinel without a reflush
+KILLED 47 guard client | client-session.ts | first failure: network-handshake.luau: 47 77 a game packet reaching a client before its READY fails its session and the server kicks
+KILLED 47 pair | server-session.ts | first failure: network-handshake.luau: 47 74 a game packet before READY and a second READY drop under the sentinel without a reflush
+KILLED 48 swap | session.ts | first failure: network-handshake.luau: 46 48 79 READY flushes constructor awake and start sends in call order and ClientReady follows the drain
+KILLED 49 guard | server-session.ts | first failure: network-peers.luau: 45 76 49 a request finishing after its peer ended sends nothing and a packet with no peer is reported once
+KILLED 49 pair | server-session.ts | first failure: network-handshake.luau: 46 48 79 READY flushes constructor awake and start sends in call order and ClientReady follows the drain
+KILLED 50 guard | session.ts | first failure: network-envelope.luau: 50 77 FAIL overflow is the two bytes 05 00
+KILLED 50 swap | envelope.ts | first failure: network-handshake.luau: 50 77 queues hold 256 packets and 1 MiB of charge; the next send fails the peer, clears it and kicks
+KILLED 50 pair | session.ts | first failure: network-handshake.luau: 50 77 queues hold 256 packets and 1 MiB of charge; the next send fails the peer, clears it and kicks
+KILLED 51 guard | server-session.ts | first failure: network-instances.luau: 67 74 a client event missing a required Instance drops silently and keeps the player's diagnostic
+KILLED 52 pair | session.ts | first failure: network-ownership.luau: 52 current() inside event and request callbacks is the owner; observe binds to it and stops after its fault
+KILLED 53 guard | session.ts | first failure: network-callbacks.luau: 53 K5 a factory-made callback is checked when it returns
+KILLED 53 swap | session.ts | first failure: network-callbacks.luau: 53 K5 a factory-made callback is checked when it returns
+KILLED 53 pair | session.ts | first failure: network-callbacks.luau: 53 K5 a factory-made callback is checked when it returns
+KILLED 54 guard | server-session.ts | first failure: network-callbacks.luau: 54 an event at MAX_ACTIVE_HANDLERS fails the peer and a request there gets overloaded
+KILLED 54 pair | session.ts | first failure: network-callbacks.luau: 54 an event at MAX_ACTIVE_HANDLERS fails the peer and a request there gets overloaded
+KILLED 55 guard | session.ts | first failure: network-callbacks.luau: 55 76 a callback that returns at once keeps no lifetime timer, and ending a peer cancels the rest
+KILLED 55 pair | session.ts | first failure: network-callbacks.luau: 55 a callback past its lifetime is diagnosed, stops counting, is never cancelled and still replies
+KILLED 56 guard | server-session.ts | first failure: network-ownership.luau: 29 45 retirement replies unavailable to an in-flight request and leaves events running
+KILLED 56 pair | session.ts | first failure: network-peers.luau: 56 an event with no live receiver drops with one diagnostic per message on each side
+KILLED 74 guard | server-session.ts | first failure: network-asks.luau: 41 74 the nonce mark advances at admission and replays drop without a reply
+KILLED 74 swap | server-session.ts | first failure: network-instances.luau: 67 74 a client event missing a required Instance drops silently and keeps the player's diagnostic
+KILLED 74 pair | server-session.ts | first failure: network-asks.luau: 41 74 the nonce mark advances at admission and replays drop without a reply
+KILLED 75 guard | session.ts | first failure: network-callbacks.luau: 75 76 R4 failures after the peer ended use the session key, once per field, never recreating the peer's set
+KILLED 75 swap | session.ts | first failure: network-callbacks.luau: 53 75 a throwing callback faults nothing, later packets still start, and failures are per player
+KILLED 75 pair | session.ts | first failure: network-callbacks.luau: 75 76 R4 failures after the peer ended use the session key, once per field, never recreating the peer's set
+KILLED 76 guard | session.ts | first failure: network-callbacks.luau: 55 76 a callback that returns at once keeps no lifetime timer, and ending a peer cancels the rest
+KILLED 76 pair | server-session.ts | first failure: network-peers.luau: 45 76 49 a request finishing after its peer ended sends nothing and a packet with no peer is reported once
+KILLED 77 guard | server-session.ts | first failure: network-peers.luau: 45 76 49 a request finishing after its peer ended sends nothing and a packet with no peer is reported once
+KILLED 77 pair | client-session.ts | first failure: network-asks.luau: 43 77 a reply naming another message or an unknown ERROR reason fails the client session
+KILLED 78 guard | server-session.ts | first failure: network-peers.luau: 78 the session stays open through onShutdown, then closes with FAIL closing and no kick
+KILLED 78 pair | boot.ts | first failure: network-peers.luau: 78 the session stays open through onShutdown, then closes with FAIL closing and no kick
+KILLED 79 guard | boot.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
+KILLED 79 swap | boot.ts | first failure: network-boot.luau: 79 80 R1 booted throwing or the network commit failing leaves the client's CrucibleBooted unset
+KILLED 79 pair | boot.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
+KILLED 80 guard | boot.ts | first failure: network-boot.luau: 79 80 R1 the network commit throwing after BindToClose and booted rolls back, and close does nothing
+KILLED 80 swap | boot.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
+KILLED 80 pair | index.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
+105/105 source mutants killed; 48 operators not applicable; restored build 0
