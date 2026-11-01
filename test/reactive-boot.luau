@@ -80,6 +80,54 @@ return {
 		w.engine.flush()
 		spec.list(w.events, { "booted", "effect" }, "the effect ran after the commit")
 	end,
+	["rule 76 E2 boot releases the barrier after the network commit, not before it"] = function()
+		local w = setup()
+		local api = w.api
+		w.service("Maker", {
+			awake = function()
+				api.effect(function()
+					w.log("effect")
+				end)
+			end,
+		})
+		local deferredAtCommit
+		w.boot(nil, false, {
+			commit = function()
+				deferredAtCommit = #w.engine.deferred
+				w.log("commit")
+			end,
+		})
+		spec.eq(type(deferredAtCommit), "number", "the network committed")
+		spec.eq(#w.engine.deferred, deferredAtCommit + 1, "the barrier was still held at the commit, then released")
+		w.engine.flush()
+		spec.list(w.events, { "booted", "commit", "effect" }, "the effect ran after the commit")
+	end,
+	["rule 76 E2 a network commit that throws rolls back before the barrier releases"] = function()
+		local w = setup()
+		local api = w.api
+		local deferredAtRollback
+		w.service("Maker", {
+			awake = function()
+				api.effect(function()
+					w.log("effect")
+				end)
+				api.onCleanup(function()
+					deferredAtRollback = #w.engine.deferred
+				end)
+			end,
+		})
+		local ok, err = pcall(w.boot, nil, false, {
+			commit = function()
+				error("commit fault")
+			end,
+		})
+		spec.eq(ok, false, "boot failed")
+		spec.has(err, "commit fault", "with the commit's fault")
+		spec.eq(type(deferredAtRollback), "number", "the rollback ended the service")
+		spec.eq(#w.engine.deferred, deferredAtRollback + 1, "the barrier was held through the rollback, then released")
+		w.engine.flush()
+		spec.list(w.events, { "booted" }, "the rolled-back effect never ran")
+	end,
 	["rule 36 T11 a module-level watch made during load runs after the commit with the baseline"] = function()
 		local w = setup()
 		local api = w.api

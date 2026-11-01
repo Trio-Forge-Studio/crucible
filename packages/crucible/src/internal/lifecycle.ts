@@ -709,3 +709,8 @@ export function admit(created: readonly ObjectState[]) {
 export function abandon() {
 	reconciler.abandon();
 }
+
+/** @internal Forwards to the installed effects' `defer`, so networking defers ClientReady cleanups as lifecycle does. */
+export function defer(callback: () => void) {
+	effects().defer(callback);
+}

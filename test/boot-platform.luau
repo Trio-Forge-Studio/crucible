@@ -86,7 +86,16 @@ return {
 			local ok = pcall(entry.boot, { load = { "untransformed" } })
 			spec.eq(ok, false, "failed load")
 			spec.eq(next(p.attributes), nil, "not booted")
+			local network = p.graph.network
+			spec.eq(network.listening, false, "no remote listener after the failed load")
+			spec.eq(next(network.listeners), nil, "no player listener, so no peer")
+			spec.eq(network.destroyed, not client, "the server's unparented remote destroyed")
+			spec.eq(network.published, nil, "a failed boot never publishes")
 			entry.boot({ load = {} })
+			spec.eq(network.listening, true, "the second boot opened a session")
+			if not client then
+				spec.eq(network.published.catalog, "", "the default fake's empty catalog")
+			end
 			if client then
 				spec.eq(entry.BOOTED_ATTRIBUTE, "CrucibleBooted", "constant")
 				spec.eq(p.attributes.CrucibleBooted, true, "local player ready")
@@ -95,6 +104,15 @@ return {
 			local wrong, err = pcall(p.graph.module, if client then "server" else "client")
 			spec.eq(wrong, false, "wrong side rejects")
 			spec.has(err, "loaded on", "reason")
+		end
+		for _, client in { false, true } do
+			local p = platform(client)
+			p.graph.network.failNext = if client then "fireServer" else "publish"
+			local ok, err = pcall(p.graph.module(if client then "client" else "server").boot, { load = {} })
+			spec.eq(ok, false, "a network commit failing after booted ran fails boot")
+			spec.has(err, "injected", "its cause")
+			spec.eq(p.attributes.CrucibleBooted, nil, "BOOTED_ATTRIBUTE undone")
+			spec.eq(p.graph.network.listening, false, "the session closed")
 		end
 	end,
 	["Roblox full port maps six frame events render names task cancellation BindToClose and Error output"] = function()

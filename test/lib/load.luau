@@ -3,6 +3,7 @@
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local task = require("@lune/task")
+local networkPort = require("./network-port")
 
 type Node = { path: string, Parent: Node }
 
@@ -36,12 +37,48 @@ local function fileOf(path: string): string
 	error(`no compiled module at {path}; run the package build first`)
 end
 
+-- roblox-ts emits `TS.Promise` for the Promise global; the RuntimeLib's copy needs only a Heartbeat to load. Its
+-- source is read here because Lune's readFile yields, and `TS.Promise` resolves inside a metamethod. Scratch copies
+-- without node_modules never reach it.
+local PROMISE_PATH = "node_modules/roblox-ts/include/Promise.lua"
+local PROMISE_SOURCE = if fs.isFile(PROMISE_PATH) then fs.readFile(PROMISE_PATH) else nil
+local promise
+local function Promise()
+	if promise == nil then
+		assert(PROMISE_SOURCE, `TS.Promise needs {PROMISE_PATH}`)
+		local runService = {
+			Heartbeat = {
+				Connect = function()
+					return { Disconnect = function() end }
+				end,
+			},
+		}
+		promise = luau.load(PROMISE_SOURCE, {
+			debugName = "Promise",
+			environment = {
+				game = {
+					GetService = function()
+						return runService
+					end,
+				},
+				task = task,
+			},
+		})()
+	end
+	return promise
+end
+
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
--- that builds a runtime starts clean.
-local function graph(defaults, loggingPort, configPort)
+-- that builds a runtime starts clean. Each graph gets its own network port: the given one, or the default fake.
+local function graph(defaults, loggingPort, configPort, network)
+	network = network or networkPort()
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
-	local TS = {}
+	local TS = setmetatable({}, {
+		__index = function(_, key)
+			return if key == "Promise" then Promise() else nil
+		end,
+	})
 	function TS.import(_caller: Node, base: Node, ...: string)
 		local path = base.path
 		for _, name in { ... } do
@@ -71,10 +108,15 @@ local function graph(defaults, loggingPort, configPort)
 			if string.match(path, "/internal/configs/port$") and configPort then
 				loaded[path].installConfigPort(configPort)
 			end
+			if string.match(path, "/internal/network/port$") then
+				loaded[path].installNetworkPort(network)
+				network.installed = true
+			end
 		end
 		return loaded[path]
 	end
 	return {
+		network = network,
 		module = function(relative: string, globals: { [string]: any }?): any
 			return load(if relative == "" then ROOT else ROOT .. "/" .. relative, globals)
 		end,
@@ -97,9 +139,11 @@ function spec.fresh(relative: string, globals: { [string]: any }?): any
 end
 
 -- A fresh graph to load several modules that must share state, such as lifecycle and its runner.
-function spec.runtime(defaults, loggingPort, configPort)
-	return graph(defaults, loggingPort, configPort)
+function spec.runtime(defaults, loggingPort, configPort, network)
+	return graph(defaults, loggingPort, configPort, network)
 end
+
+spec.Promise = Promise
 
 function spec.eq(actual: any, expected: any, label: string)
 	if actual ~= expected then

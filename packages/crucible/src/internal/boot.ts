@@ -9,6 +9,7 @@ import { useImplementerPort } from "./implementers";
 import { admit, drain, hasEnded, request, track, useEffects } from "./lifecycle";
 import { type EnginePort } from "./port";
 import { records, seal, type BehaviourRecord, type ClassRecord, type SubsystemRecord } from "./registry";
+import type { NetworkLifecycle } from "./network/session";
 import { robloxPort, type BootPort } from "./roblox-port";
 import { Scheduler } from "./scheduler";
 import { Hook, Kind, Want, type ObjectState } from "./state";
@@ -22,7 +23,8 @@ export const BOOT_CLASSES = [Subsystem, CrucibleBehaviour];
 export interface Side {
 	readonly name: "server" | "client";
 	readonly renders: boolean;
-	readonly booted: () => void;
+	readonly booted: () => (() => void) | void;
+	readonly network: NetworkLifecycle;
 }
 
 /** @internal */
@@ -225,6 +227,28 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		drain();
 	});
 	if (!ok) reject(tostring(err));
+	if (failure === undefined) {
+		let unbooted: (() => void) | void = undefined;
+		const [finalized, finalizeErr] = pcall(() => {
+			// Roblox cannot unbind BindToClose, so the callback checks that this boot committed.
+			if (side.name === "server")
+				port.bindToClose(() => {
+					if (stage !== "committed") return;
+					shutdown(port, singletons);
+					side.network.close();
+				});
+			unbooted = side.booted();
+			side.network.commit();
+		});
+		if (!finalized) {
+			const undo = unbooted as (() => void) | void;
+			if (undo !== undefined) {
+				const [undone, undoErr] = pcall(undo);
+				if (!undone) runtimeDiagnostic("error", `Crucible: undoing booted failed: ${tostring(undoErr)}`);
+			}
+			reject(`boot finalization failed: ${tostring(finalizeErr)}`);
+		}
+	}
 	if (failure !== undefined) {
 		for (const s of owned) if (!hasEnded(s)) request(s, Want.Destroyed);
 		drain();
@@ -234,13 +258,18 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 	}
 	stage = "committed";
 	owned.clear();
-	if (side.name === "server") port.bindToClose(() => shutdown(port, singletons));
-	side.booted();
 	releaseBarrier();
 }
 
 /** @internal */
 export function boot(side: Side, options: BootOptions) {
-	load(options.load);
-	ignite(robloxPort(), side, options);
+	const [ok, err] = pcall(() => {
+		side.network.open();
+		load(options.load);
+		side.network.loaded();
+		ignite(robloxPort(), side, options);
+	});
+	if (ok) return;
+	side.network.close();
+	error(err, 0);
 }
