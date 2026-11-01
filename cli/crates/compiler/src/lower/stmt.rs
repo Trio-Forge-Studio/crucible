@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::{Breakable, Lower, is_hole, skip_down};
+use super::{Breakable, ImportBase, Lower, is_hole, skip_parens_and_assertions};
 use crate::facts::{Callee, Constant, Import, Receiver};
 use crate::luau::{BinOp, Block, Expr, Field, Function, Name, Stmt};
 use crate::macros::Macro;
@@ -9,7 +9,7 @@ use crate::tree::{Kind, Node, Nodes, Op, UnaryOp};
 impl Lower<'_> {
     pub(super) fn module(&mut self, statements: Nodes) -> Block {
         self.statements(statements);
-        let mut body = std::mem::take(&mut self.out);
+        let mut body = std::mem::take(&mut self.current_block);
         let exports = std::mem::take(&mut self.exports);
         let value = if exports.is_empty() {
             Expr::Nil
@@ -30,7 +30,7 @@ impl Lower<'_> {
         match s.kind() {
             Kind::Block => {
                 let block = self.block(s.statements());
-                self.out.push(Stmt::Do(block));
+                self.current_block.push(Stmt::Do(block));
             }
             Kind::EmptyStatement | Kind::InterfaceDeclaration | Kind::TypeAliasDeclaration => {}
             Kind::VariableStatement => self.variable_statement(s),
@@ -41,7 +41,7 @@ impl Lower<'_> {
                     Some(e) => self.return_values(e),
                     None => Vec::new(),
                 };
-                self.out.push(Stmt::Return(values));
+                self.current_block.push(Stmt::Return(values));
             }
             Kind::ForStatement => self.for_statement(s),
             Kind::ForOfStatement => self.for_of(s),
@@ -51,7 +51,7 @@ impl Lower<'_> {
                 if s.has_label() {
                     self.error(s, "labeled break is not supported");
                 }
-                self.out.push(Stmt::Break);
+                self.current_block.push(Stmt::Break);
             }
             Kind::ContinueStatement => {
                 if s.has_label() {
@@ -61,11 +61,11 @@ impl Lower<'_> {
                     Some(Breakable::Switch) => self.error(s, "continue inside a switch is not supported"),
                     Some(Breakable::Loop { copy_back }) => {
                         let copy_back = copy_back.clone();
-                        self.out.extend(copy_back);
+                        self.current_block.extend(copy_back);
                     }
                     None => {}
                 }
-                self.out.push(Stmt::Continue);
+                self.current_block.push(Stmt::Continue);
             }
             Kind::SwitchStatement => self.switch_statement(s),
             Kind::FunctionDeclaration => self.function_declaration(s),
@@ -96,7 +96,6 @@ impl Lower<'_> {
         }
     }
 
-    /// Lowers the body of a branch or loop, which may be a single statement.
     pub(super) fn body_block(&mut self, s: Node) -> Block {
         if s.kind() == Kind::Block {
             self.block(s.statements())
@@ -107,23 +106,22 @@ impl Lower<'_> {
     }
 
     pub(super) fn export(&mut self, name: Name) {
-        match &self.container {
-            Some(container) => {
-                let target = Expr::Name(container.clone()).field(name.clone());
-                self.out.push(Stmt::Assign(vec![target], vec![Expr::Name(name)]));
+        match &self.namespace {
+            Some(namespace) => {
+                let target = Expr::Name(namespace.clone()).field(name.clone());
+                self.current_block.push(Stmt::Assign(vec![target], vec![Expr::Name(name)]));
             }
             None => self.exports.push((name.clone(), Expr::Name(name))),
         }
     }
 
-    /// Declares `name` with `value`, or assigns it when the block declared it first.
     pub(super) fn declare(&mut self, name_node: Node, name: Name, value: Option<Expr>) {
         if self.is_hoisted(name_node) {
             if let Some(value) = value {
-                self.out.push(Stmt::Assign(vec![Expr::Name(name)], vec![value]));
+                self.current_block.push(Stmt::Assign(vec![Expr::Name(name)], vec![value]));
             }
         } else {
-            self.out.push(Stmt::Local(vec![name], value.into_iter().collect()));
+            self.current_block.push(Stmt::Local(vec![name], value.into_iter().collect()));
         }
     }
 
@@ -186,12 +184,12 @@ impl Lower<'_> {
                 self.body_block(e)
             }
         });
-        self.out.push(Stmt::If(condition, then, otherwise));
+        self.current_block.push(Stmt::If(condition, then, otherwise));
     }
 
     /// The values a `return` or an arrow body returns. A `LuaTuple` returns its members as several values.
     pub(super) fn return_values(&mut self, e: Node) -> Vec<Expr> {
-        let inner = skip_down(e);
+        let inner = skip_parens_and_assertions(e);
         if inner.kind() == Kind::CallExpression
             && self.fact(inner.expression()).and_then(|f| f.callee) == Some(Callee::Macro(Macro::Tuple))
         {
@@ -206,7 +204,7 @@ impl Lower<'_> {
             }
         }
         match inner.kind() {
-            Kind::CallExpression => vec![self.call(inner, false).unwrap_or(Expr::Nil)],
+            Kind::CallExpression => vec![self.call(inner)],
             Kind::ArrayLiteralExpression if !inner.elements().iter().any(|e| e.kind() == Kind::SpreadElement) => {
                 self.ordered(inner.elements().iter(), |l, a| l.expr(a))
             }
@@ -226,29 +224,28 @@ impl Lower<'_> {
 
     fn while_statement(&mut self, s: Node) {
         let (condition, prereqs) = self.capture(|l| l.condition(s.expression()));
-        let mut body = self.with_breakable(Breakable::LOOP, |l| l.body_block(s.statement()));
+        let mut body = self.with_breakable(Breakable::LOOP, |l| l.body_block(s.loop_body()));
         if prereqs.is_empty() {
-            self.out.push(Stmt::While(condition, body));
+            self.current_block.push(Stmt::While(condition, body));
         } else {
             let mut block = prereqs;
             block.push(Stmt::If(condition.negated(), vec![Stmt::Break], None));
             block.append(&mut body);
-            self.out.push(Stmt::While(Expr::Bool(true), block));
+            self.current_block.push(Stmt::While(Expr::Bool(true), block));
         }
     }
 
     fn do_statement(&mut self, s: Node) {
-        let body = self.with_breakable(Breakable::LOOP, |l| l.body_block(s.statement()));
+        let body = self.with_breakable(Breakable::LOOP, |l| l.body_block(s.loop_body()));
         let (condition, prereqs) = self.capture(|l| l.condition(s.expression()));
-        if !prereqs.is_empty() && has_continue(s.statement()) {
+        if !prereqs.is_empty() && has_own_continue(s.loop_body()) {
             self.error(s, "continue in a do-while whose condition needs statements is not supported");
         }
         let mut body = scoped(body);
         body.extend(prereqs);
-        self.out.push(Stmt::Repeat(body, condition.negated()));
+        self.current_block.push(Stmt::Repeat(body, condition.negated()));
     }
 
-    /// The `let` names a `for` head declares that a function inside the loop refers to.
     fn captured_head_names(&self, s: Node) -> Vec<Node> {
         let Some(init) = s.initializer() else { return Vec::new() };
         if init.kind() != Kind::VariableDeclarationList || init.is_const() {
@@ -260,7 +257,7 @@ impl Lower<'_> {
                 super::pattern_names(name, &mut |n| names.push(n));
             }
         }
-        let parts = [s.condition(), s.incrementor(), Some(s.statement())];
+        let parts = [s.condition(), s.incrementor(), Some(s.loop_body())];
         names.retain(|name| parts.iter().flatten().any(|&part| self.closure_refers_to(part, name.text())));
         names
     }
@@ -287,7 +284,8 @@ impl Lower<'_> {
     }
 
     /// JavaScript gives each pass of a `for` its own copy of the `let` variables in its head. When a closure
-    /// captures one, each pass declares its own local from a relay, and stores it back before the next pass.
+    /// captures one, each pass declares its own local from a relay, and stores it back at the end of the pass and
+    /// before each `continue`.
     fn for_statement(&mut self, s: Node) {
         let captured = self.captured_head_names(s);
         let (_, mut block) = self.capture(|l| {
@@ -323,8 +321,8 @@ impl Lower<'_> {
             None => Vec::new(),
         };
         let loop_kind = Breakable::Loop { copy_back: copy_back.clone() };
-        let mut body = self.with_breakable(loop_kind, |l| l.body_block(s.statement()));
-        if !copy_in.is_empty() || (has_continue(s.statement()) && !increment.is_empty()) {
+        let mut body = self.with_breakable(loop_kind, |l| l.body_block(s.loop_body()));
+        if !copy_in.is_empty() || (has_own_continue(s.loop_body()) && !increment.is_empty()) {
             // `continue` jumps to the loop's start, so the increment runs there on every pass but the first.
             let mut inner = copy_in;
             if !increment.is_empty() {
@@ -358,7 +356,7 @@ impl Lower<'_> {
             inner.extend(increment);
             block.push(Stmt::While(Expr::Bool(true), inner));
         }
-        self.out.push(Stmt::Do(block));
+        self.current_block.push(Stmt::Do(block));
     }
 
     fn for_of(&mut self, s: Node) {
@@ -379,7 +377,7 @@ impl Lower<'_> {
             self.unsupported(initializer, "a for-of over an existing variable");
             return;
         };
-        let inner = skip_down(iterable);
+        let inner = skip_parens_and_assertions(iterable);
         if inner.kind() == Kind::CallExpression
             && self.fact(inner.expression()).and_then(|f| f.callee) == Some(Callee::Macro(Macro::Range))
         {
@@ -463,10 +461,10 @@ impl Lower<'_> {
                     l.bind_value(pattern, value);
                 }
             });
-            block.extend(l.body_block(s.statement()));
+            block.extend(l.body_block(s.loop_body()));
             block
         });
-        self.out.push(Stmt::GenericFor(names, iter, body));
+        self.current_block.push(Stmt::GenericFor(names, iter, body));
     }
 
     fn for_range(&mut self, s: Node, call: Node, binding: Node) {
@@ -483,8 +481,8 @@ impl Lower<'_> {
         let step = (args.len() > 2).then(|| args.remove(2));
         let end = args.remove(1);
         let start = args.remove(0);
-        let body = self.with_breakable(Breakable::LOOP, |l| l.body_block(s.statement()));
-        self.out.push(Stmt::NumericFor(name, start, end, step, body));
+        let body = self.with_breakable(Breakable::LOOP, |l| l.body_block(s.loop_body()));
+        self.current_block.push(Stmt::NumericFor(name, start, end, step, body));
     }
 
     fn switch_statement(&mut self, s: Node) {
@@ -499,19 +497,19 @@ impl Lower<'_> {
         let falls = clauses
             .iter()
             .enumerate()
-            .any(|(i, c)| i + 1 < clauses.len() && !c.statements().is_empty() && !ends_flow(c.statements()));
+            .any(|(i, c)| i + 1 < clauses.len() && !c.statements().is_empty() && !clause_always_exits(c.statements()));
         let fallthrough = falls.then(|| self.temp());
         let body = self.with_breakable(Breakable::Switch, |l| {
             let (_, block) = l.capture(|l| {
                 if let Some(flag) = &fallthrough {
-                    l.out.push(Stmt::Local(vec![flag.clone()], vec![Expr::Bool(false)]));
+                    l.current_block.push(Stmt::Local(vec![flag.clone()], vec![Expr::Bool(false)]));
                 }
                 let mut tests: Vec<Expr> = Vec::new();
                 let mut after_fallthrough = false;
                 for clause in &clauses {
                     if clause.kind() == Kind::DefaultClause {
                         let statements = l.block(clause.statements());
-                        l.out.extend(statements);
+                        l.current_block.extend(statements);
                         tests.clear();
                         continue;
                     }
@@ -530,17 +528,17 @@ impl Lower<'_> {
                         condition = Expr::Name(flag.clone()).binary(BinOp::Or, condition);
                     }
                     let mut block = l.block(clause.statements());
-                    let ends = ends_flow(clause.statements());
+                    let ends = clause_always_exits(clause.statements());
                     if !ends && let Some(flag) = &fallthrough {
                         block.push(Stmt::Assign(vec![Expr::Name(flag.clone())], vec![Expr::Bool(true)]));
                     }
                     after_fallthrough = !ends;
-                    l.out.push(Stmt::If(condition, block, None));
+                    l.current_block.push(Stmt::If(condition, block, None));
                 }
             });
             block
         });
-        self.out.push(Stmt::Repeat(body, Expr::Bool(true)));
+        self.current_block.push(Stmt::Repeat(body, Expr::Bool(true)));
     }
 
     fn function_declaration(&mut self, s: Node) {
@@ -558,16 +556,15 @@ impl Lower<'_> {
         let local = self.local_name(name);
         let function = self.function(s);
         if self.is_hoisted(name) {
-            self.out.push(Stmt::Function(Expr::Name(local.clone()), None, function));
+            self.current_block.push(Stmt::Function(Expr::Name(local.clone()), None, function));
         } else {
-            self.out.push(Stmt::LocalFunction(local.clone(), function));
+            self.current_block.push(Stmt::LocalFunction(local.clone(), function));
         }
         if s.is_export() {
             self.export(local);
         }
     }
 
-    /// Lowers a function-like node: its parameters, then its body.
     pub(super) fn function(&mut self, f: Node) -> Function {
         if f.is_async() {
             self.unsupported(f, "an async function");
@@ -584,30 +581,28 @@ impl Lower<'_> {
             }
         };
         let outer = std::mem::take(&mut self.breakables);
-        let container = self.container.take();
-        let ((mut params, varargs), body) = self.capture(|l| {
+        let namespace = self.namespace.take();
+        let (Parameters { names: mut params, rest: varargs }, body) = self.capture(|l| {
             let params = l.parameters(f.parameters());
             match f.body() {
                 Some(body) if body.kind() == Kind::Block => l.statements(body.statements()),
                 Some(body) => {
                     let values = l.return_values(body);
-                    l.out.push(Stmt::Return(values));
+                    l.current_block.push(Stmt::Return(values));
                 }
                 None => {}
             }
             params
         });
         self.breakables = outer;
-        self.container = container;
+        self.namespace = namespace;
         if method {
             params.insert(0, Cow::Borrowed("self"));
         }
         Function { params, varargs, body }
     }
 
-    /// The parameter names and whether the last is a rest parameter. Default values and destructuring become
-    /// statements in the current block.
-    pub(super) fn parameters(&mut self, params: Nodes) -> (Vec<Name>, bool) {
+    pub(super) fn parameters(&mut self, params: Nodes) -> Parameters {
         let mut names = Vec::new();
         let mut varargs = false;
         for p in params.iter() {
@@ -620,7 +615,7 @@ impl Lower<'_> {
                 let rest = Expr::Table(vec![Field::Item(Expr::VarArgs)]);
                 if name.kind() == Kind::Identifier {
                     let local = self.local_name(name);
-                    self.out.push(Stmt::Local(vec![local], vec![rest]));
+                    self.current_block.push(Stmt::Local(vec![local], vec![rest]));
                 } else {
                     let value = self.push_temp(rest);
                     self.bind_value(name, value);
@@ -632,13 +627,13 @@ impl Lower<'_> {
             if let Some(default) = p.initializer() {
                 let (value, mut block) = self.capture(|l| l.expr(default));
                 block.push(Stmt::Assign(vec![Expr::Name(local.clone())], vec![value]));
-                self.out.push(Stmt::If(Expr::Name(local.clone()).binary(BinOp::Eq, Expr::Nil), block, None));
+                self.current_block.push(Stmt::If(Expr::Name(local.clone()).binary(BinOp::Eq, Expr::Nil), block, None));
             }
             if name.kind() != Kind::Identifier {
                 self.bind_value(name, Expr::Name(local));
             }
         }
-        (names, varargs)
+        Parameters { names, rest: varargs }
     }
 
     fn enum_declaration(&mut self, s: Node) {
@@ -651,7 +646,7 @@ impl Lower<'_> {
         };
         let local = self.local_name(name);
         if !self.is_hoisted(name) {
-            self.out.push(Stmt::Local(vec![local.clone()], Vec::new()));
+            self.current_block.push(Stmt::Local(vec![local.clone()], Vec::new()));
         }
         let members: Vec<Node> = s.members().iter().collect();
         let (_, block) = self.capture(|l| {
@@ -682,26 +677,27 @@ impl Lower<'_> {
             let inverse = numeric.then(|| l.temp());
             let metatable = match &inverse {
                 Some(inverse) => {
-                    l.out.push(Stmt::Local(vec![inverse.clone()], vec![Expr::Table(Vec::new())]));
+                    l.current_block.push(Stmt::Local(vec![inverse.clone()], vec![Expr::Table(Vec::new())]));
                     vec![Field::Keyed(Expr::string("__index"), Expr::Name(inverse.clone()))]
                 }
                 None => Vec::new(),
             };
             let table = Expr::global("setmetatable").call(vec![Expr::Table(Vec::new()), Expr::Table(metatable)]);
-            l.out.push(Stmt::Assign(vec![Expr::Name(local.clone())], vec![table]));
+            l.current_block.push(Stmt::Assign(vec![Expr::Name(local.clone())], vec![table]));
             for (key, value) in values {
                 let string = matches!(value, Expr::String(_));
                 let simple = value.is_simple();
                 let value = if simple || inverse.is_none() || string { value } else { l.push_temp(value) };
-                l.out.push(Stmt::Assign(vec![Expr::Name(local.clone()).field(key)], vec![value.clone()]));
+                l.current_block.push(Stmt::Assign(vec![Expr::Name(local.clone()).field(key)], vec![value.clone()]));
                 if let Some(inverse) = &inverse
                     && !string
                 {
-                    l.out.push(Stmt::Assign(vec![Expr::Name(inverse.clone()).index(value)], vec![Expr::string(key)]));
+                    l.current_block
+                        .push(Stmt::Assign(vec![Expr::Name(inverse.clone()).index(value)], vec![Expr::string(key)]));
                 }
             }
         });
-        self.out.push(Stmt::Do(block));
+        self.current_block.push(Stmt::Do(block));
         if s.is_export() {
             self.export(local);
         }
@@ -725,10 +721,10 @@ impl Lower<'_> {
         }
         let local = self.local_name(name);
         self.declare(name, local.clone(), Some(Expr::Table(Vec::new())));
-        let outer = self.container.replace(local.clone());
+        let outer = self.namespace.replace(local.clone());
         let block = self.block(body.statements());
-        self.container = outer;
-        self.out.push(Stmt::Do(block));
+        self.namespace = outer;
+        self.current_block.push(Stmt::Do(block));
         if s.is_export() {
             self.export(local);
         }
@@ -758,7 +754,7 @@ impl Lower<'_> {
             names.pop();
         }
         let mut base = Expr::global("script");
-        if !self.init {
+        if self.import_base == ImportBase::ScriptParent {
             base = base.field("Parent");
         }
         for _ in 0..up {
@@ -788,7 +784,7 @@ impl Lower<'_> {
         };
         let Some(clause) = s.import_clause() else {
             let call = self.import_call(specifier);
-            self.out.push(Stmt::Call(call));
+            self.current_block.push(Stmt::Call(call));
             return;
         };
         if clause.is_type_only() {
@@ -876,17 +872,14 @@ impl Lower<'_> {
         }
     }
 
-    /// Lowers an expression whose value is unused.
     pub(super) fn expr_stmt(&mut self, n: Node) {
-        let n = skip_down(n);
+        let n = skip_parens_and_assertions(n);
         match n.kind() {
             Kind::CallExpression => {
-                if let Some(e) = self.call(n, true) {
-                    self.discard(e);
-                }
+                self.call_statement(n);
             }
             Kind::BinaryExpression if n.operator().is_assignment() => {
-                self.assignment(n, false);
+                self.assignment(n);
             }
             Kind::BinaryExpression if matches!(n.operator(), Op::And | Op::Or | Op::Coalesce) => {
                 let right = n.right();
@@ -899,12 +892,12 @@ impl Lower<'_> {
                     }
                 };
                 let (_, block) = self.capture(|l| l.expr_stmt(right));
-                self.out.push(Stmt::If(condition, block, None));
+                self.current_block.push(Stmt::If(condition, block, None));
             }
             Kind::PrefixUnaryExpression | Kind::PostfixUnaryExpression
                 if matches!(n.unary_operator(), Some(UnaryOp::Increment | UnaryOp::Decrement)) =>
             {
-                self.increment(n, false);
+                self.increment(n);
             }
             Kind::ConditionalExpression => {
                 let Some(test) = n.condition() else {
@@ -914,7 +907,7 @@ impl Lower<'_> {
                 let condition = self.condition(test);
                 let (_, then) = self.capture(|l| l.expr_stmt(n.when_true()));
                 let (_, otherwise) = self.capture(|l| l.expr_stmt(n.when_false()));
-                self.out.push(Stmt::If(condition, then, Some(otherwise)));
+                self.current_block.push(Stmt::If(condition, then, Some(otherwise)));
             }
             Kind::Identifier | Kind::NumericLiteral | Kind::StringLiteral | Kind::TrueKeyword | Kind::FalseKeyword => {}
             _ => {
@@ -924,22 +917,25 @@ impl Lower<'_> {
         }
     }
 
-    /// Evaluates `e` for its effects.
     pub(super) fn discard(&mut self, e: Expr) {
         match e {
-            Expr::Call(..) | Expr::Method(..) => self.out.push(Stmt::Call(e)),
-            Expr::Paren(inner) if inner.is_multi() => self.out.push(Stmt::Call(*inner)),
+            Expr::Call(..) | Expr::Method(..) => self.current_block.push(Stmt::Call(e)),
+            Expr::Paren(inner) if inner.is_multi() => self.current_block.push(Stmt::Call(*inner)),
             e if e.is_simple() => {}
             e => {
                 let name = self.temp();
-                self.out.push(Stmt::Local(vec![name], vec![e]));
+                self.current_block.push(Stmt::Local(vec![name], vec![e]));
             }
         }
     }
 }
 
-/// Whether a `continue` in `s` belongs to the loop around `s`.
-fn has_continue(s: Node) -> bool {
+pub(super) struct Parameters {
+    pub(super) names: Vec<Name>,
+    pub(super) rest: bool,
+}
+
+fn has_own_continue(s: Node) -> bool {
     match s.kind() {
         Kind::ContinueStatement => true,
         Kind::ForStatement
@@ -954,7 +950,7 @@ fn has_continue(s: Node) -> bool {
         | Kind::ClassDeclaration => false,
         _ => {
             let mut found = false;
-            s.for_each_child(&mut |c| found = found || has_continue(c));
+            s.for_each_child(&mut |c| found = found || has_own_continue(c));
             found
         }
     }
@@ -970,11 +966,10 @@ fn scoped(body: Block) -> Block {
     }
 }
 
-/// Whether a clause's statements always leave the switch.
-fn ends_flow(statements: Nodes) -> bool {
+fn clause_always_exits(statements: Nodes) -> bool {
     statements.last().is_some_and(|s| match s.kind() {
         Kind::BreakStatement | Kind::ReturnStatement | Kind::ContinueStatement | Kind::ThrowStatement => true,
-        Kind::Block => ends_flow(s.statements()),
+        Kind::Block => clause_always_exits(s.statements()),
         _ => false,
     })
 }

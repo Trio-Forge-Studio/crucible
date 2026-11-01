@@ -1,12 +1,11 @@
 use std::borrow::Cow;
 
-use super::{Lower, is_stable, skip_down};
+use super::{Lower, Usage, is_stable, skip_parens_and_assertions};
 use crate::facts::{Callee, Constant, Falsy, Receiver};
 use crate::luau::{BinOp, Block, Expr, Field, Name, Part, Stmt, UnOp};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Op, UnaryOp};
 
-/// An assignable location, lowered once so it can be read and written.
 #[derive(Clone)]
 pub(super) enum Place {
     Name(Expr),
@@ -22,7 +21,6 @@ impl Place {
     }
 }
 
-/// `e + delta`, folding a number.
 pub(super) fn offset(e: Expr, delta: f64) -> Expr {
     match e {
         Expr::Number(n) => Expr::Number(n + delta),
@@ -68,7 +66,7 @@ impl Lower<'_> {
             Kind::NewExpression => self.new_expression(n),
             Kind::BinaryExpression => self.binary(n),
             Kind::PrefixUnaryExpression => self.prefix(n),
-            Kind::PostfixUnaryExpression => self.increment(n, true).unwrap_or(Expr::Nil),
+            Kind::PostfixUnaryExpression => self.increment_value(n),
             Kind::ConditionalExpression => self.conditional(n),
             Kind::ArrowFunction | Kind::FunctionExpression => {
                 if n.kind() == Kind::FunctionExpression && n.name().is_some() {
@@ -134,7 +132,7 @@ impl Lower<'_> {
             return c;
         }
         if n.in_optional_chain() {
-            return self.optional_chain(n, false).unwrap_or(Expr::Nil);
+            return self.optional_chain(n);
         }
         let Some(name) = n.name() else { return self.unsupported(n, "this property access") };
         if name.kind() == Kind::PrivateIdentifier {
@@ -149,13 +147,13 @@ impl Lower<'_> {
             return c;
         }
         if n.in_optional_chain() {
-            return self.optional_chain(n, false).unwrap_or(Expr::Nil);
+            return self.optional_chain(n);
         }
         let object = n.expression();
         let receiver = self.receiver(object);
-        let inner = skip_down(object);
+        let inner = skip_parens_and_assertions(object);
         if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-            let call = self.call(inner, false).unwrap_or(Expr::Nil);
+            let call = self.call(inner);
             let index = self.expr(n.argument_expression());
             return match index {
                 Expr::Number(0.0) => Expr::Paren(Box::new(call)),
@@ -166,10 +164,8 @@ impl Lower<'_> {
         base.index(element_key(receiver, key))
     }
 
-    /// Lowers an assignment target. With `simple`, the base and key are stored so the place can be read and
-    /// written without evaluating them twice.
-    pub(super) fn place(&mut self, target: Node, simple: bool) -> Place {
-        let target = skip_down(target);
+    pub(super) fn place(&mut self, target: Node) -> Place {
+        let target = skip_parens_and_assertions(target);
         match target.kind() {
             Kind::Identifier => Place::Name(self.identifier(target)),
             Kind::PropertyAccessExpression if !target.in_optional_chain() => {
@@ -181,27 +177,24 @@ impl Lower<'_> {
                     self.unsupported(name, "a private name");
                 }
                 let base = self.expr(target.expression());
-                let base = if simple { self.push_temp_if_complex(base) } else { base };
                 Place::Index(base, Expr::String(Cow::Borrowed(name.text())))
             }
             Kind::ElementAccessExpression if !target.in_optional_chain() => {
                 let object = target.expression();
                 let receiver = self.receiver(object);
                 let (base, key) = self.ordered_pair(object, target.argument_expression());
-                let key = element_key(receiver, key);
-                if simple {
-                    let base = self.push_temp_if_complex(base);
-                    let key = self.push_temp_if_complex(key);
-                    Place::Index(base, key)
-                } else {
-                    Place::Index(base, key)
-                }
+                Place::Index(base, element_key(receiver, key))
             }
             _ => {
                 self.unsupported(target, "this assignment target");
                 Place::Name(Expr::Nil)
             }
         }
+    }
+
+    fn stored_place(&mut self, target: Node) -> Place {
+        let place = self.place(target);
+        self.simplify_place(place)
     }
 
     fn simplify_place(&mut self, place: Place) -> Place {
@@ -215,7 +208,6 @@ impl Lower<'_> {
         }
     }
 
-    /// Stores the base and key of `place` when the statements in `later` run first and could change them.
     fn place_before(&mut self, place: Place, later: &[Stmt]) -> Place {
         match place {
             Place::Index(base, key) => {
@@ -227,23 +219,37 @@ impl Lower<'_> {
         }
     }
 
-    /// Lowers `=` and the compound assignments. Returns the assigned value when `used`.
-    pub(super) fn assignment(&mut self, n: Node, used: bool) -> Option<Expr> {
+    pub(super) fn assignment(&mut self, n: Node) {
+        self.assign(n, Usage::Statement);
+    }
+
+    pub(super) fn assignment_value(&mut self, n: Node) -> Expr {
+        self.assign(n, Usage::Value).unwrap_or(Expr::Nil)
+    }
+
+    fn assign(&mut self, n: Node, usage: Usage) -> Option<Expr> {
+        let used = usage == Usage::Value;
         let op = n.operator();
         let (target, source) = (n.left(), n.right());
-        let target_kind = skip_down(target).kind();
-        if op == Op::Assign && matches!(target_kind, Kind::ArrayLiteralExpression | Kind::ObjectLiteralExpression) {
-            return self.assign_pattern(skip_down(target), source, used);
+        let pattern = skip_parens_and_assertions(target);
+        if op == Op::Assign && matches!(pattern.kind(), Kind::ArrayLiteralExpression | Kind::ObjectLiteralExpression) {
+            return match usage {
+                Usage::Value => Some(self.assign_pattern_value(pattern, source)),
+                Usage::Statement => {
+                    self.assign_pattern(pattern, source);
+                    None
+                }
+            };
         }
-        let (place, place_block) = self.capture(|l| l.place(target, false));
-        self.out.extend(place_block);
+        let (place, place_block) = self.capture(|l| l.place(target));
+        self.current_block.extend(place_block);
         match op {
             Op::Assign => {
                 let (value, block) = self.capture(|l| l.expr(source));
                 let place = self.place_before(place, &block);
-                self.out.extend(block);
+                self.current_block.extend(block);
                 let value = if used { self.push_temp_if_complex(value) } else { value };
-                self.out.push(Stmt::Assign(vec![place.expr()], vec![value.clone()]));
+                self.current_block.push(Stmt::Assign(vec![place.expr()], vec![value.clone()]));
                 used.then_some(value)
             }
             Op::CoalesceAssign | Op::OrAssign | Op::AndAssign => {
@@ -262,7 +268,7 @@ impl Lower<'_> {
                 };
                 let (value, mut block) = self.capture(|l| l.expr(source));
                 block.push(Stmt::Assign(vec![place.expr()], vec![value]));
-                self.out.push(Stmt::If(condition, block, None));
+                self.current_block.push(Stmt::If(condition, block, None));
                 used.then(|| place.expr())
             }
             _ => {
@@ -277,7 +283,7 @@ impl Lower<'_> {
                     Place::Name(name) if !is_stable(name, &block) => Some(self.push_temp(name.clone())),
                     _ => None,
                 };
-                self.out.extend(block);
+                self.current_block.extend(block);
                 let concat = operator == Op::Add && self.is_string_plus(target, source);
                 let (binop, value) = if concat {
                     (Some(BinOp::Concat), self.stringify(source, value))
@@ -285,16 +291,16 @@ impl Lower<'_> {
                     (arithmetic(operator), value)
                 };
                 match (binop, current) {
-                    (Some(binop), None) => self.out.push(Stmt::Compound(binop, place.expr(), value)),
+                    (Some(binop), None) => self.current_block.push(Stmt::Compound(binop, place.expr(), value)),
                     (Some(binop), Some(current)) => {
-                        self.out.push(Stmt::Assign(vec![place.expr()], vec![current.binary(binop, value)]));
+                        self.current_block.push(Stmt::Assign(vec![place.expr()], vec![current.binary(binop, value)]));
                     }
                     (None, current) => match bitwise(operator) {
                         Some(function) => {
                             place = self.simplify_place(place);
                             let current = current.unwrap_or_else(|| place.expr());
                             let call = Expr::global(function).call(vec![current, value]);
-                            self.out.push(Stmt::Assign(vec![place.expr()], vec![call]));
+                            self.current_block.push(Stmt::Assign(vec![place.expr()], vec![call]));
                         }
                         None => self.error(n, "this compound assignment is not supported"),
                     },
@@ -304,28 +310,33 @@ impl Lower<'_> {
         }
     }
 
-    /// Lowers `++` and `--`. Returns the expression's value when `used`.
-    pub(super) fn increment(&mut self, n: Node, used: bool) -> Option<Expr> {
-        let op = match n.unary_operator() {
-            Some(UnaryOp::Increment) => BinOp::Add,
-            Some(UnaryOp::Decrement) => BinOp::Sub,
+    fn increment_operator(&mut self, n: Node) -> Option<BinOp> {
+        match n.unary_operator() {
+            Some(UnaryOp::Increment) => Some(BinOp::Add),
+            Some(UnaryOp::Decrement) => Some(BinOp::Sub),
             _ => {
                 self.unsupported(n, "this unary operator");
-                return None;
+                None
             }
-        };
-        let place = self.place(n.operand(), used);
-        if !used {
-            self.out.push(Stmt::Compound(op, place.expr(), Expr::Number(1.0)));
-            return None;
         }
+    }
+
+    pub(super) fn increment(&mut self, n: Node) {
+        let Some(op) = self.increment_operator(n) else { return };
+        let place = self.place(n.operand());
+        self.current_block.push(Stmt::Compound(op, place.expr(), Expr::Number(1.0)));
+    }
+
+    pub(super) fn increment_value(&mut self, n: Node) -> Expr {
+        let Some(op) = self.increment_operator(n) else { return Expr::Nil };
+        let place = self.stored_place(n.operand());
         if n.kind() == Kind::PrefixUnaryExpression {
-            self.out.push(Stmt::Compound(op, place.expr(), Expr::Number(1.0)));
-            return Some(place.expr());
+            self.current_block.push(Stmt::Compound(op, place.expr(), Expr::Number(1.0)));
+            return place.expr();
         }
         let old = self.push_temp(place.expr());
-        self.out.push(Stmt::Assign(vec![place.expr()], vec![old.clone().binary(op, Expr::Number(1.0))]));
-        Some(old)
+        self.current_block.push(Stmt::Assign(vec![place.expr()], vec![old.clone().binary(op, Expr::Number(1.0))]));
+        old
     }
 
     fn prefix(&mut self, n: Node) -> Expr {
@@ -346,7 +357,7 @@ impl Lower<'_> {
                 let operand = self.expr(n.operand());
                 Expr::global("bit32.bnot").call(vec![operand])
             }
-            Some(UnaryOp::Increment | UnaryOp::Decrement) => self.increment(n, true).unwrap_or(Expr::Nil),
+            Some(UnaryOp::Increment | UnaryOp::Decrement) => self.increment_value(n),
             None => self.unsupported(n, "this unary operator"),
         }
     }
@@ -354,7 +365,7 @@ impl Lower<'_> {
     fn binary(&mut self, n: Node) -> Expr {
         let op = n.operator();
         if op.is_assignment() {
-            return self.assignment(n, true).unwrap_or(Expr::Nil);
+            return self.assignment_value(n);
         }
         match op {
             Op::And | Op::Or => self.logical(n),
@@ -389,7 +400,6 @@ impl Lower<'_> {
         }
     }
 
-    /// Whether `+` concatenates: either operand is a string.
     fn is_string_plus(&mut self, left: Node, right: Node) -> bool {
         let mut string = false;
         for operand in [left, right] {
@@ -402,7 +412,6 @@ impl Lower<'_> {
         string
     }
 
-    /// An operand of `..`, converted with `tostring` unless it is a string that cannot be nil, or a number literal.
     fn stringify(&mut self, n: Node, value: Expr) -> Expr {
         let fact = self.fact(n);
         let string = fact.is_some_and(|f| f.receiver == Some(Receiver::String) && !f.nullable());
@@ -413,7 +422,6 @@ impl Lower<'_> {
         }
     }
 
-    /// The JavaScript-falsy values `n` may hold.
     pub(super) fn falsy(&mut self, n: Node) -> Falsy {
         if let Some(falsy) = self.fact(n).and_then(|f| f.falsy) {
             return falsy;
@@ -422,7 +430,6 @@ impl Lower<'_> {
         Falsy::ALL
     }
 
-    /// A Luau condition that is true when `value` is JavaScript-truthy.
     pub(super) fn truthy_check(&mut self, value: Expr, falsy: Falsy) -> Expr {
         let mut checks = Vec::new();
         let extra = falsy.contains(Falsy::ZERO) || falsy.contains(Falsy::NAN) || falsy.contains(Falsy::EMPTY_STRING);
@@ -442,7 +449,6 @@ impl Lower<'_> {
         checks.into_iter().reduce(|a, b| a.binary(BinOp::And, b)).unwrap_or(Expr::Bool(true))
     }
 
-    /// Lowers `n` as a condition, where only truthiness matters.
     pub(super) fn condition(&mut self, n: Node) -> Expr {
         match n.kind() {
             Kind::ParenthesizedExpression => {
@@ -465,7 +471,7 @@ impl Lower<'_> {
                 let mut inner = block;
                 inner.push(Stmt::Assign(vec![result.clone()], vec![right]));
                 let test = if op == BinOp::And { result.clone() } else { result.clone().negated() };
-                self.out.push(Stmt::If(test, inner, None));
+                self.current_block.push(Stmt::If(test, inner, None));
                 return result;
             }
             Kind::BinaryExpression
@@ -514,7 +520,7 @@ impl Lower<'_> {
         let test = if and { test } else { test.negated() };
         let mut inner = block;
         inner.push(Stmt::Assign(vec![result.clone()], vec![right]));
-        self.out.push(Stmt::If(test, inner, None));
+        self.current_block.push(Stmt::If(test, inner, None));
         result
     }
 
@@ -539,7 +545,7 @@ impl Lower<'_> {
         let result = self.push_temp(first);
         for (value, mut block) in rest {
             block.push(Stmt::Assign(vec![result.clone()], vec![value]));
-            self.out.push(Stmt::If(result.clone().binary(BinOp::Eq, Expr::Nil), block, None));
+            self.current_block.push(Stmt::If(result.clone().binary(BinOp::Eq, Expr::Nil), block, None));
         }
         result
     }
@@ -553,14 +559,14 @@ impl Lower<'_> {
             return Expr::if_else(condition, then, otherwise);
         }
         let result = self.temp();
-        self.out.push(Stmt::Local(vec![result.clone()], Vec::new()));
+        self.current_block.push(Stmt::Local(vec![result.clone()], Vec::new()));
         let assign = |mut block: Block, value: Expr| {
             block.push(Stmt::Assign(vec![Expr::Name(result.clone())], vec![value]));
             block
         };
         let then = assign(then_block, then);
         let otherwise = assign(otherwise_block, otherwise);
-        self.out.push(Stmt::If(condition, then, Some(otherwise)));
+        self.current_block.push(Stmt::If(condition, then, Some(otherwise)));
         Expr::Name(result)
     }
 
@@ -600,18 +606,17 @@ impl Lower<'_> {
                 self.spread_append(result.clone(), e.expression());
             } else {
                 let value = self.expr(e);
-                self.out.push(Stmt::Call(Expr::global("table.insert").call(vec![result.clone(), value])));
+                self.current_block.push(Stmt::Call(Expr::global("table.insert").call(vec![result.clone(), value])));
             }
         }
         result
     }
 
-    /// A new array holding the values of a spread source.
     fn spread_copy(&mut self, source: Node) -> Expr {
         let receiver = self.receiver(source);
-        let inner = skip_down(source);
+        let inner = skip_parens_and_assertions(source);
         if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-            let call = self.call(inner, false).unwrap_or(Expr::Nil);
+            let call = self.call(inner);
             return Expr::Table(vec![Field::Item(call)]);
         }
         if receiver == Some(Receiver::Array) {
@@ -631,12 +636,11 @@ impl Lower<'_> {
         result
     }
 
-    /// Appends a spread source's values to the array in `target`.
     fn spread_append(&mut self, target: Expr, source: Node) {
         let receiver = self.receiver(source);
-        let inner = skip_down(source);
+        let inner = skip_parens_and_assertions(source);
         let value = if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-            let call = self.call(inner, false).unwrap_or(Expr::Nil);
+            let call = self.call(inner);
             Expr::Table(vec![Field::Item(call)])
         } else {
             self.expr(source)
@@ -648,18 +652,18 @@ impl Lower<'_> {
                 let length = Expr::unary(UnOp::Len, value.clone());
                 let at = offset(Expr::unary(UnOp::Len, target.clone()), 1.0);
                 let call = Expr::global("table.move").call(vec![value, Expr::Number(1.0), length, at, target.clone()]);
-                self.out.push(Stmt::Call(call));
+                self.current_block.push(Stmt::Call(call));
             }
             Some(Receiver::Set | Receiver::IterFn) => {
                 let v = self.temp();
                 let body = vec![insert(Expr::Name(v.clone()))];
-                self.out.push(Stmt::GenericFor(vec![v], vec![value], body));
+                self.current_block.push(Stmt::GenericFor(vec![v], vec![value], body));
             }
             Some(Receiver::Map) => {
                 let (k, v) = (self.temp(), self.temp());
                 let pair = Expr::Table(vec![Field::Item(Expr::Name(k.clone())), Field::Item(Expr::Name(v.clone()))]);
                 let body = vec![insert(pair)];
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![value], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![value], body));
             }
             Some(_) => {
                 self.unsupported(source, "spreading this value");
@@ -685,9 +689,9 @@ impl Lower<'_> {
         let head_end = first_spread.unwrap_or(properties.len());
         let mut lowered = Vec::new();
         for &p in &properties[..head_end] {
-            let (key, value) = self.object_property(p);
-            lowered.push(key);
-            lowered.push(value);
+            let Property { key, value } = self.object_property(p);
+            lowered.push((key.value, key.setup));
+            lowered.push((value.value, value.setup));
         }
         let fields = keyed_fields(self.order_values(lowered));
         if first_spread.is_none() {
@@ -705,61 +709,60 @@ impl Lower<'_> {
                     Stmt::Assign(vec![result.clone().index(Expr::Name(k.clone()))], vec![Expr::Name(v.clone())]);
                 let merge = Stmt::GenericFor(vec![k, v], vec![value.clone()], vec![assign]);
                 if falsy.is_empty() {
-                    self.out.push(merge);
+                    self.current_block.push(merge);
                 } else {
                     let test = self.truthy_check(value, falsy);
-                    self.out.push(Stmt::If(test, vec![merge], None));
+                    self.current_block.push(Stmt::If(test, vec![merge], None));
                 }
             } else {
-                let ((key, key_block), (value, value_block)) = self.object_property(p);
-                self.out.extend(key_block);
-                let key = self.store_before(key, &value_block);
-                self.out.extend(value_block);
-                self.out.push(Stmt::Assign(vec![result.clone().index(key)], vec![value]));
+                let Property { key, value } = self.object_property(p);
+                self.current_block.extend(key.setup);
+                let key = self.store_before(key.value, &value.setup);
+                self.current_block.extend(value.setup);
+                self.current_block.push(Stmt::Assign(vec![result.clone().index(key)], vec![value.value]));
             }
         }
         result
     }
 
-    /// The key and value of an object literal member, each with the statements it needs.
-    fn object_property(&mut self, p: Node) -> ((Expr, Block), (Expr, Block)) {
+    fn object_property(&mut self, p: Node) -> Property {
+        let lowered = |(value, setup): (Expr, Block)| Lowered { value, setup };
+        let refused = |l: &mut Self| {
+            l.unsupported(p, "this object member");
+            Property { key: Lowered::of(Expr::Nil), value: Lowered::of(Expr::Nil) }
+        };
         match p.kind() {
             Kind::PropertyAssignment => {
-                let (Some(name), Some(initializer)) = (p.name(), p.initializer()) else {
-                    self.unsupported(p, "this object member");
-                    return ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()));
-                };
-                let key = self.capture(|l| l.property_key(name));
-                let value = self.capture(|l| l.expr(initializer));
-                (key, value)
+                let (Some(name), Some(initializer)) = (p.name(), p.initializer()) else { return refused(self) };
+                let key = lowered(self.capture(|l| l.property_key(name)));
+                let value = lowered(self.capture(|l| l.expr(initializer)));
+                Property { key, value }
             }
             Kind::ShorthandPropertyAssignment => {
-                let Some(name) = p.name() else {
-                    self.unsupported(p, "this object member");
-                    return ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()));
-                };
-                let value = self.identifier(name);
-                ((Expr::String(Cow::Borrowed(name.text())), Vec::new()), (value, Vec::new()))
+                let Some(name) = p.name() else { return refused(self) };
+                let value = Lowered::of(self.identifier(name));
+                Property { key: Lowered::of(Expr::String(Cow::Borrowed(name.text()))), value }
             }
             Kind::MethodDeclaration => {
-                let Some(name) = p.name() else {
-                    self.unsupported(p, "this object member");
-                    return ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()));
-                };
-                let key = self.capture(|l| l.property_key(name));
+                let Some(name) = p.name() else { return refused(self) };
+                let key = lowered(self.capture(|l| l.property_key(name)));
                 let function = self.function(p);
-                (key, (Expr::Function(Box::new(function)), Vec::new()))
+                Property { key, value: Lowered::of(Expr::Function(Box::new(function))) }
             }
-            _ => {
-                self.unsupported(p, "this object member");
-                ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()))
-            }
+            _ => refused(self),
         }
     }
 
-    /// Lowers an optional chain ending at `n`. Every `?.` tests the value so far and leaves the result nil when
-    /// it is nil. With `statement`, a final call runs as a statement and the result is `None`.
-    pub(super) fn optional_chain(&mut self, n: Node, statement: bool) -> Option<Expr> {
+    pub(super) fn optional_chain(&mut self, n: Node) -> Expr {
+        self.chain(n, Usage::Value).unwrap_or(Expr::Nil)
+    }
+
+    pub(super) fn optional_chain_statement(&mut self, n: Node) {
+        self.chain(n, Usage::Statement);
+    }
+
+    fn chain(&mut self, n: Node, usage: Usage) -> Option<Expr> {
+        let statement = usage == Usage::Statement;
         let mut links = Vec::new();
         let mut cur = n;
         while cur.in_optional_chain() {
@@ -844,12 +847,11 @@ impl Lower<'_> {
             {
                 block.push(Stmt::Call(call));
             }
-            self.out.push(Stmt::If(result.clone().binary(BinOp::Ne, Expr::Nil), block, None));
+            self.current_block.push(Stmt::If(result.clone().binary(BinOp::Ne, Expr::Nil), block, None));
         }
         if statement { None } else { Some(result) }
     }
 
-    /// A call inside an optional chain on the value `object`.
     fn chain_call(&mut self, call: Node, callee: ChainCallee, object: Expr) -> Expr {
         let ChainCallee::Member(member) = callee else {
             let args = self.arguments(call);
@@ -860,7 +862,7 @@ impl Lower<'_> {
             return Expr::Nil;
         };
         if let Callee::Macro(m) = kind {
-            return self.method_macro(m, call, object, false).unwrap_or(Expr::Nil);
+            return self.method_macro(m, call, object);
         }
         let function: (Expr, Vec<Expr>) = match member.kind() {
             Kind::PropertyAccessExpression => {
@@ -878,7 +880,7 @@ impl Lower<'_> {
                 let key = self.expr(member.argument_expression());
                 let (args, block) = self.capture(|l| l.arguments(call));
                 let key = self.store_before(element_key(receiver, key), &block);
-                self.out.extend(block);
+                self.current_block.extend(block);
                 (object.clone().index(key), args)
             }
             _ => return self.unsupported(member, "this callee in an optional chain"),
@@ -894,16 +896,28 @@ impl Lower<'_> {
     }
 }
 
-/// What a call in an optional chain calls.
+struct Lowered {
+    value: Expr,
+    setup: Block,
+}
+
+impl Lowered {
+    fn of(value: Expr) -> Lowered {
+        Lowered { value, setup: Vec::new() }
+    }
+}
+
+struct Property {
+    key: Lowered,
+    value: Lowered,
+}
+
 #[derive(Clone, Copy)]
 enum ChainCallee {
-    /// The value so far.
     Value,
-    /// A property or element of the value so far.
     Member(Node),
 }
 
-/// Pairs alternating keys and values into table fields.
 pub(super) fn keyed_fields(values: Vec<Expr>) -> Vec<Field> {
     let mut values = values.into_iter();
     std::iter::from_fn(|| Some(Field::Keyed(values.next()?, values.next()?))).collect()
@@ -916,7 +930,6 @@ fn skip_non_null(mut n: Node) -> Node {
     n
 }
 
-/// The key for indexing a value of `receiver`. Arrays and `LuaTuple` values start at 1 in Luau.
 pub(super) fn element_key(receiver: Option<Receiver>, key: Expr) -> Expr {
     if matches!(receiver, Some(Receiver::Array | Receiver::LuaTuple)) { offset(key, 1.0) } else { key }
 }

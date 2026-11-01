@@ -1,6 +1,3 @@
-//! The Luau the lowering emits: an owned tree with no tsrs types, and a printer that adds parentheses from
-//! precedence. Every name and string is a `Name`, which borrows source text where it can.
-
 mod print;
 
 use std::borrow::Cow;
@@ -13,15 +10,13 @@ pub type Block = Vec<Stmt>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
-    /// `local a, b = x, y`. `values` may be empty.
+    /// `values` may be empty.
     Local(Vec<Name>, Vec<Expr>),
     LocalFunction(Name, Function),
-    /// `function a.b.c(...)`, or `function a.b:c(...)` with a method name. The target is a name or a chain of
-    /// constant string indexes.
+    /// The target is a name or a chain of constant string indexes.
     Function(Expr, Option<Name>, Function),
     Assign(Vec<Expr>, Vec<Expr>),
     Compound(BinOp, Expr, Expr),
-    /// A call or method call as a statement.
     Call(Expr),
     Do(Block),
     If(Expr, Block, Option<Block>),
@@ -49,8 +44,11 @@ pub enum Expr {
     Table(Vec<Field>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Unary(UnOp, Box<Expr>),
-    /// `if c then a else b`.
-    If(Box<Expr>, Box<Expr>, Box<Expr>),
+    If {
+        condition: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+    },
     Interpolated(Vec<Part>),
     /// Truncates a call to its first value.
     Paren(Box<Expr>),
@@ -152,10 +150,9 @@ impl Expr {
     }
 
     pub fn if_else(condition: Expr, then: Expr, otherwise: Expr) -> Expr {
-        Expr::If(Box::new(condition), Box::new(then), Box::new(otherwise))
+        Expr::If { condition: Box::new(condition), then: Box::new(then), otherwise: Box::new(otherwise) }
     }
 
-    /// Whether the value is always a boolean, so `not not e` is `e`.
     fn is_boolean(&self) -> bool {
         match self {
             Expr::Bool(_) => true,
@@ -167,8 +164,8 @@ impl Expr {
         }
     }
 
-    /// Whether evaluating the expression has no effect and its value cannot change between two reads in one
-    /// statement, so the lowering can repeat it instead of storing it.
+    /// Evaluating the expression has no effect, and its value can only change when a statement assigns its name, so
+    /// the lowering can repeat it instead of storing it.
     pub fn is_simple(&self) -> bool {
         matches!(self, Expr::Nil | Expr::Bool(_) | Expr::Number(_) | Expr::String(_) | Expr::Name(_) | Expr::VarArgs)
     }
@@ -179,7 +176,6 @@ impl Expr {
     }
 }
 
-/// Whether `text` can be written as a Luau name, as in `a.text` or `{ text = 1 }`.
 pub fn is_name(text: &str) -> bool {
     let mut chars = text.chars();
     let Some(first) = chars.next() else { return false };

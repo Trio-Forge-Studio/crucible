@@ -1,17 +1,17 @@
 use std::borrow::Cow;
 
 use super::expr::{element_key, keyed_fields, offset};
-use super::{Lower, skip_down};
+use super::{Lower, Usage, skip_parens_and_assertions};
 use crate::facts::{Callee, Receiver};
 use crate::luau::{BinOp, Expr, Field, Name, Stmt, UnOp, is_name};
 use crate::macros::{Macro, MacroKind};
 use crate::tree::{Kind, Node};
 
 fn calls_super(call: Node) -> bool {
-    let callee = skip_down(call.expression());
+    let callee = skip_parens_and_assertions(call.expression());
     callee.kind() == Kind::SuperKeyword
         || (callee.kind() == Kind::PropertyAccessExpression
-            && skip_down(callee.expression()).kind() == Kind::SuperKeyword)
+            && skip_parens_and_assertions(callee.expression()).kind() == Kind::SuperKeyword)
 }
 
 /// Luau types `type()` reports. Any other name needs `typeof()`.
@@ -19,9 +19,9 @@ const PRIMITIVE_TYPES: &[&str] =
     &["nil", "boolean", "string", "number", "table", "userdata", "function", "thread", "vector", "buffer"];
 
 impl Lower<'_> {
-    /// A call used as a value. A `LuaTuple` result becomes an array, as the source's type says.
+    /// A `LuaTuple` result becomes an array, as the source's type says.
     pub(super) fn call_value(&mut self, n: Node) -> Expr {
-        let value = self.call(n, false).unwrap_or(Expr::Nil);
+        let value = self.call(n);
         if !value.is_multi() {
             return value;
         }
@@ -35,13 +35,29 @@ impl Lower<'_> {
         }
     }
 
-    /// Lowers a call. With `statement`, a macro may lower to statements alone and return `None`.
-    pub(super) fn call(&mut self, n: Node, statement: bool) -> Option<Expr> {
+    /// A `LuaTuple` call keeps its several results.
+    pub(super) fn call(&mut self, n: Node) -> Expr {
+        self.lower_call(n, Usage::Value).unwrap_or(Expr::Nil)
+    }
+
+    pub(super) fn call_statement(&mut self, n: Node) {
+        if let Some(call) = self.lower_call(n, Usage::Statement) {
+            self.discard(call);
+        }
+    }
+
+    fn lower_call(&mut self, n: Node, usage: Usage) -> Option<Expr> {
         if n.in_optional_chain() {
-            return self.optional_chain(n, statement);
+            return match usage {
+                Usage::Value => Some(self.optional_chain(n)),
+                Usage::Statement => {
+                    self.optional_chain_statement(n);
+                    None
+                }
+            };
         }
         let callee = n.expression();
-        let target = skip_down(callee);
+        let target = skip_parens_and_assertions(callee);
         match target.kind() {
             Kind::SuperKeyword => {
                 let args = self.arguments(n);
@@ -53,7 +69,7 @@ impl Lower<'_> {
             _ => {}
         }
         if target.kind() == Kind::PropertyAccessExpression
-            && skip_down(target.expression()).kind() == Kind::SuperKeyword
+            && skip_parens_and_assertions(target.expression()).kind() == Kind::SuperKeyword
             && let Some(name) = target.name()
         {
             let name: Name = Cow::Borrowed(name.text());
@@ -67,7 +83,7 @@ impl Lower<'_> {
             return Some(Expr::Nil);
         };
         if let Callee::Macro(m) = kind {
-            return self.macro_call(m, n, statement);
+            return self.macro_call(m, n, usage);
         }
         match target.kind() {
             Kind::PropertyAccessExpression => {
@@ -77,7 +93,7 @@ impl Lower<'_> {
                 let base = self.expr(object);
                 let (args, block) = self.capture(|l| l.arguments(n));
                 let base = self.store_before(base, &block);
-                self.out.extend(block);
+                self.current_block.extend(block);
                 Some(match kind {
                     Callee::Method => self.method_call(base, name, args),
                     _ => base.field(name).call(args),
@@ -89,10 +105,12 @@ impl Lower<'_> {
                 let (base, key) = self.ordered_pair(object, target.argument_expression());
                 let key = element_key(receiver, key);
                 if kind == Callee::Method {
-                    let base = self.push_temp_if_complex(base);
-                    let key = self.push_temp_if_complex(key);
                     let (args, block) = self.capture(|l| l.arguments(n));
-                    self.out.extend(block);
+                    let base = self.push_temp_if_complex(base);
+                    let base = self.store_before(base, &block);
+                    let key = self.push_temp_if_complex(key);
+                    let key = self.store_before(key, &block);
+                    self.current_block.extend(block);
                     let mut all = vec![base.clone()];
                     all.extend(args);
                     Some(base.index(key).call(all))
@@ -100,7 +118,7 @@ impl Lower<'_> {
                     let (args, block) = self.capture(|l| l.arguments(n));
                     let base = self.store_before(base, &block);
                     let key = self.store_before(key, &block);
-                    self.out.extend(block);
+                    self.current_block.extend(block);
                     Some(base.index(key).call(args))
                 }
             }
@@ -108,13 +126,12 @@ impl Lower<'_> {
                 let function = self.expr(callee);
                 let (args, block) = self.capture(|l| l.arguments(n));
                 let function = self.store_before(function, &block);
-                self.out.extend(block);
+                self.current_block.extend(block);
                 Some(function.call(args))
             }
         }
     }
 
-    /// `base:name(args)`, or `base["name"](base, args)` when the name is not a Luau name.
     pub(super) fn method_call(&mut self, base: Expr, name: Name, args: Vec<Expr>) -> Expr {
         if is_name(&name) {
             return base.method(name, args);
@@ -125,7 +142,6 @@ impl Lower<'_> {
         base.field(name).call(all)
     }
 
-    /// A call's arguments in order. A spread must come last.
     pub(super) fn arguments(&mut self, call: Node) -> Vec<Expr> {
         let args: Vec<Node> = call.arguments().iter().collect();
         let count = args.len();
@@ -138,7 +154,7 @@ impl Lower<'_> {
             }
         }
         let truncate = values.last().is_some_and(Expr::is_multi)
-            && args.last().is_some_and(|&a| skip_down(a).kind() == Kind::CallExpression)
+            && args.last().is_some_and(|&a| skip_parens_and_assertions(a).kind() == Kind::CallExpression)
             && !calls_super(call)
             && match self.fact(call.expression()).and_then(|f| f.roblox_api) {
                 Some(roblox) => roblox,
@@ -155,11 +171,9 @@ impl Lower<'_> {
 
     fn spread_argument(&mut self, source: Node) -> Expr {
         let receiver = self.receiver(source);
-        let inner = skip_down(source);
+        let inner = skip_parens_and_assertions(source);
         match receiver {
-            Some(Receiver::LuaTuple) if inner.kind() == Kind::CallExpression => {
-                self.call(inner, false).unwrap_or(Expr::Nil)
-            }
+            Some(Receiver::LuaTuple) if inner.kind() == Kind::CallExpression => self.call(inner),
             Some(Receiver::Array | Receiver::LuaTuple) => {
                 let value = self.expr(source);
                 Expr::global("table.unpack").call(vec![value])
@@ -177,7 +191,7 @@ impl Lower<'_> {
         let class = self.expr(callee);
         let (args, block) = self.capture(|l| l.arguments(n));
         let class = self.store_before(class, &block);
-        self.out.extend(block);
+        self.current_block.extend(block);
         class.field("new").call(args)
     }
 
@@ -205,7 +219,7 @@ impl Lower<'_> {
 
     fn new_set(&mut self, source: Option<Node>) -> Expr {
         let Some(source) = source else { return Expr::Table(Vec::new()) };
-        let inner = skip_down(source);
+        let inner = skip_parens_and_assertions(source);
         if inner.kind() == Kind::ArrayLiteralExpression
             && !inner.elements().iter().any(|e| e.kind() == Kind::SpreadElement)
         {
@@ -216,17 +230,17 @@ impl Lower<'_> {
         let set = self.push_temp(Expr::Table(Vec::new()));
         let (k, v) = (self.temp(), self.temp());
         let body = vec![Stmt::Assign(vec![set.clone().index(Expr::Name(v.clone()))], vec![Expr::Bool(true)])];
-        self.out.push(Stmt::GenericFor(vec![k, v], vec![value], body));
+        self.current_block.push(Stmt::GenericFor(vec![k, v], vec![value], body));
         set
     }
 
     fn new_map(&mut self, source: Option<Node>) -> Expr {
         let Some(source) = source else { return Expr::Table(Vec::new()) };
-        let inner = skip_down(source);
+        let inner = skip_parens_and_assertions(source);
         let mut nodes = Vec::new();
         let pairs = inner.kind() == Kind::ArrayLiteralExpression
             && inner.elements().iter().all(|e| {
-                let e = skip_down(e);
+                let e = skip_parens_and_assertions(e);
                 let pair = e.kind() == Kind::ArrayLiteralExpression && e.elements().len() == 2;
                 if pair {
                     nodes.extend(e.elements().iter());
@@ -245,20 +259,20 @@ impl Lower<'_> {
             vec![map.clone().index(entry.clone().index(Expr::Number(1.0)))],
             vec![entry.index(Expr::Number(2.0))],
         )];
-        self.out.push(Stmt::GenericFor(vec![k, v], vec![value], body));
+        self.current_block.push(Stmt::GenericFor(vec![k, v], vec![value], body));
         map
     }
 
-    fn macro_call(&mut self, m: Macro, n: Node, statement: bool) -> Option<Expr> {
+    fn macro_call(&mut self, m: Macro, n: Node, usage: Usage) -> Option<Expr> {
         match m.kind() {
             MacroKind::Call => Some(self.call_macro(m, n)),
             MacroKind::Method => {
-                let target = skip_down(n.expression());
+                let target = skip_parens_and_assertions(n.expression());
                 if !matches!(target.kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression) {
                     return Some(self.unsupported(n, "a method macro without its object"));
                 }
                 let object = self.expr(target.expression());
-                self.method_macro(m, n, object, statement)
+                self.expand_method_macro(m, n, object, usage)
             }
             MacroKind::Crucible => {
                 Some(self.unsupported(
@@ -314,12 +328,16 @@ impl Lower<'_> {
         }
     }
 
-    /// Lowers a method macro on an already lowered receiver.
-    pub(super) fn method_macro(&mut self, m: Macro, n: Node, object: Expr, statement: bool) -> Option<Expr> {
+    pub(super) fn method_macro(&mut self, m: Macro, n: Node, object: Expr) -> Expr {
+        self.expand_method_macro(m, n, object, Usage::Value).unwrap_or(Expr::Nil)
+    }
+
+    fn expand_method_macro(&mut self, m: Macro, n: Node, object: Expr, usage: Usage) -> Option<Expr> {
+        let statement = usage == Usage::Statement;
         let arg_nodes: Vec<Node> = n.arguments().iter().collect();
         let (args, block) = self.capture(|l| l.ordered(arg_nodes.iter().copied(), |l, a| l.expr(a)));
         let object = self.store_before(object, &block);
-        self.out.extend(block);
+        self.current_block.extend(block);
         let mut args = args.into_iter();
         let mut arg = || args.next().unwrap_or(Expr::Nil);
         let length = |e: &Expr| Expr::unary(UnOp::Len, e.clone());
@@ -377,24 +395,24 @@ impl Lower<'_> {
                 if statement {
                     let last = inserts.pop();
                     for call in inserts {
-                        self.out.push(Stmt::Call(call));
+                        self.current_block.push(Stmt::Call(call));
                     }
                     return last;
                 }
                 for call in inserts {
-                    self.out.push(Stmt::Call(call));
+                    self.current_block.push(Stmt::Call(call));
                 }
                 length(&object)
             }
             Macro::ArrayPop => {
                 let object = self.push_temp_if_complex(object);
                 if statement {
-                    self.out.push(Stmt::Assign(vec![object.clone().index(length(&object))], vec![Expr::Nil]));
+                    self.current_block.push(Stmt::Assign(vec![object.clone().index(length(&object))], vec![Expr::Nil]));
                     return None;
                 }
                 let size = self.push_temp(length(&object));
                 let value = self.push_temp(object.clone().index(size.clone()));
-                self.out.push(Stmt::Assign(vec![object.index(size)], vec![Expr::Nil]));
+                self.current_block.push(Stmt::Assign(vec![object.index(size)], vec![Expr::Nil]));
                 value
             }
             Macro::ArrayShift => Expr::global("table.remove").call(vec![object, Expr::Number(1.0)]),
@@ -413,7 +431,7 @@ impl Lower<'_> {
                     Stmt::Assign(vec![object.clone().index(index)], vec![object.clone().index(size.clone())]),
                     Stmt::Assign(vec![object.index(size)], vec![Expr::Nil]),
                 ];
-                self.out.push(Stmt::If(value.clone().binary(BinOp::Ne, Expr::Nil), body, None));
+                self.current_block.push(Stmt::If(value.clone().binary(BinOp::Ne, Expr::Nil), body, None));
                 value
             }
             Macro::ArraySort => {
@@ -424,7 +442,7 @@ impl Lower<'_> {
                 if statement {
                     return Some(call);
                 }
-                self.out.push(Stmt::Call(call));
+                self.current_block.push(Stmt::Call(call));
                 object
             }
             Macro::ArrayClear | Macro::SetClear | Macro::MapClear => {
@@ -432,7 +450,7 @@ impl Lower<'_> {
                 if statement {
                     return Some(call);
                 }
-                self.out.push(Stmt::Call(call));
+                self.current_block.push(Stmt::Call(call));
                 Expr::Nil
             }
             Macro::ReadonlyArrayIsEmpty => length(&object).binary(BinOp::Eq, Expr::Number(0.0)),
@@ -444,7 +462,11 @@ impl Lower<'_> {
                     e => {
                         let separator = self.push_temp(e);
                         let default = vec![Stmt::Assign(vec![separator.clone()], vec![Expr::string(", ")])];
-                        self.out.push(Stmt::If(separator.clone().binary(BinOp::Eq, Expr::Nil), default, None));
+                        self.current_block.push(Stmt::If(
+                            separator.clone().binary(BinOp::Eq, Expr::Nil),
+                            default,
+                            None,
+                        ));
                         separator
                     }
                 };
@@ -454,7 +476,7 @@ impl Lower<'_> {
                     vec![strings.clone().index(Expr::Name(k.clone()))],
                     vec![Expr::global("tostring").call(vec![Expr::Name(v.clone())])],
                 )];
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![object], body));
                 Expr::global("table.concat").call(vec![strings, separator])
             }
             Macro::ReadonlyArrayMove => {
@@ -493,7 +515,7 @@ impl Lower<'_> {
                     vec![Stmt::Assign(vec![result.clone()], vec![Expr::Bool(!every)]), Stmt::Break],
                     None,
                 )];
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![object], body));
                 result
             }
             Macro::ReadonlyArrayForEach => {
@@ -501,7 +523,7 @@ impl Lower<'_> {
                 let callback = self.callback(arg());
                 let (k, v) = (self.temp(), self.temp());
                 let body = vec![Stmt::Call(callback.call(self.element_args(&k, &v, &object)))];
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![object], body));
                 if statement {
                     return None;
                 }
@@ -516,7 +538,7 @@ impl Lower<'_> {
                     vec![result.clone().index(Expr::Name(k.clone()))],
                     vec![callback.call(self.element_args(&k, &v, &object))],
                 )];
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![object], body));
                 result
             }
             Macro::ReadonlyArrayMapFiltered | Macro::ReadonlyArrayFilter => {
@@ -546,7 +568,7 @@ impl Lower<'_> {
                         ),
                     ]
                 };
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![object], body));
                 result
             }
             Macro::ReadonlyArrayFilterUndefined => {
@@ -559,7 +581,7 @@ impl Lower<'_> {
                     vec![Stmt::Assign(vec![size.clone()], vec![index])],
                     None,
                 );
-                self.out.push(Stmt::GenericFor(vec![i], vec![object.clone()], vec![widen]));
+                self.current_block.push(Stmt::GenericFor(vec![i], vec![object.clone()], vec![widen]));
                 let result = self.push_temp(Expr::Table(Vec::new()));
                 let count = self.push_temp(Expr::Number(0.0));
                 let (i, v) = (self.temp(), self.temp());
@@ -574,7 +596,7 @@ impl Lower<'_> {
                         None,
                     ),
                 ];
-                self.out.push(Stmt::NumericFor(i, Expr::Number(1.0), size, None, body));
+                self.current_block.push(Stmt::NumericFor(i, Expr::Number(1.0), size, None, body));
                 result
             }
             Macro::ReadonlyArrayReduce => {
@@ -587,7 +609,7 @@ impl Lower<'_> {
                         let empty = Stmt::Call(Expr::global("error").call(vec![Expr::string(
                             "Attempted to call `ReadonlyArray.reduce()` on an empty array without an initialValue.",
                         )]));
-                        self.out.push(Stmt::If(
+                        self.current_block.push(Stmt::If(
                             length(&object).binary(BinOp::Eq, Expr::Number(0.0)),
                             vec![empty],
                             None,
@@ -604,7 +626,7 @@ impl Lower<'_> {
                     object.clone(),
                 ]);
                 let body = vec![Stmt::Assign(vec![result.clone()], vec![call])];
-                self.out.push(Stmt::NumericFor(i, start, length(&object), None, body));
+                self.current_block.push(Stmt::NumericFor(i, start, length(&object), None, body));
                 result
             }
             Macro::ReadonlyArrayFind | Macro::ReadonlyArrayFindIndex => {
@@ -615,7 +637,7 @@ impl Lower<'_> {
                     self.push_temp(Expr::Number(-1.0))
                 } else {
                     let name = self.temp();
-                    self.out.push(Stmt::Local(vec![name.clone()], Vec::new()));
+                    self.current_block.push(Stmt::Local(vec![name.clone()], Vec::new()));
                     Expr::Name(name)
                 };
                 let (k, v) = (self.temp(), self.temp());
@@ -626,7 +648,7 @@ impl Lower<'_> {
                     vec![Stmt::Assign(vec![result.clone()], vec![found]), Stmt::Break],
                     None,
                 )];
-                self.out.push(Stmt::GenericFor(vec![k, v], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k, v], vec![object], body));
                 result
             }
             Macro::ReadonlySetIsEmpty | Macro::ReadonlyMapIsEmpty => {
@@ -636,7 +658,7 @@ impl Lower<'_> {
                 let size = self.push_temp(Expr::Number(0.0));
                 let k = self.temp();
                 let body = vec![Stmt::Compound(BinOp::Add, size.clone(), Expr::Number(1.0))];
-                self.out.push(Stmt::GenericFor(vec![k], vec![object], body));
+                self.current_block.push(Stmt::GenericFor(vec![k], vec![object], body));
                 size
             }
             Macro::ReadonlySetHas | Macro::ReadonlyMapHas => object.index(arg()).binary(BinOp::Ne, Expr::Nil),
@@ -651,7 +673,7 @@ impl Lower<'_> {
                     (vec![k.clone(), v.clone()], vec![Expr::Name(v), Expr::Name(k), object.clone()])
                 };
                 let body = vec![Stmt::Call(callback.call(call_args))];
-                self.out.push(Stmt::GenericFor(names, vec![object], body));
+                self.current_block.push(Stmt::GenericFor(names, vec![object], body));
                 if statement {
                     return None;
                 }
@@ -661,7 +683,7 @@ impl Lower<'_> {
                 let object = if statement { object } else { self.push_temp_if_complex(object) };
                 let key = arg();
                 let value = if m == Macro::SetAdd { Expr::Bool(true) } else { arg() };
-                self.out.push(Stmt::Assign(vec![object.clone().index(key)], vec![value]));
+                self.current_block.push(Stmt::Assign(vec![object.clone().index(key)], vec![value]));
                 if statement {
                     return None;
                 }
@@ -669,13 +691,13 @@ impl Lower<'_> {
             }
             Macro::SetDelete | Macro::MapDelete => {
                 if statement {
-                    self.out.push(Stmt::Assign(vec![object.index(arg())], vec![Expr::Nil]));
+                    self.current_block.push(Stmt::Assign(vec![object.index(arg())], vec![Expr::Nil]));
                     return None;
                 }
                 let object = self.push_temp_if_complex(object);
                 let key = self.push_temp_if_complex(arg());
                 let existed = self.push_temp(object.clone().index(key.clone()).binary(BinOp::Ne, Expr::Nil));
-                self.out.push(Stmt::Assign(vec![object.index(key)], vec![Expr::Nil]));
+                self.current_block.push(Stmt::Assign(vec![object.index(key)], vec![Expr::Nil]));
                 existed
             }
             Macro::PromiseThen => {
@@ -698,13 +720,11 @@ impl Lower<'_> {
         Some(value)
     }
 
-    /// A callback the macro loops call, stored unless it is already a name.
     fn callback(&mut self, value: Expr) -> Expr {
         if matches!(value, Expr::Name(_)) { value } else { self.push_temp(value) }
     }
 
-    /// The `(value, index, array)` arguments an array callback receives.
-    fn element_args(&self, k: &Name, v: &Name, object: &Expr) -> Vec<Expr> {
-        vec![Expr::Name(v.clone()), offset(Expr::Name(k.clone()), -1.0), object.clone()]
+    fn element_args(&self, index: &Name, value: &Name, object: &Expr) -> Vec<Expr> {
+        vec![Expr::Name(value.clone()), offset(Expr::Name(index.clone()), -1.0), object.clone()]
     }
 }

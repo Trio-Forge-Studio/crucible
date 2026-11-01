@@ -1,5 +1,3 @@
--- Runs the compiled lowering fixtures and checks their results against what the TypeScript computes.
--- `lune run run.luau <out>`
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local process = require("@lune/process")

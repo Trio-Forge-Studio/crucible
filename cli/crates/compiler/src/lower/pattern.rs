@@ -1,19 +1,19 @@
 use std::borrow::Cow;
 
-use super::{Lower, is_hole, skip_down};
+use super::{Lower, is_hole, skip_parens_and_assertions};
 use crate::facts::Receiver;
 use crate::luau::{BinOp, Expr, Name, Stmt, UnOp};
 use crate::tree::{Kind, Node, Op};
 
 impl Lower<'_> {
-    /// `const <pattern> = init`. A `LuaTuple` call binds its values directly.
+    /// A `LuaTuple` call binds its values directly.
     pub(super) fn bind_initializer(&mut self, pattern: Node, init: Node) {
-        let inner = skip_down(init);
+        let inner = skip_parens_and_assertions(init);
         if pattern.kind() == Kind::ArrayBindingPattern
             && self.fact(pattern).and_then(|f| f.receiver) == Some(Receiver::LuaTuple)
             && inner.kind() == Kind::CallExpression
         {
-            let call = self.call(inner, false).unwrap_or(Expr::Nil);
+            let call = self.call(inner);
             let mut names = Vec::new();
             let mut later = Vec::new();
             for e in pattern.elements().iter() {
@@ -41,7 +41,7 @@ impl Lower<'_> {
                 self.discard(call);
                 return;
             }
-            self.out.push(Stmt::Local(names, vec![call]));
+            self.current_block.push(Stmt::Local(names, vec![call]));
             for (e, temp) in later {
                 self.bind_element(e, Expr::Name(temp));
             }
@@ -51,7 +51,6 @@ impl Lower<'_> {
         self.bind_value(pattern, value);
     }
 
-    /// Declares the names in a binding name or pattern from `value`.
     pub(super) fn bind_value(&mut self, pattern: Node, value: Expr) {
         match pattern.kind() {
             Kind::Identifier => {
@@ -140,26 +139,37 @@ impl Lower<'_> {
         self.bind_value(name, value);
     }
 
-    /// `if target == nil then target = default end`, evaluating the default only when it applies.
     fn default(&mut self, target: Expr, default: Node) {
         let (value, mut block) = self.capture(|l| l.expr(default));
         block.push(Stmt::Assign(vec![target.clone()], vec![value]));
-        self.out.push(Stmt::If(target.binary(BinOp::Eq, Expr::Nil), block, None));
+        self.current_block.push(Stmt::If(target.binary(BinOp::Eq, Expr::Nil), block, None));
     }
 
-    /// `[a, b] = value` and `({ a, b } = value)`. Returns the assigned value when `used`.
-    pub(super) fn assign_pattern(&mut self, target: Node, source: Node, used: bool) -> Option<Expr> {
-        let inner = skip_down(source);
+    pub(super) fn assign_pattern(&mut self, target: Node, source: Node) {
+        self.lower_assign_pattern(target, source);
+    }
+
+    pub(super) fn assign_pattern_value(&mut self, target: Node, source: Node) -> Expr {
+        if self.is_lua_tuple_call(target, source) {
+            return self.unsupported(target, "using the value of a LuaTuple assignment");
+        }
+        self.lower_assign_pattern(target, source).unwrap_or(Expr::Nil)
+    }
+
+    fn is_lua_tuple_call(&self, target: Node, source: Node) -> bool {
+        target.kind() == Kind::ArrayLiteralExpression
+            && self.fact(target).and_then(|f| f.receiver) == Some(Receiver::LuaTuple)
+            && skip_parens_and_assertions(source).kind() == Kind::CallExpression
+    }
+
+    fn lower_assign_pattern(&mut self, target: Node, source: Node) -> Option<Expr> {
         if target.kind() == Kind::ArrayLiteralExpression {
             let receiver = self.fact(target).and_then(|f| f.receiver);
-            if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-                if used {
-                    self.unsupported(target, "using the value of a LuaTuple assignment");
-                }
-                let call = self.call(inner, false).unwrap_or(Expr::Nil);
+            if self.is_lua_tuple_call(target, source) {
+                let call = self.call(skip_parens_and_assertions(source));
                 let elements: Vec<Node> = target.elements().iter().collect();
                 let temps: Vec<Name> = elements.iter().map(|_| self.temp()).collect();
-                self.out.push(Stmt::Local(temps.clone(), vec![call]));
+                self.current_block.push(Stmt::Local(temps.clone(), vec![call]));
                 for (e, temp) in elements.into_iter().zip(temps) {
                     if e.kind() != Kind::OmittedExpression {
                         self.assign_target(e, Expr::Name(temp));
@@ -198,7 +208,7 @@ impl Lower<'_> {
                     _ => self.assign_target(e, value.clone().index(Expr::Number(i as f64 + 1.0))),
                 }
             }
-            return used.then_some(value);
+            return Some(value);
         }
         let value = self.expr(source);
         let value = self.push_temp_if_complex(value);
@@ -223,7 +233,7 @@ impl Lower<'_> {
                     };
                     let element = value.clone().field(Cow::Borrowed(name.text()));
                     let place = self.identifier_place(name);
-                    self.out.push(Stmt::Assign(vec![place.clone()], vec![element]));
+                    self.current_block.push(Stmt::Assign(vec![place.clone()], vec![element]));
                     if let Some(default) = p.initializer() {
                         self.default(place, default);
                     }
@@ -233,7 +243,7 @@ impl Lower<'_> {
                 }
             }
         }
-        used.then_some(value)
+        Some(value)
     }
 
     fn identifier_place(&mut self, n: Node) -> Expr {
@@ -246,11 +256,14 @@ impl Lower<'_> {
             self.default(value.clone(), target.right());
             return self.assign_target(target.left(), value);
         }
-        if matches!(skip_down(target).kind(), Kind::ArrayLiteralExpression | Kind::ObjectLiteralExpression) {
+        if matches!(
+            skip_parens_and_assertions(target).kind(),
+            Kind::ArrayLiteralExpression | Kind::ObjectLiteralExpression
+        ) {
             self.unsupported(target, "a nested assignment pattern");
             return;
         }
-        let place = self.place(target, false);
-        self.out.push(Stmt::Assign(vec![place.expr()], vec![value]));
+        let place = self.place(target);
+        self.current_block.push(Stmt::Assign(vec![place.expr()], vec![value]));
     }
 }

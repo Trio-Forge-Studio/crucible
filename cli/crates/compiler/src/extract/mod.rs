@@ -147,9 +147,7 @@ impl Extractor {
     }
 
     fn span(&self, n: P<Node>) -> Span {
-        let pos = n.pos().source_offset().unwrap_or(0);
-        let end = n.end().source_offset().unwrap_or(pos);
-        Span { start: tsrs_scanner::skip_trivia(self.text, pos), end }
+        crate::tree::span(n, self.text)
     }
 
     fn site(&mut self) {
