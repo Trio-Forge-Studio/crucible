@@ -33,6 +33,6 @@ export default defineConfig({
 		categories: { correctness: "error", suspicious: "error" },
 		plugins: ["typescript", "node"],
 		rules: { "no-shadow": "off" },
-		ignorePatterns: ["**/out/**", "**/include/**", "build/**", "cli/target/**"],
+		ignorePatterns: ["**/out/**", "**/include/**", "build/**", "cli/target/**", "packages/compiler-types/types/**"],
 	},
 });

@@ -30,7 +30,8 @@
 	},
 	"devDependencies": {
 		"@rbxts/compiler-types": "3.0.0-types.0",
-		"@rbxts/types": "1.0.959"
+		"@rbxts/types": "1.0.959",
+		"@trioforge/compiler-types": "workspace:*"
 	},
 	"peerDependencies": {
 		"typescript": "5.5.3"
