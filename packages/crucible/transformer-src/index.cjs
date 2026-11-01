@@ -3,6 +3,7 @@ const { createRequire } = require("node:module");
 const { packageOf, typeId, sourceRoot } = require("./type-id.cjs");
 const { createReporter } = require("./diagnostics.cjs");
 const { createNetwork } = require("./network.cjs");
+const { createDataChecks } = require("./data.cjs");
 
 module.exports = function transformer(program, config = {}, extras = {}) {
 	const ts = extras.ts ?? require("typescript");
@@ -48,6 +49,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 	const diagnosticSink = extras.addDiagnostic;
 	let report;
 	let networkProgram;
+	let dataProgram;
 	return (context) => (source) => {
 		if (source.isDeclarationFile) return source;
 		let used = false;
@@ -509,8 +511,11 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			side,
 			visitInput: (node) => ts.visitNode(node, visit),
 		});
+		dataProgram ??= createDataChecks({ ts, program, checker, api });
+		const data = dataProgram({ report, side });
 		const inspect = (node) => {
 			network.inspect(node);
+			data(node);
 			if (
 				ts.isImportDeclaration(node) ||
 				ts.isExportDeclaration(node) ||

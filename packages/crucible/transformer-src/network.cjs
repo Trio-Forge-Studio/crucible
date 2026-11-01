@@ -1,14 +1,17 @@
 const path = require("node:path");
 const { packageOf } = require("./type-id.cjs");
+const {
+	limits,
+	dataLimits,
+	kinds,
+	depthLimits,
+	replica,
+	serverOnlyPaths,
+	viewNameProblems,
+} = require("./declarations.cjs");
 
-const limits = Object.freeze({
-	MESSAGE_NAME_MAX_BYTES: 64,
-	MAX_ASK_TIMEOUT_SECONDS: 120,
-	MAX_UNION_BRANCHES: 256,
-	MAX_SCHEMA_NODES: 4096,
-	MAX_DEPTH: 32,
-});
-const macros = ["toServer", "toClient", "askServer", "receive"];
+const declarationMacros = Object.keys(kinds);
+const macros = [...declarationMacros, "receive"];
 
 function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifiers, isMacro }) {
 	const unalias = (s) => s && (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
@@ -93,7 +96,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		for (const sf of program.getSourceFiles()) {
 			if (sf.isDeclarationFile) continue;
 			const walk = (node) => {
-				const kind = macros.slice(0, 3).find((name) => isMacro(node, name));
+				const kind = declarationMacros.find((name) => isMacro(node, name));
 				if (kind)
 					declarations.push({
 						node,
@@ -109,7 +112,24 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		}
 		return declarations;
 	};
-	function lowerMessage(node, kind, report, reached = new Set()) {
+	const serverOnly = (type) => api(type.getSymbol()) === "ServerOnly";
+	const plainIntersection = (type) =>
+		type.isIntersection() &&
+		type.types.every(
+			(part) =>
+				part.flags & flags.Object && !part.getCallSignatures().length && !part.getConstructSignatures().length,
+		);
+	const targetOf = (node) => {
+		if (node.typeArguments?.length) return checker.getTypeFromTypeNode(node.typeArguments[0]);
+		const signature = checker.getResolvedSignature(node);
+		const returned = signature && checker.getReturnTypeOfSignature(signature);
+		if (returned && returned.objectFlags & ts.ObjectFlags.Reference) return checker.getTypeArguments(returned)[0];
+	};
+	function lowerDeclaration(node, kind, report, reached = new Set()) {
+		const spec = kinds[kind];
+		const state = spec.position !== "payload";
+		const persist = spec.position === "persist";
+		const depthLimit = depthLimits[spec.position];
 		const active = new Set();
 		const fail = (at, location, reason, code = "CRU019") => {
 			report(at, code, `${node.arguments[0]?.text ?? kind} ${location}: ${reason}`);
@@ -143,8 +163,16 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			}
 			ts.forEachChild(syntax, (child) => references(child, location));
 		};
-		for (const type of node.typeArguments ?? []) references(type, "payload");
+		for (const type of node.typeArguments ?? []) references(type, state ? "value" : "payload");
 		const instance = (classes, location, position) => {
+			if (state)
+				return fail(
+					node,
+					location,
+					persist
+						? "Instances cannot be saved or replicated; store a stable id"
+						: "replicated state cannot hold Instances; replicate a stable id",
+				);
 			if (position.toClient && !position.nilable && !(classes.length === 1 && classes[0] === "Player"))
 				fail(
 					node,
@@ -162,7 +190,13 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				.filter((p) => p.name !== omit)
 				.sort((a, b) => Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)));
 			if (!props.length && omit === undefined)
-				return fail(node, location, "an empty object type accepts anything; use undefined");
+				return fail(
+					node,
+					location,
+					spec.handles
+						? "an empty object type accepts anything; annotate an empty template table: {} as Record<string, number>"
+						: "an empty object type accepts anything; use undefined",
+				);
 			return {
 				kind: "object",
 				fields: props.map((prop) => {
@@ -174,6 +208,13 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						fail(node, `${location}.${prop.name}`, "numeric property names are not supported; use a Map");
 					if (prop.declarations?.some((d) => ts.isMethodSignature(d) || ts.isMethodDeclaration(d)))
 						fail(node, `${location}.${prop.name}`, "functions cannot cross the network");
+					if (spec.handles && dataLimits.RESERVED_HANDLE_NAMES.includes(prop.name))
+						fail(
+							node,
+							`${location}.${prop.name}`,
+							`\`${prop.name}\` is a handle method name (set, update, insert, remove); rename the field`,
+							"CRU026",
+						);
 					const value = checker.getTypeOfSymbolAtLocation(prop, at);
 					if (value.flags & flags.Undefined)
 						return [
@@ -181,7 +222,9 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 							fail(
 								node,
 								`${location}.${prop.name}`,
-								"a field of type undefined carries no information; remove it",
+								spec.handles
+									? "a position that is always undefined; annotate it: undefined as string | undefined"
+									: "a field of type undefined carries no information; remove it",
 							),
 						];
 					return [
@@ -192,6 +235,8 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 							{
 								toClient: position.toClient,
 								nilable: !!(prop.flags & ts.SymbolFlags.Optional) || absent(value),
+								path: position.path,
+								marked: position.marked,
 							},
 							depth + 1,
 						),
@@ -202,6 +247,12 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		const key = (type, location) => {
 			declared(type, location);
 			if (type.flags & flags.String) return { kind: "string" };
+			if (state && !(type.isUnion() ? type.types : [type]).every((t) => t.isStringLiteral()))
+				return fail(
+					node,
+					location,
+					"state maps are keyed by string or a union of string literals; frames carry string-keyed records",
+				);
 			const w = width(type);
 			if (["u8", "u16", "u32"].includes(w)) return { kind: w };
 			const parts = type.isUnion() ? type.types : [type];
@@ -229,7 +280,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		const union = (type, location, position, depth) => {
 			const parts = type.types;
 			const missing = parts.some((p) => p.flags & flags.Undefined);
-			position = { ...position, nilable: position.nilable || missing };
+			position = { ...position, nilable: position.nilable || missing, path: false };
 			const branches = missing ? [{ kind: "nil" }] : [];
 			const literals = [],
 				typed = [],
@@ -251,7 +302,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					continue;
 				}
 				if (
-					part.flags & flags.Object &&
+					(part.flags & flags.Object || (state && plainIntersection(part))) &&
 					!e &&
 					!collection(part) &&
 					!checker.getIndexInfosOfType(part).length &&
@@ -342,12 +393,55 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 		};
 		const lower = (type, location, position, depth = 1) => {
 			declared(type, location);
-			if (depth > limits.MAX_DEPTH) return fail(node, location, "schema exceeds MAX_DEPTH");
+			if (depth > depthLimit) return fail(node, location, `schema exceeds the depth limit of ${depthLimit}`);
+			if (state && type.isUnion()) {
+				const present = type.types.filter((t) => !(t.flags & flags.Undefined));
+				if (present.length === 1 && present.length < type.types.length && serverOnly(present[0])) {
+					const inner = lower(present[0], location, position, depth);
+					return inner.serverOnly
+						? {
+								kind: "union",
+								branches: [{ kind: "nil" }, { ...inner, serverOnly: false }],
+								serverOnly: true,
+							}
+						: inner;
+				}
+			}
+			if (state && serverOnly(type)) {
+				if (!spec.handles)
+					return fail(
+						node,
+						location,
+						"serverOnly marks a profileStore template field; it means nothing here",
+					);
+				if (position.root)
+					fail(
+						node,
+						location,
+						"serverOnly marks a template field, never the store's whole value; wrap the value in an object and mark the field",
+					);
+				if (position.marked) return fail(node, location, "this field is already inside a serverOnly field");
+				if (!position.path)
+					return fail(
+						node,
+						location,
+						"serverOnly marks a field on an object path from the template root, never an array element, a map value or a union member",
+					);
+				const inner = lower(checker.getTypeArguments(type)[0], location, { ...position, marked: true }, depth);
+				return { ...inner, serverOnly: true };
+			}
 			if (active.has(type)) return fail(node, location, "recursive payload type");
 			active.add(type);
 			try {
 				if (type.flags & flags.Any) return fail(node, location, "any cannot be checked; use unknown");
-				if (type.flags & flags.Unknown) return { kind: "dynamic" };
+				if (type.flags & flags.Unknown)
+					return state
+						? fail(
+								node,
+								location,
+								"unknown cannot be stored or replicated state; give the value a declared type",
+							)
+						: { kind: "dynamic" };
 				if (type.flags & flags.Undefined) return { kind: "nil" };
 				if (type.flags & flags.Void) return fail(node, location, "use undefined for no payload");
 				if (
@@ -369,16 +463,31 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						? { kind: w }
 						: fail(node, location, "conflicting widths");
 				if (type.isUnion()) return union(type, location, position, depth);
-				if (type.isIntersection())
-					return fail(node, location, "only numeric width intersections are supported");
+				const flat = state && plainIntersection(type);
+				if (type.isIntersection() && !flat)
+					return fail(
+						node,
+						location,
+						type.types.some((t) => t.flags & flags.NumberLike)
+							? "only a Crucible width brand may intersect number; this brand is foreign"
+							: "only numeric width intersections are supported",
+					);
 				const e = engine(type);
 				if (e?.kind === "instance") return instance(e.classes, location, position);
 				if (e?.kind === "unsupported") return fail(node, location, "Roblox datatype not supported in v1");
+				if (e && persist)
+					return fail(
+						node,
+						location,
+						`${e.runtime} cannot be saved: a save holds JSON; store its components`,
+					);
 				if (e) return { kind: e.kind };
 				const c = collection(type);
 				const args = type.objectFlags & ts.ObjectFlags.Reference ? checker.getTypeArguments(type) : [];
-				const element = (t, location) => {
-					if (absent(t)) fail(node, location, "collection elements and map values cannot admit undefined");
+				const element = (t, location, value = false) => {
+					if (state && value) t = checker.getNonNullableType(t);
+					else if (absent(t))
+						fail(node, location, "collection elements and map values cannot admit undefined");
 					return lower(t, location, { toClient: position.toClient, nilable: false }, depth + 1);
 				};
 				if (c === "tuple") {
@@ -390,14 +499,20 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						return fail(node, location, "tuples must be fixed length with no optional or rest elements");
 					return { kind: "tuple", elements: args.map((t, i) => element(t, `${location}[${i}]`)) };
 				}
+				if (c === "array" && state && args[0].flags & flags.Never)
+					return fail(
+						node,
+						`${location}[]`,
+						"an empty array has no element type; annotate it: [] as string[]",
+					);
 				if (c === "array") return { kind: "array", element: element(args[0], `${location}[]`) };
 				if (c === "map")
 					return {
 						kind: "map",
 						key: key(args[0], `${location}.key`),
-						value: element(args[1], `${location}.value`),
+						value: element(args[1], `${location}.value`, true),
 					};
-				if (type.flags & flags.Object) {
+				if (type.flags & flags.Object || flat) {
 					const indices = checker.getIndexInfosOfType(type);
 					if (
 						indices.length === 1 &&
@@ -407,7 +522,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						return {
 							kind: "map",
 							key: { kind: "string" },
-							value: element(indices[0].type, `${location}.value`),
+							value: element(indices[0].type, `${location}.value`, true),
 						};
 					if (indices.length)
 						return fail(node, location, "only a string index signature can encode a record");
@@ -418,15 +533,31 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				active.delete(type);
 			}
 		};
-		const result = (node.typeArguments ?? []).map((type, i) =>
-			lower(
-				checker.getTypeFromTypeNode(type),
-				i === 1 ? "response" : kind === "askServer" ? "request" : "payload",
-				{ toClient: kind === "toClient" || i === 1, nilable: false },
-			),
-		);
+		let result;
+		if (!state)
+			result = (node.typeArguments ?? []).map((type, i) =>
+				lower(
+					checker.getTypeFromTypeNode(type),
+					i === 1 ? "response" : kind === "askServer" ? "request" : "payload",
+					{ toClient: kind === "toClient" || i === 1, nilable: false },
+				),
+			);
+		else {
+			const target = targetOf(node);
+			if (!target) return [];
+			const value = lower(target, "value", { toClient: false, nilable: false, path: true, root: true });
+			if (spec.store && value.kind !== "object" && value.kind !== "map")
+				fail(node, "value", `a store's value is a record; wrap a ${checker.typeToString(target)} in an object`);
+			else if (spec.handles && value.kind === "map")
+				fail(
+					node,
+					"value",
+					"a profile store's value is an object with declared fields; wrap the record in a field",
+				);
+			result = [value];
+		}
 		const cost = (n, depth = 1) => {
-			if (depth > limits.MAX_DEPTH) fail(node, "payload", "schema exceeds MAX_DEPTH");
+			if (depth > depthLimit) fail(node, "value", `schema exceeds the depth limit of ${depthLimit}`);
 			return (
 				1 +
 				(n.fields?.reduce((v, [, child]) => v + cost(child, depth + 1), 0) ?? 0) +
@@ -442,11 +573,16 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			);
 		};
 		if (result.reduce((v, n) => v + cost(n), 0) > limits.MAX_SCHEMA_NODES)
-			fail(node, "payload", "schema exceeds MAX_SCHEMA_NODES");
-		return result;
+			fail(node, state ? "value" : "payload", "schema exceeds MAX_SCHEMA_NODES");
+		if (!spec.handles) return result;
+		const view = replica(result[0]);
+		for (const [location, reason] of viewNameProblems(node.arguments[0]?.text, view))
+			fail(node, location, reason, "CRU018");
+		return [result[0], view];
 	}
 	let reached;
 	let entryFiles;
+	const entryExports = new Map();
 	const canonicalFiles = new Map();
 	const canonical = (file) => {
 		if (!canonicalFiles.has(file)) canonicalFiles.set(file, path.normalize(ts.sys.realpath?.(file) ?? file));
@@ -489,9 +625,22 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					program.getCompilerOptions(),
 					ts.sys,
 				).resolvedModule;
-				if (resolved) entryFiles.set(canonical(resolved.resolvedFileName), s);
+				if (resolved) {
+					entryFiles.set(canonical(resolved.resolvedFileName), s);
+					const module = program.getSourceFile(resolved.resolvedFileName);
+					const symbol = module && checker.getSymbolAtLocation(module);
+					for (const exported of symbol ? checker.getExportsOfModule(symbol) : [])
+						entryExports.set(unalias(exported), s);
+				}
 			}
 		}
+		const exportSide = (node, symbol) => {
+			if (!symbol) return;
+			if (entryExports.has(symbol)) return entryExports.get(symbol);
+			if (!(symbol.flags & (ts.SymbolFlags.Variable | ts.SymbolFlags.Property))) return;
+			const type = checker.getTypeAtLocation(node);
+			return entryExports.get(unalias(type.aliasSymbol)) ?? entryExports.get(type.getSymbol());
+		};
 		const wrongSide = (node, file) => {
 			const s = entryFiles.get(canonical(file));
 			if (s && s !== side(source))
@@ -601,7 +750,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				if (!reached) {
 					reached = new Set();
 					for (const declaration of index())
-						lowerMessage(declaration.node, declaration.kind, () => {}, reached);
+						lowerDeclaration(declaration.node, declaration.kind, () => {}, reached);
 				}
 				const added = (body) =>
 					(!body ? [] : ts.isModuleBlock(body) ? body.statements : [body]).flatMap((statement) => [
@@ -612,7 +761,7 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					report(
 						node,
 						"CRU010",
-						"This augmentation changes a network payload; incremental builds cannot see the merge. Declare the type in one module.",
+						"This augmentation changes a type a Crucible declaration lowers; incremental builds cannot see the merge. Declare the type in one module.",
 					);
 			}
 			if (
@@ -633,6 +782,17 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			if (ts.isIdentifier(node)) {
 				const symbol = unalias(checker.getSymbolAtLocation(node));
 				for (const decl of symbol?.declarations ?? []) wrongSide(node, decl.getSourceFile().fileName);
+				const owner = exportSide(node, symbol);
+				if (
+					owner &&
+					owner !== side(source) &&
+					!symbol.declarations?.some((d) => entryFiles.has(canonical(d.getSourceFile().fileName)))
+				)
+					report(
+						node,
+						"CRU024",
+						`This file cannot reference @trioforge/crucible/${owner} through ${node.text}; move it under a ${owner} folder.`,
+					);
 				const name = api(symbol);
 				if (macros.includes(name)) {
 					const p = node.parent;
@@ -655,8 +815,9 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					])
 				);
 			}
-			const kind = macros.slice(0, 3).find((name) => isMacro(node, name));
+			const kind = declarationMacros.find((name) => isMacro(node, name));
 			if (!kind) return;
+			const spec = kinds[kind];
 			const decl = node.parent,
 				list = decl.parent,
 				statement = list?.parent;
@@ -670,26 +831,39 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				statement.parent !== source ||
 				!modifiers(statement, ts.ModifierFlags.Export) ||
 				!ts.isExternalModule(source) ||
-				side(node) !== "shared"
+				side(node) !== spec.side
 			)
-				report(node, "CRU017", "Declare messages as an exported top-level const in a shared module.");
-			if (node.typeArguments?.length !== (kind === "askServer" ? 2 : 1))
-				report(node, "CRU017", `${kind} needs explicit payload types; use undefined for no payload.`);
+				report(
+					node,
+					"CRU017",
+					`Declare ${spec.label} as an exported top-level const in a ${spec.side} module.`,
+				);
+			const typeArguments = node.typeArguments?.length ?? 0;
+			if (spec.typeArguments === "optional" ? typeArguments > 1 : typeArguments !== spec.typeArguments)
+				report(
+					node,
+					"CRU017",
+					spec.position === "payload"
+						? `${kind} needs explicit payload types; use undefined for no payload.`
+						: `${kind} needs ${spec.typeArguments === "optional" ? "at most one" : "an explicit"} type argument.`,
+				);
 			const name = node.arguments[0];
 			if (
 				!name ||
 				!ts.isStringLiteral(name) ||
-				Buffer.byteLength(name.text) > limits.MESSAGE_NAME_MAX_BYTES ||
+				Buffer.byteLength(name.text) > spec.maxBytes ||
 				!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*$/.test(name.text) ||
 				name.text.split(".")[0] === "Crucible"
 			)
 				report(
 					node,
 					"CRU018",
-					"Message names are 1 to 64 bytes of dot-separated segments [A-Za-z][A-Za-z0-9_]*; Crucible is reserved.",
+					`${spec.names} names are 1 to ${spec.maxBytes} bytes of dot-separated segments [A-Za-z][A-Za-z0-9_]*; Crucible is reserved.`,
 				);
 			else {
-				const other = index().find((d) => d.node !== node && d.name === name.text);
+				const other = index().find(
+					(d) => d.node !== node && d.name === name.text && kinds[d.kind].names === spec.names,
+				);
 				if (other) {
 					const sf = other.node.getSourceFile();
 					report(
@@ -717,12 +891,21 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					report(node, "CRU017", "askServer options must be { timeout: <number literal in (0, 120]> }.");
 				else timeout = prop.initializer;
 			}
-			if (node.arguments.length > (kind === "askServer" ? 2 : 1))
-				report(node, "CRU017", "Unexpected declaration arguments.");
+			if (node.arguments.length > spec.arguments) report(node, "CRU017", "Unexpected declaration arguments.");
+			const descriptors = lowerDeclaration(node, kind, report);
+			if (spec.position !== "payload" && !descriptors.length)
+				report(node, "CRU017", `Cannot read ${kind}'s value type; give it an explicit type argument.`);
+			const tail =
+				kind === "askServer"
+					? [timeout]
+					: spec.handles && descriptors.length
+						? [arr(serverOnlyPaths(descriptors[0]).map((segments) => arr(segments.map(str))))]
+						: [];
 			return f.createCallExpression(runtime(kind), node.typeArguments, [
 				name ?? str("invalid"),
-				...lowerMessage(node, kind, report).map(emit),
-				...(kind === "askServer" ? [timeout] : []),
+				...spec.passed.map((i) => node.arguments[i] && visitInput(node.arguments[i])).filter(Boolean),
+				...descriptors.map(emit),
+				...tail,
 			]);
 		};
 		return { inspect, visit };
