@@ -725,7 +725,9 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			report(
 				source,
 				"Crucible",
-				`Cannot transform input: ${String(error instanceof Error ? error.message : error).split(/\r?\n/)[0]}`,
+				error instanceof RangeError
+					? "Cannot transform input: the type checker ran out of stack. A type in this file nests or inherits too deeply to analyse."
+					: `Cannot transform input: ${String(error instanceof Error ? error.message : error).split(/\r?\n/)[0]}`,
 			);
 			return source;
 		}
