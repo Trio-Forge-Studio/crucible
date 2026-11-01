@@ -2,7 +2,18 @@ local world = require("./binding-world")
 
 return function()
 	local w = world()
-	w.bootModule = w.graph.module("internal/boot")
+	local function none() end
+	local boot = w.graph.module("internal/boot")
+	-- Specs written before networking hand ignite a Side without a network; they get an idle one.
+	w.bootModule = setmetatable({
+		ignite = function(port, side, options)
+			if side.network == nil then
+				side = table.clone(side)
+				side.network = { open = none, loaded = none, commit = none, close = none }
+			end
+			return boot.ignite(port, side, options)
+		end,
+	}, { __index = boot })
 	w.subsystem = w.graph.module("subsystem").Subsystem
 	w.closers = {}
 	w.workers = {}
@@ -49,7 +60,6 @@ return function()
 	end
 	function w.boot(options, client, overrides)
 		overrides = overrides or {}
-		local function none() end
 		w.bootModule.ignite(w.engine.port, {
 			name = if client then "client" else "server",
 			renders = client == true,
