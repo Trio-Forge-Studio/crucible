@@ -1211,6 +1211,66 @@ tests["8 97 a player's invalid first targeted value keeps the global value"] = f
 	spec.eq(discount(player), 9, "a later valid targeted value replaces it")
 end
 
+tests["97 a later invalid targeted value keeps that player's last good targeted value"] = function()
+	local w = world()
+	local discount = w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.backend.globals["Shop.Discount"] = 5
+	w.backend.targeted[7] = { ["Shop.Discount"] = 9 }
+	w.start()
+	local player = w.backend:join(7)
+	local other = w.backend:join(8)
+	spec.eq(discount(player), 9, "the targeted value")
+	spec.eq(discount(other), 5, "an untargeted player reads the global value")
+	w.backend:setForPlayer(7, "Shop.Discount", "nine")
+	spec.eq(w.refresh().value, true, "refresh")
+	spec.eq(discount(player), 9, "the player's own last good value, not the global one")
+	spec.eq(discount(other), 5, "the other player is unchanged")
+	spec.eq(#w.diagnostics("player 7"), 1, "the invalid value is diagnosed once")
+end
+
+tests["97 an unchanged player table value keeps its identity across a refresh"] = function()
+	local w = world()
+	local box = w.emit.playerConfig("Shop.Box", { a = 1 }, w.n.object({ { "a", w.n.f64 } }))
+	w.backend.globals["Shop.Box"] = { a = 5 }
+	w.backend.targeted[7] = { ["Shop.Box"] = { a = 9 } }
+	w.start()
+	local player = w.backend:join(7)
+	local before = box(player)
+	spec.eq(before.a, 9, "the targeted table")
+	w.backend:setForPlayer(7, "Shop.Other", 1)
+	spec.eq(w.refresh().value, true, "refresh")
+	spec.eq(rawequal(before, box(player)), true, "the same table")
+end
+
+tests["100 a refresh that throws after a discarded one reports false on stale values"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	w.start()
+	w.backend.eventOnPublish = false
+	w.backend:setGlobal("Shop.Coins", 5)
+	w.backend:delay("global", 15)
+	local late = w.refresh()
+	w.backend:advance(10)
+	spec.eq(late.value, false, "false at the bound")
+	w.backend:advance(6)
+	w.backend:delay("global", 0)
+	w.backend:failNext("global", "throw", 1)
+	spec.eq(w.refresh().value, false, "the throwing refresh reports false")
+	spec.eq(coins(), 3, "the value is still the old one")
+	spec.eq(w.refresh().value, true, "the next refresh recovers")
+	spec.eq(coins(), 5, "and applies the fetched value")
+end
+
+tests["3 104 a declaration between ignite and the first advance throws"] = function()
+	local w = world()
+	w.emit.config("A", 1, w.n.f64)
+	w.ignite()
+	throws(function()
+		w.emit.config("B", 1, w.n.f64)
+	end, "B was declared after the config registry sealed", "declaration inside the boot yield")
+end
+
 tests["3 104 a declaration after a configless boot throws and a rolled-back boot leaves the registry open"] = function()
 	local w = world()
 	w.start()
