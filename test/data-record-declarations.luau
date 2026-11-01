@@ -10,9 +10,9 @@ local function noop(current)
 	return current
 end
 
-local function world()
+local function world(options)
 	local backend = Backend.new()
-	local realm = backend:realm()
+	local realm = backend:realm(options)
 	local n = realm.n
 	local w = {
 		backend = backend,
@@ -182,6 +182,35 @@ return {
 			"stored at the step count"
 		)
 	end,
+	["rule 4 migrations declared with the store run on an older record, in order"] = function()
+		local w = world()
+		local handle = w.bound("Decl.Migrated", {
+			function(old)
+				return { count = old.count + 10 }
+			end,
+			function(old)
+				return { count = old.count * 2, label = "s1" }
+			end,
+		})
+		R.seed(w.backend, "old", { schemaVersion = 0, payload = { count = 1 } }, "Decl.Migrated")
+		local read = run(w, function()
+			return handle:read("old")
+		end)
+		R.same(
+			read.value,
+			{ ok = true, value = { count = 22, label = "s1" } },
+			"both steps ran, the first before the second"
+		)
+		local id = R.id(WALL - 5, "m1")
+		run(w, function()
+			return handle:update("old", noop, id)
+		end)
+		R.same(
+			R.stored(w.backend, "old", "Decl.Migrated"),
+			R.envelope({ schemaVersion = 2, payload = { count = 22, label = "s1" }, operations = { id } }),
+			"and a no-op stores the migrated record at the step count"
+		)
+	end,
 	["rule 4 defaults that violate the descriptor throw naming the store and path, and the name stays free"] = function()
 		local w = world()
 		local ok, err = pcall(w.declare, "Decl.Bad", { count = R.SECRET })
@@ -199,16 +228,33 @@ return {
 		w.declare("Dup.Store")
 		local ok, err = pcall(w.declare, "Dup.Store")
 		spec.eq(ok, false, "throws")
-		spec.has(err, "Dup.Store", "naming the name")
+		spec.has(err, "Dup.Store is already declared", "naming the name")
 		spec.eq(pcall(w.declare, "Dup.Other"), true, "another name is fine")
 	end,
 	["rule 3 names are dot-separated letter-led segments and Crucible is reserved as the first"] = function()
 		local w = world()
-		local bad = { "", "1a", "a..b", ".a", "a.", "a b", "a-b", "a.1b", "a.b!", "Crucible", "Crucible.Data" }
-		for _, name in bad do
+		local grammar = "a store name is dot-separated segments of letters, digits and underscores"
+		local reserved = "the name Crucible is reserved"
+		local bad = {
+			{ "", "a store name is 1 to 50 bytes" },
+			{ "1a", grammar },
+			{ "a..b", grammar },
+			{ ".a", grammar },
+			{ "a.", grammar },
+			{ "a b", grammar },
+			{ "a-b", grammar },
+			{ "a.1b", grammar },
+			{ "a.b!", grammar },
+			{ "_a", grammar },
+			{ "a.b-", grammar },
+			{ "Crucible", reserved },
+			{ "Crucible.Data", reserved },
+		}
+		for _, case in bad do
+			local name, reason = case[1], case[2]
 			local ok, err = pcall(w.declare, name)
 			spec.eq(ok, false, `{name} is refused`)
-			spec.has(err, name, `{name} is named`)
+			spec.has(err, `{name}: {reason}`, `{name} is named with its reason`)
 		end
 		for _, name in { "A", "a_b.C1", "X.Y.Z", "FD.Players2", "Crucibles.A", "A.Crucible" } do
 			spec.eq(pcall(w.declare, name), true, `{name} is accepted`)
@@ -221,7 +267,7 @@ return {
 		spec.eq(pcall(w.declare, fifty), true, "50 bytes is accepted")
 		local ok, err = pcall(w.declare, long)
 		spec.eq(ok, false, "51 bytes is refused")
-		spec.has(err, long, "naming the name")
+		spec.has(err, `{long}: a store name is 1 to 50 bytes`, "naming the name and the limit")
 	end,
 	["rule 3 a realm holds at most 256 data declarations"] = function()
 		local w = world()
@@ -230,7 +276,7 @@ return {
 		end
 		local ok, err = pcall(w.declare, "Cap.S257")
 		spec.eq(ok, false, "the 257th throws")
-		spec.has(err, "Cap.S257", "naming it")
+		spec.has(err, "Cap.S257: more than 256 data declarations", "naming it and the cap")
 		local other = world()
 		spec.eq(pcall(other.declare, "Cap.S1"), true, "another realm has its own registry")
 	end,
@@ -285,6 +331,57 @@ return {
 		R.same(update.value, { ok = true, value = { count = 3 }, replayed = false }, "the public update shape")
 		R.same(R.stored(w.backend, "k", "Wait.Bound").payload, { count = 3 }, "and it wrote")
 	end,
+	["rule 104 two calls waiting for activation are both woken by the binding"] = function()
+		local w = world()
+		local handle = w.declare("Wait.Two")
+		local read = w.realm.run(function()
+			return handle:read("k")
+		end)
+		local update = w.realm.run(function()
+			return handle:update("k", noop, R.id(WALL - 5, "w2"))
+		end)
+		w.backend:advance(10)
+		spec.eq(read.done or update.done, false, "both wait")
+		w.bindings.bindRecords(w.realm.data)
+		w.backend:advance(1)
+		spec.eq(read.done and update.done, true, "both returned within a second of the binding")
+		R.same(read.value, { ok = true, value = nil }, "the read")
+		spec.eq(update.value.ok, true, "and the update")
+	end,
+	["rule 104 after unbinding a call waits for the next activation"] = function()
+		local w = world()
+		local handle = w.bound("Wait.Unbound")
+		w.bindings.unbindRecords()
+		local read = w.realm.run(function()
+			return handle:read("k")
+		end)
+		w.backend:advance(10)
+		spec.eq(read.done, false, "the stale store is not used")
+		w.backend:advance(21)
+		R.same(read.value, { ok = false, reason = "timeout" }, "it returns timeout at the deadline")
+		spec.eq(#w.backend.calls, 0, "nothing was sent")
+	end,
+	["rule 1 a declared store used before the server runtime is loaded throws naming the store"] = function()
+		local backend = Backend.new()
+		local realm = backend:realm()
+		local emit = realm.graph.module("emit")
+		local node = realm.n.object({ { "count", realm.n.f64 } })
+		local handle = emit.dataStore("Unloaded.Store", { defaults = { count = 0 } }, node)
+		local ok, err = pcall(handle.read, handle, "k")
+		spec.eq(ok, false, "a read throws")
+		spec.has(
+			err,
+			"Unloaded.Store: the data runtime is not loaded; import @trioforge/crucible/server",
+			"with the rule's text"
+		)
+		ok, err = pcall(handle.update, handle, "k", noop)
+		spec.eq(ok, false, "an update throws")
+		spec.has(
+			err,
+			"Unloaded.Store: the data runtime is not loaded; import @trioforge/crucible/server",
+			"with the rule's text"
+		)
+	end,
 	["rule 104 after binding read and update return the public shapes"] = function()
 		local w = world()
 		local handle = w.bound("Shape.Store")
@@ -328,6 +425,13 @@ return {
 			return handle:read("bad")
 		end)
 		R.same(read.value, { ok = false, reason = "unavailable" }, "a read of an unreadable record")
+		local slow = world()
+		local slowHandle = slow.bound("Fail.Slow")
+		slow.realm.budget.read = 0
+		local held = run(slow, function()
+			return slowHandle:read("k")
+		end, 31)
+		R.same(held.value, { ok = false, reason = "timeout" }, "a read that was never dispatched")
 	end,
 
 	["rule 1 the untransformed public dataStore throws the plugin message"] = function()
@@ -337,6 +441,14 @@ return {
 		spec.eq(ok, false, "throws")
 		spec.has(err, PLUGIN, "with the rule's text")
 		spec.eq(w.records.declaredRecords()["Plain.Store"], nil, "and registers nothing")
+	end,
+	["rule 66 operationId writes the wall second in base 36 and the GUID in lower case"] = function()
+		local expected = { [0] = "0", [35] = "z", [36] = "10", [1295] = "zz", [1296] = "100", [46655] = "zzz" }
+		for wall, text in expected do
+			local w = world({ wall = wall, id = "SERVER-AB" })
+			local server = w.realm.graph.module("server/data")
+			spec.eq(server.operationId(), `o1-{text}-serverabtoken1`, `wall second {wall}`)
+		end
 	end,
 	["rule 66 operationId makes o1, the base 36 wall second and an alphanumeric token within 64 bytes"] = function()
 		local w = world()

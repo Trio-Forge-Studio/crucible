@@ -103,6 +103,109 @@ end
 local REJECTED = {
 	{ "a boolean holding a string", n.bool, true, "hunter2", ".x", "expected boolean, got string", "hunter2" },
 	{ "a number holding a string", n.f64, 0, "12abc", ".x", "expected number, got string", "12abc" },
+	{ "a string holding a number", n.string, "", 12, ".x", "expected string, got number" },
+	{ "a literal holding another value", n.literal("a"), "a", "b", ".x", "expected the literal a" },
+	{ "a value where nothing is declared", n["nil"], nil, 5, ".x", "expected nothing" },
+	{
+		"a number where an object is declared",
+		DM.object({ y = n.f64 }),
+		{ y = 0 },
+		5,
+		".x",
+		"expected an object, got number",
+	},
+	{ "a string where an array is declared", n.array(n.f64), {}, "s", ".x", "expected an array, got string" },
+	{ "a boolean where a map is declared", n.map(n.string, n.f64), {}, true, ".x", "expected an object, got boolean" },
+	{ "a tuple of the wrong length", n.tuple({ n.f64, n.string }), { 1, "a" }, { 1 }, ".x", "expected 2 elements" },
+	{
+		"a tuple of the wrong length, longer",
+		n.tuple({ n.f64, n.string }),
+		{ 1, "a" },
+		{ 1, "a", 3 },
+		".x",
+		"expected 2 elements",
+	},
+	{
+		"a tuple element of the wrong type",
+		n.tuple({ n.f64, n.string }),
+		{ 1, "a" },
+		{ 1, 2 },
+		".x[1]",
+		"expected string, got number",
+	},
+	{
+		"a key a map does not declare",
+		n.map(n.union({ n.literal("a"), n.literal("b") }), n.f64),
+		{},
+		{ c = 1 },
+		".x.c",
+		"not a key this map declares",
+	},
+	{
+		"an array where a map is declared",
+		n.map(n.string, n.f64),
+		{},
+		{ 1, 2 },
+		".x",
+		"expected an object with string keys",
+	},
+	{ "a map value of the wrong type", n.map(n.string, n.f64), {}, { k = "v" }, ".x.k", "expected number, got string" },
+	{
+		"a boolean where a number or a string is declared",
+		n.union({ n.f64, n.string }),
+		0,
+		true,
+		".x",
+		"expected number or string, got boolean",
+	},
+	{
+		"a string where an array or a number is declared",
+		n.union({ n.f64, n.array(n.f64) }),
+		0,
+		"s",
+		".x",
+		"expected number or an array, got string",
+	},
+	{
+		"a string where an object or a number is declared",
+		n.union({ n.f64, DM.object({ y = n.f64 }) }),
+		0,
+		"s",
+		".x",
+		"expected number or an object, got string",
+	},
+	{
+		"a string where a map or a bool is declared",
+		n.union({ n.bool, n.map(n.string, n.f64) }),
+		false,
+		"s",
+		".x",
+		"expected boolean or an object, got string",
+	},
+	{
+		"a string where a tuple or a bool is declared",
+		n.union({ n.bool, n.tuple({ n.f64 }) }),
+		false,
+		"s",
+		".x",
+		"expected boolean or an array, got string",
+	},
+	{
+		"a string no literal matches",
+		n.union({ n.literal("a"), n.literal("b") }),
+		"a",
+		"c",
+		".x",
+		"expected the literal a or the literal b, got string",
+	},
+	{
+		"a variant tag no variant has",
+		n.union({ n.variant("kind", "A", DM.object({ a = n.f64 })), n.variant("kind", "B", DM.object({ b = n.f64 })) }),
+		{ kind = "A", a = 0 },
+		{ kind = "C" },
+		".x",
+		"expected the variant kind = A or the variant kind = B, got table",
+	},
 	{ "NaN", n.f64, 0, 0 / 0, ".x", "expected a finite number" },
 	{ "infinity", n.f64, 0, math.huge, ".x", "expected a finite number" },
 	{ "negative infinity", n.f64, 0, -math.huge, ".x", "expected a finite number" },
@@ -153,6 +256,51 @@ return {
 		spec.eq((accepted("zero is not reset", n.f64, 5, 0)), 0, "a present zero stays zero, not the default")
 		spec.eq((accepted("false is not reset", n.bool, true, false)), false, "a present false stays false")
 		spec.eq((accepted("empty string is not reset", n.string, "d", "")), "", "a present empty string stays empty")
+		local pair = accepted("tuple", n.tuple({ n.f64, n.string }), { 1, "a" }, { 7, "z" })
+		spec.eq(pair[1], 7, "a tuple keeps its first element")
+		spec.eq(pair[2], "z", "and its second")
+		local mapped = accepted(
+			"restricted map",
+			n.map(n.union({ n.literal("a"), n.literal("b") }), n.f64),
+			{},
+			{ a = 1, b = 2 }
+		)
+		spec.eq(mapped.a * 10 + mapped.b, 12, "a map of declared keys keeps both entries")
+		local free = accepted("string map", n.map(n.string, n.f64), {}, { anything = 3 })
+		spec.eq(free.anything, 3, "a string map takes any key")
+		local literal = accepted("literal", n.literal("a"), "a", "a")
+		spec.eq(literal, "a", "a matching literal")
+		local either = accepted("union", n.union({ n.f64, n.string }), 0, "s")
+		spec.eq(either, "s", "a union takes either branch")
+	end,
+	["rule 76 an undeclared table with an interior hole or a stray key is not read as an array"] = function()
+		local function shaped(extra: number?)
+			local list = table.create(3)
+			list[1] = 1
+			list[3] = 3
+			if extra then
+				list[extra] = 9
+			end
+			return list
+		end
+		for _, extra in { false, 5, 0, 1.5 } do
+			local label = if extra then `stray key {extra}` else "an interior hole"
+			local backend, a = seeded(1, valid())
+			local pa = D2.join(backend, a)
+			local session = DM.session(a, pa)
+			local result = DM.write(a, pa, function(old)
+				local value = table.clone(old)
+				value.list = shaped(extra or nil)
+				return value
+			end)
+			spec.eq(result.ok, false, `{label}: refused`)
+			spec.eq(
+				starts(result.err, STORE .. ".list: a table mixing array and object keys"),
+				true,
+				`{label}: as mixed, at its path`
+			)
+			spec.eq(session.revision, 0, `{label}: no revision`)
+		end
 	end,
 	["rule 76 a mixed array and object table, and a hole in an undeclared array, are refused at their path"] = function()
 		local mixed = { 1, 2 }
@@ -482,6 +630,22 @@ return {
 		spec.eq(table.isfrozen(value.settings), true, "frozen")
 		spec.eq(value.settings.volume, 0.75, "with the written value")
 	end,
+	["rule 15 a frozen table admitted under one descriptor is admitted again under another"] = function()
+		local backend, a = seeded(1, valid())
+		local pa = D2.join(backend, a)
+		local session = DM.session(a, pa)
+		local current = session.value
+		local result = DM.write(a, pa, function(old)
+			local value = table.clone(old)
+			value.bonus = { k = old.bonus.k, other = old.career.jobs[1] }
+			return value
+		end)
+		spec.eq(result.ok, false, "a job is not a bonus entry")
+		spec.eq(starts(result.err, STORE .. ".bonus.other.n"), true, "naming the store and the missing field")
+		spec.has(result.err, "missing", "and the reason")
+		spec.eq(rawequal(session.value, current), true, "nothing changed")
+		spec.eq(session.revision, 0, "no revision")
+	end,
 	["rule 15 a frozen subtree reused where its deepest table passes depth 28 is refused"] = function()
 		for _, wrap in { 8, 9 } do
 			local backend, a = seeded(1, { a = DM.nest(19) }, { version = nil }, {})
@@ -536,6 +700,238 @@ return {
 		spec.eq(once.ok, true, `used once it is accepted: {once.err}`)
 		spec.eq(rawequal(session.value.big, current.big), true, "and reused")
 		spec.eq(session.revision, 1, "one revision")
+	end,
+	["rule 14 a write that returns something other than a table throws naming the store and what it got"] = function()
+		local backend, a = seeded(1, valid())
+		local pa = D2.join(backend, a)
+		local session = DM.session(a, pa)
+		for _, case in { { 5, "number" }, { "text", "string" }, { true, "boolean" } } do
+			local result = DM.write(a, pa, function()
+				return case[1]
+			end)
+			spec.eq(result.ok, false, `{case[2]}: refused`)
+			spec.eq(
+				starts(result.err, `{STORE}: a store's value is a record, got {case[2]}`),
+				true,
+				`{case[2]}: the message`
+			)
+		end
+		spec.eq(session.revision, 0, "no revision")
+	end,
+	["rule 15 the visit limit is exact for tables reused from the current value"] = function()
+		local shapes = {
+			{ "undeclared tables", { version = nil }, {} },
+			{
+				"declared arrays",
+				{ node = DM.object({ big = n.array(n.f64), small = n.array(n.f64) }) },
+				{ big = {}, small = {} },
+			},
+		}
+		for _, shape in shapes do
+			local label = shape[1]
+			local backend, a =
+				seeded(1, { big = table.create(60000, 1), small = table.create(39997, 2) }, shape[2], shape[3])
+			local pa = D2.join(backend, a)
+			local session = DM.session(a, pa)
+			local current = session.value
+			spec.eq(#current.big + #current.small, 99997, `{label}: 100,000 visits load`)
+			local reused = DM.write(a, pa, function(old)
+				local value = table.clone(old)
+				return value
+			end)
+			spec.eq(reused.ok, true, `{label}: exactly 100,000 visits through the cache are accepted: {reused.err}`)
+			spec.eq(rawequal(session.value.big, current.big), true, `{label}: the first table is reused`)
+			spec.eq(rawequal(session.value.small, current.small), true, `{label}: and the second`)
+			local over = DM.write(a, pa, function(old)
+				local value = table.clone(old)
+				value.extra = 1
+				return value
+			end)
+			spec.eq(over.ok, false, `{label}: one more value is the 100,001st`)
+			spec.eq(starts(over.err, STORE), true, `{label}: naming the store`)
+			spec.has(over.err, "more than 100000 values", `{label}: and the limit`)
+			spec.eq(session.revision, 1, `{label}: only the first write counted`)
+		end
+	end,
+	["rule 76 a descriptor kind that is not JSON refuses a default at its path when the store is declared"] = function()
+		local ok, err = pcall(D2.world, 1, {
+			defaults = { x = 5 },
+			version = { node = DM.object({ x = n.vector3 }) },
+		})
+		spec.eq(ok, false, "the declaration throws")
+		spec.eq(
+			starts(err, "FD.Players.x: vector3 cannot be saved; a save holds JSON"),
+			true,
+			"naming the store, the path and the kind"
+		)
+	end,
+	["rule 76 a map keyed by a number refuses the store at its path when it is declared"] = function()
+		local ok, err = pcall(D2.world, 1, {
+			defaults = { x = {} },
+			version = { node = DM.object({ x = n.map(n.u8, n.f64) }) },
+		})
+		spec.eq(ok, false, "the declaration throws")
+		spec.eq(
+			starts(err, "FD.Players.x: a saved map has string keys"),
+			true,
+			"naming the store, the path and the reason"
+		)
+	end,
+	["rule 76 variant objects count their tag once, at exactly 100,000 visits"] = function()
+		local node = DM.object({
+			x = n.array(n.union({
+				n.variant("kind", "A", DM.object({ a = n.f64 })),
+				n.variant("kind", "B", DM.object({ b = n.f64 })),
+			})),
+			secret = n.string,
+		})
+		local function load(pads: number)
+			local items = {}
+			for index = 1, 33331 do
+				items[index] = { kind = "A", a = 1 }
+			end
+			local payload = { x = items, secret = SECRET }
+			for index = 1, pads do
+				payload[`pad{index}`] = 1
+			end
+			local backend, a = seeded(1, payload, { node = node }, { x = {}, secret = "" })
+			local player, handle = DM.begin(a)
+			backend:advance(1)
+			return handle.value, a, player
+		end
+		local fits, _, player = load(4)
+		spec.eq(fits, true, "1 root, 1 array, 99,993 for the elements, 1 string and 4 pads are 100,000")
+		local over, a = load(5)
+		spec.eq(over, false, "one more is the 100,001st")
+		local messages = DM.logged(a, "did not load")
+		spec.eq(#messages, 1, "one diagnostic")
+		spec.has(messages[1], "more than 100000 values", "naming the limit")
+		spec.eq(player ~= nil, true, "the first load had a player")
+	end,
+	["rule 15 a declared node reused deeper carries the depth of its unknown keys"] = function()
+		for _, wrappers in { 7, 8 } do
+			local leaf = DM.object({ v = n.f64 })
+			local inner = leaf
+			for _ = 1, wrappers do
+				inner = DM.object({ c = DM.opt(inner) })
+			end
+			local node = DM.object({ a = DM.opt(leaf), z = DM.opt(inner) })
+			local backend, a = seeded(1, { a = { v = 1, deep = DM.nest(19) } }, { node = node }, {})
+			local pa = D2.join(backend, a)
+			local session = DM.session(a, pa)
+			local result = DM.write(a, pa, function(old)
+				local value = table.clone(old)
+				local holder = old.a
+				for _ = 1, wrappers do
+					holder = { c = holder }
+				end
+				value.z = holder
+				return value
+			end)
+			if wrappers == 7 then
+				spec.eq(result.ok, true, `its deepest table at depth 28 is accepted: {result.err}`)
+			else
+				spec.eq(result.ok, false, "its deepest table at depth 29 is refused")
+				spec.has(result.err, "deeper than 28", "with the reason")
+				spec.eq(session.revision, 0, "no revision")
+			end
+		end
+	end,
+	["rule 15 a table rebuilt around a cached subtree carries the subtree's depth"] = function()
+		for _, wrappers in { 7, 8 } do
+			local backend, a = seeded(1, { a = DM.nest(19) }, { version = nil }, {})
+			local pa = D2.join(backend, a)
+			local session = DM.session(a, pa)
+			local first = DM.write(a, pa, function(old)
+				local value = table.clone(old)
+				value.w = { deep = old.a }
+				return value
+			end)
+			spec.eq(first.ok, true, `a wrapper around the subtree is accepted: {first.err}`)
+			local result = DM.write(a, pa, function(old)
+				local value = table.clone(old)
+				local holder = old.w
+				for _ = 1, wrappers do
+					holder = { n = holder }
+				end
+				value.u = holder
+				return value
+			end)
+			if wrappers == 7 then
+				spec.eq(result.ok, true, `its deepest table at depth 28 is accepted: {result.err}`)
+			else
+				spec.eq(result.ok, false, "its deepest table at depth 29 is refused")
+				spec.eq(starts(result.err, STORE), true, "naming the store")
+				spec.has(result.err, "deeper than 28", "and the reason")
+				spec.eq(session.revision, 1, "only the first write counted")
+			end
+		end
+	end,
+	["rule 14 a table shared by two fields is not a cycle"] = function()
+		local backend, a = seeded(1, valid())
+		local pa = D2.join(backend, a)
+		local session = DM.session(a, pa)
+		local result = DM.write(a, pa, function(old)
+			local value = table.clone(old)
+			local shared = { id = "s", tips = 2 }
+			value.career = { jobs = { shared, shared }, rank = 1 }
+			return value
+		end)
+		spec.eq(result.ok, true, `accepted: {result.err}`)
+		local jobs = session.value.career.jobs
+		spec.eq(#jobs, 2, "both elements are there")
+		spec.eq(jobs[1].id .. jobs[2].id, "ss", "with the shared contents")
+		spec.eq(table.isfrozen(jobs[1]) and table.isfrozen(jobs[2]), true, "frozen")
+	end,
+	["rule 15 a frozen table that holds an unfrozen one is copied and frozen throughout"] = function()
+		local backend, a = seeded(1, valid())
+		local pa = D2.join(backend, a)
+		local session = DM.session(a, pa)
+		local given = table.freeze({ jobs = { { id = "n", tips = 1 } }, rank = 8 })
+		local result = DM.write(a, pa, function(old)
+			local value = table.clone(old)
+			value.career = given
+			return value
+		end)
+		spec.eq(result.ok, true, `accepted: {result.err}`)
+		local career = session.value.career
+		spec.eq(rawequal(career, given), false, "the shallow freeze is not trusted: a copy is stored")
+		spec.eq(table.isfrozen(career), true, "the copy is frozen")
+		spec.eq(table.isfrozen(career.jobs), true, "so is the array inside it")
+		spec.eq(table.isfrozen(career.jobs[1]), true, "and its element")
+		spec.eq(career.jobs[1].id, "n", "with the same contents")
+		local free = table.freeze({ list = { 1, 2 } })
+		local more = DM.write(a, pa, function(old)
+			local value = table.clone(old)
+			value.free = free
+			return value
+		end)
+		spec.eq(more.ok, true, `an undeclared frozen table holding an unfrozen one is accepted: {more.err}`)
+		spec.eq(rawequal(session.value.free, free), false, "a copy is stored")
+		spec.eq(table.isfrozen(session.value.free.list), true, "with the array inside it frozen")
+		local extra =
+			table.freeze({ jobs = table.freeze({ table.freeze({ id = "p", tips = 2 }) }), rank = 9, extra = { z = 1 } })
+		local again = DM.write(a, pa, function(old)
+			local value = table.clone(old)
+			value.career = extra
+			return value
+		end)
+		spec.eq(
+			again.ok,
+			true,
+			`a frozen declared table whose only unfrozen part is an unknown key is accepted: {again.err}`
+		)
+		spec.eq(rawequal(session.value.career, extra), false, "a copy is stored")
+		spec.eq(table.isfrozen(session.value.career.extra), true, "with the unknown key's table frozen")
+		local items = table.freeze({ { n = 1 }, { n = 2 } })
+		local last = DM.write(a, pa, function(old)
+			local value = table.clone(old)
+			value.items = items
+			return value
+		end)
+		spec.eq(last.ok, true, `a frozen undeclared array of unfrozen tables is accepted: {last.err}`)
+		spec.eq(rawequal(session.value.items, items), false, "a copy is stored")
+		spec.eq(table.isfrozen(session.value.items[2]), true, "with its elements frozen")
 	end,
 	["rule 14 and 76 a write over PAYLOAD_MAX_BYTES throws naming the store and user, a single string over 65536 is refused first"] = function()
 		local backend, a = seeded(1, valid())
