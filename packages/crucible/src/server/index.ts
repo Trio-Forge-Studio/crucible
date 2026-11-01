@@ -1,6 +1,7 @@
 import type { BootOptions } from "../index";
 import { boot as bootSide } from "../internal/boot";
 import { installConfigRuntime } from "../internal/configs/runtime";
+import "../internal/data/record-bindings";
 
 if (!game.GetService("RunService").IsServer()) error("@trioforge/crucible/server loaded on the client");
 

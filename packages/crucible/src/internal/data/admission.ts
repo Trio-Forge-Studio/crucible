@@ -19,7 +19,7 @@ export interface Schema {
 /** @internal */
 export type Loaded =
 	| { readonly kind: "ok"; readonly value: object; readonly migrated: boolean }
-	| { readonly kind: "unreadable"; readonly reason: string }
+	| { readonly kind: "unreadable"; readonly code: "migration" | "admission"; readonly reason: string }
 	| { readonly kind: "newer"; readonly version: number };
 
 /** @internal */
@@ -391,10 +391,14 @@ export function loadRecord(schema: Schema, payload: object | undefined, version:
 		if (step === undefined) continue;
 		const [status, patch] = call(step, copyJson(current) as object, undefined);
 		const label = `${schema.name}: migrations[${index}]`;
-		if (status === CallResult.Threw) return { kind: "unreadable", reason: `${label} threw` };
-		if (status === CallResult.Yielded) return { kind: "unreadable", reason: `${label} yielded` };
+		if (status === CallResult.Threw) return { kind: "unreadable", code: "migration", reason: `${label} threw` };
+		if (status === CallResult.Yielded) return { kind: "unreadable", code: "migration", reason: `${label} yielded` };
 		if (!typeIs(patch, "table") || !isObject(patch))
-			return { kind: "unreadable", reason: `${label} returned ${typeOf(patch)}, not a record` };
+			return {
+				kind: "unreadable",
+				code: "migration",
+				reason: `${label} returned ${typeOf(patch)}, not a record`,
+			};
 		current = merge(current, patch);
 		migrated = true;
 	}
@@ -402,6 +406,7 @@ export function loadRecord(schema: Schema, payload: object | undefined, version:
 	if (!result.ok)
 		return {
 			kind: "unreadable",
+			code: "admission",
 			reason: `${schema.name}${result.path}: ${result.reason}${migrated ? ` (after migrating from version ${version})` : ""}`,
 		};
 	return { kind: "ok", value: result.value as object, migrated };
