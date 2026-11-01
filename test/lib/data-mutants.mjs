@@ -1186,6 +1186,38 @@ const mutants = [
 		";(function(continue) continue() end)(function()",
 		"rule 37 R1 a new session's first save with an update",
 	],
+	[
+		"20",
+		"guard",
+		D + "profiles.ts",
+		"\t\t\t\theld = false;\n",
+		"\n",
+		"rule 20 a held load whose polls then throttle",
+	],
+	[
+		"32",
+		"guard",
+		D + "profiles.ts",
+		'\t\t\t\tif (settled.kind === "overloaded")\n\t\t\t\t\tthis.changed.park(math.min(deadline, bootClock() + LOAD_POLL_MIN_SECONDS));\n',
+		"",
+		"rule 32 a load refused at a pending cap",
+	],
+	[
+		"32",
+		"guard",
+		D + "profiles.ts",
+		"math.min(deadline, bootClock() + LOAD_POLL_MIN_SECONDS)",
+		"math.min(deadline, bootClock())",
+		"rule 32 a load refused at a pending cap",
+	],
+	[
+		"20",
+		"guard",
+		D + "profiles.ts",
+		"this.changed.park(math.min(deadline, bootClock() + LOAD_POLL_MIN_SECONDS))",
+		"this.changed.park(bootClock() + LOAD_POLL_MIN_SECONDS)",
+		"rule 20 a load refused at a pending cap ends at the deadline",
+	],
 ];
 // Type-checks every mutant in one language service, so a mutant that cannot compile fails before the slow runs.
 function typecheck(originals) {
