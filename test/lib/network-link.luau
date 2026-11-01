@@ -10,8 +10,9 @@
 --     leaves its sidecar key absent, as Studio measured.
 --   * The engine-supplied Player on the server. A client cannot choose it.
 --   * A deterministic clock: `advance(seconds)` fires delays, discovery deadlines and handler lifetimes.
---   * `Player:Kick` is recorded with its message, and PlayerRemoving follows on the next flush, after the packets that
---     client already fired, as Studio measured (PlayerRemoving fires 1 to 3 s after Kick returns).
+--   * `Player:Kick` is recorded with its message and the count of packets logged before it. PlayerRemoving follows on
+--     the next flush, after the packets that client already fired, as Studio measured (PlayerRemoving fires 1 to 3 s
+--     after Kick returns).
 --   * `leave(client)` fires PlayerRemoving at once, so a spec can end a peer from inside a callback.
 --   * Raw injection both ways, and fault injection on the port's create, publish, fireServer and discover.
 -- What it does not prove: replication, streaming timing, attribute sizes, kick timing or wire size. Studio does.
@@ -352,7 +353,7 @@ local function serverPort(self, realm)
 			end
 		end,
 		kick = function(player, message)
-			table.insert(self.kicks, { player = player.Name, message = message })
+			table.insert(self.kicks, { player = player.Name, message = message, sent = #self.log })
 			local client = self.present[player]
 			if client and not client.kicked then
 				client.kicked = true

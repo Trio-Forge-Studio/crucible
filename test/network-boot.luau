@@ -244,6 +244,31 @@ return {
 			link:assertClean()
 		end
 	end,
+	["38 76 79 a client boot failing at its network commit settles a pending ask disconnected"] = function()
+		local link = Link.new()
+		server(link, record(), function(s, m)
+			m.Echo = s.emit.askServer("Boot.Echo", s.n.string, s.n.string, nil)
+		end)
+		local asked
+		local c = link:join("Ann", function(realm)
+			local m = declare(realm)
+			m.Echo = realm.emit.askServer("Boot.Echo", realm.n.string, realm.n.string, nil)
+			realm.service("Asker", nil, {
+				start = function()
+					asked = link:run(function()
+						return realm.Network.ask(m.Echo, "x")
+					end)
+				end,
+			})
+		end, { boot = false })
+		link:failNext("fireServer")
+		link:start(c)
+		spec.eq(c.booted, false, "READY failing fails the boot")
+		spec.eq(asked.done, true, "the ask settled when the session closed")
+		spec.eq(asked.value.reason, "disconnected", "as disconnected, not timeout")
+		spec.eq(link:pending(), 0, "its deadline was cancelled")
+		link:assertClean()
+	end,
 	["79 the client flush throwing after READY closes with FAIL closing"] = function()
 		local link = Link.new()
 		local rec = record()

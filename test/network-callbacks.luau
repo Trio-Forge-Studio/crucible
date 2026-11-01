@@ -166,6 +166,48 @@ return {
 			return e.to == "Ann" and e.opcode == 5
 		end)
 		spec.eq(h.hex(fail[1].packet), "05 01", "FAIL overloaded")
+		local position
+		for index, entry in link.log do
+			if entry.to == "Ann" and entry.opcode == 5 then
+				position = index
+			end
+		end
+		spec.eq(link.kicks[1].sent, position, "77: the FAIL is the last packet fired before the kick")
+		link:assertClean()
+	end,
+	["54 77 a client event at MAX_ACTIVE_HANDLERS fails the client session with FAIL overloaded"] = function()
+		local link = Link.new()
+		local m
+		link:boot(function(s)
+			m = declare(s)
+		end)
+		local started = 0
+		local ann = link:join("Ann", function(c)
+			c.m = declare(c)
+			c.service("Listener", function(self)
+				self.note = c.emit.receive(self, "note", c.m.Note, function()
+					started += 1
+					coroutine.yield()
+				end)
+			end)
+		end)
+		for i = 1, 64 do
+			link.server.Network.send(ann.player, m.Note, tostring(i))
+		end
+		link:flush()
+		spec.eq(started, 64, "64 callbacks hold the client's ceiling")
+		spec.eq(#link.kicks, 0, "at the ceiling, not past it")
+		link.server.Network.send(ann.player, m.Note, "65")
+		link:flush()
+		spec.eq(started, 64, "the 65th never starts")
+		spec.eq(ann.logged("Crucible network session failed (overloaded)"), 1, "the client session fails")
+		local fail = link:sent(function(e)
+			return e.from == "Ann" and e.opcode == 5
+		end)
+		spec.eq(#fail, 1, "one FAIL")
+		spec.eq(h.hex(fail[1].packet), "05 01", "FAIL overloaded")
+		spec.eq(link.kicks[1].message, "Connection problem, please rejoin.", "the server kicks on it")
+		spec.eq(link:pending(), 0, "ending the session cancelled every lifetime timer")
 		link:assertClean()
 	end,
 	["55 a callback past its lifetime is diagnosed, stops counting, is never cancelled and still replies"] = function()
@@ -209,6 +251,14 @@ return {
 		link:flush()
 		spec.eq(finished, 65, "every event callback finished")
 		spec.eq(asked.value.value, "late", "the request past its lifetime still replies")
+		for i = 1, 64 do
+			ann.Network.send(ann.m.Slow, "again " .. i)
+		end
+		link:flush()
+		spec.eq(#link.kicks, 0, "an overrun callback that finishes uncounts once, so 64 fit again")
+		ann.Network.send(ann.m.Slow, "over")
+		link:flush()
+		spec.eq(#link.kicks, 1, "and the 65th fails the peer")
 		link:assertClean()
 	end,
 	["55 76 a callback that returns at once keeps no lifetime timer, and ending a peer cancels the rest"] = function()

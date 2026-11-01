@@ -18,6 +18,31 @@ local function client(c)
 end
 
 return {
+	["52 a callback thread that finished holds no owner"] = function()
+		local link = Link.new()
+		local threads = {}
+		link:boot(function(s)
+			local m = declare(s)
+			s.service("Owner", function(self)
+				self.ping = s.emit.receive(self, "ping", m.Ping, function(_, text)
+					threads[text] = coroutine.running()
+					if text == "held" then
+						coroutine.yield()
+					end
+				end)
+			end)
+		end)
+		local runner = link.server.graph.module("internal/runner")
+		local ann = link:join("Ann", client)
+		ann.Network.send(ann.m.Ping, "done")
+		ann.Network.send(ann.m.Ping, "held")
+		link:flush()
+		assert(runner.ownerOf(threads.held) ~= nil, "a running callback is owned")
+		spec.eq(runner.ownerOf(threads.done), nil, "a finished callback releases its owner")
+		link:resume(threads.held)
+		spec.eq(runner.ownerOf(threads.held), nil, "so does one that finishes after yielding")
+		link:assertClean()
+	end,
 	["52 current() inside event and request callbacks is the owner; observe binds to it and stops after its fault"] = function()
 		local link = Link.new()
 		local seen = {}

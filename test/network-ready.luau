@@ -235,6 +235,26 @@ return {
 		spec.list(called, { "A Ann", "C Ann", "A Bea", "C Bea" }, "B retired before its turn")
 		link:assertClean()
 	end,
+	["33 36 R3 a middle owner retiring itself in its callback never skips the next owner"] = function()
+		local link = Link.new()
+		local called = {}
+		servers(link, { "A", "B", "C" }, {
+			A = function(player)
+				table.insert(called, "A " .. player.Name)
+			end,
+			B = function(player, object)
+				table.insert(called, "B " .. player.Name)
+				link.server.life.fault(link.server.state(object), CALLBACK, "retired itself")
+			end,
+			C = function(player)
+				table.insert(called, "C " .. player.Name)
+			end,
+		})
+		link:join("Ann")
+		link:join("Bea")
+		spec.list(called, { "A Ann", "B Ann", "C Ann", "A Bea", "C Bea" }, "C runs after B retires itself")
+		link:assertClean()
+	end,
 	["31 32 ClientReady is a receive target only and one per Subsystem"] = function()
 		local link = Link.new()
 		link:boot(function(s)

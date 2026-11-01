@@ -326,6 +326,43 @@ return {
 		spec.eq(long.value.value, "kept", "the kept ask settles")
 		link:assertClean()
 	end,
+	["40 50 an ask that times out in the pre-ready queue returns its byte charge"] = function()
+		local link = Link.new()
+		server(link, function(_, _, value)
+			return value
+		end)
+		local ann = link:join("Ann", nil, { boot = false })
+		local session = ann.graph.module("internal/network/client-session").ClientSession.new(ann.port)
+		link:run(function()
+			session:open()
+		end)
+		link:flush()
+		session:loaded()
+		local mm = declare(ann)
+		local big = string.rep("x", 65536)
+		local function ask(message, value)
+			return link:run(function()
+				return session:ask(message, value)
+			end)
+		end
+		local expired = ask(mm.Short, big)
+		link:advance(1.1)
+		spec.eq(expired.value.reason, "timeout", "the large ask expired while queued")
+		-- Each REQUEST is opcode, index, nonce and slot count of one byte each, a 3-byte length, then the string:
+		-- 15 of 65,543 bytes, then 65,431 bytes, reach 1,048,576 exactly.
+		local asks = {}
+		for i = 1, 15 do
+			asks[i] = ask(mm.Echo, big)
+		end
+		asks[16] = ask(mm.Echo, string.rep("y", 65424))
+		link:flush()
+		spec.eq(ann.logged("Crucible network session failed"), 0, "MAX_QUEUED_BYTES fits once the expired ask left")
+		spec.eq(asks[16].done, nil, "still queued")
+		local over = ask(mm.Echo, "")
+		spec.eq(over.value.reason, "disconnected", "one more request fails the session")
+		spec.eq(ann.logged("Crucible network session failed (overflow)"), 1, "on overflow")
+		link:assertClean()
+	end,
 	["38 14 asks fail locally as unavailable overloaded or disconnected without sending"] = function()
 		local link = Link.new()
 		link:boot(function(s)
@@ -368,6 +405,31 @@ return {
 		end)
 		spec.eq(after.value.reason, "disconnected", "after the session ended")
 		spec.eq(ann.Network.send(ann.m.Put, { items = {} }), false, "send returns false")
+		link:assertClean()
+	end,
+	["43 74 77 an OK or ERROR with nonce 0 or naming a non-ask, or an EVENT past the catalog, fails the client"] = function()
+		local link = Link.new()
+		local m = server(link, function(_, _, value)
+			return value
+		end)
+		local cases = {
+			Ann = `02 {hex(m.Echo.index)} 00 00 01 78`,
+			Bea = `03 {hex(m.Echo.index)} 00 00`,
+			Cid = `02 {hex(m.Note.index)} 01 00 01 78`,
+			Dee = "00 08 00",
+			Eve = "00 7f 00",
+		}
+		for name, bytes in cases do
+			local c = link:join(name, client)
+			link:injectToClient(c, h.bytes(bytes), {})
+			link:flush()
+			spec.eq(c.logged("Crucible network session failed (malformed)"), 1, `{name}: {bytes} fails the session`)
+			local fail = link:sent(function(e)
+				return e.from == name and e.opcode == 5
+			end)
+			spec.eq(h.hex(fail[1].packet), "05 03", `{name}: FAIL malformed`)
+		end
+		spec.eq(#link.kicks, 5, "the server kicks each one")
 		link:assertClean()
 	end,
 	["43 77 a reply naming another message or an unknown ERROR reason fails the client session"] = function()
