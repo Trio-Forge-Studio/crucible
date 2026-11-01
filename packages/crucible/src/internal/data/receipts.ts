@@ -78,14 +78,13 @@ export class ReceiptRouter {
 	}
 
 	/**
-	 * Shutdown hook start and retirement: new callbacks get NotProcessedYet at once and held ones wake and return it
-	 * (rules 51, 63). Retirement also replaces the installed handler (rules 57, 107).
+	 * Shutdown hook start and retirement: new callbacks get NotProcessedYet at once, and the caller wakes the held ones
+	 * so they return it (rules 51, 63). Retirement also replaces the installed handler (rules 57, 107).
 	 */
 	close(retire = false) {
 		this.closed = true;
 		if (retire && this.service !== undefined)
 			this.service.ProcessReceipt = () => Enum.ProductPurchaseDecision.NotProcessedYet;
-		this.engine.wake();
 	}
 
 	/** Rules 58 to 64. Yields while a purchase is held for its load or waits for its save. */

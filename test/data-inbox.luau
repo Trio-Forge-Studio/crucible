@@ -151,6 +151,19 @@ return {
 		spec.list(envelope.seen, { id }, "acknowledged")
 		spec.eq(#envelope.inbox, 0, "off the inbox")
 	end,
+	["rule 66 a send prompts only the target user's session"] = function()
+		local backend, a = D2.world()
+		local decl = D2.message("grant")
+		D2.join(backend, a)
+		local other = D2.join(backend, a, D2.USER + 1)
+		D2.receiver(a, decl)
+		backend:advance(1)
+		local before = D2.session(a, other).op
+		D2.send(a, decl, { amount = 7 }, D2.id(W, "m1"))
+		backend:advance(1)
+		spec.eq(D2.stored(backend).payload.coins, 7, "the target's session applied it within a round trip")
+		spec.eq(D2.session(a, other).op, before, "and no other session was asked to save")
+	end,
 	["rule 67 unavailable for an unreadable envelope or a non-retryable error, with nothing written"] = function()
 		local backend, a = D2.world()
 		local decl = D2.message("grant")

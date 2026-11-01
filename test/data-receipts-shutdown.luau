@@ -134,6 +134,24 @@ return {
 		spec.eq(#routeB.calls, 0, "without a grant")
 		spec.eq(D2.stored(backend).payload.gems, 25, "granted once in all")
 	end,
+	["rule 109 shutdown a receipt held before the load starts is woken at hook start and returns NotProcessedYet"] = function()
+		local backend, a = world(nil)
+		local route = D2.route(a, PRODUCT, 25)
+		a.join(D2.USER)
+		local returned
+		a.run(function()
+			returned = { result = a.receipts:process(D2.info("R1")), at = a.clock() }
+		end)
+		backend:advance(5)
+		spec.eq(returned, nil, "held while no load has started")
+		local start = a.clock()
+		a.close()
+		backend:advance(0.05)
+		assert(returned ~= nil, "woken by the hook")
+		spec.eq(returned.result, "notYet", "NotProcessedYet")
+		assert(returned.at - start < 0.05, "at hook start")
+		spec.eq(#route.calls, 0, "nothing was granted")
+	end,
 	["rule 107 retirement wakes held callbacks and ends the wait of a granting one"] = function()
 		local backend, a = D2.world()
 		local route = D2.route(a, PRODUCT, 25)
