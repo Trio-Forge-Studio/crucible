@@ -16,9 +16,10 @@ use crate::Diagnostic;
 pub(crate) struct Checked {
     pub program: &'static Program,
     pub checker: CheckerHandle,
+    pub host: ConfigHost,
 }
 
-struct ConfigHost {
+pub(crate) struct ConfigHost {
     fs: Arc<dyn FS>,
     cwd: String,
 }
@@ -63,7 +64,7 @@ pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {
     if !diagnostics.is_empty() {
         return Err(diagnostics.iter().map(convert).collect());
     }
-    Ok(Checked { program, checker: program.get_type_checker(&ctx) })
+    Ok(Checked { program, checker: program.get_type_checker(&ctx), host })
 }
 
 fn plain(message: &str) -> Diagnostic {

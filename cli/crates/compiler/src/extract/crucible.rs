@@ -1,45 +1,81 @@
-//! Crucible's class metadata and macros, ported from `packages/crucible/transformer-src`.
+//! Crucible's class metadata and macros. Type ids must equal the ones `packages/crucible/transformer-src` writes,
+//! because packages built by either compiler register classes with each other.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use tsrs_ast::{Kind, ModifierFlags, Node, Symbol, SymbolFlags};
 use tsrs_checker::{Checker, ObjectFlags, SignatureKind, Type, TypeFlags};
 use tsrs_compiler::{CheckerHandle, Program};
 use tsrs_core::P;
+use tsrs_tsoptions as tsoptions;
 
 use super::{Extractor, types};
 use crate::facts::{Attribute, Check, Class, ClassKind, Crucible, Dependency, Literal};
-use crate::macros::{Macro, MacroKind};
+use crate::macros::Macro;
+use crate::program::ConfigHost;
 
 const PACKAGE: &str = "@trioforge/crucible";
 const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "CrucibleObject"];
+/// `@trioforge/crucible/emit` exports a runtime `attribute` that is not the macro.
+const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
+    [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[Macro::Boot]), ("./client", &[Macro::Boot])];
 
 struct Package {
     dir: PathBuf,
     json: serde_json::Value,
 }
 
-/// The exports of `@trioforge/crucible` by their unaliased symbols, as the transform's `api(symbol)` reads them.
 pub(super) struct Api {
     exports: HashMap<P<Symbol>, &'static str>,
-    packages: HashMap<PathBuf, Option<std::rc::Rc<Package>>>,
+    macros: HashMap<P<Symbol>, Macro>,
+    packages: HashMap<PathBuf, Option<Rc<Package>>>,
+    configs: HashMap<PathBuf, Option<PathBuf>>,
+    roots: HashMap<PathBuf, Option<PathBuf>>,
     root_dir: Option<PathBuf>,
+    host: ConfigHost,
 }
 
 impl Api {
-    pub fn new(program: &'static Program, c: &mut Checker) -> Api {
+    pub fn new(program: &'static Program, c: &mut Checker, host: ConfigHost) -> Api {
         let options = program.options();
         let root_dir = (!options.root_dir.is_empty()).then(|| PathBuf::from(&options.root_dir));
-        let mut api = Api { exports: HashMap::new(), packages: HashMap::new(), root_dir };
+        let mut api = Api {
+            exports: HashMap::new(),
+            macros: HashMap::new(),
+            packages: HashMap::new(),
+            configs: HashMap::new(),
+            roots: HashMap::new(),
+            root_dir,
+            host,
+        };
+        let mut modules = Vec::new();
         for &file in program.source_files() {
-            if api.package_of(Path::new(file.file_name())).is_none_or(|p| p.json["name"] != PACKAGE) {
+            let path = PathBuf::from(file.file_name());
+            if api.package_of(&path).is_none_or(|p| p.json["name"] != PACKAGE) {
                 continue;
             }
             let Some(module) = file.as_node().symbol() else { continue };
-            for symbol in c.get_exports_of_module_exported(module) {
+            let exports = c.get_exports_of_module_exported(module);
+            for &symbol in &exports {
                 let target = unalias(c, symbol);
                 api.exports.entry(target).or_insert(symbol.name());
+            }
+            modules.push((path, exports));
+        }
+        for (path, exports) in modules {
+            let Some((owner, module)) = api.module_path(&path) else { continue };
+            for (entry, macros) in MACRO_ENTRIES {
+                if api.entry_module(&owner, entry).as_deref() != Some(module.as_str()) {
+                    continue;
+                }
+                for &symbol in &exports {
+                    if let Some(&m) = macros.iter().find(|m| m.name() == symbol.name()) {
+                        let target = unalias(c, symbol);
+                        api.macros.insert(target, m);
+                    }
+                }
             }
         }
         api
@@ -49,17 +85,24 @@ impl Api {
         self.exports.get(&unalias(c, symbol?)).copied()
     }
 
-    /// The Crucible macro a callee resolves to.
-    pub fn macro_at(&self, c: &mut CheckerHandle, callee: P<Node>) -> Option<Macro> {
-        if self.exports.is_empty() {
-            return None;
-        }
-        let symbol = c.get_symbol_at_location_exported(callee);
-        let name = self.name(c, symbol)?;
-        Macro::ALL.iter().copied().find(|m| m.kind() == MacroKind::Crucible && m.name() == name)
+    fn macro_of(&self, c: &mut Checker, symbol: Option<P<Symbol>>) -> Option<Macro> {
+        self.macros.get(&unalias(c, symbol?)).copied()
     }
 
-    fn package_of(&mut self, file: &Path) -> Option<std::rc::Rc<Package>> {
+    pub fn macro_at(&self, c: &mut CheckerHandle, call: P<Node>) -> Option<Macro> {
+        if self.macros.is_empty() {
+            return None;
+        }
+        let symbol = c.get_symbol_at_location_exported(call.as_call_expression().expression);
+        if let Some(m) = self.macro_of(c, symbol) {
+            return Some(m);
+        }
+        let name = c.get_resolved_signature_exported(call).declaration()?.name()?;
+        let symbol = c.get_symbol_at_location_exported(name);
+        self.macro_of(c, symbol)
+    }
+
+    fn package_of(&mut self, file: &Path) -> Option<Rc<Package>> {
         let mut dir = file.parent()?.to_path_buf();
         let mut visited = Vec::new();
         let found = loop {
@@ -70,7 +113,7 @@ impl Api {
             let manifest = dir.join("package.json");
             if let Ok(text) = std::fs::read_to_string(&manifest) {
                 let json = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
-                break Some(std::rc::Rc::new(Package { dir: dir.clone(), json }));
+                break Some(Rc::new(Package { dir: dir.clone(), json }));
             }
             if !dir.pop() {
                 break None;
@@ -82,33 +125,119 @@ impl Api {
         found
     }
 
-    /// The transform's `typeId`: `<package>/<module path>:<name>`, with the module path relative to the source root
-    /// for sources and to the matching `types` entry's directory for declarations.
-    fn type_id(&mut self, file: &str, name: &str) -> Option<Box<str>> {
-        let file = Path::new(file);
-        let owner = self.package_of(file)?;
-        let package = owner.json["name"].as_str()?;
-        let file_name = file.to_string_lossy();
-        let root = if file_name.ends_with(".d.ts") || file_name.ends_with(".d.tsx") {
-            let exports = &owner.json["exports"];
-            let mut entries = Vec::new();
-            types_condition(if exports.get(".").is_some() { &exports["."] } else { exports }, &mut entries);
-            let entry = entries
-                .into_iter()
-                .find(|entry| owner.dir.join(entry).parent().is_some_and(|dir| file.starts_with(normalize(dir))))
-                .or_else(|| owner.json["types"].as_str().or(owner.json["typings"].as_str()).map(str::to_owned))
-                .unwrap_or_else(|| "index.d.ts".to_owned());
-            normalize(owner.dir.join(entry).parent()?)
-        } else {
-            match &self.root_dir {
-                Some(root) if file.starts_with(root) => root.clone(),
-                _ => owner.dir.clone(),
+    fn config_of(&mut self, file: &Path) -> Option<PathBuf> {
+        let mut dir = file.parent()?.to_path_buf();
+        let mut visited = Vec::new();
+        let found = loop {
+            if let Some(cached) = self.configs.get(&dir) {
+                break cached.clone();
+            }
+            visited.push(dir.clone());
+            let config = dir.join("tsconfig.json");
+            if config.is_file() {
+                break Some(config);
+            }
+            if !dir.pop() {
+                break None;
             }
         };
+        for dir in visited {
+            self.configs.insert(dir, found.clone());
+        }
+        found
+    }
+
+    fn config_root(&mut self, config: &Path) -> Option<PathBuf> {
+        if let Some(root) = self.roots.get(config) {
+            return root.clone();
+        }
+        let (parsed, _) =
+            tsoptions::get_parsed_command_line_of_config_file(&config.to_string_lossy(), None, None, &self.host, None);
+        let root = parsed.and_then(|parsed| {
+            let options = parsed.compiler_options()?;
+            let base = config.parent()?;
+            let dirs = parsed
+                .file_names()
+                .iter()
+                .map(Path::new)
+                .filter(|file| !is_declaration(file))
+                .filter_map(|file| file.parent().map(Path::to_path_buf))
+                .collect();
+            let root_dirs: Vec<PathBuf> =
+                options.root_dirs.iter().flatten().map(|dir| normalize(&base.join(dir))).collect();
+            let root_dir = (!options.root_dir.is_empty()).then(|| normalize(&base.join(&options.root_dir)));
+            source_root(root_dir, root_dirs, dirs)
+        });
+        self.roots.insert(config.to_path_buf(), root.clone());
+        root
+    }
+
+    fn source_root(&mut self, owner: &Package, file: &Path) -> PathBuf {
+        let root = match self.config_of(file) {
+            Some(config) if self.package_of(&config).is_some_and(|p| p.dir == owner.dir) => self.config_root(&config),
+            _ => None,
+        };
+        root.or_else(|| self.root_dir.clone()).unwrap_or_else(|| owner.dir.clone())
+    }
+
+    /// Declarations and the sources they were built from have the same module path, so a class has one type id in
+    /// every package that sees it.
+    fn module_path(&mut self, file: &Path) -> Option<(Rc<Package>, String)> {
+        let owner = self.package_of(file)?;
+        owner.json["name"].as_str()?;
+        let root = if is_declaration(file) { declaration_root(&owner, file)? } else { self.source_root(&owner, file) };
         let relative = file.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
-        let module = [".d.tsx", ".d.ts", ".tsx", ".ts"].iter().find_map(|ext| relative.strip_suffix(ext))?;
+        let module = [".d.tsx", ".d.ts", ".tsx", ".ts"].iter().find_map(|ext| relative.strip_suffix(ext))?.to_owned();
+        Some((owner, module))
+    }
+
+    fn entry_module(&mut self, owner: &Package, entry: &str) -> Option<String> {
+        let exports = &owner.json["exports"];
+        let mut types = Vec::new();
+        types_condition(if entry == "." && exports.get(".").is_none() { exports } else { &exports[entry] }, &mut types);
+        let types = types.into_iter().next().or_else(|| (entry == ".").then(|| package_types(owner)))?;
+        self.module_path(&normalize(&owner.dir.join(types))).map(|(_, module)| module)
+    }
+
+    fn type_id(&mut self, file: &str, name: &str) -> Option<Box<str>> {
+        let (owner, module) = self.module_path(Path::new(file))?;
+        let package = owner.json["name"].as_str()?;
         Some(format!("{package}/{module}:{name}").into())
     }
+}
+
+fn is_declaration(file: &Path) -> bool {
+    let name = file.to_string_lossy();
+    name.ends_with(".d.ts") || name.ends_with(".d.tsx")
+}
+
+fn package_types(owner: &Package) -> String {
+    owner.json["types"].as_str().or(owner.json["typings"].as_str()).unwrap_or("index.d.ts").to_owned()
+}
+
+fn declaration_root(owner: &Package, file: &Path) -> Option<PathBuf> {
+    let exports = &owner.json["exports"];
+    let mut entries = Vec::new();
+    types_condition(if exports.get(".").is_some() { &exports["."] } else { exports }, &mut entries);
+    let entry = entries
+        .into_iter()
+        .find(|entry| owner.dir.join(entry).parent().is_some_and(|dir| file.starts_with(normalize(dir))))
+        .unwrap_or_else(|| package_types(owner));
+    Some(normalize(owner.dir.join(entry).parent()?))
+}
+
+fn source_root(root_dir: Option<PathBuf>, root_dirs: Vec<PathBuf>, mut dirs: Vec<PathBuf>) -> Option<PathBuf> {
+    if root_dir.is_some() {
+        return root_dir;
+    }
+    dirs.extend(root_dirs);
+    let mut root = dirs.first()?.clone();
+    while !dirs.iter().all(|dir| dir.starts_with(&root)) {
+        if !root.pop() {
+            return None;
+        }
+    }
+    Some(root)
 }
 
 fn types_condition(value: &serde_json::Value, out: &mut Vec<String>) {
@@ -137,7 +266,6 @@ fn unalias(c: &mut Checker, s: P<Symbol>) -> P<Symbol> {
     if s.flags().intersects(SymbolFlags::Alias) { c.get_aliased_symbol(s) } else { s }
 }
 
-/// The transform's `type.target ?? type`.
 fn target(t: P<Type>) -> P<Type> {
     if t.object_flags().intersects(ObjectFlags::Reference) { t.target().unwrap_or(t) } else { t }
 }
@@ -190,7 +318,6 @@ impl Extractor {
         self.checker.get_type_arguments_exported(t).first().copied()
     }
 
-    /// The transform's `injectable`, without the CRU014 generic-target check, which phase 4 ports with the rules.
     fn dependency(&mut self, t: P<Type>, all: bool) -> Dependency {
         if !all && let Some(item) = self.all_target(t) {
             return match self.dependency(item, true) {
@@ -268,11 +395,9 @@ impl Extractor {
     }
 
     fn is_crucible_call(&mut self, n: P<Node>, m: Macro) -> bool {
-        n.kind() == Kind::CallExpression
-            && self.crucible.macro_at(&mut self.checker, n.as_call_expression().expression) == Some(m)
+        n.kind() == Kind::CallExpression && self.crucible.macro_at(&mut self.checker, n) == Some(m)
     }
 
-    /// The transform's `registration`, for a class whose instance type extends `Subsystem` or `CrucibleBehaviour`.
     pub(super) fn crucible_registration(&mut self, node: P<Node>) -> Option<Class> {
         let symbol = self.checker.get_symbol_of_declaration_exported(node)?;
         let instance = self.checker.get_declared_type_of_symbol_exported(symbol);
@@ -355,14 +480,14 @@ impl Extractor {
         Some(class)
     }
 
-    /// `inject<T>()` and `inject<All<T>>()`.
-    pub(super) fn crucible_inject(&mut self, call: P<Node>) -> Option<Crucible> {
-        let &argument = call.type_arguments().first()?;
-        let t = self.checker.get_type_from_type_node_exported(argument);
-        let target = match self.all_target(t) {
-            Some(item) => self.id(item).map(Dependency::All),
-            None => self.id(t).map(Dependency::One),
-        };
-        Some(Crucible::Inject(target.unwrap_or(Dependency::Invalid)))
+    pub(super) fn crucible_inject(&mut self, call: P<Node>) -> Crucible {
+        let target = call.type_arguments().first().and_then(|&argument| {
+            let t = self.checker.get_type_from_type_node_exported(argument);
+            match self.all_target(t) {
+                Some(item) => self.id(item).map(Dependency::All),
+                None => self.id(t).map(Dependency::One),
+            }
+        });
+        Crucible::Inject(target.unwrap_or(Dependency::Invalid))
     }
 }

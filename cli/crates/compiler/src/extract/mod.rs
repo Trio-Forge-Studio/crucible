@@ -1,7 +1,7 @@
 //! The fact extractor. It walks the syntax tree of every source file, finds each site whose lowering depends on a
-//! type, and answers it from the checker that ran the full check. The predicates port roblox-ts 3.0.0's
-//! `util/types.ts`, `isMethod.ts` and `createTruthinessChecks.ts`, and the class metadata ports Crucible's
-//! `transformer-src`.
+//! type, and answers it from the checker that ran the full check. A site is a node where roblox-ts 3.0.0 or Crucible's
+//! transform asks the checker a question whose answer changes the emitted Luau. Checks that only report an error are
+//! not sites yet.
 
 mod crucible;
 mod types;
@@ -13,17 +13,15 @@ use tsrs_checker::{EmitResolver, Type};
 use tsrs_compiler::CheckerHandle;
 use tsrs_core::P;
 
-use crate::facts::{
-    Callee, Constant, Crucible, Fact, Facts, FileFacts, Import, Reason, Receiver, Site, Span, Unanswered,
-};
+use crate::facts::{Callee, Crucible, Fact, Facts, FileFacts, Import, Reason, Receiver, Site, Span, Unanswered};
 use crate::macros::Macro;
 use crate::program::Checked;
 
 pub(crate) fn extract(checked: Checked) -> Facts {
-    let Checked { program, mut checker } = checked;
+    let Checked { program, mut checker, host } = checked;
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
     let globals = types::Globals::new(&mut checker);
-    let crucible = crucible::Api::new(program, &mut checker);
+    let crucible = crucible::Api::new(program, &mut checker, host);
     let mut x = Extractor {
         checker,
         resolver,
@@ -32,7 +30,7 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         facts: Facts::default(),
         text: "",
         path: String::new(),
-        file: HashMap::new(),
+        table: Table::default(),
         pending: Vec::new(),
     };
     for &file in program.source_files() {
@@ -44,13 +42,66 @@ pub(crate) fn extract(checked: Checked) -> Facts {
     x.facts
 }
 
-/// An import of a const enum that the checker does not mark as referenced, because TypeScript inlines const enum
-/// members. Crucible compiles a const enum as a regular enum, so the import stays if any value refers to it.
+/// The checker does not mark a const enum import as referenced, because TypeScript inlines const enum members.
+/// Crucible compiles a const enum as a regular enum, so the import stays if any value refers to it.
 struct PendingImport {
     name: &'static str,
     alias: P<Symbol>,
     span: Span,
     used: bool,
+}
+
+#[derive(Default)]
+struct Table {
+    facts: HashMap<Span, Fact>,
+    conflicts: Vec<(Span, Site)>,
+}
+
+impl Table {
+    fn store<T: PartialEq>(&mut self, span: Span, site: Site, field: fn(&mut Fact) -> &mut Option<T>, value: T) {
+        let slot = field(self.facts.entry(span).or_default());
+        match slot {
+            Some(old) if *old != value => self.conflicts.push((span, site)),
+            _ => *slot = Some(value),
+        }
+    }
+}
+
+enum Pattern {
+    Assigned(P<Node>),
+    ForOf,
+    Nested,
+}
+
+/// How an array or object literal destructures, or `None` where it builds a value.
+fn pattern_role(n: P<Node>) -> Option<Pattern> {
+    let parent = n.parent()?;
+    match parent.kind() {
+        Kind::BinaryExpression => {
+            let binary = parent.as_binary_expression();
+            if binary.operator_token.kind() != Kind::EqualsToken || binary.left != n {
+                return None;
+            }
+            Some(if tsrs_ast::is_assignment_target(parent) {
+                Pattern::Nested
+            } else {
+                Pattern::Assigned(binary.right())
+            })
+        }
+        Kind::ForOfStatement if parent.initializer() == Some(n) => Some(Pattern::ForOf),
+        _ => tsrs_ast::is_assignment_target(n).then_some(Pattern::Nested),
+    }
+}
+
+fn computed_key(n: P<Node>) -> bool {
+    let computed = |key: Option<P<Node>>| key.is_some_and(|key| key.kind() == Kind::ComputedPropertyName);
+    match n.kind() {
+        Kind::ObjectBindingPattern => n.elements().iter().any(|e| computed(e.property_name())),
+        Kind::ObjectLiteralExpression => {
+            n.properties().iter().any(|p| p.kind() == Kind::PropertyAssignment && computed(p.name()))
+        }
+        _ => false,
+    }
 }
 
 struct Extractor {
@@ -61,7 +112,7 @@ struct Extractor {
     facts: Facts,
     text: &'static str,
     path: String,
-    file: HashMap<Span, Fact>,
+    table: Table,
     pending: Vec<PendingImport>,
 }
 
@@ -69,13 +120,23 @@ impl Extractor {
     fn source_file(&mut self, file: P<SourceFile>) {
         self.text = file.text();
         self.path = file.file_name().replace('\\', "/");
-        for &statement in file.as_node().statements() {
+        let first = self.facts.unanswered.len();
+        let statements = file.as_node().statements();
+        let (imports, rest): (Vec<P<Node>>, Vec<P<Node>>) =
+            statements.iter().copied().partition(|s| s.kind() == Kind::ImportDeclaration);
+        for statement in imports.into_iter().chain(rest) {
             self.visit(statement);
         }
         for pending in std::mem::take(&mut self.pending) {
-            self.fact(pending.span).import = Some(if pending.used { Import::Keep } else { Import::Elide });
+            let import = if pending.used { Import::Keep } else { Import::Elide };
+            self.table.store(pending.span, Site::Import, |f| &mut f.import, import);
         }
-        let mut facts: Vec<(Span, Fact)> = self.file.drain().collect();
+        let table = std::mem::take(&mut self.table);
+        for (span, site) in table.conflicts {
+            self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
+        }
+        self.facts.unanswered[first..].sort_by_key(|u| (u.span, u.site));
+        let mut facts: Vec<(Span, Fact)> = table.facts.into_iter().collect();
         facts.sort_unstable_by_key(|(span, _)| *span);
         self.facts.files.push(FileFacts { path: std::mem::take(&mut self.path), facts });
     }
@@ -84,10 +145,6 @@ impl Extractor {
         let pos = n.pos().source_offset().unwrap_or(0);
         let end = n.end().source_offset().unwrap_or(pos);
         Span { start: tsrs_scanner::skip_trivia(self.text, pos), end }
-    }
-
-    fn fact(&mut self, span: Span) -> &mut Fact {
-        self.file.entry(span).or_default()
     }
 
     fn site(&mut self) {
@@ -113,6 +170,7 @@ impl Extractor {
         }
         match kind {
             Kind::CallExpression => self.call(n),
+            Kind::TaggedTemplateExpression => self.tagged_template(n),
             Kind::NewExpression => self.new_expression(n),
             Kind::PropertyAccessExpression => self.constant_ref(n),
             Kind::ElementAccessExpression => {
@@ -132,56 +190,58 @@ impl Extractor {
             Kind::DoStatement => self.truthy(n.as_do_statement().expression),
             Kind::ConditionalExpression => self.truthy(n.as_conditional_expression().condition),
             Kind::ForStatement => self.for_statement(n),
-            Kind::ForOfStatement => {
-                let for_of = n.as_for_in_or_of_statement();
-                self.iterable(for_of.expression, Site::Iterable);
-                if for_of.initializer.kind() == Kind::VariableDeclarationList
-                    && let Some(&declaration) =
-                        for_of.initializer.as_variable_declaration_list().declarations.nodes().first()
-                    && declaration.name().is_some_and(|name| name.kind() == Kind::ArrayBindingPattern)
-                {
-                    self.iterable(declaration.name().unwrap(), Site::Destructure);
+            Kind::ForOfStatement => self.for_of(n),
+            Kind::ArrayBindingPattern => {
+                self.iterable(n, Site::Destructure);
+            }
+            Kind::ObjectBindingPattern if computed_key(n) => {
+                let t = self.type_of(n);
+                self.element_receiver_of(n, t);
+            }
+            Kind::ArrayLiteralExpression | Kind::ObjectLiteralExpression => self.assignment_pattern(n),
+            Kind::SpreadElement => {
+                let expression = n.as_spread_element().expression;
+                if !tsrs_ast::is_assignment_target(expression) {
+                    self.iterable(expression, Site::Spread);
                 }
             }
-            Kind::VariableDeclaration => {
-                if n.name().is_some_and(|name| name.kind() == Kind::ArrayBindingPattern)
-                    && let Some(initializer) = n.initializer()
-                    && n.parent().and_then(|list| list.parent()).is_none_or(|p| p.kind() != Kind::ForOfStatement)
-                {
-                    self.iterable(initializer, Site::Destructure);
-                }
-            }
-            Kind::SpreadElement => self.iterable(n.as_spread_element().expression, Site::Spread),
             Kind::SpreadAssignment => {
-                self.site();
                 let expression = n.as_spread_assignment().expression;
-                let t = self.type_of(expression);
-                let falsy = self.falsy(t);
-                let span = self.span(expression);
-                set(&mut self.fact(span).falsy, falsy);
+                if !tsrs_ast::is_assignment_target(expression) {
+                    self.object_spread(expression);
+                }
             }
+            Kind::JsxSpreadAttribute => self.object_spread(n.as_jsx_spread_attribute().expression),
             Kind::ReturnStatement => {
                 if let Some(expression) = n.expression() {
                     self.value(expression);
                 }
             }
+            Kind::ArrowFunction => {
+                self.function(n);
+                if let Some(body) = n.body()
+                    && body.kind() != Kind::Block
+                {
+                    self.value(body);
+                }
+            }
             Kind::FunctionDeclaration
             | Kind::FunctionExpression
-            | Kind::ArrowFunction
             | Kind::MethodDeclaration
             | Kind::GetAccessor
             | Kind::SetAccessor
             | Kind::Constructor => {
-                if n.body().is_some() {
-                    self.function(n);
+                if n.body().is_none() {
+                    return;
                 }
+                self.function(n);
             }
             Kind::ClassDeclaration => self.crucible_class(n),
             Kind::EnumMember => {
                 self.site();
                 if let Some(value) = self.checker.get_constant_value(n).and_then(types::constant) {
                     let span = self.span(n);
-                    set(&mut self.fact(span).constant, value);
+                    self.table.store(span, Site::Constant, |f| &mut f.constant, value);
                 }
             }
             Kind::Identifier => self.identifier(n),
@@ -199,71 +259,84 @@ impl Extractor {
     fn call(&mut self, n: P<Node>) {
         let callee = n.as_call_expression().expression;
         let target = types::skip_outer(callee);
-        match target.kind() {
+        let object = match target.kind() {
             Kind::SuperKeyword | Kind::ImportKeyword => return,
-            Kind::PropertyAccessExpression | Kind::ElementAccessExpression => {
-                let object = target.expression().unwrap();
-                if object.kind() == Kind::SuperKeyword {
-                    return;
-                }
+            Kind::PropertyAccessExpression | Kind::ElementAccessExpression => target.expression(),
+            _ => None,
+        };
+        if object.is_some_and(|o| o.kind() == Kind::SuperKeyword) {
+            return;
+        }
+        self.site();
+        let span = self.span(callee);
+        if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
+            self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
+            if m == Macro::Inject {
                 self.site();
-                if let Some(m) = self.crucible.macro_at(&mut self.checker, callee) {
-                    let span = self.span(callee);
-                    set(&mut self.fact(span).callee, Callee::Macro(m));
-                    self.crucible_call(n, m);
-                    self.value(object);
-                    self.value(n);
-                    return;
-                }
-                let t = self.type_of(callee);
-                let t = self.checker.get_non_optional_type(t);
-                if types::is_any(t) {
-                    self.unanswered(callee, Site::CallCallee, Reason::Any);
-                } else {
-                    let resolved = match self.first_defined_symbol(t).and_then(|s| self.globals.method_macro(s)) {
-                        Some(m) => Callee::Macro(m),
-                        None => match self.method_bits(t) {
-                            (true, true) => {
-                                self.unanswered(callee, Site::CallCallee, Reason::MethodAndFunction);
-                                Callee::Method
-                            }
-                            (true, false) => Callee::Method,
-                            _ => Callee::Function,
-                        },
-                    };
-                    let span = self.span(callee);
-                    set(&mut self.fact(span).callee, resolved);
-                }
-                self.value(object);
+                let inject = Box::new(self.crucible_inject(n));
+                let call = self.span(n);
+                self.table.store(call, Site::Crucible, |f| &mut f.crucible, inject);
             }
-            _ => {
-                self.site();
-                let resolved = match self.crucible.macro_at(&mut self.checker, callee) {
-                    Some(m) => Some(m),
-                    None => {
-                        let t = self.type_of(callee);
-                        let t = self.checker.get_non_optional_type(t);
-                        self.first_defined_symbol(t).and_then(|s| self.globals.call_macro(s))
-                    }
+        } else {
+            let t = self.type_of(callee);
+            let t = self.checker.get_non_optional_type(t);
+            if object.is_some() && types::is_any(t) {
+                self.unanswered(callee, Site::CallCallee, Reason::Any);
+            } else {
+                let symbol = self.first_defined_symbol(t);
+                let found = match symbol {
+                    Some(s) if object.is_some() => self.globals.method_macro(s),
+                    Some(s) => self.globals.call_macro(s),
+                    None => None,
                 };
-                let span = self.span(callee);
-                set(&mut self.fact(span).callee, resolved.map_or(Callee::Function, Callee::Macro));
-                if let Some(m) = resolved {
-                    self.crucible_call(n, m);
+                let resolved = match found {
+                    Some(m) => Callee::Macro(m),
+                    None if object.is_some() => self.callee_kind(callee, Site::CallCallee, t),
+                    None => Callee::Function,
+                };
+                self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
+                let arguments = n.arguments();
+                if let Callee::Macro(_) = resolved {
+                    if let Some(&last) = arguments.last()
+                        && last.kind() == Kind::SpreadElement
+                    {
+                        self.unanswered(last, Site::Spread, Reason::MacroSpread);
+                    }
+                } else if arguments.iter().any(|a| a.kind() == Kind::CallExpression) {
+                    let roblox = self.possibly_roblox(t);
+                    self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
                 }
             }
+        }
+        if let Some(object) = object {
+            self.value(object);
         }
         self.value(n);
     }
 
-    fn crucible_call(&mut self, n: P<Node>, m: Macro) {
-        if m == Macro::Inject
-            && let Some(inject) = self.crucible_inject(n)
-        {
-            self.site();
-            let span = self.span(n);
-            self.fact(span).crucible = Some(Box::new(inject));
+    fn tagged_template(&mut self, n: P<Node>) {
+        let tag = n.as_tagged_template_expression().tag;
+        let property =
+            matches!(types::skip_outer(tag).kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression);
+        self.site();
+        let t = self.type_of(tag);
+        let t = self.checker.get_non_optional_type(t);
+        if property && types::is_any(t) {
+            self.unanswered(tag, Site::CallCallee, Reason::Any);
+        } else {
+            let callee = if property { self.callee_kind(tag, Site::CallCallee, t) } else { Callee::Function };
+            let span = self.span(tag);
+            self.table.store(span, Site::CallCallee, |f| &mut f.callee, callee);
         }
+        self.value(n);
+    }
+
+    fn callee_kind(&mut self, n: P<Node>, site: Site, t: P<Type>) -> Callee {
+        let (method, function) = self.method_bits(t);
+        if method && function {
+            self.unanswered(n, site, Reason::MethodAndFunction);
+        }
+        if method { Callee::Method } else { Callee::Function }
     }
 
     fn new_expression(&mut self, n: P<Node>) {
@@ -272,7 +345,7 @@ impl Extractor {
         let t = self.type_of(callee);
         if let Some(m) = t.symbol().and_then(|s| self.globals.constructor_macro(s)) {
             let span = self.span(callee);
-            set(&mut self.fact(span).callee, Callee::Macro(m));
+            self.table.store(span, Site::NewCallee, |f| &mut f.callee, Callee::Macro(m));
         }
     }
 
@@ -285,7 +358,7 @@ impl Extractor {
         self.site();
         if let Some(value) = self.checker.get_constant_value(n).and_then(types::constant) {
             let span = self.span(n);
-            set(&mut self.fact(span).constant, value);
+            self.table.store(span, Site::Constant, |f| &mut f.constant, value);
         }
     }
 
@@ -312,22 +385,14 @@ impl Extractor {
                         && p.as_binary_expression().left == n
                 });
                 if !inner {
-                    self.site();
-                    let t = self.type_of(n);
-                    let falsy = self.falsy(t);
-                    let span = self.span(n);
-                    set(&mut self.fact(span).falsy, falsy);
+                    self.truthy(n);
                 }
-            }
-            Kind::EqualsToken if types::skip_outer(left).kind() == Kind::ArrayLiteralExpression => {
-                self.iterable(right, Site::Destructure);
             }
             _ => {}
         }
     }
 
-    /// roblox-ts concatenates when either operand is definitely a string, and adds numbers otherwise. An operand is
-    /// definitely a string when its receiver is `String` and it is not nullable.
+    /// An operand that is definitely a string makes `+` concatenate.
     fn plus(&mut self, left: P<Node>, right: P<Node>) {
         let mut strings = [false; 2];
         let mut maybe = [false; 2];
@@ -341,7 +406,7 @@ impl Extractor {
             strings[i] = self.definitely(t, types::is_string);
             maybe[i] = !strings[i] && self.possibly_string(t);
             let (receiver, _) = self.value_class(t);
-            self.receiver(operand, receiver, t);
+            self.receiver(operand, receiver, t, Site::PlusOperand);
         }
         if !strings.contains(&true) {
             for (i, operand) in [left, right].into_iter().enumerate() {
@@ -357,16 +422,24 @@ impl Extractor {
         let t = self.type_of(n);
         let falsy = self.falsy(t);
         let span = self.span(n);
-        set(&mut self.fact(span).falsy, falsy);
+        self.table.store(span, Site::Truthiness, |f| &mut f.falsy, falsy);
+    }
+
+    /// The checker accepts only object types and falsy values in a spread, so no falsy values means an object.
+    fn object_spread(&mut self, n: P<Node>) {
+        self.site();
+        let t = self.type_of(n);
+        let falsy = self.falsy(t);
+        let span = self.span(n);
+        self.table.store(span, Site::Spread, |f| &mut f.falsy, falsy);
     }
 
     fn for_statement(&mut self, n: P<Node>) {
         let for_statement = n.as_for_statement();
-        let mut bounds = Vec::new();
         if let Some(condition) = for_statement.condition {
             self.truthy(condition);
             if condition.kind() == Kind::BinaryExpression {
-                bounds.push(condition.as_binary_expression().right());
+                self.integer_bound(condition.as_binary_expression().right());
             }
         }
         if let Some(initializer) = for_statement.initializer
@@ -374,30 +447,90 @@ impl Extractor {
             && let [declaration] = initializer.as_variable_declaration_list().declarations.nodes()
             && let Some(value) = declaration.initializer()
         {
-            bounds.push(value);
+            self.integer_bound(value);
         }
-        for bound in bounds {
-            self.site();
-            let t = self.type_of(bound);
-            if let Some(value) = self.integer_literal(t) {
-                let span = self.span(bound);
-                set(&mut self.fact(span).constant, Constant::Number(value));
+    }
+
+    /// A numeric `for` loop needs integer bounds. Literals and sums, differences, products and powers of integers
+    /// are integers by their syntax, so only the other leaves ask their type.
+    fn integer_bound(&mut self, n: P<Node>) {
+        match n.kind() {
+            Kind::NumericLiteral => {}
+            Kind::BinaryExpression => {
+                let binary = n.as_binary_expression();
+                if matches!(
+                    binary.operator_token.kind(),
+                    Kind::PlusToken | Kind::MinusToken | Kind::AsteriskToken | Kind::AsteriskAsteriskToken
+                ) {
+                    self.integer_bound(binary.left);
+                    self.integer_bound(binary.right());
+                }
+            }
+            Kind::PrefixUnaryExpression => {
+                let unary = n.as_prefix_unary_expression();
+                if matches!(unary.operator, Kind::PlusToken | Kind::MinusToken) {
+                    self.integer_bound(unary.operand);
+                }
+            }
+            _ => {
+                self.site();
+                let t = self.type_of(n);
+                let integer = self.definitely(t, types::is_integer_literal);
+                let span = self.span(n);
+                self.table.store(span, Site::Constant, |f| &mut f.integer, integer);
             }
         }
     }
 
-    /// Call receivers, call results and return values.
+    fn for_of(&mut self, n: P<Node>) {
+        let for_of = n.as_for_in_or_of_statement();
+        let receiver = self.iterable(for_of.expression, Site::Iterable);
+        let pattern = for_of.initializer;
+        let inline = pattern.kind() == Kind::ArrayLiteralExpression
+            && matches!(receiver, Some(Receiver::Map | Receiver::LuaTupleIterFn));
+        if !inline && (pattern.kind() == Kind::ArrayLiteralExpression || computed_key(pattern)) {
+            self.site();
+            self.unanswered(pattern, Site::Destructure, Reason::AssignmentPattern);
+        }
+    }
+
+    fn assignment_pattern(&mut self, n: P<Node>) {
+        let object = n.kind() == Kind::ObjectLiteralExpression;
+        if object && !computed_key(n) {
+            return;
+        }
+        match pattern_role(n) {
+            None | Some(Pattern::ForOf) => {}
+            Some(Pattern::Assigned(source)) => {
+                let t = self.type_of(source);
+                if object {
+                    self.element_receiver_of(n, t);
+                } else {
+                    self.iterable_of(n, t, Site::Destructure);
+                }
+            }
+            Some(Pattern::Nested) => {
+                self.site();
+                self.unanswered(n, Site::Destructure, Reason::AssignmentPattern);
+            }
+        }
+    }
+
     fn value(&mut self, n: P<Node>) {
         self.site();
         let t = self.type_of(n);
         let (receiver, _) = self.value_class(t);
-        self.receiver(n, receiver, t);
+        self.receiver(n, receiver, t, Site::Value);
+    }
+
+    fn element_receiver(&mut self, n: P<Node>) {
+        let t = self.type_of(n);
+        self.element_receiver_of(n, t);
     }
 
     /// Indexing adds one for arrays, so a receiver whose class is unknown cannot be lowered.
-    fn element_receiver(&mut self, n: P<Node>) {
+    fn element_receiver_of(&mut self, n: P<Node>, t: P<Type>) {
         self.site();
-        let t = self.type_of(n);
         if types::is_any(t) {
             self.unanswered(n, Site::ElementReceiver, Reason::Any);
             return;
@@ -406,33 +539,36 @@ impl Extractor {
         if mixed {
             self.unanswered(n, Site::ElementReceiver, Reason::Mixed);
         }
-        self.receiver(n, receiver, t);
+        self.receiver(n, receiver, t, Site::ElementReceiver);
     }
 
-    fn receiver(&mut self, n: P<Node>, receiver: Receiver, t: P<Type>) {
+    fn receiver(&mut self, n: P<Node>, receiver: Receiver, t: P<Type>, site: Site) {
         let falsy = self.falsy(t);
         let span = self.span(n);
-        let fact = self.fact(span);
-        set(&mut fact.receiver, receiver);
-        set(&mut fact.falsy, falsy);
+        self.table.store(span, site, |f| &mut f.receiver, receiver);
+        self.table.store(span, site, |f| &mut f.falsy, falsy);
     }
 
-    /// `for..of` iterables, spreads and destructured values.
-    fn iterable(&mut self, n: P<Node>, site: Site) {
-        self.site();
+    fn iterable(&mut self, n: P<Node>, site: Site) -> Option<Receiver> {
         let t = self.type_of(n);
+        self.iterable_of(n, t, site)
+    }
+
+    fn iterable_of(&mut self, n: P<Node>, t: P<Type>, site: Site) -> Option<Receiver> {
+        self.site();
         if types::is_any(t) {
             self.unanswered(n, site, Reason::Any);
-            return;
+            return None;
         }
         let (receiver, _) = self.value_class(t);
         if receiver == Receiver::Other {
             if !(site == Site::Iterable && self.is_call_to(n, Macro::Range)) {
                 self.unanswered(n, site, Reason::Iteration);
             }
-            return;
+            return None;
         }
-        self.receiver(n, receiver, t);
+        self.receiver(n, receiver, t, site);
+        Some(receiver)
     }
 
     fn is_call_to(&mut self, n: P<Node>, m: Macro) -> bool {
@@ -448,16 +584,9 @@ impl Extractor {
     fn function(&mut self, n: P<Node>) {
         self.site();
         let t = self.type_of(n);
-        let callee = match self.method_bits(t) {
-            (true, true) => {
-                self.unanswered(n, Site::Function, Reason::MethodAndFunction);
-                Callee::Method
-            }
-            (true, false) => Callee::Method,
-            _ => Callee::Function,
-        };
+        let callee = self.callee_kind(n, Site::Function, t);
         let span = self.span(n);
-        set(&mut self.fact(span).callee, callee);
+        self.table.store(span, Site::Function, |f| &mut f.callee, callee);
     }
 
     fn identifier(&mut self, n: P<Node>) {
@@ -478,7 +607,7 @@ impl Extractor {
             if symbol.is_some() && symbol == self.globals.identifier_macro {
                 self.site();
                 let span = self.span(n);
-                set(&mut self.fact(span).callee, Callee::Macro(Macro::Promise));
+                self.table.store(span, Site::Identifier, |f| &mut f.callee, Callee::Macro(Macro::Promise));
             }
         }
     }
@@ -509,7 +638,7 @@ impl Extractor {
             self.site();
             let span = self.span(name);
             if self.resolver.is_referenced_alias_declaration(&mut self.checker, declaration) {
-                self.fact(span).import = Some(Import::Keep);
+                self.table.store(span, Site::Import, |f| &mut f.import, Import::Keep);
                 continue;
             }
             let alias = self.checker.get_symbol_of_declaration_exported(declaration);
@@ -520,7 +649,7 @@ impl Extractor {
                 Some(alias) if const_enum => {
                     self.pending.push(PendingImport { name: name.as_identifier().text(), alias, span, used: false })
                 }
-                _ => self.fact(span).import = Some(Import::Elide),
+                _ => self.table.store(span, Site::Import, |f| &mut f.import, Import::Elide),
             }
         }
     }
@@ -529,7 +658,8 @@ impl Extractor {
         if n.is_type_only() {
             return;
         }
-        let Some(clause) = n.as_export_declaration().export_clause else { return };
+        let declaration = n.as_export_declaration();
+        let Some(clause) = declaration.export_clause else { return };
         if clause.kind() != Kind::NamedExports {
             return;
         }
@@ -539,10 +669,18 @@ impl Extractor {
             }
             self.site();
             let alias = self.checker.get_symbol_of_declaration_exported(specifier);
+            if declaration.module_specifier.is_none()
+                && let Some(local) = alias.and_then(|a| self.checker.get_immediate_aliased_symbol_exported(a))
+            {
+                for pending in self.pending.iter_mut().filter(|p| p.alias == local) {
+                    pending.used = true;
+                }
+            }
             let target = alias.map(|a| self.checker.get_aliased_symbol(a));
             let value = target.is_some_and(|t| self.checker.get_symbol_flags(t).intersects(SymbolFlags::Value));
             let span = self.span(specifier.name().unwrap());
-            self.fact(span).import = Some(if value { Import::Keep } else { Import::Elide });
+            let import = if value { Import::Keep } else { Import::Elide };
+            self.table.store(span, Site::Import, |f| &mut f.import, import);
         }
     }
 
@@ -553,12 +691,25 @@ impl Extractor {
         let Some(class) = self.crucible_registration(n) else { return };
         self.site();
         let span = self.span(n);
-        self.fact(span).crucible = Some(Box::new(Crucible::Class(class)));
+        self.table.store(span, Site::Crucible, |f| &mut f.crucible, Box::new(Crucible::Class(class)));
     }
 }
 
-/// Stores one answer. Sites that share a node ask the same question of the same type, so a second answer must match.
-fn set<T: PartialEq + std::fmt::Debug>(slot: &mut Option<T>, value: T) {
-    debug_assert!(slot.as_ref().is_none_or(|old| *old == value), "two sites disagree: {slot:?} and {value:?}");
-    *slot = Some(value);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::facts::Falsy;
+
+    #[test]
+    fn a_second_different_answer_is_a_conflict() {
+        let span = Span { start: 3, end: 9 };
+        let mut table = Table::default();
+        table.store(span, Site::Value, |f| &mut f.receiver, Receiver::Array);
+        table.store(span, Site::Value, |f| &mut f.receiver, Receiver::Array);
+        table.store(span, Site::Truthiness, |f| &mut f.falsy, Falsy::NIL);
+        assert!(table.conflicts.is_empty(), "equal answers agree");
+        table.store(span, Site::Iterable, |f| &mut f.receiver, Receiver::Map);
+        assert_eq!(table.conflicts, [(span, Site::Iterable)], "a different answer is recorded");
+        assert_eq!(table.facts[&span].receiver, Some(Receiver::Array), "the first answer stays");
+    }
 }

@@ -1,2 +1,10 @@
 declare const mixed: number[] | Record<number, number>;
 export const first = mixed[0];
+const rows: [number, string][] = [];
+let left = 0;
+let right = "";
+for ([left, right] of rows) print(left, right);
+[[left, right]] = [[1, "z"]];
+const numbers: number[] = [];
+const more = [1, 2];
+numbers.push(...more);

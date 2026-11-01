@@ -4,3 +4,5 @@ export function pair(): LuaTuple<[number, string]> {
 const [first, second] = pair();
 export const both = [first, second];
 for (const [key, value] of pairs(new Map<string, number>())) print(key, value);
+declare const step: IterableFunction<number>;
+for (const value of step) print(value);

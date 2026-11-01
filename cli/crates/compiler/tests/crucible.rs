@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{Attribute, Check, Class, ClassKind, Crucible, Dependency, Facts};
+use crucible_compiler::{Attribute, Check, Class, ClassKind, Crucible, Dependency, Fact, Facts, Falsy, Receiver, Span};
 
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -28,13 +28,23 @@ fn sources(dir: &Path, out: &mut Vec<String>) {
 fn assert_complete(facts: &Facts, src: &str) {
     let unanswered: Vec<String> = facts.unanswered.iter().map(|u| format!("{u:?}")).collect();
     assert!(unanswered.is_empty(), "every site is answered:\n{}", unanswered.join("\n"));
-    assert!(facts.sites > 0, "the extractor visited sites");
+    let suffix = |path: &str| path.rsplit_once(src).map(|(_, rest)| format!("{src}{rest}"));
     let mut expected = Vec::new();
     sources(&repo().join(src), &mut expected);
-    for file in expected {
-        let suffix = file.rsplit_once(src).map(|(_, rest)| format!("{src}{rest}")).unwrap();
-        assert!(facts.files.iter().any(|f| f.path.ends_with(&suffix)), "{suffix} has a fact table");
-    }
+    let mut expected: Vec<Option<String>> = expected.iter().map(|path| suffix(path)).collect();
+    let mut tables: Vec<Option<String>> = facts.files.iter().map(|f| suffix(&f.path)).collect();
+    expected.sort();
+    tables.sort();
+    assert_eq!(tables, expected, "every source file has one fact table and nothing else does");
+}
+
+fn fact_at(facts: &Facts, file: &str, context: &str, part: &str) -> Fact {
+    let text = std::fs::read_to_string(repo().join(file)).expect("the source exists");
+    assert_eq!(text.matches(context).count(), 1, "`{context}` occurs once in {file}");
+    let start = (text.find(context).unwrap() + context.find(part).unwrap()) as u32;
+    let span = Span { start, end: start + part.len() as u32 };
+    let table = facts.files.iter().find(|f| f.path.ends_with(file)).unwrap_or_else(|| panic!("{file} has facts"));
+    table.get(span).cloned().unwrap_or_else(|| panic!("`{part}` in {file} has a fact"))
 }
 
 fn class(facts: &Facts, file: &str) -> Class {
@@ -55,6 +65,14 @@ fn class(facts: &Facts, file: &str) -> Class {
 fn runtime_checks_and_every_site_is_answered() {
     let facts = analyze("packages/crucible/tsconfig.ts7.json");
     assert_complete(&facts, "packages/crucible/src");
+    let array = Fact { receiver: Some(Receiver::Array), falsy: Some(Falsy::NONE), ..Fact::default() };
+    for (file, context) in [
+        ("packages/crucible/src/internal/network/codec.ts", "node.fields.map(([name, child])"),
+        ("packages/crucible/src/internal/network/schema.ts", "fields.map(([name, child])"),
+    ] {
+        let pattern = fact_at(&facts, file, context, "[name, child]");
+        assert_eq!(pattern, array, "the callback's parameter pattern in {file} destructures an array");
+    }
 }
 
 #[test]

@@ -21,10 +21,15 @@ pub struct Fact {
     pub receiver: Option<Receiver>,
     /// What a call, a `new` callee or an identifier macro resolves to, and whether a function takes `self`.
     pub callee: Option<Callee>,
+    /// Whether a callee may be a Roblox API, which tells a missing argument from `nil`. Asked at calls with a call
+    /// argument, which the lowering wraps in parentheses when it may return nothing.
+    pub roblox_api: Option<bool>,
     /// The JavaScript-falsy values the expression may hold.
     pub falsy: Option<Falsy>,
-    /// The value of an enum member, an enum member access or an integer literal type.
+    /// The value of an enum member or an enum member access.
     pub constant: Option<Constant>,
+    /// Whether a numeric `for` loop bound is definitely an integer.
+    pub integer: Option<bool>,
     /// Whether an import or re-export binding must stay in the output.
     pub import: Option<Import>,
     /// What Crucible's transform reads at a class, an `inject` call or an `attribute` call.
@@ -47,9 +52,10 @@ pub enum Receiver {
     String,
     /// A `LuaTuple`, which lowers to multiple values.
     LuaTuple,
-    /// An `IterableFunction`, which a `for..of` calls as a Luau iterator. Its binding pattern says whether each step
-    /// yields a `LuaTuple`.
+    /// An `IterableFunction`, which a `for..of` calls as a Luau iterator.
     IterFn,
+    /// An `IterableFunction` whose steps are `LuaTuple`s, so each step is several values.
+    LuaTupleIterFn,
     Other,
 }
 
@@ -220,16 +226,28 @@ pub struct Unanswered {
     pub reason: Reason,
 }
 
-/// The kind of site an unanswered entry comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Site {
+    /// The callee of a call or a tagged template.
     CallCallee,
+    NewCallee,
+    /// A reference to an identifier macro.
+    Identifier,
+    /// An indexed value, or an object pattern with a computed key.
     ElementReceiver,
     PlusOperand,
+    /// A condition, a logical operand or a `??` chain.
+    Truthiness,
     Iterable,
+    /// An array, call, object or JSX spread.
     Spread,
     Destructure,
+    /// A call receiver, a call result or a returned value.
+    Value,
     Function,
+    Constant,
+    Import,
+    Crucible,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -242,6 +260,13 @@ pub enum Reason {
     MethodAndFunction,
     /// An iterable that is not an array, set, map, string, `LuaTuple` or `IterableFunction`.
     Iteration,
+    /// An array assignment pattern nested in another pattern or in a `for..of` head that needs its source type. tsrs
+    /// keeps the checker's assignment pattern type private.
+    AssignmentPattern,
+    /// A spread argument to a macro. roblox-ts rejects it for a variadic macro, and otherwise needs the tuple's length.
+    MacroSpread,
+    /// Two sites on one node got different answers.
+    Conflict,
 }
 
 /// The fact table of a checked program.

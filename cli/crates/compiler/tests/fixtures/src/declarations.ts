@@ -9,3 +9,6 @@ export const enum Mode {
 export const enum Unused {
 	Only,
 }
+export const enum Speed {
+	Low,
+}
