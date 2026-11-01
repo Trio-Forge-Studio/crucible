@@ -176,16 +176,22 @@ return {
 	["rule 72 an item from a newer build stays queued, is diagnosed once per id per session, and a newer build applies it"] = function()
 		local backend, a, b = D2.world(2, { versions = { 2, 5 } })
 		local id = D2.id(W - 10, "n1")
-		D2.seed(backend, nil, { inbox = { D2.item(id, "grant", { amount = 4 }, { version = 5 }) } })
+		local second = D2.id(W - 9, "n2")
+		D2.seed(backend, nil, {
+			inbox = {
+				D2.item(id, "grant", { amount = 4 }, { version = 5 }),
+				D2.item(second, "grant", { amount = 1 }, { version = 5 }),
+			},
+		})
 		local old = D2.receiver(a, D2.message("grant"))
 		local player = D2.join(backend, a)
 		backend:advance(120)
 		spec.eq(#old.calls, 0, "the older build did not apply it")
 		local envelope = D2.stored(backend)
-		spec.eq(#envelope.inbox, 1, "it stays queued")
+		spec.eq(#envelope.inbox, 2, "they stay queued")
 		spec.eq(#envelope.quarantine, 0, "never quarantined")
 		spec.eq(envelope.inbox[1].generation, 0, "and unmarked")
-		spec.eq(a.engine.logged("newer build"), 1, "diagnosed once, though renewals delivered it again")
+		spec.eq(a.engine.logged("newer build"), 2, "diagnosed once per id, though renewals delivered them again")
 		a.leave(player)
 		a.run(function()
 			a.store:leave(player)
@@ -194,8 +200,8 @@ return {
 		local fresh = D2.receiver(b, D2.message("grant"))
 		D2.join(backend, b)
 		backend:advance(2)
-		spec.eq(#fresh.calls, 1, "the newer build applied it")
-		spec.eq(D2.stored(backend).payload.coins, 4, "once")
+		spec.eq(#fresh.calls, 2, "the newer build applied them")
+		spec.eq(D2.stored(backend).payload.coins, 5, "once each")
 	end,
 	["rule 72 a payload this build refuses is quarantined with reason payload and its unknown keys intact"] = function()
 		local backend, a = D2.world()
@@ -297,11 +303,20 @@ return {
 		spec.eq(entry.payload.future, 1, "its payload with unknown keys")
 		spec.eq(#backend.calls, 1, "one call")
 		spec.eq(backend.calls[1].kind, "read", "a GetAsync")
+		local alone = clearQuarantined(b, { id }, "retry")
+		backend:advance(1)
+		spec.eq(alone.value.value, 1, "another server retried it")
+		local returned = D2.stored(backend)
+		spec.eq(#returned.quarantine, 0, "it left the quarantine")
+		spec.eq(#returned.inbox, 1, "and is live again")
+		spec.eq(returned.inbox[1].generation, 6, "at the next generation")
+		spec.eq(returned.inbox[1].attempts, 0, "with no attempts")
+		spec.eq(returned.inbox[1].reason, nil, "and no reason")
 		local record = D2.receiver(a, D2.message("grant"))
 		D2.join(backend, a)
 		local cleared = clearQuarantined(a, { id, "unknown-id" }, "retry")
 		backend:advance(1)
-		spec.eq(cleared.value.value, 1, "one item changed: the unlisted id is ignored")
+		spec.eq(cleared.value.value, 0, "nothing is left to change: the unlisted id is ignored")
 		spec.eq(#record.calls, 1, "the session on this server read the change within a round trip")
 		local envelope = D2.stored(backend)
 		spec.eq(envelope.payload.coins, 6, "and applied it")
@@ -599,6 +614,10 @@ return {
 			return D2.item(id, "none", { amount = 1 }, { generation = generation, attempts = attempts })
 		end
 		session.confirmed = 3
+		session.marks["m6"] = { id = "m6", generation = 2, attempts = 1 }
+		a.store.inbox:deliver(session, { inbox = { item("m6", 3, 1) } })
+		spec.eq(session.marks["m6"], nil, "a plain attempt mark that moved on is retired")
+		spec.eq(a.engine.logged("quarantine full"), 0, "without a quarantine diagnostic")
 		session.acks["x1"] = 1
 		session.acks["x2"] = 4
 		session.marks["m1"] = { id = "m1", generation = 2, attempts = 1 }
@@ -636,7 +655,7 @@ return {
 			return value
 		end)
 		local cleared = clearQuarantined(a, { id }, "retry")
-		backend:advance(1.5)
+		backend:advance(0.6)
 		spec.eq(cleared.value.value, 1, "the operator retried it")
 		spec.eq(calls, 1, "and the session applied it within a round trip")
 		spec.eq(D2.stored(backend).payload.coins, 100, "once")
@@ -708,6 +727,28 @@ return {
 		spec.eq(envelope.payload.coins, 5, "the acquisition carried the sealed revision")
 		spec.eq(envelope.inbox[1].attempts, 1, "and the mark, applied by its generation")
 		spec.eq(envelope.inbox[1].generation, 1, "which raised it")
+	end,
+	["rule 72 an item applied by a timer while an older save is in flight is not applied again by that save's response"] = function()
+		local backend, a = D2.world()
+		local id = D2.id(W - 10, "j1")
+		D2.seed(backend, nil, { inbox = { D2.item(id, "grant", { amount = 100 }, { attempts = 1, generation = 1 }) } })
+		local record = D2.receiver(a, D2.message("grant"))
+		local player = D2.join(backend, a)
+		backend:advance(3)
+		local gate = backend:gate("response", { server = a.id })
+		a.run(function()
+			return a.store:save(player, 0)
+		end)
+		backend:advance(1)
+		assert(#gate.parked == 1, "a clean save is in flight with its response parked")
+		backend:advance(2)
+		spec.eq(#record.calls, 1, "the retry timer applied the item meanwhile")
+		gate.release()
+		backend:advance(3)
+		spec.eq(#record.calls, 1, "the older save's response, which still lists the item, did not apply it again")
+		local envelope = D2.stored(backend)
+		spec.eq(envelope.payload.coins, 100, "stored once")
+		spec.list(envelope.seen, { id }, "acknowledged")
 	end,
 	["rule 52 and 67 sends are accepted until the dispatch cutoff and return closing after it"] = function()
 		local backend, a = D2.sweepWorld(function(realm)

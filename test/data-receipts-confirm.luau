@@ -18,6 +18,37 @@ local function untilDone(backend, handle, limit)
 end
 
 return {
+	["rule 63 a new id grants once in one revision and is acknowledged only once the disk holds it"] = function()
+		local backend, a = D2.world()
+		local pa = D2.join(backend, a)
+		local seen = {}
+		local route = D2.route(a, PRODUCT, 25, {
+			during = function(player, _, purchase)
+				seen.player = player
+				seen.purchase = purchase
+			end,
+		})
+		local gate = backend:gate("commit", { server = a.id })
+		local handle = D2.purchase(a, D2.info("R1", PRODUCT, D2.USER, 99))
+		backend:advance(0.5)
+		spec.eq(#route.calls, 1, "the grant ran")
+		spec.eq(seen.player, pa, "for the buyer")
+		spec.eq(seen.purchase.id, "R1", "with the purchase id")
+		spec.eq(seen.purchase.productId, PRODUCT, "the product")
+		spec.eq(seen.purchase.currencySpent, 99, "and the Robux spent")
+		spec.eq(handle.done, false, "not acknowledged while the save is parked before its commit")
+		local session = D2.session(a, pa)
+		spec.eq(session.value.gems, 25, "data and id are one revision in memory")
+		spec.eq(session.revision, 1, "one revision")
+		spec.eq(session.receipts[1], "R1", "the id is staged")
+		spec.eq(#D2.stored(backend).receipts, 0, "and no id is stored yet")
+		gate.release()
+		backend:advance(0.5)
+		spec.eq(handle.value, "granted", "granted after the commit")
+		local envelope = D2.stored(backend)
+		spec.eq(envelope.payload.gems, 25, "the grant is stored")
+		spec.list(envelope.receipts, { "R1" }, "with its id")
+	end,
 	["rule 61 afterGrant effects run once each, on fresh threads, after the confirmed save and before the callback returns"] = function()
 		local backend, a = D2.world()
 		local pa = D2.join(backend, a)
@@ -154,7 +185,7 @@ return {
 		backend:advance(1)
 		spec.eq(handle.value, "granted", "still granted")
 		spec.eq(ran, 11, "the next effect ran too")
-		spec.eq(a.engine.logged("afterGrant effect"), 1, "diagnosed once")
+		spec.eq(a.engine.logged("an afterGrant effect for FD.Players 4120 threw"), 1, "diagnosed once")
 		spec.eq(a.engine.logged("secret value"), 0, "without the error text")
 		spec.eq(D2.stored(backend).payload.gems, 25, "the grant stands")
 		spec.eq(D2.session(a, pa).revision, 1, "and no revision was added")
