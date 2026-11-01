@@ -81,7 +81,7 @@ test("K2 K9 rule 25 unknown responses accept an empty callback and the build rej
 	const messages =
 		'import { askServer, toServer } from "@trioforge/crucible"; export const Query = askServer<undefined, unknown>("X.Query"); export const Typed = askServer<undefined, string | undefined>("X.Typed"); export const Event = toServer<string>("X.Event"); export const Ask = askServer<string, number>("X.Ask");';
 	const receiver = (field) =>
-		`import { receive, Subsystem, ClientReady } from "@trioforge/crucible"; import { Query, Typed, Event, Ask } from "../shared/messages"; export class Q extends Subsystem { readonly r = ${field}; }`;
+		`import { receive, Subsystem, ClientReady, ToServer } from "@trioforge/crucible"; import { Query, Typed, Event, Ask } from "../shared/messages"; export class Q extends Subsystem { readonly r = ${field}; }`;
 	const semantic = (program, game, file) =>
 		program
 			.getSemanticDiagnostics(program.getSourceFile(path.join(game, file)))
@@ -114,6 +114,11 @@ test("K2 K9 rule 25 unknown responses accept an empty callback and the build rej
 			"Argument of type '(p: string) => void' is not assignable to parameter of type '(player: Player) => void | (() => void)'.\n  Types of parameters 'p' and 'player' are incompatible.\n    Type 'Player' is not assignable to type 'string'.",
 		],
 		"src/server/ask.ts": ["receive(Ask, (p, s) => s)", 2322, "Type 'string' is not assignable to type 'number'."],
+		"src/server/explicit.ts": [
+			"receive<ToServer<number>>(Event, (p, n) => {})",
+			2345,
+			"Argument of type 'ToServer<string>' is not assignable to parameter of type 'ToServer<number>'.\n  The types of '[message].payload' are incompatible between these types.\n    Type '(value: string) => string' is not assignable to type '(value: number) => number'.\n      Types of parameters 'value' and 'value' are incompatible.\n        Type 'number' is not assignable to type 'string'.",
+		],
 	};
 	const files = { "src/shared/messages.ts": messages };
 	for (const [file, [field]] of Object.entries(negatives)) files[file] = receiver(field);
@@ -124,7 +129,7 @@ test("K2 K9 rule 25 unknown responses accept an empty callback and the build rej
 		[],
 	);
 	const output = stripVTControlCharacters(compile(game, 1)).replaceAll("\r\n", "\n");
-	assert.equal(output.match(/ error TS/g)?.length, 4, output);
+	assert.equal(output.match(/ error TS/g)?.length, 5, output);
 	for (const [file, [, code, message]] of Object.entries(negatives)) {
 		assert.deepEqual(semantic(program, game, file), [[code, message]]);
 		const reported = output.slice(output.indexOf(`${file}:`)).replace(/^\S+ - /, "");
