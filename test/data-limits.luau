@@ -64,7 +64,7 @@ local function owned(r, payload)
 		token = "T",
 		epoch = 1,
 		op = 1,
-		snapshot = { revision = 1, schemaVersion = 0, payload = payload, receipts = {} },
+		snapshot = { revision = 1, schemaVersion = 0, payload = payload, receipts = {}, acks = {}, marks = {} },
 		release = false,
 		wall = r.wall,
 	}, function(d)

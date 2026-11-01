@@ -10,6 +10,7 @@ import {
 	type OwnedDecision,
 	type Sealed,
 } from "./lease";
+import { Inbox } from "./inbox";
 import {
 	CALL_DEADLINE_SECONDS,
 	HANDOFF_TIMEOUT_SECONDS,
@@ -30,6 +31,7 @@ import {
 	TAKEOVER_GRACE_SECONDS,
 } from "./limits";
 import type { DataPort } from "./port";
+import { ReceiptRouter } from "./receipts";
 import { KeyedScheduler, Priority, type Settled } from "./scheduler";
 import { assertOutsideCallback, Phase, Session, type Released, type SealReason } from "./session";
 import { Waiters } from "./waiters";
@@ -43,7 +45,17 @@ export type SaveResult = "ok" | "unavailable" | "timeout" | "uncertain";
 /** @internal */
 export type StoreResult<T> =
 	| { readonly kind: "ok"; readonly value: T }
-	| { readonly kind: "timeout" | "uncertain" | "overloaded" | "closing" | "unavailable" };
+	| {
+			readonly kind:
+				| "timeout"
+				| "uncertain"
+				| "overloaded"
+				| "closing"
+				| "unavailable"
+				| "full"
+				| "expired"
+				| "reused";
+	  };
 
 /**
  * @internal The seams later units fill. D4 runs the claims and owns the slot's node; D2 delivers the inbox and receipts
@@ -67,6 +79,8 @@ const NO_HOOKS: ProfileHooks = {
 export class DataEngine {
 	readonly scheduler: KeyedScheduler;
 	readonly profiles = new Array<ProfileRuntime>();
+	/** The one ProcessReceipt router, shared by every profile store (rule 57). */
+	readonly receipts: ReceiptRouter;
 	/** Loads closed (rule 51). */
 	closing = false;
 	/** Profile writes refused (rule 53). */
@@ -77,6 +91,7 @@ export class DataEngine {
 
 	constructor(readonly port: DataPort) {
 		this.scheduler = new KeyedScheduler(port, (key, message) => this.diagnose(key, message));
+		this.receipts = new ReceiptRouter(this);
 	}
 
 	/** Rule 110: once per key; messages carry store, user, reason, revisions and sizes, never values. */
@@ -107,6 +122,7 @@ export class DataEngine {
 					runtime.startRelease(session);
 				}
 			}
+		this.receipts.close(true);
 		this.wake();
 	}
 }
@@ -115,6 +131,7 @@ export class DataEngine {
 export class ProfileRuntime {
 	readonly sessions = new Map<Player, Session>();
 	readonly changed: Waiters;
+	readonly inbox: Inbox;
 	/** This server's sealed sessions per user, by token, kept for rule 29 until superseded or expired. */
 	private readonly sealed = new Map<number, Map<string, Session>>();
 
@@ -124,6 +141,7 @@ export class ProfileRuntime {
 		readonly hooks: ProfileHooks,
 	) {
 		this.changed = new Waiters(engine.port);
+		this.inbox = new Inbox(this);
 	}
 
 	private key(userId: number) {
@@ -336,6 +354,7 @@ export class ProfileRuntime {
 		session.phase = Phase.Active;
 		this.hooks.publish(player, session.value);
 		this.hooks.delivered(session, envelope);
+		this.inbox.deliver(session, envelope);
 		session.renewAt = bootClock() + port.random() * RENEW_INTERVAL_SECONDS;
 		this.armSeal(session);
 		this.armRenewal(session);
@@ -414,7 +433,7 @@ export class ProfileRuntime {
 		this.requestWrite(session, Priority.Release);
 	}
 
-	private requestWrite(session: Session, priority: Priority) {
+	requestWrite(session: Session, priority: Priority) {
 		session.want = session.want === undefined ? priority : math.min(session.want, priority);
 		this.pumpWriter(session);
 	}
@@ -526,6 +545,7 @@ export class ProfileRuntime {
 		if (earliest !== undefined && this.accept(session))
 			session.safeUntil = math.max(session.safeUntil, earliest + LOCAL_AUTHORITY_SECONDS);
 		this.hooks.delivered(session, envelope);
+		this.inbox.deliver(session, envelope);
 	}
 
 	private releaseClaims(session: Session, reason: ReleaseReason) {

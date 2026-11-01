@@ -105,7 +105,7 @@ local function spaced(log, label: string)
 end
 
 local function snapshot(revision: number, coins: number)
-	return { revision = revision, schemaVersion = 0, payload = { coins = coins }, receipts = {} }
+	return { revision = revision, schemaVersion = 0, payload = { coins = coins }, receipts = {}, acks = {}, marks = {} }
 end
 
 return {

@@ -157,7 +157,7 @@ end
 -- Injects one failure into each of the next `times` matching calls. Kinds: "throttle" (301, nothing sent),
 -- "transient" (503 before the commit), "committed" (commits, then a 502), "conflict" (a rerun of the transform),
 -- "late" (the response arrives `seconds` later), "stall" (the call holds its slot for `seconds` before running) and
--- "reject" (a non-retryable `code`).
+-- "reject" (a non-retryable `code`). `options.after` skips the first calls: the plan only hits calls numbered above it.
 function Backend:fail(kind: string, filter, times: number?, options)
 	table.insert(self.plans, {
 		kind = kind,
@@ -165,12 +165,13 @@ function Backend:fail(kind: string, filter, times: number?, options)
 		remaining = times or 1,
 		seconds = options and options.seconds or 0,
 		code = options and options.code or 400,
+		after = options and options.after or 0,
 	})
 end
 
 function Backend:plan(call)
 	for _, plan in self.plans do
-		if plan.remaining > 0 and matches(plan.filter, call) then
+		if plan.remaining > 0 and call.index > plan.after and matches(plan.filter, call) then
 			plan.remaining -= 1
 			return plan
 		end
@@ -401,6 +402,14 @@ function Backend:realm(options)
 			present = function(player)
 				return realm.present[player] == true
 			end,
+			byUserId = function(userId)
+				for player in realm.present do
+					if player.UserId == userId then
+						return player
+					end
+				end
+				return nil
+			end,
 			kick = function(player, message)
 				table.insert(realm.kicks, { player = player, message = message, at = backend.now })
 			end,
@@ -422,7 +431,7 @@ function Backend:realm(options)
 		realm.spawn(fn)
 	end
 
-	realm.graph = spec.runtime(nil, engine.loggingPort, nil, realm.port)
+	realm.graph = spec.runtime(options.env, engine.loggingPort, nil, realm.port)
 	realm.boot = realm.graph.module("internal/boot")
 	realm.limits = realm.graph.module("internal/data/limits")
 	realm.lease = realm.graph.module("internal/data/lease")

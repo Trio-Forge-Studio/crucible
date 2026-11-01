@@ -27,6 +27,8 @@ export const SAVE_TIMEOUT_DEFAULT_SECONDS = 10;
 export const SAVE_TIMEOUT_MAX_SECONDS = 30;
 /** @internal */
 export const HANDOFF_TIMEOUT_SECONDS = 10;
+/** @internal How long a granting callback waits for its id to be durable (rule 63). */
+export const RECEIPT_SAVE_TIMEOUT_SECONDS = 30;
 /** @internal */
 export const CALL_DEADLINE_SECONDS = 30;
 
@@ -82,11 +84,23 @@ export const QUARANTINE_MAX_MESSAGES = 8;
 /** @internal */
 export const QUARANTINE_MAX_BYTES = 69_632;
 /** @internal */
+export const MESSAGE_PAYLOAD_MAX_BYTES = 8_192;
+/** @internal Seven days (rule 69). */
+export const MESSAGE_ID_MAX_AGE_SECONDS = 604_800;
+/** @internal */
+export const ID_FUTURE_SKEW_SECONDS = 5;
+/** @internal The 30 s call deadline plus 5 s of clock error, with margin (rule 69). */
+export const ID_EVICT_MIN_AGE_SECONDS = 60;
+/** @internal */
 export const OPERATION_ID_MAX_BYTES = 64;
 /** @internal */
 export const SEEN_MAX_MESSAGES = 1_024;
 /** @internal */
 export const SEEN_MAX_BYTES = 69_632;
+/** @internal The wait after attempt n is entry n - 1; the last repeats (rule 73). */
+export const INBOX_RETRY_SECONDS = [5, 15, 60, 60];
+/** @internal Attempts before an item is quarantined with reason "attempts" (rule 73). */
+export const INBOX_MAX_ATTEMPTS = 5;
 /** @internal */
 export const OPERATION_MARKERS_PER_KEY = 256;
 
