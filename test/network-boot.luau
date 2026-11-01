@@ -66,6 +66,34 @@ local function rolledBack(realm, rec, again)
 	spec.has(err, "boot already ran on this side", "stops only at the registry, after its own catalog step")
 end
 
+-- The Subsystem that receives Note on a client: a claim a close must discard on a failed boot and keep once committed.
+local function clientWithClaim(rec)
+	return function(realm)
+		local m = declare(realm)
+		rec.m = m
+		realm.service("Owner", function(self)
+			self.note = realm.emit.receive(self, "note", m.Note, function() end)
+		end)
+	end
+end
+
+-- The session a client boot creates, which nothing else exposes.
+local function capture(realm)
+	local class = realm.graph.module("internal/network/client-session").ClientSession
+	local make = class.new
+	local box = { disconnects = 0 }
+	class.new = function(...)
+		box.session = make(...)
+		return box.session
+	end
+	local disconnect = realm.port.disconnect
+	realm.port.disconnect = function(...)
+		box.disconnects += 1
+		return disconnect(...)
+	end
+	return box
+end
+
 return {
 	["79 a module require throwing closes the session; a player joining gets no peer"] = function()
 		local link = Link.new()
@@ -410,6 +438,80 @@ return {
 			{ "wait CrucibleNetwork 30", "connect client" },
 			"connects before returning"
 		)
+	end,
+	["78 80 closing a committed server session keeps its claims and sealed indices"] = function()
+		local link = Link.new()
+		local rec = record()
+		server(link, rec)
+		spec.eq(link.server.booted, true, "committed")
+		local s = link.server
+		spec.eq(rec.m.Note.index, 0, "Boot.Note is first in the sorted catalog")
+		spec.eq(rec.m.Ping.index, 1, "Boot.Ping is second")
+		spec.eq(s.catalog.catalogSize(), 2, "two sealed names")
+		spec.eq(s.claims.receiverOf(rec.m.Ping) ~= nil, true, "the Ping receiver is claimed")
+		spec.eq(#s.claims.readyClaims(), 1, "the ClientReady receiver is claimed")
+		s.closers[1]()
+		spec.list(rec.shutdown, { "Owner" }, "the shutdown ran")
+		spec.eq(s.remote, nil, "the session closed")
+		spec.eq(rec.m.Note.index, 0, "indices outlive the close")
+		spec.eq(rec.m.Ping.index, 1, "all of them")
+		spec.eq(s.catalog.catalogSize(), 2, "the sealed catalog outlives the close")
+		spec.eq(s.claims.receiverOf(rec.m.Ping) ~= nil, true, "the receiver claim outlives the close")
+		spec.eq(#s.claims.readyClaims(), 1, "the ClientReady claim outlives the close")
+		link:assertClean()
+	end,
+	["79 80 closing a committed client session keeps its claims and adopted indices"] = function()
+		local link = Link.new()
+		server(link, record())
+		local rec = record()
+		local c = link:join("Ann", clientWithClaim(rec), { boot = false })
+		local box = capture(c)
+		link:start(c)
+		spec.eq(c.booted, true, "committed")
+		spec.eq(rec.m.Note.index, 0, "Boot.Note adopted at its sorted place")
+		spec.eq(c.catalog.catalogSize(), 2, "two adopted names")
+		spec.eq(c.claims.receiverOf(rec.m.Note) ~= nil, true, "the Note receiver is claimed")
+		box.session:close()
+		spec.eq(box.disconnects, 1, "the close disconnected the port")
+		spec.eq(rec.m.Note.index, 0, "the index outlives the close")
+		spec.eq(c.catalog.catalogSize(), 2, "the adopted catalog outlives the close")
+		spec.eq(c.claims.receiverOf(rec.m.Note) ~= nil, true, "the receiver claim outlives the close")
+		link:assertClean()
+	end,
+	["76 79 closing a client session twice disconnects and ends it once"] = function()
+		local link = Link.new()
+		local rec = record()
+		server(link, rec)
+		local c = link:join("Ann", function(realm)
+			clientWithClaim(rec)(realm)
+			realm.service("Sender", nil, {
+				start = function()
+					realm.Network.send(rec.m.Ping, "queued")
+				end,
+			})
+		end, { boot = false })
+		local box = capture(c)
+		link:failNext("fireServer", 1)
+		link:start(c)
+		spec.eq(c.booted, false, "the flush failed the boot")
+		local function fromAnn()
+			local out = {}
+			for _, e in
+				link:sent(function(entry)
+					return entry.from == "Ann"
+				end)
+			do
+				table.insert(out, h.hex(e.packet))
+			end
+			return out
+		end
+		spec.list(fromAnn(), { "04", "05 02" }, "READY, then one FAIL closing")
+		spec.eq(box.disconnects, 1, "the failed boot's close disconnected once")
+		box.session:close()
+		spec.eq(box.disconnects, 1, "a second close disconnects nothing")
+		spec.list(fromAnn(), { "04", "05 02" }, "and sends nothing")
+		spec.eq(c.catalog.catalogSize(), 0, "the catalog stays discarded")
+		link:assertClean()
 	end,
 	["79 world finalization undoes booted before rollback and leaves the network uncommitted"] = function()
 		local w = world()

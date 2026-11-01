@@ -646,6 +646,8 @@ const rules = [
 			"\t\t\t\t\tshutdown(port, singletons);",
 		],
 		["pair end", SS, "\t\t\tpcall(() => this.end(peer));\n", "\n"],
+		["guard committed indices", SS, "\t\tif (!committed) discardIndices();", "\t\tdiscardIndices();"],
+		["guard committed claims", SS, "\t\tcloseClaims(!committed);", "\t\tcloseClaims(true);"],
 	],
 	[
 		"79",
@@ -658,6 +660,9 @@ const rules = [
 		],
 		["pair", B, "\tif (ok) return;\n\tside.network.close();", "\tif (ok) return;"],
 		["pair client end", CS, "\t\tpcall(() => this.end(this.peer));\n", "\n"],
+		["guard client committed indices", CS, "\t\tif (!committed) discardIndices();", "\t\tdiscardIndices();"],
+		["guard client committed claims", CS, "\t\tcloseClaims(!committed);", "\t\tcloseClaims(true);"],
+		["guard client close twice", CS, "\t\tif (this.stage === Stage.Closed) return;\n", ""],
 	],
 	[
 		"80",
