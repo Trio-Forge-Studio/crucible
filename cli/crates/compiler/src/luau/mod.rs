@@ -170,6 +170,35 @@ impl Expr {
         matches!(self, Expr::Nil | Expr::Bool(_) | Expr::Number(_) | Expr::String(_) | Expr::Name(_) | Expr::VarArgs)
     }
 
+    /// Whether evaluating the expression may run a function the program defines. A function value's body does not
+    /// run, and `bit32` and `math` only compute numbers.
+    pub fn may_call(&self) -> bool {
+        match self {
+            Expr::Call(function, args) => match function.as_ref() {
+                Expr::Index(library, _) if matches!(library.as_ref(), Expr::Name(n) if n == "bit32" || n == "math") => {
+                    args.iter().any(Expr::may_call)
+                }
+                _ => true,
+            },
+            Expr::Method(..) => true,
+            Expr::Index(a, b) | Expr::Binary(_, a, b) => a.may_call() || b.may_call(),
+            Expr::Unary(_, e) | Expr::Paren(e) => e.may_call(),
+            Expr::If { condition, then, otherwise } => condition.may_call() || then.may_call() || otherwise.may_call(),
+            Expr::Table(fields) => fields.iter().any(|f| match f {
+                Field::Item(e) => e.may_call(),
+                Field::Keyed(k, v) => k.may_call() || v.may_call(),
+            }),
+            Expr::Interpolated(parts) => parts.iter().any(|p| matches!(p, Part::Expr(e) if e.may_call())),
+            Expr::Nil
+            | Expr::Bool(_)
+            | Expr::Number(_)
+            | Expr::String(_)
+            | Expr::VarArgs
+            | Expr::Name(_)
+            | Expr::Function(_) => false,
+        }
+    }
+
     /// A call that may return several values or none.
     pub fn is_multi(&self) -> bool {
         matches!(self, Expr::Call(..) | Expr::Method(..) | Expr::VarArgs)
