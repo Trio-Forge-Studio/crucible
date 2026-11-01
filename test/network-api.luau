@@ -6,4 +6,8 @@ return {
 		local result = process.exec("node", { "test/lib/network-api-consumer.mjs" })
 		spec.eq(result.code, 0, result.stdout .. result.stderr)
 	end,
+	["25 K2 K9 the transformed rbxtsc build type-checks every receive callback against its target"] = function()
+		local result = process.exec("node", { "test/lib/network-receive-consumer.mjs" })
+		spec.eq(result.code, 0, result.stdout .. result.stderr)
+	end,
 }
