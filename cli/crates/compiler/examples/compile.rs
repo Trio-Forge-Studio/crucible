@@ -1,7 +1,3 @@
-//! Compiles a project to Luau, writing only the files whose bytes changed.
-//!
-//! `cargo run --release -p crucible-compiler --example compile -- <tsconfig> <out>`
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;

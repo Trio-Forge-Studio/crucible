@@ -1,9 +1,3 @@
-//! Crucible's compiler: a tsconfig in, the checker's diagnostics or Luau modules out.
-//!
-//! tsrs types stay inside three modules. `program` builds and checks the tsrs program, `extract` reads the checker
-//! into the plain data of `facts`, and `tree` is the syntax view the lowering reads. The lowering reads the tree
-//! and the fact table, never the checker, and builds the `luau` tree that the printer writes.
-
 mod extract;
 mod facts;
 mod lower;
@@ -22,6 +16,7 @@ pub use facts::{
     Literal, Reason, Receiver, Site, Span, Unanswered,
 };
 pub use lower::Error;
+use lower::ImportBase;
 pub use macros::{Macro, MacroKind};
 
 /// A configuration, syntax or type error.
@@ -52,7 +47,6 @@ pub fn analyze(tsconfig: &Path) -> Result<Facts, Vec<Diagnostic>> {
     Ok(extract::extract(checked))
 }
 
-/// One emitted Luau module.
 #[derive(Clone, Debug)]
 pub struct Module {
     /// The output path relative to the output directory, with forward slashes. An `index` source is its
@@ -61,12 +55,9 @@ pub struct Module {
     pub source: String,
 }
 
-/// Why a compile wrote nothing.
 #[derive(Clone, Debug)]
 pub enum Failure {
-    /// The program has configuration, syntax or type errors.
     Check(Vec<Diagnostic>),
-    /// The lowering refused constructs or sites it cannot answer.
     Lower(Vec<Error>),
 }
 
@@ -79,8 +70,7 @@ impl fmt::Display for Failure {
     }
 }
 
-/// Checks the program for `tsconfig`, extracts its facts, and lowers every source file to Luau. Any diagnostic or
-/// lowering error fails the whole compile.
+/// Any diagnostic or lowering error fails the whole compile, and no module is returned.
 pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
     let files = checked.files();
@@ -98,12 +88,12 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
         };
         let relative = path.strip_prefix(root.as_str()).unwrap_or(path).trim_start_matches('/');
         let stem = relative.rsplit_once('.').map_or(relative, |(stem, _)| stem);
-        let (stem, init) = match stem.strip_suffix("index") {
-            Some(dir) if dir.is_empty() || dir.ends_with('/') => (format!("{dir}init"), true),
-            _ => (stem.to_owned(), false),
+        let (stem, import_base) = match stem.strip_suffix("index") {
+            Some(dir) if dir.is_empty() || dir.ends_with('/') => (format!("{dir}init"), ImportBase::Script),
+            _ => (stem.to_owned(), ImportBase::ScriptParent),
         };
         let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
-        match lower::lower(file, file_facts, &unanswered, init) {
+        match lower::lower(file, file_facts, &unanswered, import_base) {
             Ok(chunk) => {
                 let mut source = luau::print(&chunk);
                 source.insert_str(0, HEADER);
@@ -119,18 +109,16 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
 /// starts with it.
 const HEADER: &str = "-- Compiled with crucible-compiler\n";
 
-/// What `write` changed in the output directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Written {
-    /// Modules whose file was missing or held other bytes.
     pub written: usize,
-    /// Stale modules deleted.
     pub removed: usize,
 }
 
-/// Writes each module under `out`, skipping files whose bytes already match. Then it deletes every `.luau` file
-/// under `out` that starts with the compiler's header and is not one of `modules`, and any folder that deletion
-/// leaves empty. Files the compiler did not emit, such as `rbxtsc` output and declarations, stay.
+/// Writes each module under `out`, skipping files whose bytes already match, and counts the files it wrote. Then it
+/// deletes every `.luau` file under `out` that starts with the compiler's header and is not one of `modules`, and
+/// any folder that deletion leaves empty, and counts the files it deleted. Files the compiler did not emit, such as
+/// `rbxtsc` output and declarations, stay.
 pub fn write(out: &Path, modules: &[Module]) -> io::Result<Written> {
     let mut changes = Written::default();
     for module in modules {

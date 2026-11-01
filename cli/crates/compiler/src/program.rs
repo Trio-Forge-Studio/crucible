@@ -19,7 +19,6 @@ pub(crate) struct Checked {
 }
 
 impl Checked {
-    /// The source files the build lowers, in program order.
     pub fn files(&self) -> Vec<crate::tree::File> {
         self.program
             .source_files()
@@ -29,7 +28,6 @@ impl Checked {
             .collect()
     }
 
-    /// The configured `rootDir`, absolute with forward slashes.
     pub fn root_dir(&self) -> Option<String> {
         let root = &self.program.options().root_dir;
         (!root.is_empty()).then(|| root.replace('\\', "/"))

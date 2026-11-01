@@ -1,5 +1,4 @@
-//! The syntax tree view the lowering reads. It wraps tsrs nodes behind Crucible's own kinds and accessors, so the
-//! lowering never names a tsrs type. Accessors panic on a node of the wrong kind, as tsrs's do.
+//! Accessors panic on a node of the wrong kind, as tsrs's do.
 
 use tsrs_ast::{Kind as TsKind, ModifierFlags, Node as TsNode, NodeFlags, SourceFile};
 use tsrs_core::P;
@@ -137,7 +136,6 @@ kinds! {
 
 macro_rules! operators {
     ($($token:ident => $op:ident,)*) => {
-        /// A binary or assignment operator.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum Op {
             $($op,)*
@@ -199,7 +197,6 @@ operators! {
 }
 
 impl Op {
-    /// The operator an assignment applies, as `Add` for `+=`.
     pub fn compound(self) -> Option<Op> {
         Some(match self {
             Op::AddAssign => Op::Add,
@@ -236,7 +233,6 @@ pub enum UnaryOp {
     Decrement,
 }
 
-/// One parsed source file.
 #[derive(Clone, Copy)]
 pub struct File {
     file: P<SourceFile>,
@@ -247,7 +243,6 @@ impl File {
         File { file }
     }
 
-    /// The absolute path with forward slashes.
     pub fn path(&self) -> String {
         self.file.file_name().replace('\\', "/")
     }
@@ -260,8 +255,7 @@ impl File {
         Node { n: self.file.as_node(), text: self.file.text() }
     }
 
-    /// One-based line and column, in bytes.
-    pub fn position(&self, offset: u32) -> (u32, u32) {
+    pub fn position(&self, offset: u32) -> Position {
         let text = self.file.text();
         let mut offset = (offset as usize).min(text.len());
         while !text.is_char_boundary(offset) {
@@ -270,8 +264,21 @@ impl File {
         let before = &text[..offset];
         let line = before.matches('\n').count() + 1;
         let column = offset - before.rfind('\n').map_or(0, |i| i + 1) + 1;
-        (line as u32, column as u32)
+        Position { line: line as u32, column: column as u32 }
     }
+}
+
+/// One-based, in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Position {
+    pub line: u32,
+    pub column: u32,
+}
+
+pub(crate) fn span(n: P<TsNode>, text: &str) -> Span {
+    let pos = n.pos().source_offset().unwrap_or(0);
+    let end = n.end().source_offset().unwrap_or(pos);
+    Span { start: tsrs_scanner::skip_trivia(text, pos), end }
 }
 
 #[derive(Clone, Copy)]
@@ -341,28 +348,23 @@ impl Node {
         kind_of(self.n.kind())
     }
 
-    /// The tsrs kind name, for error messages.
     pub fn kind_name(&self) -> String {
         format!("{:?}", self.n.kind())
     }
 
-    /// The span the fact table keys this node by.
     pub fn span(&self) -> Span {
-        let pos = self.n.pos().source_offset().unwrap_or(0);
-        let end = self.n.end().source_offset().unwrap_or(pos);
-        Span { start: tsrs_scanner::skip_trivia(self.text, pos), end }
+        span(self.n, self.text)
     }
 
     pub fn parent(&self) -> Option<Node> {
         self.wrap_opt(self.n.parent())
     }
 
-    /// The text of an identifier, a string or template literal (its value), or a numeric literal.
+    /// A string or template literal's text is its cooked value.
     pub fn text(&self) -> &'static str {
         self.n.text()
     }
 
-    /// The value of a numeric literal.
     pub fn number(&self) -> f64 {
         let text = self.n.text();
         text.parse().unwrap_or_else(|_| parse_integer(text).unwrap_or(f64::NAN))
@@ -446,12 +448,10 @@ impl Node {
         self.list(list.as_variable_declaration_list().declarations.nodes())
     }
 
-    /// Whether a variable statement or declaration list declares with `const`.
     pub fn is_const(&self) -> bool {
         self.declaration_list_flags().contains(NodeFlags::Const)
     }
 
-    /// Whether a variable statement or declaration list declares with `var`.
     pub fn is_var(&self) -> bool {
         !self.declaration_list_flags().intersects(NodeFlags::BlockScoped)
     }
@@ -498,7 +498,6 @@ impl Node {
         }
     }
 
-    /// The condition of a conditional expression or a `for` statement.
     pub fn condition(&self) -> Option<Node> {
         match self.n.kind() {
             TsKind::ConditionalExpression => Some(self.wrap(self.n.as_conditional_expression().condition)),
@@ -527,8 +526,7 @@ impl Node {
         self.wrap_opt(self.n.as_if_statement().else_statement)
     }
 
-    /// The body of a loop or a labeled statement.
-    pub fn statement(&self) -> Node {
+    pub fn loop_body(&self) -> Node {
         self.wrap(self.n.statement())
     }
 
@@ -553,17 +551,14 @@ impl Node {
         self.wrap(self.n.as_element_access_expression().argument_expression)
     }
 
-    /// Whether a property access, element access or call has its own `?.`.
     pub fn has_question_dot(&self) -> bool {
         self.n.question_dot_token().is_some()
     }
 
-    /// Whether the node is part of an optional chain.
     pub fn in_optional_chain(&self) -> bool {
         self.n.flags().contains(NodeFlags::OptionalChain)
     }
 
-    /// Whether a parameter or binding element is a rest element.
     pub fn is_rest(&self) -> bool {
         match self.n.kind() {
             TsKind::Parameter => self.n.as_parameter_declaration().dot_dot_dot_token().is_some(),
@@ -588,7 +583,6 @@ impl Node {
         self.n.modifier_flags().contains(ModifierFlags::Abstract)
     }
 
-    /// Whether the declaration is `declare`, or inside an ambient context.
     pub fn is_ambient(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Ambient) || self.n.flags().contains(NodeFlags::Ambient)
     }
@@ -601,12 +595,10 @@ impl Node {
         tsrs_ast::get_function_flags(Some(self.n)).contains(tsrs_ast::FunctionFlags::Generator)
     }
 
-    /// A constructor parameter that declares a property.
     pub fn is_parameter_property(&self) -> bool {
         self.n.modifier_flags().intersects(ModifierFlags::ParameterPropertyModifier)
     }
 
-    /// Whether a `break` or `continue` names a label.
     pub fn has_label(&self) -> bool {
         self.n.label().is_some()
     }
@@ -619,7 +611,6 @@ impl Node {
         !self.n.decorators().is_empty()
     }
 
-    /// The `extends` expression of a class.
     pub fn extends(&self) -> Option<Node> {
         let clauses = self.n.as_class_declaration().class_like_base.heritage_clauses.get()?;
         clauses
@@ -655,8 +646,7 @@ impl Node {
         });
     }
 
-    /// Whether the node is a type annotation or another node that only exists for the checker.
-    pub fn is_type(&self) -> bool {
+    pub fn is_erased(&self) -> bool {
         tsrs_ast::is_type_node_kind(self.n.kind())
             || matches!(
                 self.n.kind(),

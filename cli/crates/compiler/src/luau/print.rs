@@ -2,7 +2,6 @@ use std::fmt::Write;
 
 use super::{BinOp, Expr, Field, Function, Part, Stmt, UnOp, is_name};
 
-/// Prints a chunk with tabs, one statement per line.
 pub fn print(chunk: &[Stmt]) -> String {
     let mut p = Printer { out: String::with_capacity(4096), depth: 0 };
     p.block(chunk);
@@ -62,12 +61,11 @@ fn precedence(e: &Expr) -> u8 {
         Expr::Binary(op, ..) => binary_precedence(*op).0,
         Expr::Unary(..) => UNARY,
         Expr::Number(n) if n.is_sign_negative() || n.is_nan() => UNARY,
-        Expr::If(..) => 0,
+        Expr::If { .. } => 0,
         _ => ATOM,
     }
 }
 
-/// Whether the expression can be called or indexed without parentheses.
 fn is_prefix(e: &Expr) -> bool {
     matches!(e, Expr::Name(_) | Expr::Index(..) | Expr::Call(..) | Expr::Method(..) | Expr::Paren(_))
 }
@@ -384,7 +382,7 @@ impl Printer {
                 });
                 self.expr(operand, if *op == UnOp::Neg { UNARY + 1 } else { UNARY });
             }
-            Expr::If(condition, then, otherwise) => {
+            Expr::If { condition, then, otherwise } => {
                 self.out.push_str("if ");
                 self.expr(condition, 0);
                 self.out.push_str(" then ");
