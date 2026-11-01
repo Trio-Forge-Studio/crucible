@@ -255,8 +255,8 @@ pub enum Reason {
     MethodAndFunction,
     /// An iterable that is not an array, set, map, string, `LuaTuple` or `IterableFunction`.
     Iteration,
-    /// An array assignment pattern nested in another pattern or in a `for..of` head that needs its source type. tsrs
-    /// keeps the checker's assignment pattern type private.
+    /// An array assignment pattern, or an object one with a computed key, nested in another pattern or in a `for..of`
+    /// head that needs its source type. tsrs keeps the checker's assignment pattern type private.
     AssignmentPattern,
     /// A spread argument to a macro. roblox-ts rejects it for a variadic macro, and otherwise needs the tuple's length.
     MacroSpread,
