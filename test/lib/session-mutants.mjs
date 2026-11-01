@@ -170,7 +170,7 @@ const rules = [
 			"has two receivers: ${other.label} and ${label}",
 			"has two receivers: ${label} and ${other.label}",
 		],
-		["pair", CL, "else receivers.set(target as Definition, entry);", "else live;"],
+		["pair", CL, "else receivers.set(target as Definition, entry);", "else {}"],
 	],
 	[
 		"27",
@@ -217,8 +217,8 @@ const rules = [
 		[
 			"guard",
 			SS,
-			'if (definition === undefined || definition.kind !== "to-client")',
-			'if (definition !== undefined && definition.kind !== "to-client")',
+			'if (definition === undefined || definition.kind !== "to-client")\n\t\terror(`${call} needs a message declared with toClient`, 0);\n\treturn definition;',
+			'if (definition !== undefined && definition.kind !== "to-client")\n\t\terror(`${call} needs a message declared with toClient`, 0);\n\treturn definition!;',
 		],
 		["swap", "ClientReady is one frozen value"],
 		["pair", "ClientReady never enters the catalog, so nothing pairs with it there"],
@@ -232,7 +232,7 @@ const rules = [
 			"${label}: ${other.label} already receives ClientReady",
 			"${other.label}: ${label} already receives ClientReady",
 		],
-		["pair", CL, "if (target === ClientReady) ready.push(entry);", "if (target === ClientReady) live;"],
+		["pair", CL, "if (target === ClientReady) ready.push(entry);", "if (target === ClientReady) {}"],
 	],
 	[
 		"33",
@@ -353,7 +353,12 @@ const rules = [
 			"\t\t\t\t\tdefinition.index!,\n\t\t\t\t\tnonce,\n",
 			"\t\t\t\t\tnonce,\n\t\t\t\t\tdefinition.index!,\n",
 		],
-		["pair", SS, "\t\tif (receiver === undefined) return refuse(ErrorReason.Unavailable);\n", "\n"],
+		[
+			"pair",
+			SS,
+			"\t\tif (receiver === undefined) return refuse(ErrorReason.Unavailable);\n\t\tif (peer.counted >= L.MAX_ACTIVE_HANDLERS) return refuse(ErrorReason.Overloaded);\n\t\tthis.start(peer, receiver, [player, value], { definition, nonce });",
+			"\t\tif (peer.counted >= L.MAX_ACTIVE_HANDLERS) return refuse(ErrorReason.Overloaded);\n\t\tthis.start(peer, receiver!, [player, value], { definition, nonce });",
+		],
 	],
 	[
 		"43",
@@ -496,7 +501,12 @@ const rules = [
 	],
 	[
 		"56",
-		["guard", SS, "\t\t\tif (receiver === undefined) return this.unreceived(definition);\n", "\n"],
+		[
+			"guard",
+			SS,
+			"\t\t\tif (receiver === undefined) return this.unreceived(definition);\n\t\t\tif (peer.counted >= L.MAX_ACTIVE_HANDLERS) return this.fail(peer, FailReason.Overloaded);\n\t\t\treturn this.start(peer, receiver, [player, value]);",
+			"\t\t\tif (peer.counted >= L.MAX_ACTIVE_HANDLERS) return this.fail(peer, FailReason.Overloaded);\n\t\t\treturn this.start(peer, receiver!, [player, value]);",
+		],
 		["swap", "the diagnostic names one message"],
 		["pair", S, "\t\tthis.noReceiver.add(definition);\n", "\n"],
 	],
@@ -528,7 +538,7 @@ const rules = [
 			"guard",
 			S,
 			"\t\tfor (const entry of peer.running) {\n\t\t\tentry.lifetime?.();",
-			"\t\tfor (const entry of peer.running) {\n\t\t\tentry;",
+			"\t\tfor (const entry of peer.running) {\n\t\t\tif (entry === undefined) continue;",
 		],
 		["swap", "ending takes one peer"],
 		["pair", SS, "\t\tif (this.peers.get(player) === peer) this.peers.delete(player);\n", "\n"],
@@ -562,7 +572,7 @@ const rules = [
 	],
 	[
 		"79",
-		["guard", B, "\t\t\tif (undo !== undefined) {", "\t\t\tif (false as boolean) {"],
+		["guard", B, "const [undone, undoErr] = pcall(undo);", "const [undone, undoErr] = pcall(() => {});"],
 		[
 			"swap",
 			B,
@@ -613,6 +623,15 @@ function run(cwd, command, args) {
 	return result;
 }
 
+// A Lune run that printed no summary never ran its specs, so it decides nothing; run it again.
+function specRun(cwd) {
+	for (let attempt = 1; ; attempt++) {
+		const result = run(cwd, "lune", ["run", "test", ...specs]);
+		if (/\d+ passed, \d+ failed/.test(result.stdout)) return result;
+		assert.ok(attempt < 3, `lune printed no summary three times\n${result.stdout}${result.stderr}`);
+	}
+}
+
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-session-mutants-"));
 try {
 	for (const name of ["tsconfig.rbxts.json", ".luaurc", "rokit.toml"])
@@ -636,7 +655,7 @@ try {
 		]);
 	let built = build();
 	assert.equal(built.status, 0, built.stdout + built.stderr);
-	const baseline = run(scratch, "lune", ["run", "test", ...specs]);
+	const baseline = specRun(scratch);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
 	for (const line of absent) console.log(line);
 	let killed = 0;
@@ -647,7 +666,7 @@ try {
 		fs.writeFileSync(path.join(scratch, file), original.replaceAll(before, after));
 		built = build();
 		assert.equal(built.status, 0, `${name} must compile\n${built.stdout}${built.stderr}`);
-		const tested = run(scratch, "lune", ["run", "test", ...specs]);
+		const tested = specRun(scratch);
 		assert.equal(tested.status, 1, `${name} survived\n${tested.stdout}${tested.stderr}`);
 		const failure = (tested.stdout + tested.stderr).match(/FAIL ((?:network|boot)[^\n]*)/);
 		assert.ok(failure, `${name} must fail a spec assertion`);
