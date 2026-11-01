@@ -304,6 +304,11 @@ impl Extractor {
                 };
                 self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
                 let arguments = n.arguments();
+                if resolved == Callee::Macro(Macro::Assert)
+                    && let Some(&first) = arguments.first()
+                {
+                    self.truthy(first);
+                }
                 if let Callee::Macro(_) = resolved {
                     if let Some(&last) = arguments.last()
                         && last.kind() == Kind::SpreadElement

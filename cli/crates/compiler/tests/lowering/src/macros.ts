@@ -60,3 +60,8 @@ export function order() {
 	const joined = getList().join(arg("+"));
 	return [log.join(","), removed, unordered, joined];
 }
+
+export function checked(n: number) {
+	assert(n, "zero");
+	return n;
+}

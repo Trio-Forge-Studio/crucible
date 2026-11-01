@@ -387,6 +387,7 @@ impl Lower<'_> {
             self.error(iterable, "the type facts do not say how to iterate this value");
             return;
         };
+        let receiver = if receiver == Receiver::LuaTuple { Receiver::Array } else { receiver };
         let source = self.expr(iterable);
         let simple_name =
             |l: &mut Self, n: Node| -> Option<Name> { (n.kind() == Kind::Identifier).then(|| l.local_name(n)) };

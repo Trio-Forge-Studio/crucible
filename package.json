@@ -6,6 +6,7 @@
 		"test": "pnpm run build && lune run test && node --test test/studio/verification.test.mjs test/docs.test.mjs test/compiler-types.test.mjs",
 		"check": "vp check && stylua --check test .lune probes cli/crates/compiler/tests && selene test .lune cli/crates/compiler/tests && selene --config probes/engine/selene.toml probes && node --test probes/engine/verification.test.mjs probes/modules/verification.test.mjs && pnpm run test && pnpm --filter @trioforge/crucible test:transformer",
 		"fmt": "vp fmt && stylua test .lune probes cli/crates/compiler/tests",
+		"test:compiler": "node test/compiler/specs.mjs",
 		"prepare": "vp config"
 	},
 	"devDependencies": {

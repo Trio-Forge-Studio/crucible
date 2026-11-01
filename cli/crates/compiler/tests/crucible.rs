@@ -103,3 +103,28 @@ fn sample_game_checks_and_every_site_is_answered() {
         "Member's attributes, with speed defaulted"
     );
 }
+
+#[test]
+fn the_runtime_lowers_to_one_module_per_source_file() {
+    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"))
+        .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"));
+    let src = repo().join("packages/crucible/src").to_string_lossy().replace('\\', "/");
+    let mut files = Vec::new();
+    sources(&repo().join("packages/crucible/src"), &mut files);
+    let mut expected: Vec<String> = files
+        .iter()
+        .map(|path| {
+            let relative = path.strip_prefix(&format!("{src}/")).expect("the source is under src");
+            let stem = relative.strip_suffix(".ts").expect("the runtime is TypeScript");
+            let stem = match stem.strip_suffix("index") {
+                Some(dir) if dir.is_empty() || dir.ends_with('/') => format!("{dir}init"),
+                _ => stem.to_owned(),
+            };
+            format!("{stem}.luau")
+        })
+        .collect();
+    let mut paths: Vec<String> = modules.iter().map(|m| m.path.clone()).collect();
+    expected.sort();
+    paths.sort();
+    assert_eq!(paths, expected);
+}

@@ -72,6 +72,7 @@ end
 eq("fallthrough 1", control.fallthrough(1), "one,two")
 eq("fallthrough 2", control.fallthrough(2), "two")
 eq("fallthrough default", control.fallthrough(5), "other")
+eq("for-of over a LuaTuple", control.spanOf(), 7)
 eq("for-of", control.iterate({ "x", "y" }, { a = 1, b = 2 }, { m = true, n = true }), "x y a=1 m")
 eq("for-of over a string", control.letters("abc"), "a-b-c")
 eq("closures capture each pass", control.captured(), "0,1,2")
@@ -136,6 +137,8 @@ list("arrays", macros.arrays(), { 3, 4, "1-2-3", "10,21,32", 1, 2, 1, -1, 6, tru
 list("maps", macros.maps(), { 2, false, 1, true, false, 2, true, false })
 list("strings", macros.strings("a,b"), { 3, "a,", 2, true, "number" })
 list("macro operands keep their order", macros.order(), { "set,arg,set,arg,list,arg,list,arg", false, 1, "3+2" })
+eq("assert passes", macros.checked(2), 2)
+eq("assert rejects zero", pcall(macros.checked, 0), false)
 
 local patterns = load("patterns")
 list("destructure", patterns.destructure({ 1, 2, nil, 4, 5 }, { a = 9 }), { 1, "one", 1, 30, 2, 9, "default" })

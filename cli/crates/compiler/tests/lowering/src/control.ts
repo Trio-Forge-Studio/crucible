@@ -112,3 +112,13 @@ export function shadowedCondition() {
 	} while (--n > 0);
 	return passes;
 }
+
+function bounds(): LuaTuple<[number, number]> {
+	return $tuple(2, 5);
+}
+
+export function spanOf() {
+	let total = 0;
+	for (const bound of bounds()) total += bound;
+	return total;
+}

@@ -83,6 +83,12 @@ fn type_is_matches_the_macro_by_symbol_identity() {
 }
 
 #[test]
+fn assert_tests_its_condition_for_javascript_truthiness() {
+    let condition = fact("macros.ts", "assert(count, \"empty\")", "count");
+    assert_eq!(condition, Fact { falsy: Some(Falsy::ZERO | Falsy::NAN), ..Fact::default() });
+}
+
+#[test]
 fn enum_members_and_const_enum_references_carry_constant_values() {
     let cases = [
         (fact("enums.ts", "Green = 4", "Green = 4"), Constant::Number(4.0)),
