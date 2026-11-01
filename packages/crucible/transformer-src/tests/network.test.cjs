@@ -121,6 +121,7 @@ const negatives = [
 		declaration("{inner: {bad: any}}"),
 	],
 	["undefined field", "CRU019: X.Test payload.a: ", declaration("{a: undefined; b: string}")],
+	["optional undefined field", "CRU019: X.Test payload.a: ", declaration("{a?: undefined; b: string}")],
 	["optional discriminant", "CRU019", declaration('{Kind?:"A";a:number}|{Kind:"B";b:string}')],
 	["shared discriminant literal", "CRU019", declaration('{Kind:"A";a:number}|{Kind:"A";b:string}')],
 	["array beside variants", "CRU019", declaration('string[]|{Kind:"A"}|{Kind:"B"}')],
@@ -257,6 +258,8 @@ export class Good extends Base {
 			"CRU021",
 			"abstract class Base extends Subsystem { readonly r = receive(Event, () => {}); } class X extends Base { readonly r = receive(Event, () => {}); }",
 		],
+		["CRU017", 'class X extends Subsystem { readonly r = receive(toServer<string>("X.Inline"), () => {}); }'],
+		["CRU021", "class X extends Subsystem { readonly r = receive(Event, () => { receive(Event, () => {}); }); }"],
 		["CRU022", "class X extends Subsystem { readonly r = receive(Out, () => {}); }"],
 		["CRU012", "class X extends Subsystem { readonly r = receive(Event, async () => {}); }"],
 		[
@@ -377,6 +380,86 @@ test("network augmentations that add no declaration to a reached payload symbol 
 		[],
 	);
 	compile(game);
+});
+
+const augmentation = (module, body) => `import "${module}"; declare module "${module}" { ${body} }`;
+const augmentedFiles = (result) =>
+	[
+		...new Set(
+			result.diagnostics
+				.filter((d) => d.code === 90010 && d.file.fileName.includes("/util/"))
+				.map((d) => path.basename(d.file.fileName, ".ts")),
+		),
+	].sort();
+
+test("network augmentations of a base interface a reached payload extends fail at the augmentation", () => {
+	const game = project({
+		"src/shared/base.ts":
+			"export interface Base { base: string } export interface Root { root: string } export interface Gen<T> { value: T }",
+		"src/shared/model.ts":
+			'import { Base, Root, Gen } from "./base"; export interface Child extends Base { child: string } export interface Middle extends Root { middle: string } export interface Top extends Middle { top: string } export interface Generic extends Gen<string> { own: number } export interface Unreached extends Base { own: string }',
+		"src/shared/messages.ts":
+			imports +
+			'import { Child, Top, Generic } from "./model"; export const One = toServer<Child>("X.One"); export const Two = toServer<Top>("X.Two"); export const Three = toServer<Generic>("X.Three");',
+		"src/util/base.ts": augmentation("../shared/base", "interface Base { extra: string }"),
+		"src/util/root.ts": augmentation("../shared/base", "interface Root { extra: string }"),
+		"src/util/gen.ts": augmentation("../shared/base", "interface Gen<T> { extra: T }"),
+		"src/util/middle.ts": augmentation("../shared/model", "interface Middle { extra: string }"),
+		"src/util/unreached.ts": augmentation("../shared/model", "interface Unreached { extra: string }"),
+	});
+	assert.deepEqual(augmentedFiles(inspect(game)), ["base", "gen", "middle", "root"]);
+	assert.match(compile(game, 1), /CRU010/);
+});
+
+test("network augmentations declaring a value beside a reached payload name fail like any other declaration", () => {
+	const forms = {
+		function: ["function Payload(): void;", true],
+		const: ["const Payload: number;", true],
+		let: ["let Payload: number;", true],
+		var: ["var Payload: number;", true],
+		unreached: ["const Other: number;", false],
+	};
+	for (const [form, [body, rejected]] of Object.entries(forms)) {
+		const game = project({
+			"src/shared/model.ts":
+				"export interface Payload { value: string } export interface Other { value: string }",
+			"src/shared/messages.ts":
+				imports + 'import { Payload } from "./model"; export const One = toServer<Payload>("X.One");',
+			"src/util/value.ts": augmentation("../shared/model", body),
+		});
+		assert.deepEqual(augmentedFiles(inspect(game)), rejected ? ["value"] : [], form);
+		if (rejected) assert.match(compile(game, 1), /CRU010/);
+		else compile(game);
+	}
+});
+
+test("network augmentations reach a payload through a dotted namespace declaration", () => {
+	const game = project({
+		"src/shared/model.ts":
+			"export namespace A { export namespace B { export interface Payload { x: number } } export const marker: number }",
+		"src/shared/messages.ts":
+			imports + 'import { A } from "./model"; export const One = toServer<A.B.Payload>("X.One");',
+		"src/util/dotted.ts": augmentation("../shared/model", "namespace A.B { interface Payload { extra: string } }"),
+		"src/util/unrelated.ts": augmentation("../shared/model", "namespace A.B { const unrelated: number }"),
+	});
+	assert.deepEqual(augmentedFiles(inspect(game)), ["dotted"]);
+	assert.match(compile(game, 1), /CRU010/);
+});
+
+test("network augmentations the reverse scan reports only the augmentation and no diagnostic of other declarations", () => {
+	const game = project({
+		"src/global.d.ts": "interface ScriptPayload { value: string }\n",
+		"src/shared/model.ts": "export interface Payload { value: string }",
+		"src/shared/messages.ts":
+			imports + 'import { Payload } from "./model"; export const One = toServer<Payload>("X.One");',
+		"src/shared/bad.ts": imports + declaration("{ a: any; b: ScriptPayload }", "toServer", "X.Bad"),
+		"src/augment-only.ts": augmentation("./shared/model", "interface Payload { extra: string }"),
+	});
+	const result = inspect(game, "augment-only.ts");
+	assert.deepEqual(
+		result.diagnostics.map((d) => [path.basename(d.file.fileName), d.code]),
+		[["augment-only.ts", 90010]],
+	);
 });
 
 test("network side entry references follow named and star barrels namespace aliases type imports and dynamic imports", () => {

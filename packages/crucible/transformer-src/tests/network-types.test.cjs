@@ -139,3 +139,23 @@ test("K2 K9 rule 25 unknown responses accept an empty callback and the build rej
 		);
 	}
 });
+
+test("K9 explicit type arguments reach the emitted receive when the callback is a named function", () => {
+	const game = project({
+		"src/shared/messages.ts":
+			'import { toServer } from "@trioforge/crucible"; export const Event = toServer<string>("X.Event");',
+		"src/server/named.ts":
+			'import { receive, Subsystem, ToServer } from "@trioforge/crucible"; import { Event } from "../shared/messages"; function named(player: Player, payload: string) {} export class Q extends Subsystem { readonly r = receive<ToServer<number>>(Event, named); }',
+	});
+	const { diagnostics } = inspect(game);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
+	const output = stripVTControlCharacters(compile(game, 1)).replaceAll("\r\n", "\n");
+	assert.equal(output.match(/ error TS/g)?.length, 1, output);
+	assert.match(
+		output,
+		/error TS2345: Argument of type 'ToServer<string>' is not assignable to parameter of type 'ToServer<number>'/,
+	);
+});
