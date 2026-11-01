@@ -86,7 +86,7 @@ KILLED 30 guard | server-session.ts | first failure: network-callbacks.luau: 53 
 KILLED 31 guard | server-session.ts | first failure: network-ready.luau: 31 32 ClientReady is a receive target only and one per Subsystem
 KILLED 32 guard | claims.ts | first failure: network-ready.luau: 31 32 ClientReady is a receive target only and one per Subsystem
 KILLED 32 swap | claims.ts | first failure: network-ready.luau: 31 32 ClientReady is a receive target only and one per Subsystem
-KILLED 32 pair | claims.ts | first failure: network-boot.luau: 79 the client flush throwing after READY closes with FAIL closing
+KILLED 32 pair | claims.ts | first failure: network-boot.luau: 78 80 closing a committed server session keeps its claims and sealed indices
 KILLED 33 guard | server-session.ts | first failure: network-ready.luau: 33 35 R3 a callback that ends its peer stops the pass and its cleanup runs after the end's
 KILLED 33 pair | server-session.ts | first failure: network-handshake.luau: 46 48 79 READY flushes constructor awake and start sends in call order and ClientReady follows the drain
 KILLED 34 guard | session.ts | first failure: network-callbacks.luau: 75 76 R4 failures after the peer ended use the session key, once per field, never recreating the peer's set
@@ -164,13 +164,18 @@ KILLED 77 guard ERROR nonce 0 | envelope.ts | first failure: network-asks.luau: 
 KILLED 77 guard catalog size | client-session.ts | first failure: network-asks.luau: 43 74 77 an OK or ERROR with nonce 0 or naming a non-ask, or an EVENT past the catalog, fails the client
 KILLED 77 guard reply kind | client-session.ts | first failure: network-asks.luau: 43 74 77 an OK or ERROR with nonce 0 or naming a non-ask, or an EVENT past the catalog, fails the client
 KILLED 78 guard | server-session.ts | first failure: network-peers.luau: 78 76 the session stays open through onShutdown, then closes with FAIL closing, no kick, and ends every peer
-KILLED 78 pair | boot.ts | first failure: network-peers.luau: 78 76 the session stays open through onShutdown, then closes with FAIL closing, no kick, and ends every peer
+KILLED 78 pair | boot.ts | first failure: network-boot.luau: 78 80 closing a committed server session keeps its claims and sealed indices
 KILLED 78 pair end | server-session.ts | first failure: network-peers.luau: 78 76 the session stays open through onShutdown, then closes with FAIL closing, no kick, and ends every peer
+KILLED 78 guard committed indices | server-session.ts | first failure: network-boot.luau: 78 80 closing a committed server session keeps its claims and sealed indices
+KILLED 78 guard committed claims | server-session.ts | first failure: network-boot.luau: 78 80 closing a committed server session keeps its claims and sealed indices
 KILLED 79 guard | boot.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
 KILLED 79 swap | boot.ts | first failure: network-boot.luau: 79 80 R1 booted throwing or the network commit failing leaves the client's CrucibleBooted unset
 KILLED 79 pair | boot.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
 KILLED 79 pair client end | client-session.ts | first failure: network-boot.luau: 38 76 79 a client boot failing at its network commit settles a pending ask disconnected
+KILLED 79 guard client committed indices | client-session.ts | first failure: network-boot.luau: 79 80 closing a committed client session keeps its claims and adopted indices
+KILLED 79 guard client committed claims | client-session.ts | first failure: network-boot.luau: 79 80 closing a committed client session keeps its claims and adopted indices
+KILLED 79 guard client close twice | client-session.ts | first failure: network-boot.luau: 76 79 closing a client session twice disconnects and ends it once
 KILLED 80 guard | boot.ts | first failure: network-boot.luau: 79 80 R1 the network commit throwing after BindToClose and booted rolls back, and close does nothing
 KILLED 80 swap | boot.ts | first failure: network-asks.luau: 18 a payload is encoded at the call, so mutating it afterwards sends nothing new
 KILLED 80 pair | index.ts | first failure: boot-platform.luau: side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot
-124/124 source mutants killed; 51 operators not applicable; restored build 0
+129/129 source mutants killed; 51 operators not applicable; restored build 0
