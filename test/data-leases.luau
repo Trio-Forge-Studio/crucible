@@ -5,6 +5,8 @@ local STORE = "FD.Players"
 local USER = 4120
 local KEY = tostring(USER)
 local SEALED, ENDED = 2, 3
+local LOAD, ORDINARY = 4, 5
+local PENDING_PER_KEY = 32
 
 local function world(count: number?, options)
 	local backend = Backend.new()
@@ -47,6 +49,42 @@ end
 
 local function stored(backend)
 	return backend:envelope(STORE, KEY)
+end
+
+local function fill(realm, seconds: number)
+	local scheduler = realm.data.scheduler
+	realm.run(function()
+		for _ = 1, PENDING_PER_KEY do
+			scheduler:submit({
+				store = STORE,
+				key = KEY,
+				priority = ORDINARY,
+				kind = "update",
+				dispatchDeadline = realm.clock() + seconds,
+				bytes = 100,
+				transform = function()
+					return function()
+						return nil
+					end
+				end,
+			})
+		end
+	end)
+end
+
+local function attempts(realm)
+	local scheduler = realm.data.scheduler
+	local submit = scheduler.submit
+	local log = {}
+	scheduler.submit = function(self, request)
+		local ticket = submit(self, request)
+		if request.store == STORE and request.key == KEY and request.priority == LOAD then
+			table.insert(log, { at = realm.clock(), refused = ticket.settled and ticket.settled.kind == "overloaded" })
+			assert(#log <= 2000, "a refused load resubmits without yielding")
+		end
+		return ticket
+	end
+	return log
 end
 
 local function snapshot(revision: number, coins: number)
@@ -330,6 +368,76 @@ return {
 		spec.eq(calls[1].plan, "reject", "the one call was refused")
 		spec.eq(#a.kicks, 1, "kicked once")
 		spec.eq(stored(backend), nil, "nothing written")
+	end,
+	["rule 20 a held load whose polls then throttle until the deadline kicks failed"] = function()
+		local backend, a, b = world()
+		load(a, a.join(USER))
+		backend:advance(1)
+		local pb = b.join(USER)
+		local start = backend.now
+		local lb = load(b, pb)
+		backend:advance(100)
+		spec.eq(lb.done, false, "polling the live lease")
+		local held = 0
+		for _, call in backend:callsTo({ server = b.id }) do
+			held += if call.outcome and call.outcome.kind == "ok" and not call.committed then 1 else 0
+		end
+		assert(held >= 5, `{held} held answers before the throttling`)
+		backend:fail("throttle", { server = b.id }, 100000)
+		backend:advance(30)
+		spec.eq(lb.value, false, "the load ended")
+		spec.eq(b.kicked(pb), b.limits.LOAD_FAILED_MESSAGE, "storage errors at the deadline kick failed, not busy")
+		local late = b.kicks[1].at - start - b.limits.LOAD_DEADLINE_SECONDS
+		assert(late >= -1e-6 and late <= 0.25, `kicked {late} s after the deadline`)
+		spec.eq(stored(backend).lease.serverId, a.id, "the live lease was never taken")
+	end,
+	["rule 32 a load refused at a pending cap retries no faster than the poll minimum"] = function()
+		local backend, a = world(1)
+		local log = attempts(a)
+		a.budget.update = 0
+		fill(a, 30)
+		local pa = a.join(USER)
+		local la = load(a, pa)
+		backend:advance(29)
+		spec.eq(la.done, false, "the load keeps trying while refused")
+		assert(#log >= 2, "the refused load tried again")
+		for index, attempt in log do
+			assert(attempt.refused, `attempt {index} was refused at the per-key cap`)
+			if index > 1 then
+				local gap = attempt.at - log[index - 1].at
+				assert(gap >= 0.25 - 1e-6, `attempt {index} followed the last after {gap} s`)
+			end
+		end
+		assert(#log <= 29 / 0.25 + 1, `{#log} attempts in 29 s`)
+		backend:advance(1.5)
+		a.budget.update = 1000
+		backend:advance(2)
+		spec.eq(la.value, true, "loaded once the cap cleared")
+		spec.eq(a.kicked(pa), nil, "never kicked")
+		spec.eq(#backend:callsTo({ server = a.id }), 1, "the refused attempts and the withdrawn callers sent nothing")
+	end,
+	["rule 20 a load refused at a pending cap ends at the deadline"] = function()
+		local backend, a, b = world()
+		load(a, a.join(USER))
+		backend:advance(1)
+		local log = attempts(b)
+		local pb = b.join(USER)
+		local start = backend.now
+		local lb = load(b, pb)
+		backend:advance(100)
+		spec.eq(lb.done, false, "polling the live lease")
+		b.budget.update = 1
+		fill(b, 60)
+		backend:advance(25)
+		local refused = 0
+		for _, attempt in log do
+			refused += if attempt.refused then 1 else 0
+		end
+		assert(refused >= 10, `{refused} attempts refused at the per-key cap`)
+		spec.eq(lb.value, false, "the load ended")
+		spec.eq(b.kicked(pb), b.limits.LOAD_FAILED_MESSAGE, "refused at the cap, not answered by a live lease")
+		local late = b.kicks[1].at - start - b.limits.LOAD_DEADLINE_SECONDS
+		assert(math.abs(late) <= 1e-6, `kicked {late} s after the deadline`)
 	end,
 	["rule 20 abandon after an ambiguous acquisition removes only its lease"] = function()
 		local backend, a = world(1)
