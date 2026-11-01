@@ -499,7 +499,7 @@ function link:realm(side: string, name: string)
 			end
 			return realm.required
 		end,
-	}, engine.loggingPort, realm.port)
+	}, engine.loggingPort, nil, realm.port)
 	-- Boot reads the engine port through roblox-port; patching the module table before boot loads swaps in the fake.
 	realm.graph.module("internal/roblox-port").robloxPort = function()
 		return engine.port
