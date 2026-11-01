@@ -34,7 +34,7 @@ export interface Request {
 	readonly key: string;
 	readonly priority: Priority;
 	readonly kind: "update" | "read";
-	/** No dispatch at or after it. Session work passes its safe bound (rule 36). */
+	/** No dispatch at or after it. Session work passes its safe bound (rule 36), a release its lease's end (ruling K15). */
 	readonly dispatchDeadline: number;
 	/** Orders Release and Renew, and makes a renewal LeaseCritical within 30 s of it (rule 34). */
 	readonly safeUntil?: number;

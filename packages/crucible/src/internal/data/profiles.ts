@@ -440,7 +440,8 @@ export class ProfileRuntime {
 			kind: "update",
 			renewal: !release,
 			safeUntil: session.safeUntil,
-			dispatchDeadline: session.safeUntil,
+			// A release retries until its lease would expire, never only until the safe bound (rule 26, ruling K15).
+			dispatchDeadline: release ? session.safeUntil - LOCAL_AUTHORITY_SECONDS + LEASE_SECONDS : session.safeUntil,
 			bytes: jsonBytes(session.value) + 1024,
 			transform: () => {
 				const snapshot = session.snapshot();
