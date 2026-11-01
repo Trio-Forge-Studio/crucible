@@ -50,15 +50,18 @@ function inspect(game, only, fault) {
 	const sources = program
 		.getSourceFiles()
 		.filter((s) => !s.isDeclarationFile && (!only || s.fileName.endsWith(only)));
-	const subject = fault
+	const injected = fault instanceof Error ? { error: fault } : fault;
+	let armed = injected?.during === "creation";
+	const subject = injected
 		? Object.create(program, {
 				getTypeChecker: {
 					value: () =>
 						new Proxy(program.getTypeChecker(), {
 							get: (checker, name) =>
-								name === "getTypeFromTypeNode"
-									? () => {
-											throw fault;
+								name === (injected.method ?? "getTypeFromTypeNode")
+									? (...args) => {
+											if (!armed) return checker[name](...args);
+											throw injected.error;
 										}
 									: checker[name],
 						}),
@@ -66,15 +69,23 @@ function inspect(game, only, fault) {
 			})
 		: program;
 	const factory = transform(subject, {}, { ts, addDiagnostic: (d) => diagnostics.push(d) });
-	const result = ts.transform(sources, [factory]);
+	armed = injected?.during !== "creation";
+	let thrown;
+	let result;
+	try {
+		result = ts.transform(sources, [factory]);
+	} catch (error) {
+		if (!injected) throw error;
+		thrown = error;
+	}
 	const output = new Map(
-		result.transformed.map((s) => [
+		(result?.transformed ?? []).map((s) => [
 			path.relative(game, s.fileName).replaceAll("\\", "/"),
 			ts.createPrinter().printFile(s),
 		]),
 	);
-	result.dispose();
-	return { program, diagnostics, output };
+	result?.dispose();
+	return { program, diagnostics, output, thrown };
 }
 function compile(game, expected = 0) {
 	const result = spawnSync(process.execPath, [path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"), "-p", game], {

@@ -179,8 +179,12 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					if (ts.isTypeAliasDeclaration(decl) && !exempt(decl.getSourceFile()))
 						references(decl.type, location);
 			}
-			if (ts.isTypeQueryNode(syntax))
+			if (ts.isTypeQueryNode(syntax)) {
 				checkSymbols([unalias(checker.getSymbolAtLocation(syntax.exprName))], location);
+				const queried = checker.getTypeAtLocation(syntax.exprName);
+				for (const signature of [...queried.getCallSignatures(), ...queried.getConstructSignatures()])
+					mention(checker.getReturnTypeOfSignature(signature), location);
+			}
 			ts.forEachChild(syntax, (child) => references(child, location));
 		};
 		for (const type of node.typeArguments ?? []) references(type, state ? "value" : "payload");
@@ -221,6 +225,9 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				kind: "object",
 				fields: props.map((prop) => {
 					const at = prop.valueDeclaration ?? prop.declarations?.[0] ?? node;
+					for (const decl of prop.declarations ?? [])
+						if (ts.isInterfaceDeclaration(decl.parent))
+							reached.add(checker.getSymbolAtLocation(decl.parent.name));
 					references(at.type, `${location}.${prop.name}`);
 					if (prop.escapedName.toString().startsWith("__@"))
 						fail(node, location, "symbol property names cannot cross the network");
