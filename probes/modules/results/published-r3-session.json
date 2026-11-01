@@ -1,0 +1,126 @@
+{
+	"label": "published-r3",
+	"placeId": 101113691364993,
+	"universeId": 10774131158,
+	"plays": [
+		{
+			"name": "hold",
+			"clicks": [
+				{
+					"ordinal": 1,
+					"what": "Buy",
+					"at": "2026-11-01T07:26:07.630Z"
+				},
+				{
+					"ordinal": 1,
+					"what": "OK",
+					"at": "2026-11-01T07:26:15.631Z"
+				},
+				{
+					"ordinal": 2,
+					"what": "Buy",
+					"at": "2026-11-01T07:26:38.263Z"
+				},
+				{
+					"ordinal": 2,
+					"what": "OK",
+					"at": "2026-11-01T07:27:40.625Z"
+				},
+				{
+					"ordinal": 3,
+					"what": "Buy",
+					"at": "2026-11-01T07:28:02.991Z"
+				},
+				{
+					"ordinal": 3,
+					"what": "OK",
+					"at": "2026-11-01T07:30:05.716Z"
+				}
+			],
+			"attributes": {
+				"ProbeMode": "hold",
+				"ProbeHolds": "5,60,120",
+				"ProbeOutdatedSeconds": 300
+			},
+			"start": 0,
+			"startedAt": "2026-11-01T07:25:57.599Z",
+			"end": 39,
+			"stoppedAt": "2026-11-01T07:31:15.664Z"
+		},
+		{
+			"name": "leave-1",
+			"clicks": [
+				{
+					"ordinal": 1,
+					"what": "Buy",
+					"at": "2026-11-01T07:31:28.478Z"
+				}
+			],
+			"attributes": {
+				"ProbeMode": "leave",
+				"ProbeHolds": "1",
+				"ProbeOutdatedSeconds": 1
+			},
+			"start": 39,
+			"startedAt": "2026-11-01T07:31:18.748Z",
+			"end": 63,
+			"stoppedAt": "2026-11-01T07:33:10.830Z"
+		},
+		{
+			"name": "join-late",
+			"clicks": [],
+			"attributes": {
+				"ProbeMode": "join",
+				"ProbeProcessAfter": 15,
+				"ProbeOutdatedSeconds": 1
+			},
+			"start": 63,
+			"startedAt": "2026-11-01T07:33:13.891Z",
+			"end": 83,
+			"stoppedAt": "2026-11-01T07:34:10.281Z"
+		},
+		{
+			"name": "leave-2",
+			"clicks": [
+				{
+					"ordinal": 1,
+					"what": "Buy",
+					"at": "2026-11-01T07:34:22.234Z"
+				}
+			],
+			"attributes": {
+				"ProbeMode": "leave",
+				"ProbeHolds": "1",
+				"ProbeOutdatedSeconds": 1
+			},
+			"start": 83,
+			"startedAt": "2026-11-01T07:34:13.338Z",
+			"end": 107,
+			"stoppedAt": "2026-11-01T07:36:04.437Z"
+		},
+		{
+			"name": "join-early",
+			"clicks": [],
+			"attributes": {
+				"ProbeMode": "join",
+				"ProbeProcessAfter": 0,
+				"ProbeOutdatedSeconds": 1
+			},
+			"start": 107,
+			"startedAt": "2026-11-01T07:36:07.513Z",
+			"end": 127,
+			"stoppedAt": "2026-11-01T07:36:53.611Z"
+		}
+	],
+	"observations": {},
+	"freePhysicalMemoryKB": 5696636,
+	"launchedAt": "2026-11-01T07:25:33.688Z",
+	"pid": 13296,
+	"nativeLog": "0.745.0.7451137_20261101T072534Z_Studio_304FB_last.log",
+	"studioId": "fa50a1e1-8102-40fb-bcda-6cf2c90e147d",
+	"rejectedStudioIds": [],
+	"version": "0.745.0.7451137 placeId=101113691364993 gameId=10774131158",
+	"finished": true,
+	"closeMethod": "Stop-Process",
+	"processRemaining": false
+}

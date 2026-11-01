@@ -1,0 +1,127 @@
+2026-11-01T07:25:57.869Z G1|20.156|env|mode=hold placeId=101113691364993 gameId=10774131158 holds=5,60,120
+2026-11-01T07:25:57.869Z G1|20.157|5b|ProcessReceipt assigned
+2026-11-01T07:25:57.869Z G1|20.157|ready|published-place instrument
+2026-11-01T07:25:58.028Z G1|20.315|5b|PlayerAdded Hezaerd userId=1113069837
+2026-11-01T07:26:00.275Z G1|22.565|6fetch|ok=true result=ConfigSnapshot
+2026-11-01T07:26:00.276Z G1|22.565|6a|GlobalEvent typeof=table type=table value={"endsAt":0,"multiplier":2}
+2026-11-01T07:26:00.276Z G1|22.565|6a|GlobalEvent.multiplier typeof=number value=2
+2026-11-01T07:26:00.276Z G1|22.566|6a|NoSuchKey ok=true typeof=nil value=nil
+2026-11-01T07:26:00.276Z G1|22.566|6b|initial Outdated=false
+2026-11-01T07:26:01.758Z G1|24.047|5a|prompting ordinal=1
+2026-11-01T07:26:07.605Z G1|29.893|5a|callback ordinal=1 callsForId=1 purchaseId=fa129884e94c07fccc187cf02d36b6ab product=3726289768 player=1113069837 players=1
+2026-11-01T07:26:07.605Z G1|29.894|5a|holding ordinal=1 for 5s
+2026-11-01T07:26:12.621Z G1|34.910|5a|returning PurchaseGranted ordinal=1 heldFor=5.017
+2026-11-01T07:26:12.839Z G1|35.126|5a|ordinal=1 promptToReturn=10.863
+2026-11-01T07:26:15.290Z G1|37.576|5a|PromptProductPurchaseFinished user=1113069837 product=3726289768 purchased=true
+2026-11-01T07:26:32.855Z G1|55.142|5a|prompting ordinal=2
+2026-11-01T07:26:37.936Z G1|60.224|5a|callback ordinal=2 callsForId=1 purchaseId=b3be2109fd4842097b6c047e39ef6896 product=3726289768 player=1113069837 players=1
+2026-11-01T07:26:37.936Z G1|60.224|5a|holding ordinal=2 for 60s
+2026-11-01T07:27:37.951Z G1|120.238|5a|returning PurchaseGranted ordinal=2 heldFor=60.014
+2026-11-01T07:27:38.102Z G1|120.389|5a|ordinal=2 promptToReturn=65.096
+2026-11-01T07:27:40.284Z G1|122.572|5a|PromptProductPurchaseFinished user=1113069837 product=3726289768 purchased=true
+2026-11-01T07:27:58.117Z G1|140.405|5a|prompting ordinal=3
+2026-11-01T07:28:02.966Z G1|145.256|5a|callback ordinal=3 callsForId=1 purchaseId=b96af1a7ce8cb25860615fb0b872dc3c product=3726289768 player=1113069837 players=1
+2026-11-01T07:28:02.966Z G1|145.256|5a|holding ordinal=3 for 120s
+2026-11-01T07:30:02.979Z G1|265.267|5a|returning PurchaseGranted ordinal=3 heldFor=120.012
+2026-11-01T07:30:03.063Z G1|265.351|5a|ordinal=3 promptToReturn=124.862
+2026-11-01T07:30:05.379Z G1|267.667|5a|PromptProductPurchaseFinished user=1113069837 product=3726289768 purchased=true
+2026-11-01T07:30:23.078Z G1|285.366|5a|purchase sequence complete
+2026-11-01T07:31:00.712Z G1|322.999|6b|idle 300s Outdated=false
+2026-11-01T07:31:00.712Z G1|322.999|6b|fresh GetConfigAsync sameObject=false Outdated=false
+2026-11-01T07:31:00.713Z G1|323.000|6b|SetTestingValue ok=true result=nil
+2026-11-01T07:31:00.713Z G1|323.000|6b|after SetTestingValue Outdated=true fresh.Outdated=true
+2026-11-01T07:31:00.713Z G1|323.001|6b|UpdateAvailable fired Outdated=true
+2026-11-01T07:31:05.718Z G1|328.004|6b|5s later Outdated=true
+2026-11-01T07:31:05.719Z G1|328.005|6b|GetConfigAsync after write sameObject=false typeof=string value={"multiplier":3,"endsAt":0}
+2026-11-01T07:31:05.719Z G1|328.006|6b|old snapshot still reads typeof=table
+2026-11-01T07:31:05.719Z G1|328.006|6b|Refresh ok=true result=nil Outdated=false
+2026-11-01T07:31:05.719Z G1|328.006|6b|after Refresh value={"multiplier":3,"endsAt":0}
+2026-11-01T07:31:05.719Z G1|328.006|6done|config probe complete
+2026-11-01T07:31:18.963Z G1|341.251|env|mode=leave placeId=101113691364993 gameId=10774131158 holds=1
+2026-11-01T07:31:18.964Z G1|341.251|5b|ProcessReceipt assigned
+2026-11-01T07:31:18.964Z G1|341.251|ready|published-place instrument
+2026-11-01T07:31:19.099Z G1|341.388|5b|PlayerAdded Hezaerd userId=1113069837
+2026-11-01T07:31:22.166Z G1|344.453|6fetch|ok=true result=ConfigSnapshot
+2026-11-01T07:31:22.167Z G1|344.454|6a|GlobalEvent typeof=table type=table value={"endsAt":0,"multiplier":2}
+2026-11-01T07:31:22.167Z G1|344.454|6a|GlobalEvent.multiplier typeof=number value=2
+2026-11-01T07:31:22.167Z G1|344.454|6a|NoSuchKey ok=true typeof=nil value=nil
+2026-11-01T07:31:22.167Z G1|344.454|6b|initial Outdated=false
+2026-11-01T07:31:22.212Z G1|344.498|5a|prompting ordinal=1
+2026-11-01T07:31:23.175Z G1|345.463|6b|idle 1s Outdated=false
+2026-11-01T07:31:23.176Z G1|345.464|6b|fresh GetConfigAsync sameObject=false Outdated=false
+2026-11-01T07:31:23.176Z G1|345.464|6b|SetTestingValue ok=true result=nil
+2026-11-01T07:31:23.177Z G1|345.464|6b|after SetTestingValue Outdated=true fresh.Outdated=true
+2026-11-01T07:31:23.177Z G1|345.465|6b|UpdateAvailable fired Outdated=true
+2026-11-01T07:31:28.177Z G1|350.466|6b|5s later Outdated=true
+2026-11-01T07:31:28.177Z G1|350.466|6b|GetConfigAsync after write sameObject=false typeof=string value={"multiplier":3,"endsAt":0}
+2026-11-01T07:31:28.178Z G1|350.466|6b|old snapshot still reads typeof=table
+2026-11-01T07:31:28.178Z G1|350.467|6b|Refresh ok=true result=nil Outdated=false
+2026-11-01T07:31:28.178Z G1|350.467|6b|after Refresh value={"multiplier":3,"endsAt":0}
+2026-11-01T07:31:28.178Z G1|350.467|6done|config probe complete
+2026-11-01T07:31:28.459Z G1|350.747|5a|callback ordinal=1 callsForId=1 purchaseId=3cbc82dca84b65ecd7a5445e2aaa952c product=3726289768 player=1113069837 players=1
+2026-11-01T07:31:28.460Z G1|350.748|5a|returning NotProcessedYet ordinal=1
+2026-11-01T07:31:42.225Z G1|364.514|5a|purchase sequence complete
+2026-11-01T07:33:14.029Z G1|456.316|env|mode=join placeId=101113691364993 gameId=10774131158 holds=5,60,120
+2026-11-01T07:33:14.029Z G1|456.316|ready|published-place instrument
+2026-11-01T07:33:14.168Z G1|456.455|5b|PlayerAdded Hezaerd userId=1113069837
+2026-11-01T07:33:16.213Z G1|458.502|6fetch|ok=true result=ConfigSnapshot
+2026-11-01T07:33:16.213Z G1|458.502|6a|GlobalEvent typeof=table type=table value={"endsAt":0,"multiplier":2}
+2026-11-01T07:33:16.214Z G1|458.502|6a|GlobalEvent.multiplier typeof=number value=2
+2026-11-01T07:33:16.214Z G1|458.503|6a|NoSuchKey ok=true typeof=nil value=nil
+2026-11-01T07:33:16.214Z G1|458.503|6b|initial Outdated=false
+2026-11-01T07:33:17.404Z G1|459.692|6b|idle 1s Outdated=false
+2026-11-01T07:33:17.405Z G1|459.693|6b|fresh GetConfigAsync sameObject=false Outdated=false
+2026-11-01T07:33:17.405Z G1|459.693|6b|SetTestingValue ok=true result=nil
+2026-11-01T07:33:17.405Z G1|459.693|6b|after SetTestingValue Outdated=true fresh.Outdated=true
+2026-11-01T07:33:17.405Z G1|459.693|6b|UpdateAvailable fired Outdated=true
+2026-11-01T07:33:22.421Z G1|464.709|6b|5s later Outdated=true
+2026-11-01T07:33:22.422Z G1|464.710|6b|GetConfigAsync after write sameObject=false typeof=string value={"multiplier":3,"endsAt":0}
+2026-11-01T07:33:22.422Z G1|464.710|6b|old snapshot still reads typeof=table
+2026-11-01T07:33:22.422Z G1|464.710|6b|Refresh ok=true result=nil Outdated=false
+2026-11-01T07:33:22.423Z G1|464.711|6b|after Refresh value={"multiplier":3,"endsAt":0}
+2026-11-01T07:33:22.423Z G1|464.711|6done|config probe complete
+2026-11-01T07:33:29.036Z G1|471.326|5b|ProcessReceipt assigned
+2026-11-01T07:34:13.477Z G1|515.764|env|mode=leave placeId=101113691364993 gameId=10774131158 holds=1
+2026-11-01T07:34:13.477Z G1|515.765|5b|ProcessReceipt assigned
+2026-11-01T07:34:13.477Z G1|515.765|ready|published-place instrument
+2026-11-01T07:34:13.623Z G1|515.911|5b|PlayerAdded Hezaerd userId=1113069837
+2026-11-01T07:34:15.415Z G1|517.703|6fetch|ok=true result=ConfigSnapshot
+2026-11-01T07:34:15.415Z G1|517.703|6a|GlobalEvent typeof=table type=table value={"endsAt":0,"multiplier":2}
+2026-11-01T07:34:15.415Z G1|517.703|6a|GlobalEvent.multiplier typeof=number value=2
+2026-11-01T07:34:15.415Z G1|517.703|6a|NoSuchKey ok=true typeof=nil value=nil
+2026-11-01T07:34:15.415Z G1|517.704|6b|initial Outdated=false
+2026-11-01T07:34:16.599Z G1|518.886|6b|idle 1s Outdated=false
+2026-11-01T07:34:16.600Z G1|518.887|6b|fresh GetConfigAsync sameObject=false Outdated=false
+2026-11-01T07:34:16.600Z G1|518.887|6b|SetTestingValue ok=true result=nil
+2026-11-01T07:34:16.600Z G1|518.887|6b|after SetTestingValue Outdated=true fresh.Outdated=true
+2026-11-01T07:34:16.600Z G1|518.887|6b|UpdateAvailable fired Outdated=true
+2026-11-01T07:34:16.642Z G1|518.930|5a|prompting ordinal=1
+2026-11-01T07:34:21.603Z G1|523.892|6b|5s later Outdated=true
+2026-11-01T07:34:21.604Z G1|523.892|6b|GetConfigAsync after write sameObject=false typeof=string value={"multiplier":3,"endsAt":0}
+2026-11-01T07:34:21.604Z G1|523.893|6b|old snapshot still reads typeof=table
+2026-11-01T07:34:21.604Z G1|523.893|6b|Refresh ok=true result=nil Outdated=false
+2026-11-01T07:34:21.604Z G1|523.893|6b|after Refresh value={"multiplier":3,"endsAt":0}
+2026-11-01T07:34:21.604Z G1|523.893|6done|config probe complete
+2026-11-01T07:34:22.219Z G1|524.506|5a|callback ordinal=1 callsForId=1 purchaseId=cd2418d961224cbeb108d5edc16300bd product=3726289768 player=1113069837 players=1
+2026-11-01T07:34:22.219Z G1|524.506|5a|returning NotProcessedYet ordinal=1
+2026-11-01T07:34:36.653Z G1|538.941|5a|purchase sequence complete
+2026-11-01T07:36:07.795Z G1|630.083|env|mode=join placeId=101113691364993 gameId=10774131158 holds=5,60,120
+2026-11-01T07:36:07.795Z G1|630.083|5b|ProcessReceipt assigned
+2026-11-01T07:36:07.795Z G1|630.083|ready|published-place instrument
+2026-11-01T07:36:07.973Z G1|630.261|5b|PlayerAdded Hezaerd userId=1113069837
+2026-11-01T07:36:09.964Z G1|632.251|6fetch|ok=true result=ConfigSnapshot
+2026-11-01T07:36:09.964Z G1|632.251|6a|GlobalEvent typeof=table type=table value={"endsAt":0,"multiplier":2}
+2026-11-01T07:36:09.964Z G1|632.252|6a|GlobalEvent.multiplier typeof=number value=2
+2026-11-01T07:36:09.964Z G1|632.252|6a|NoSuchKey ok=true typeof=nil value=nil
+2026-11-01T07:36:09.964Z G1|632.252|6b|initial Outdated=false
+2026-11-01T07:36:11.142Z G1|633.430|6b|idle 1s Outdated=false
+2026-11-01T07:36:11.143Z G1|633.431|6b|fresh GetConfigAsync sameObject=false Outdated=false
+2026-11-01T07:36:11.143Z G1|633.431|6b|SetTestingValue ok=true result=nil
+2026-11-01T07:36:11.143Z G1|633.431|6b|after SetTestingValue Outdated=true fresh.Outdated=true
+2026-11-01T07:36:11.144Z G1|633.431|6b|UpdateAvailable fired Outdated=true
+2026-11-01T07:36:16.149Z G1|638.437|6b|5s later Outdated=true
+2026-11-01T07:36:16.150Z G1|638.437|6b|GetConfigAsync after write sameObject=false typeof=string value={"multiplier":3,"endsAt":0}
+2026-11-01T07:36:16.150Z G1|638.438|6b|old snapshot still reads typeof=table
+2026-11-01T07:36:16.150Z G1|638.438|6b|Refresh ok=true result=nil Outdated=false
+2026-11-01T07:36:16.150Z G1|638.438|6b|after Refresh value={"multiplier":3,"endsAt":0}
+2026-11-01T07:36:16.150Z G1|638.438|6done|config probe complete

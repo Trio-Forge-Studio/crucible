@@ -1,0 +1,9 @@
+{
+	"content": [
+		{
+			"type": "text",
+			"text": "G1|630.083|env|mode=join placeId=101113691364993 gameId=10774131158 holds=5,60,120\nG1|630.083|5b|ProcessReceipt assigned\nG1|630.083|ready|published-place instrument\nG1|630.261|5b|PlayerAdded Hezaerd userId=1113069837\nG1|632.251|6fetch|ok=true result=ConfigSnapshot\nG1|632.251|6a|GlobalEvent typeof=table type=table value={\"endsAt\":0,\"multiplier\":2}\nG1|632.252|6a|GlobalEvent.multiplier typeof=number value=2\nConfigService: Config value not found for key \"NoSuchKey\".\nG1|632.252|6a|NoSuchKey ok=true typeof=nil value=nil\nG1|632.252|6b|initial Outdated=false\nG1|633.430|6b|idle 1s Outdated=false\nG1|633.431|6b|fresh GetConfigAsync sameObject=false Outdated=false\nG1|633.431|6b|SetTestingValue ok=true result=nil\nG1|633.431|6b|after SetTestingValue Outdated=true fresh.Outdated=true\nG1|633.431|6b|UpdateAvailable fired Outdated=true\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nG1|638.437|6b|5s later Outdated=true\nG1|638.437|6b|GetConfigAsync after write sameObject=false typeof=string value={\"multiplier\":3,\"endsAt\":0}\nG1|638.438|6b|old snapshot still reads typeof=table\nG1|638.438|6b|Refresh ok=true result=nil Outdated=false\nG1|638.438|6b|after Refresh value={\"multiplier\":3,\"endsAt\":0}\nG1|638.438|6done|config probe complete"
+		}
+	],
+	"isError": false
+}

@@ -122,6 +122,104 @@ test("NET 35, 52 and 77 kick traces preserve the observed callback lifetime and 
 test("DATA 97 and 100 parked reads retain the engine error", () => {
 	assert.ok(trace.includes("|6fetch|ok=false result=ConfigService: Failed to load config"));
 });
+const published = fs.readFileSync(process.env.G1_TRACE || new URL("results/published-r3.log", import.meta.url), "utf8");
+const publishedLines = published.trim().split(/\r?\n/);
+const playsOf = () => {
+	const plays = [];
+	for (const line of publishedLines) {
+		const mode = /\|env\|mode=(\w+) placeId=(\d+) gameId=(\d+)/.exec(line);
+		if (mode) plays.push({ mode: mode[1], placeId: mode[2], gameId: mode[3], lines: [] });
+		plays.at(-1).lines.push(line);
+	}
+	return plays;
+};
+const clockOf = (line) => Number(line.split("G1|")[1].split("|")[0]);
+const playsMatching = (mode) => playsOf().filter((play) => play.mode === mode);
+const has = (play, text) => play.lines.some((line) => line.includes(text));
+const count = (play, text) => play.lines.filter((line) => line.includes(text)).length;
+
+test("G1 every play ran inside the published test place", () => {
+	const plays = playsOf();
+	assert.equal(plays.length, 5);
+	for (const play of plays) {
+		assert.equal(play.placeId, "101113691364993");
+		assert.equal(play.gameId, "10774131158");
+	}
+});
+
+test("DATA 57 and 58 ProcessReceipt callbacks held for 5, 60 and 120 s were honoured without a duplicate", () => {
+	const [hold] = playsMatching("hold");
+	for (const [ordinal, seconds] of [
+		[1, 5],
+		[2, 60],
+		[3, 120],
+	]) {
+		assert.equal(count(hold, `|callback ordinal=${ordinal} `), 1, `callbacks for ordinal ${ordinal}`);
+		assert.ok(has(hold, `|callback ordinal=${ordinal} callsForId=1 `));
+		assert.ok(has(hold, `|holding ordinal=${ordinal} for ${seconds}s`));
+		const granted = hold.lines.find((line) => line.includes(`|returning PurchaseGranted ordinal=${ordinal} `));
+		assert.ok(granted, `grant for ordinal ${ordinal}`);
+		const held = Number(/heldFor=([\d.]+)/.exec(granted)[1]);
+		assert.ok(held >= seconds && held < seconds + 1, `ordinal ${ordinal} held ${held}`);
+	}
+	assert.equal(count(hold, "|PromptProductPurchaseFinished user=1113069837 product=3726289768 purchased=true"), 3);
+	assert.equal(count(hold, "|5a|duplicate"), 0);
+	assert.equal(count(hold, "|callback "), 3);
+});
+
+test("DATA 58 a NotProcessedYet receipt is not redelivered in the same play or at a later join in Studio", () => {
+	const leaves = playsMatching("leave");
+	assert.equal(leaves.length, 2);
+	for (const leave of leaves) {
+		assert.equal(count(leave, "|callback "), 1);
+		assert.ok(has(leave, "|returning NotProcessedYet ordinal=1"));
+		assert.equal(count(leave, "|5a|duplicate"), 0);
+	}
+	const joins = playsMatching("join");
+	assert.equal(joins.length, 2);
+	for (const join of joins) {
+		assert.ok(has(join, "|5b|PlayerAdded Hezaerd"));
+		assert.ok(has(join, "|5b|ProcessReceipt assigned"));
+		assert.equal(count(join, "|callback "), 0);
+	}
+	const [late, early] = joins;
+	const delayOf = (join) =>
+		clockOf(join.lines.find((line) => line.includes("ProcessReceipt assigned"))) -
+		clockOf(join.lines.find((line) => line.includes("PlayerAdded")));
+	assert.ok(delayOf(late) >= 14, `late assignment ${delayOf(late)} s after PlayerAdded`);
+	assert.ok(delayOf(early) < 1, `early assignment ${delayOf(early)} s after PlayerAdded`);
+});
+
+test("DATA 97 GetValue returns a decoded table for the JSON dashboard config", () => {
+	for (const play of playsOf()) {
+		assert.ok(has(play, '|6a|GlobalEvent typeof=table type=table value={"endsAt":0,"multiplier":2}'));
+		assert.ok(has(play, "|6a|GlobalEvent.multiplier typeof=number value=2"));
+		assert.ok(has(play, "|6a|NoSuchKey ok=true typeof=nil value=nil"));
+	}
+});
+
+test("DATA 98 and 100 Outdated stays false when idle, turns true on a testing write, and clears on Refresh", () => {
+	const [hold] = playsMatching("hold");
+	const order = [
+		"|6b|initial Outdated=false",
+		"|6b|idle 300s Outdated=false",
+		"|6b|fresh GetConfigAsync sameObject=false Outdated=false",
+		"|6b|SetTestingValue ok=true result=nil",
+		"|6b|after SetTestingValue Outdated=true fresh.Outdated=true",
+		"|6b|UpdateAvailable fired Outdated=true",
+		"|6b|5s later Outdated=true",
+		"|6b|old snapshot still reads typeof=table",
+		"|6b|Refresh ok=true result=nil Outdated=false",
+	];
+	let previous = -1;
+	for (const observation of order) {
+		const index = hold.lines.findIndex((line) => line.includes(observation));
+		assert.ok(index > previous, `missing or out-of-order ${observation}`);
+		previous = index;
+	}
+	assert.ok(has(hold, "|6b|GetConfigAsync after write sameObject=false typeof=string"));
+	assert.equal(count(hold, "Outdated changed"), 0);
+});
 test("owned sessions have unique names and reject ambiguous selection", () => {
 	const name = createPlaceName("deferred-short");
 	assert.ok(name.startsWith(`s0-deferred-short-${process.pid}-`));
