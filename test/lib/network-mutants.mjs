@@ -191,6 +191,13 @@ const rules = [
 		],
 	],
 	[
+		"71 count minimum",
+		["array", C, "r.count(children[0].minBytes, p)", "r.count(0, p)"],
+		["map", C, "r.count(key.minBytes + value.minBytes, p)", "r.count(0, p)"],
+		["dynamic", C, "r.count(tag === 5 ? 1 : 2, path)", "r.count(0, path)"],
+		["record", C, "r.count(tag === 5 ? 1 : 2, path)", "r.count(tag === 5 ? 1 : 1, path)"],
+	],
+	[
 		"72",
 		["guard", "the codec reads no sender; the session supplies the engine sender (unit N2)"],
 		["swap", "no runtime site"],
