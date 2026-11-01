@@ -7,12 +7,16 @@ local STORE = DM.STORE
 local USER = DM.USER
 local SECRET = "SECRET-payload-value"
 
-local ROOT = DM.object({ coins = n.f64, gems = n.f64, label = DM.opt(n.string) })
+local rootNode
+local function recordNode()
+	rootNode = rootNode or DM.object({ coins = n.f64, gems = n.f64, label = DM.opt(n.string) })
+	return rootNode
+end
 
 -- Two steps whose order shows in the result: doubling then adding 5 gives 19 from 7, adding then doubling gives 24.
 local function twoSteps(log)
 	return {
-		node = ROOT,
+		node = recordNode(),
 		migrations = {
 			function(old)
 				table.insert(log, { step = 0, coins = old.coins })
@@ -398,7 +402,7 @@ return {
 	end,
 	["rule 110 a failed migration and a failed admission are diagnosed under separate codes"] = function()
 		local shape = {
-			node = ROOT,
+			node = recordNode(),
 			migrations = {
 				function(old)
 					if old.coins == 13 then
@@ -441,7 +445,7 @@ return {
 		spec.eq(a.engine.logged(SECRET), 0, "no value")
 	end,
 	["rule 110 an unreadable envelope is diagnosed once per user with the store and the user, and kicks at once"] = function()
-		local backend, a = D2.world(1, { version = { node = ROOT } })
+		local backend, a = D2.world(1, { version = { node = recordNode() } })
 		for _, user in { 4120, 4121 } do
 			D2.seed(backend, user, { format = 2, payload = { coins = 3, gems = SECRET } })
 		end
@@ -462,12 +466,26 @@ return {
 		spec.eq(string.sub(messages[2], 1, #two), two, "the second")
 		spec.eq(a.engine.logged(SECRET), 0, "no value")
 	end,
+	["rule 110 an unreadable envelope names the bad field and never echoes the stored kind or format"] = function()
+		for field, stored in { kind = "ZZSECRETKIND", format = "ZZSECRETFORMAT" } do
+			local backend, a = D2.world(1, { version = { node = recordNode() } })
+			D2.seed(backend, nil, { [field] = stored, payload = { coins = 3, gems = 4 } })
+			local player = DM.begin(a)
+			backend:advance(1)
+			spec.eq(a.kicked(player), a.limits.LOAD_FAILED_MESSAGE, `a bad {field} fails the load`)
+			local messages = DM.logged(a, "record is unreadable: ")
+			spec.eq(#messages, 1, "one diagnostic")
+			spec.has(messages[1], `record is unreadable: bad {field}`, "naming the field")
+			spec.eq(a.engine.logged(stored), 0, `never the stored {field}`)
+		end
+	end,
 	["rule 110 a failed admission of a record at the current version names no migration"] = function()
-		local shape = { node = ROOT, migrations = {
-			function(old)
-				return { coins = old.coins }
-			end,
-		} }
+		local shape =
+			{ node = recordNode(), migrations = {
+				function(old)
+					return { coins = old.coins }
+				end,
+			} }
 		local backend, a = D2.world(1, { version = shape })
 		D2.seed(backend, nil, { schemaVersion = 1, payload = { coins = 2, gems = SECRET }, epoch = 5 })
 		DM.begin(a)
@@ -622,6 +640,23 @@ return {
 		spec.list(after.seen, { id }, "and acknowledged it")
 		spec.eq(after.schemaVersion > 0, true, "the stored version stays above E's")
 		spec.eq(DM.session(f, pf).value.career.jobs[2].tips, 0, "F's value holds the filled field")
+	end,
+	["rule 77 a save never overwrites a record that became newer while the session was live"] = function()
+		local backend, a = D2.world(1, { version = { version = 1 } })
+		D2.seed(backend, nil, { schemaVersion = 1, payload = { coins = 7, gems = 3 }, epoch = 5 })
+		local player, handle = DM.begin(a)
+		backend:advance(0.5)
+		spec.eq(handle.value, true, "loaded")
+		local entry = backend:entry(DM.STORE, tostring(DM.USER))
+		entry.value.schemaVersion = 9
+		entry.value.payload = { coins = 777, gems = 3 }
+		DM.write(a, player, function(current)
+			return { coins = current.coins + 1, gems = current.gems }
+		end)
+		backend:advance(25)
+		local envelope = DM.stored(backend)
+		spec.eq(envelope.schemaVersion, 9, "the newer version is untouched")
+		spec.eq(envelope.payload.coins, 777, "and the newer payload is not overwritten")
 	end,
 	["rule 77 clearQuarantined and send work on a newer record without touching its payload or lease"] = function()
 		local backend, e = D2.world(1, { version = { version = 2 } })

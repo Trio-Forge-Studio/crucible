@@ -1366,9 +1366,49 @@ const mutants = [
 			"data-records.luau: rule 110 an update and a read of a record that does not load carry the same exact diagnostic",
 		],
 	),
-	m("87", "guard", RC, "\t\t\tif (rawequal(changed, loaded.value)) return loaded.value;\n", "", [
+	m("87", "guard", RC, "\t\tif (unchanged && !loaded.migrated) return loaded.value;\n", "", [
 		"data-records-limits.luau: rule 87 a no-op update of a stored record over 1,000,000 bytes stores no payload and records the id",
 	]),
+	m(
+		"87",
+		"guard",
+		RC,
+		"if (unchanged && !loaded.migrated) return loaded.value;",
+		"if (unchanged) return loaded.value;",
+		[
+			"data-records-limits.luau: rule 87 a migration that grows an old record past 1,000,000 bytes throws at the call even when change returns it unchanged",
+		],
+	),
+	m(
+		"110",
+		"guard",
+		D + "envelope.ts",
+		'if (t.kind !== kind) fail("bad kind");',
+		"if (t.kind !== kind) fail(`kind ${tostring(t.kind)}`);",
+		[
+			"data-records-limits.luau: rule 110 an update on an envelope with a bad kind or format names the field and never echoes the stored text",
+			"data-migrations.luau: rule 110 an unreadable envelope names the bad field and never echoes the stored kind or format",
+		],
+	),
+	m(
+		"110",
+		"guard",
+		D + "envelope.ts",
+		'if (t.format !== 1) fail("bad format");',
+		"if (t.format !== 1) fail(`format ${tostring(t.format)}`);",
+		[
+			"data-records-limits.luau: rule 110 an update on an envelope with a bad kind or format names the field and never echoes the stored text",
+			"data-migrations.luau: rule 110 an unreadable envelope names the bad field and never echoes the stored kind or format",
+		],
+	),
+	m(
+		"77",
+		"guard",
+		D + "lease.ts",
+		"(envelope.payload !== undefined && envelope.schemaVersion > input.snapshot.schemaVersion)",
+		"false",
+		["data-migrations.luau: rule 77 a save never overwrites a record that became newer while the session was live"],
+	),
 	m(
 		"87",
 		"guard",
@@ -1377,9 +1417,14 @@ const mutants = [
 		"const changed = input.change(loaded.value);",
 		[REC, LIM],
 	),
-	m("87", "guard", RC, "\t\t\tconst admitted = admitWrite(schema, changed);\n", "\t\t\tconst admitted = changed;\n", [
-		"data-records-limits.luau: rule 39 a string over 65,536 bytes is refused by admission at the call",
-	]),
+	m(
+		"87",
+		"guard",
+		RC,
+		"\t\t\tconst admitted = unchanged ? loaded.value : admitWrite(schema, changed);\n",
+		"\t\t\tconst admitted = unchanged ? loaded.value : changed;\n",
+		["data-records-limits.luau: rule 39 a string over 65,536 bytes is refused by admission at the call"],
+	),
 	m(
 		"87",
 		"guard",

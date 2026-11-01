@@ -93,8 +93,9 @@ function updateRecord(
 	}
 	const [ok, result] = pcall(() => {
 		const changed = dataCallback(input.change, loaded.value, undefined);
-		if (rawequal(changed, loaded.value)) return loaded.value;
-		const admitted = admitWrite(schema, changed);
+		const unchanged = rawequal(changed, loaded.value);
+		if (unchanged && !loaded.migrated) return loaded.value;
+		const admitted = unchanged ? loaded.value : admitWrite(schema, changed);
 		const bytes = jsonBytes(admitted);
 		if (bytes > RECORD_PAYLOAD_MAX_BYTES)
 			error(`${schema.name}: ${input.key}'s record is ${bytes} bytes, over ${RECORD_PAYLOAD_MAX_BYTES}`, 0);

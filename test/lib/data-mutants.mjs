@@ -643,14 +643,7 @@ const mutants = [
 		"rule 39 section caps",
 	],
 	["39", "pair", D + "envelope.ts", "\t\tbytes += jsonBytes(entry);\n", "\n", "rule 39 section caps"],
-	[
-		"40",
-		"guard",
-		D + "envelope.ts",
-		"if (t.kind !== kind) fail(`kind ${tostring(t.kind)}`);",
-		"",
-		"rule 40 malformed",
-	],
+	["40", "guard", D + "envelope.ts", 'if (t.kind !== kind) fail("bad kind");', "", "rule 40 malformed"],
 	[
 		"40",
 		"guard",
@@ -948,14 +941,7 @@ const mutants = [
 		"\t\tlease: undefined,\n\t\tcommit,\n",
 		"rule 24 one winner",
 	],
-	[
-		"40",
-		"guard",
-		D + "envelope.ts",
-		"if (t.format !== 1) fail(`format ${tostring(t.format)}`);",
-		"",
-		"rule 40 malformed",
-	],
+	["40", "guard", D + "envelope.ts", 'if (t.format !== 1) fail("bad format");', "", "rule 40 malformed"],
 	[
 		"41",
 		"swap",

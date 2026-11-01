@@ -66,6 +66,23 @@ function R.bulkWorld()
 	return backend, realm, store
 end
 
+-- A store whose one migration appends 30,000 bytes to the stored chunks.
+function R.growWorld()
+	local backend = Backend.new()
+	local realm = backend:realm()
+	local store = realm.recordStore("FD.Grow", { chunks = {} }, {
+		node = R.bulkNode(realm.n),
+		migrations = {
+			function(old)
+				local chunks = table.clone(old.chunks)
+				table.insert(chunks, string.rep("b", 30000))
+				return { chunks = chunks }
+			end,
+		},
+	})
+	return backend, realm, store
+end
+
 -- A second realm over the same backend and the same store.
 function R.second(backend, options)
 	options = options or {}

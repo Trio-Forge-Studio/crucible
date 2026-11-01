@@ -126,6 +126,23 @@ return {
 		spec.eq(retry.replayed, false, "the id was not recorded")
 		spec.eq(runs, 1, "so change ran")
 	end,
+	["rule 87 a migration that grows an old record past 1,000,000 bytes throws at the call even when change returns it unchanged"] = function()
+		local backend, realm, store = R.growWorld()
+		local old = R.chunks(985000)
+		local seeded = R.envelope({ schemaVersion = 0, payload = { chunks = old } })
+		backend:seed("FD.Grow", "k", seeded, {}, {})
+		local id = R.id(WALL - 5, "g1")
+		local ok, err = R.try(backend, realm, function()
+			return store:update("k", function(current)
+				return current
+			end, id)
+		end)
+		spec.eq(ok, false, "the call throws")
+		spec.has(err, "FD.Grow: k", "naming the store and key")
+		spec.has(err, "over 1000000", "against the cap")
+		R.same(R.stored(backend, "k", "FD.Grow"), seeded, "the old record and its version are untouched, with no id")
+		spec.eq(R.committed(backend, "FD.Grow"), 0, "nothing was written")
+	end,
 	["rule 39 a string over 65,536 bytes is refused by admission at the call"] = function()
 		local backend, realm, store = R.bulkWorld()
 		local ok, err = R.try(backend, realm, function()
@@ -353,6 +370,18 @@ return {
 			1,
 			"and the oversize envelope under its own code"
 		)
+	end,
+	["rule 110 an update on an envelope with a bad kind or format names the field and never echoes the stored text"] = function()
+		for field, stored in { kind = "ZZSECRETKIND", format = "ZZSECRETFORMAT" } do
+			local backend, realm, store = R.world()
+			R.seed(backend, "bad", { [field] = stored, payload = { entries = {}, tallies = {}, total = 1 } })
+			local result = R.update(backend, realm, store, "bad", function(current)
+				return current
+			end, R.id(WALL - 5, "u1"))
+			spec.eq(result.kind, "unavailable", `a bad {field} is unavailable`)
+			spec.has(R.logText(realm), `FD.CommandLog: bad did not load: bad {field}`, "the diagnostic names the field")
+			spec.eq(string.find(R.logText(realm), stored, 1, true), nil, `never the stored {field}`)
+		end
 	end,
 	["rule 90 a request that was never dispatched settles timeout at the 30 second deadline"] = function()
 		local backend, realm, store = R.world()
