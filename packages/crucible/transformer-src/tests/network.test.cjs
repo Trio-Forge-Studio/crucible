@@ -100,7 +100,6 @@ const negatives = [
 		"{ f(): void }",
 		"DateTime",
 		"(string | undefined)[]",
-		"[string?]",
 		"[string, ...number[]]",
 		"[string | undefined]",
 		"Map<string, number | undefined>",
@@ -137,6 +136,7 @@ const negatives = [
 		"CRU017: Unexpected declaration arguments.",
 		'export const X = toServer<string>("X.Test", {} as never);',
 	],
+	["optional tuple element", "CRU019: X.Test payload: tuples must be fixed length", declaration("[string?]")],
 	["empty interface", "CRU019", "interface Empty {} " + declaration("Empty")],
 	["recursive interface", "CRU019", "interface Recursive { next?: Recursive } " + declaration("Recursive")],
 	["numeric enum properties", "CRU019", "const enum Slot { A, B } " + declaration("Record<Slot,string>")],
@@ -191,6 +191,17 @@ test("network diagnostic catalogue rejects every unsupported declaration with re
 	for (const side of ["server", "client", "neutral"])
 		assert.ok(result.diagnostics.some((d) => d.file.fileName.endsWith(`/${side}/wrong.ts`) && d.code === 90017));
 	for (const code of new Set(negatives.map((n) => n[1].slice(0, 6)))) assert.match(log, new RegExp(code));
+	const exact = project(
+		{ "src/shared/optional.ts": imports + declaration('{Kind?:"A";a:number}|{Kind:"B";b:string}') },
+		{ exactOptionalPropertyTypes: true },
+	);
+	assert.match(
+		inspect(exact)
+			.diagnostics.map((d) => d.messageText)
+			.join("\n"),
+		/CRU019: X.Test payload: union members .* have no discriminant/,
+	);
+	compile(exact, 1);
 });
 
 test("network receives rewrite owner field target callback and enforce placement sides and own callback returns", () => {
@@ -327,6 +338,7 @@ test("network duplicate names and transitive global or merged payloads fail at t
 		"src/shared/ns.ts": "export namespace Doors { export interface State { open: boolean } }",
 		"src/shared/ns-message.ts":
 			imports + 'import { Doors } from "./ns"; ' + declaration("Doors.State", "toServer", "X.Namespaced"),
+		"src/shorthand.ts": 'export {}; declare module "untyped-lib";',
 		"src/ns-augment.ts":
 			'import "./shared/ns"; declare module "./shared/ns" { namespace Doors { interface State { extra: string } } }',
 	});
@@ -335,6 +347,7 @@ test("network duplicate names and transitive global or merged payloads fail at t
 		result.diagnostics
 			.filter((d) => d.code === code)
 			.map((d) => [path.relative(game, d.file.fileName).replaceAll("\\", "/"), d.messageText]);
+	assert.ok(!result.diagnostics.some((d) => d.file.fileName.endsWith("shorthand.ts")));
 	assert.deepEqual(at(90018).sort(), [
 		["src/shared/a.ts", "CRU018: X.Test is already declared at src/shared/b.ts:2."],
 		["src/shared/b.ts", "CRU018: X.Test is already declared at src/shared/a.ts:2."],
@@ -357,7 +370,8 @@ test("network augmentations that add no declaration to a reached payload symbol 
 	const game = project({
 		"src/shared/model.ts": "export interface Other { x: number }",
 		"src/shared/messages.ts": imports + declaration("{ door: Model }", "toServer", "Doors.Toggle"),
-		"src/util/workspace.ts": "export {}; declare global { interface Workspace { Lobby: Model } }",
+		"src/util/workspace.ts":
+			"export {}; declare global { interface Workspace { Lobby: Model } const Lobby: Model; }",
 		"src/util/other.ts":
 			'import "../shared/model"; declare module "../shared/model" { interface Other { door: Model } }',
 	});
