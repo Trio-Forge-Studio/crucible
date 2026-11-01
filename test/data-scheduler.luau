@@ -289,4 +289,27 @@ return {
 		backend:advance(1)
 		spec.eq(#backend.calls, 0, "nothing dispatched")
 	end,
+	["rule 54 a retry that cannot start before the cutoff gives up at once"] = function()
+		local backend, realm, scheduler = world()
+		backend:fail("throttle", nil, 100000)
+		realm.port.random = function()
+			return 0.999
+		end
+		local settledAt
+		local ticket = submit(realm, scheduler, "retrying", RELEASE)
+		ticket:onSettled(function()
+			settledAt = backend.now
+		end)
+		local cutoff = realm.clock() + 12
+		realm.run(function()
+			scheduler:setDispatchCutoff(cutoff)
+		end)
+		backend:advance(9)
+		spec.eq(
+			ticket.settled.kind,
+			"timeout",
+			"given up once the next retry (up to 8 s after the fifth failure) passes the cutoff"
+		)
+		assert(settledAt < 9, `settled at {settledAt} s, not held to the cutoff at 12 s`)
+	end,
 }

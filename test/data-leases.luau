@@ -104,6 +104,67 @@ local function spaced(log, label: string)
 	end
 end
 
+local function timed(realm, player)
+	local outcome = {}
+	realm.run(function()
+		outcome.value = realm.store:load(player, "join")
+		outcome.at = realm.backend.now
+	end)
+	return outcome
+end
+
+local function departs(realm, player)
+	realm.leave(player)
+	realm.run(function()
+		realm.store:leave(player)
+	end)
+end
+
+local function closes(realm)
+	realm.run(function()
+		realm.shutdown.shutdownData(realm.data)
+	end)
+end
+
+local function refusedLoad(ending, label: string)
+	local backend, a = world(1)
+	a.budget.update = 1
+	fill(a, 30)
+	local pa = a.join(USER)
+	local la = timed(a, pa)
+	backend:advance(0.1)
+	spec.eq(la.at, nil, `{label}: waiting out the refusal`)
+	local began = backend.now
+	ending(a, pa)
+	backend:advance(0.05)
+	spec.eq(la.value, false, `{label}: the load ended`)
+	assert(la.at - began <= 0.05 + 1e-6, `{label}: ended {la.at - began} s after, with 0.15 s of the wait left`)
+end
+
+local function heldLoad(ending, label: string)
+	local backend, a, b = world()
+	load(a, a.join(USER))
+	backend:advance(1)
+	local log = attempts(b)
+	local pb = b.join(USER)
+	local lb = timed(b, pb)
+	local steps = 0
+	while #log < 6 do
+		backend:advance(0.05)
+		steps += 1
+		assert(steps <= 1000, `{label}: the sixth poll never came`)
+	end
+	backend:advance(0.2)
+	local began = backend.now
+	assert(began - log[6].at < 5 * (1 - 0.25), `{label}: inside the 5 s poll wait`)
+	spec.eq(lb.at, nil, `{label}: still polling the live lease`)
+	ending(b, pb)
+	backend:advance(0.05)
+	spec.eq(lb.value, false, `{label}: the load ended`)
+	assert(lb.at - began <= 0.05 + 1e-6, `{label}: ended {lb.at - began} s after, with at least 3.5 s of the wait left`)
+	spec.eq(stored(backend).lease.serverId, a.id, `{label}: the live lease was never taken`)
+end
+
 local function snapshot(revision: number, coins: number)
 	return { revision = revision, schemaVersion = 0, payload = { coins = coins }, receipts = {} }
 end
@@ -486,6 +547,18 @@ return {
 		spec.eq(b.kicked(pb), b.limits.LOAD_FAILED_MESSAGE, "refused at the cap, not answered by a live lease")
 		local late = b.kicks[1].at - start - b.limits.LOAD_DEADLINE_SECONDS
 		assert(math.abs(late) <= 1e-6, `kicked {late} s after the deadline`)
+	end,
+	["rule 20 an overloaded wait ends at once when the player leaves"] = function()
+		refusedLoad(departs, "left")
+	end,
+	["rule 20 an overloaded wait ends at once when shutdown starts"] = function()
+		refusedLoad(closes, "shutdown")
+	end,
+	["rule 20 a held wait ends at once when the player leaves"] = function()
+		heldLoad(departs, "left")
+	end,
+	["rule 20 a held wait ends at once when shutdown starts"] = function()
+		heldLoad(closes, "shutdown")
 	end,
 	["rule 20 abandon after an ambiguous acquisition removes only its lease"] = function()
 		local backend, a = world(1)

@@ -77,6 +77,59 @@ local function attempt(realm, fn)
 	return outcome
 end
 
+-- Throttles every call of A for good once its load has committed. Zero jitter retries at each response, 0.1 s apart.
+local function outage(backend, realm)
+	backend:advance(0.2)
+	local issued = lastCommitted(backend, realm).at
+	realm.port.random = function()
+		return 0
+	end
+	backend:fail("throttle", { server = realm.id }, 100000)
+	return issued
+end
+
+local function committedAfter(backend, realm, time: number)
+	local count = 0
+	for _, call in backend:callsTo({ server = realm.id }) do
+		if call.committed and call.at > time then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function onlyTheRelease(queue)
+	local backend, a = world()
+	local pa = loaded(backend, a)
+	local issued = outage(backend, a)
+	local bound = issued + a.limits.LOCAL_AUTHORITY_SECONDS
+	local old = session(a, pa)
+	queue(a, pa)
+	backend:advance(bound - 1 - backend.now)
+	assert(old.writing ~= nil and not old.releaseWanted, "a renewal or save is queued before the safe bound")
+	backend:advance(2)
+	spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+	backend:advance(bound + 5 - backend.now)
+	recover(backend)
+	backend:advance(3)
+	spec.eq(committedAfter(backend, a, bound), 1, "one commit after the safe bound")
+	spec.eq(old.released, "committed", "and it is the release")
+	spec.eq(stored(backend).lease, nil, "the lease is released, never extended after the seal")
+end
+
+local function releaseRecovered(offset: number)
+	local backend, a = world()
+	local pa = loaded(backend, a)
+	local issued = outage(backend, a)
+	set(a, pa, 41)
+	local old = session(a, pa)
+	local expiry = issued + a.limits.LEASE_SECONDS
+	backend:advance(expiry + offset - backend.now)
+	recover(backend)
+	backend:advance(3)
+	return backend, a, old, expiry
+end
+
 return {
 	["rule 28 B1 a no-op renewal still extends the lease and records its op"] = function()
 		local backend, a = world()
@@ -744,6 +797,29 @@ return {
 		spec.eq(envelope.lease.token, taken.lease.token, "the newer owner keeps the lease")
 		spec.eq(envelope.epoch, taken.epoch, "nothing was written over the newer owner")
 		spec.eq(envelope.payload.coins, 0, "the sealed revision was never merged")
+	end,
+	["rule 26 K15 a queued renewal is never sent after the safe bound, only the release"] = function()
+		onlyTheRelease(function() end)
+	end,
+	["rule 26 K15 a queued save is never sent after the safe bound, only the release"] = function()
+		onlyTheRelease(function(a, pa)
+			set(a, pa, 41)
+			save(a, pa, 100)
+		end)
+	end,
+	["rule 26 K17 a release recovered 0.3 s before its lease expires still commits"] = function()
+		local backend, _, old = releaseRecovered(-0.3)
+		spec.eq(old.released, "committed", "the release committed")
+		spec.eq(stored(backend).lease, nil, "the lease is released")
+		spec.eq(stored(backend).payload.coins, 41, "with the sealed revision")
+	end,
+	["rule 26 K17 a release recovered 0.3 s after its lease expires had given up"] = function()
+		local backend, a, old, expiry = releaseRecovered(0.3)
+		spec.eq(old.released, "given up", "the release gave up")
+		spec.eq(stored(backend).lease.token, old.token, "the lease was left to expire")
+		for _, call in backend:callsTo({ server = a.id }) do
+			assert(call.at < expiry, `a call was sent {call.at - expiry} s after the lease expired`)
+		end
 	end,
 	["rule 26 authority loss is diagnosed once per session"] = function()
 		local backend, a = world()

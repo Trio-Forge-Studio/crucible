@@ -140,6 +140,16 @@ return {
 		spec.eq(ok, false, "a second boot is refused by the registry")
 		spec.eq(realm.boot.shutdownProgress(probe), nil, "but its ignite reset the sweep first")
 	end,
+	["rule 111 a second ignite takes its own port's clock"] = function()
+		local _, realm = world()
+		assert(realm.boot.bootClock() ~= 12345, "the first clock is the realm's")
+		local port = table.clone(realm.engine.port)
+		port.clock = function()
+			return 12345
+		end
+		pcall(realm.boot.ignite, port, { name = "server", renders = false, booted = function() end }, {})
+		spec.eq(realm.boot.bootClock(), 12345, "bootClock follows the port of the latest ignite")
+	end,
 	["rule 52 early hook: the early flush keeps the lease and the final phase follows the last hook"] = function()
 		local accepted
 		local backend, realm = world(function(r)
