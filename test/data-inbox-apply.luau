@@ -74,6 +74,7 @@ local function staleMark(reason: string)
 	local loading = a.run(function()
 		return a.store:load(again, "join")
 	end)
+	D2.untilDone(backend, loading, 60)
 	backend:advance(5)
 	spec.eq(loading.value, true, "the user rejoined the same server")
 	spec.eq(calls, 1, "the item was applied once by the new build")
@@ -82,6 +83,76 @@ local function staleMark(reason: string)
 	spec.eq(#envelope.inbox, 0, "the stale mark did not requarantine it")
 	spec.eq(#envelope.quarantine, 0, "the quarantine is empty")
 	spec.list(envelope.seen, { id }, "and the ack is in seen")
+end
+
+-- durability.md "A stale quarantine mark after a retry (R3)" as written: the mark stays staged while every request from A
+-- fails, A loses authority at its safe bound and releases at 75 s, and the release's transform skips the mark by its
+-- generation because an operator's retry raised the item to generation 2.
+local function releaseRoute()
+	local backend, a, b = D2.world(2)
+	local id = D2.id(W - 10, "m1")
+	D2.seed(backend, nil, { inbox = { D2.item(id, "grant", { amount = "bad" }) } })
+	D2.receiver(a, D2.message("grant"))
+	backend:fail("committed", { server = a.id }, 100000, { after = 1 })
+	local player = D2.join(backend, a)
+	backend:advance(1)
+	local old = D2.session(a, player)
+	spec.eq(old.marks[id].generation, 0, "A stages its mark at generation 0")
+	spec.eq(
+		D2.stored(backend).quarantine[1].generation,
+		1,
+		"the mark committed under a 502: quarantined at generation 1"
+	)
+	spec.eq(D2.stored(backend).quarantine[1].reason, "payload", "with its reason")
+	clear(backend)
+	backend:fail("transient", { server = a.id }, 100000)
+	D2.set(a, player, function()
+		return { coins = 5, gems = 0 }
+	end)
+	backend:advance(5 - backend.now)
+	local cleared = clearQuarantined(b, { id }, "retry")
+	backend:advance(1)
+	spec.eq(cleared.value.value, 1, "the operator on B retried the item at 5 s")
+	local live = inbox(backend)[1]
+	spec.eq(live.generation, 2, "live at generation 2")
+	spec.eq(live.attempts, 0, "with no attempts")
+	backend:advance(70.5 - backend.now)
+	spec.eq(old.sealedBy, "authority", "A sealed when its safe bound passed")
+	spec.eq(old.marks[id].generation, 0, "and still holds the mark from generation 0")
+	spec.eq(inbox(backend)[1].generation, 2, "nothing reached the disk while A's requests failed")
+	backend:advance(75 - backend.now)
+	clear(backend)
+	backend:advance(15)
+	spec.eq(old.released, "committed", "the release committed")
+	local release
+	for _, call in backend:callsTo({ server = a.id }) do
+		if call.committed then
+			release = call
+		end
+	end
+	assert(release.at >= 75, `the release committed at {release.at}, after storage recovered at 75`)
+	local envelope = D2.stored(backend)
+	spec.eq(envelope.lease, nil, "the lease is released")
+	spec.eq(envelope.payload.coins, 5, "with A's newest change")
+	spec.eq(#envelope.inbox, 1, "M is still live")
+	spec.eq(envelope.inbox[1].id, id, "it is M")
+	spec.eq(envelope.inbox[1].generation, 2, "at generation 2: the stale mark skipped")
+	spec.eq(envelope.inbox[1].attempts, 0, "with the attempts the retry reset")
+	spec.eq(#envelope.quarantine, 0, "the quarantine is empty")
+	local calls = 0
+	b.store.inbox:receive(D2.lenient("grant"), function(_, data)
+		calls += 1
+		local value = table.clone(data)
+		value.coins += 100
+		return value
+	end)
+	D2.join(backend, b)
+	backend:advance(2)
+	spec.eq(calls, 1, "the new deploy applied M once")
+	local final = D2.stored(backend)
+	spec.eq(#final.inbox, 0, "M left the inbox")
+	spec.list(final.seen, { id }, "and its id is in seen")
+	spec.eq(final.payload.coins, 105, "on A's saved change")
 end
 
 return {
@@ -429,6 +500,91 @@ return {
 	end,
 	["rule 72 R3 a stale attempts quarantine mark is skipped by its generation, and the attempts the clear reset stay reset"] = function()
 		staleMark("attempts")
+	end,
+	["rule 72 R3 a stale quarantine mark in a release after losing authority is skipped by its generation"] = function()
+		releaseRoute()
+	end,
+	["rule 72 an ack carried by a second write after an ambiguous commit lands in seen once"] = function()
+		local backend, a = D2.world()
+		local id = D2.id(W - 10, "m1")
+		D2.seed(backend, nil, { inbox = { D2.item(id, "grant", { amount = 5 }) } })
+		D2.receiver(a, D2.message("grant"))
+		backend:fail("committed", { server = a.id }, 100000, { after = 1 })
+		local player = D2.join(backend, a)
+		backend:advance(1)
+		D2.set(a, player, function()
+			return { coins = 9, gems = 0 }
+		end)
+		backend:advance(80)
+		spec.eq(D2.session(a, player).sealedBy, "authority", "the session lost authority")
+		clear(backend)
+		a.leave(player)
+		local again = a.join(D2.USER)
+		local loading = a.run(function()
+			return a.store:load(again, "join")
+		end)
+		D2.untilDone(backend, loading, 60)
+		backend:advance(5)
+		spec.eq(loading.value, true, "the same server rejoined")
+		local envelope = D2.stored(backend)
+		spec.list(envelope.seen, { id }, "the carried ack is in seen once")
+		spec.eq(#envelope.inbox, 0, "and off the inbox")
+	end,
+	["rule 73 clearQuarantined with only unlisted ids changes nothing and commits no write"] = function()
+		local backend, a = D2.world()
+		local id = D2.id(W - 20, "q1")
+		D2.seed(backend, nil, {
+			quarantine = { D2.item(id, "grant", { amount = 6 }, { reason = "attempts", attempts = 5, generation = 5 }) },
+		})
+		local before = backend:stored(D2.STORE, D2.KEY).version
+		for _, action in { "retry", "discard" } do
+			local function commits()
+				local count = 0
+				for _, call in backend.calls do
+					count += if call.committed then 1 else 0
+				end
+				return count
+			end
+			local first = commits()
+			local result = clearQuarantined(a, { D2.id(W - 30, "other") }, action)
+			backend:advance(1)
+			spec.eq(result.value.kind, "ok", `{action}: ok`)
+			spec.eq(result.value.value, 0, `{action}: nothing changed`)
+			spec.eq(commits(), first, `{action}: no write committed`)
+			spec.eq(backend:stored(D2.STORE, D2.KEY).version, before, `{action}: the stored version is untouched`)
+		end
+		spec.eq(#D2.stored(backend).quarantine, 1, "the quarantined item stays")
+	end,
+	["rule 72 the receiver gets the admitted value, not the stored payload"] = function()
+		local backend, a = D2.world()
+		local id = D2.id(W - 10, "m1")
+		D2.seed(backend, nil, {
+			inbox = { D2.item(id, "grant", { amount = 5, junk = "stored only" }) },
+		})
+		local received = {}
+		a.store.inbox:receive(D2.stripping("grant"), function(_, data, payload)
+			table.insert(received, payload)
+			return data
+		end)
+		D2.join(backend, a)
+		backend:advance(1)
+		spec.eq(#received, 1, "the receiver ran once")
+		spec.eq(received[1].amount, 5, "with the admitted amount")
+		spec.eq(received[1].junk, nil, "and not the key admission dropped")
+	end,
+	["rule 72 acks reach seen in the order of their revisions"] = function()
+		local backend, a = D2.world()
+		local ids, items = {}, {}
+		for index = 1, 16 do
+			ids[index] = D2.id(W - 100 + index, `m{index}`)
+			items[index] = D2.item(ids[index], "grant", { amount = 1 })
+		end
+		D2.seed(backend, nil, { inbox = items })
+		D2.receiver(a, D2.message("grant"))
+		local player = D2.join(backend, a)
+		backend:advance(1)
+		spec.eq(D2.session(a, player).revision, 16, "one revision per item")
+		spec.list(D2.stored(backend).seen, ids, "seen holds the ids in the order they were applied")
 	end,
 	["rule 72 an ack removes its id from the quarantine, wherever a stale mark put the item"] = function()
 		local backend, a = D2.world()
