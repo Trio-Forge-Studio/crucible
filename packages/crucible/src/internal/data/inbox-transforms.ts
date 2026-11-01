@@ -6,7 +6,6 @@ import {
 	MESSAGE_ID_MAX_AGE_SECONDS,
 	QUARANTINE_MAX_BYTES,
 	QUARANTINE_MAX_MESSAGES,
-	SEEN_MAX_BYTES,
 	SEEN_MAX_MESSAGES,
 } from "./limits";
 import { ageOf, createdAt, evictable } from "./operation-id";
@@ -27,7 +26,7 @@ function addSeen(envelope: Envelope, ids: readonly string[]): Pick<Envelope, "se
 	const seen = [...envelope.seen];
 	let floor = envelope.seenFloor;
 	for (const id of ids) if (!seen.includes(id)) seen.push(id);
-	while (seen.size() > SEEN_MAX_MESSAGES || jsonBytes(seen) > SEEN_MAX_BYTES) {
+	while (seen.size() > SEEN_MAX_MESSAGES) {
 		const evicted = seen.shift()!;
 		floor = math.max(floor, createdAt(evicted) ?? 0);
 	}

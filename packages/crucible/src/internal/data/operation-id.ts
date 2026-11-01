@@ -1,4 +1,4 @@
-import { ID_EVICT_MIN_AGE_SECONDS, ID_FUTURE_SKEW_SECONDS, OPERATION_ID_MAX_BYTES } from "./limits";
+import { ID_EVICT_MIN_AGE_SECONDS, ID_FUTURE_SKEW_SECONDS } from "./limits";
 import type { DataPort } from "./port";
 
 const DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -25,7 +25,6 @@ export function newOperationId(port: DataPort): string {
 
 /** @internal The creation second of an id of this format, and undefined for any other text. */
 export function createdAt(id: string): number | undefined {
-	if (id.size() > OPERATION_ID_MAX_BYTES) return undefined;
 	const [seconds] = id.match("^o1%-([0-9a-z]+)%-[0-9a-z]+$");
 	return seconds === undefined ? undefined : tonumber(seconds, 36);
 }
