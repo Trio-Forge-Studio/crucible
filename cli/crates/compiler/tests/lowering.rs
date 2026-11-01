@@ -202,7 +202,7 @@ fn write_skips_unchanged_modules_and_removes_only_its_own_stale_ones() {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("write");
     let _ = std::fs::remove_dir_all(&out);
     let first = crucible_compiler::write(&out, &MODULES).expect("the fixtures are written");
-    assert_eq!(first, Written { written: MODULES.len(), removed: 0 });
+    assert_eq!(first, Written { written: MODULES.len(), renamed: 0, removed: 0 });
     std::fs::write(out.join("foreign.luau"), "return nil\n").unwrap();
     std::fs::write(out.join("nested/init.d.ts"), "export {};\n").unwrap();
     std::fs::create_dir_all(out.join("other")).unwrap();
@@ -211,7 +211,7 @@ fn write_skips_unchanged_modules_and_removes_only_its_own_stale_ones() {
     let without: Vec<Module> =
         MODULES.iter().filter(|m| !matches!(m.path.as_str(), "util.luau" | "nested/init.luau")).cloned().collect();
     let second = crucible_compiler::write(&out, &without).expect("the fixtures are written again");
-    assert_eq!(second, Written { written: 0, removed: 2 });
+    assert_eq!(second, Written { written: 0, renamed: 0, removed: 2 });
     assert!(!out.join("util.luau").exists(), "a removed source's module is deleted");
     assert!(!out.join("nested/init.luau").exists());
     assert!(out.join("nested/init.d.ts").exists(), "a declaration beside it stays, and so does its folder");
@@ -221,8 +221,19 @@ fn write_skips_unchanged_modules_and_removes_only_its_own_stale_ones() {
     std::fs::remove_file(out.join("nested/init.d.ts")).unwrap();
     std::fs::write(out.join("nested/init.luau"), luau("nested/init.luau")).unwrap();
     let third = crucible_compiler::write(&out, &without).expect("the fixtures are written a third time");
-    assert_eq!(third, Written { written: 0, removed: 1 });
+    assert_eq!(third, Written { written: 0, renamed: 0, removed: 1 });
     assert!(!out.join("nested").exists(), "a folder the deletion empties is deleted");
+
+    let recased: Vec<Module> = without
+        .iter()
+        .map(|m| Module { path: m.path.replace("classes.luau", "Classes.luau"), source: m.source.clone() })
+        .collect();
+    crucible_compiler::write(&out, &recased).expect("the fixtures are written with a source renamed in case");
+    let names: Vec<String> =
+        std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    assert!(names.contains(&"Classes.luau".to_owned()), "the module has its new name: {names:?}");
+    assert!(!names.contains(&"classes.luau".to_owned()), "the old name is gone: {names:?}");
+    assert_eq!(std::fs::read_to_string(out.join("Classes.luau")).unwrap(), luau("classes.luau"));
 }
 
 #[test]

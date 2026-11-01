@@ -10,7 +10,7 @@ use std::fmt;
 
 use crate::facts::{Fact, FileFacts, Unanswered};
 use crate::luau::{Block, Expr, Name, Stmt};
-use crate::tree::{File, Kind, Node, Nodes, Position};
+use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
@@ -51,6 +51,7 @@ pub(crate) fn lower(
         temps: 0,
         uses_ts: false,
         refs: references(file.root()),
+        closure_assigned: closure_assigned(file.root()),
         hoisted_name_starts: HashSet::new(),
         exports: Vec::new(),
         namespace: None,
@@ -92,6 +93,7 @@ pub(crate) struct Lower<'a> {
     temps: u32,
     uses_ts: bool,
     refs: Vec<Reference>,
+    closure_assigned: HashSet<&'static str>,
     hoisted_name_starts: HashSet<u32>,
     exports: Vec<(Name, Expr)>,
     namespace: Option<Name>,
@@ -118,35 +120,39 @@ struct Reference {
     start: u32,
 }
 
+/// Whether an identifier reads or writes a variable, rather than naming a declaration or a property.
+fn is_reference(identifier: Node) -> bool {
+    !identifier.parent().is_some_and(|p| {
+        let named = p.name() == Some(identifier);
+        match p.kind() {
+            Kind::PropertyAccessExpression => named,
+            Kind::VariableDeclaration
+            | Kind::Parameter
+            | Kind::FunctionDeclaration
+            | Kind::FunctionExpression
+            | Kind::ClassDeclaration
+            | Kind::EnumDeclaration
+            | Kind::ModuleDeclaration
+            | Kind::PropertyAssignment
+            | Kind::PropertyDeclaration
+            | Kind::MethodDeclaration
+            | Kind::EnumMember
+            | Kind::ImportSpecifier
+            | Kind::ImportClause
+            | Kind::NamespaceImport => named,
+            Kind::BindingElement => named || p.property_name() == Some(identifier),
+            _ => false,
+        }
+    })
+}
+
 fn references(root: Node) -> Vec<Reference> {
     fn walk(n: Node, out: &mut Vec<Reference>) {
         if n.is_erased() {
             return;
         }
         if n.kind() == Kind::Identifier {
-            let declares = n.parent().is_some_and(|p| {
-                let named = p.name() == Some(n);
-                match p.kind() {
-                    Kind::PropertyAccessExpression => named,
-                    Kind::VariableDeclaration
-                    | Kind::Parameter
-                    | Kind::FunctionDeclaration
-                    | Kind::FunctionExpression
-                    | Kind::ClassDeclaration
-                    | Kind::EnumDeclaration
-                    | Kind::ModuleDeclaration
-                    | Kind::PropertyAssignment
-                    | Kind::PropertyDeclaration
-                    | Kind::MethodDeclaration
-                    | Kind::EnumMember
-                    | Kind::ImportSpecifier
-                    | Kind::ImportClause
-                    | Kind::NamespaceImport => named,
-                    Kind::BindingElement => named || p.property_name() == Some(n),
-                    _ => false,
-                }
-            });
-            if !declares {
+            if is_reference(n) {
                 out.push(Reference { text: n.text(), start: n.span().start });
             }
             return;
@@ -156,6 +162,79 @@ fn references(root: Node) -> Vec<Reference> {
     let mut out = Vec::new();
     walk(root, &mut out);
     out.sort_unstable();
+    out
+}
+
+/// A function, or code that runs later as part of one, such as an instance property's initializer.
+fn runs_later(n: Node) -> bool {
+    match n.kind() {
+        Kind::ArrowFunction
+        | Kind::FunctionExpression
+        | Kind::FunctionDeclaration
+        | Kind::MethodDeclaration
+        | Kind::Constructor
+        | Kind::GetAccessor
+        | Kind::SetAccessor => true,
+        Kind::PropertyDeclaration => !n.is_static(),
+        _ => false,
+    }
+}
+
+/// The names of the locals that a function assigns although they are declared outside it. Luau reads a local operand
+/// when the operator runs, after the operands to its right, and a call among them can change such a local.
+fn closure_assigned(root: Node) -> HashSet<&'static str> {
+    fn walk(n: Node, function: Option<Node>, out: &mut HashSet<&'static str>) {
+        if n.is_erased() {
+            return;
+        }
+        let function = if runs_later(n) { Some(n) } else { function };
+        if let Some(function) = function {
+            match n.kind() {
+                Kind::BinaryExpression if n.operator().is_assignment() => targets(n.left(), function, out),
+                Kind::PrefixUnaryExpression | Kind::PostfixUnaryExpression
+                    if matches!(n.unary_operator(), Some(UnaryOp::Increment | UnaryOp::Decrement)) =>
+                {
+                    targets(n.operand(), function, out)
+                }
+                _ => {}
+            }
+        }
+        n.for_each_child(&mut |c| walk(c, function, out));
+    }
+    fn targets(n: Node, function: Node, out: &mut HashSet<&'static str>) {
+        let n = skip_parens_and_assertions(n);
+        match n.kind() {
+            Kind::Identifier => {
+                if n.declaration().is_some_and(|d| !function.contains(d)) {
+                    out.insert(n.text());
+                }
+            }
+            Kind::ArrayLiteralExpression => n.elements().iter().for_each(|e| targets(e, function, out)),
+            Kind::ObjectLiteralExpression => {
+                for p in n.properties().iter() {
+                    match p.kind() {
+                        Kind::PropertyAssignment => {
+                            if let Some(value) = p.initializer() {
+                                targets(value, function, out);
+                            }
+                        }
+                        Kind::ShorthandPropertyAssignment => {
+                            if let Some(name) = p.name() {
+                                targets(name, function, out);
+                            }
+                        }
+                        Kind::SpreadAssignment => targets(p.expression(), function, out),
+                        _ => {}
+                    }
+                }
+            }
+            Kind::SpreadElement => targets(n.expression(), function, out),
+            Kind::BinaryExpression if n.operator() == Op::Assign => targets(n.left(), function, out),
+            _ => {}
+        }
+    }
+    let mut out = HashSet::new();
+    walk(root, None, &mut out);
     out
 }
 
@@ -190,8 +269,18 @@ impl<'a> Lower<'a> {
         if value.is_simple() { value } else { self.push_temp(value) }
     }
 
-    fn store_before(&mut self, value: Expr, later: &[Stmt]) -> Expr {
-        if later.is_empty() || is_stable(&value, later) { value } else { self.push_temp(value) }
+    /// Stores `value` in a temporary when it may read differently after the statements `later` run, or after
+    /// `read_after`, the operands Luau evaluates before it reads a local operand, such as the right side of a binary
+    /// operator.
+    fn store_before(&mut self, value: Expr, later: &[Stmt], read_after: &[Expr]) -> Expr {
+        let moved = !later.is_empty() && !is_stable(&value, later);
+        if moved || self.call_may_assign(&value, later, read_after) { self.push_temp(value) } else { value }
+    }
+
+    /// Whether `value` names a local that a function assigns, and the later operands may call one.
+    fn call_may_assign(&self, value: &Expr, later: &[Stmt], read_after: &[Expr]) -> bool {
+        matches!(value, Expr::Name(name) if self.closure_assigned.contains(name.as_ref()))
+            && (!later.is_empty() || read_after.iter().any(Expr::may_call))
     }
 
     fn capture<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, Block) {
@@ -216,7 +305,7 @@ impl<'a> Lower<'a> {
         let (first, first_setup) = self.capture(|l| l.expr(first));
         let (second, second_setup) = self.capture(|l| l.expr(second));
         self.current_block.extend(first_setup);
-        let first = self.store_before(first, &second_setup);
+        let first = self.store_before(first, &second_setup, std::slice::from_ref(&second));
         self.current_block.extend(second_setup);
         (first, second)
     }
@@ -225,8 +314,9 @@ impl<'a> Lower<'a> {
         let last = lowered.iter().rposition(|(_, b)| !b.is_empty());
         let stable: Vec<bool> = (0..lowered.len())
             .map(|i| {
-                last.is_none_or(|last| i >= last)
-                    || lowered[i + 1..].iter().all(|(_, later)| is_stable(&lowered[i].0, later))
+                let (value, later) = (&lowered[i].0, &lowered[i + 1..]);
+                (last.is_none_or(|last| i >= last) || later.iter().all(|(_, block)| is_stable(value, block)))
+                    && !later.iter().any(|(_, block)| self.call_may_assign(value, block, &[]))
             })
             .collect();
         let mut values = Vec::with_capacity(lowered.len());

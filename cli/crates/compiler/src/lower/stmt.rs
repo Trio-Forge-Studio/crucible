@@ -258,29 +258,8 @@ impl Lower<'_> {
             }
         }
         let parts = [s.condition(), s.incrementor(), Some(s.loop_body())];
-        names.retain(|name| parts.iter().flatten().any(|&part| self.closure_refers_to(part, name.text())));
+        names.retain(|&name| parts.iter().flatten().any(|&part| closure_refers_to(part, name)));
         names
-    }
-
-    fn closure_refers_to(&self, n: Node, name: &str) -> bool {
-        if matches!(
-            n.kind(),
-            Kind::ArrowFunction
-                | Kind::FunctionExpression
-                | Kind::FunctionDeclaration
-                | Kind::MethodDeclaration
-                | Kind::Constructor
-                | Kind::GetAccessor
-                | Kind::SetAccessor
-                | Kind::ClassDeclaration
-                | Kind::ClassExpression
-        ) {
-            let span = n.span();
-            return self.referenced_between(name, span.start, span.end, u32::MAX);
-        }
-        let mut found = false;
-        n.for_each_child(&mut |c| found = found || self.closure_refers_to(c, name));
-        found
     }
 
     /// JavaScript gives each pass of a `for` its own copy of the `let` variables in its head. When a closure
@@ -320,7 +299,15 @@ impl Lower<'_> {
             Some(i) => self.capture(|l| l.expr_stmt(i)).1,
             None => Vec::new(),
         };
-        let loop_kind = Breakable::Loop { copy_back: copy_back.clone() };
+        let copy_at_continue = if continue_hides(s.loop_body(), &captured) {
+            let store = self.temp();
+            let function = Function { params: Vec::new(), varargs: false, body: copy_back.clone() };
+            copy_in.push(Stmt::LocalFunction(store.clone(), function));
+            vec![Stmt::Call(Expr::Name(store).call(Vec::new()))]
+        } else {
+            copy_back.clone()
+        };
+        let loop_kind = Breakable::Loop { copy_back: copy_at_continue };
         let mut body = self.with_breakable(loop_kind, |l| l.body_block(s.loop_body()));
         if !copy_in.is_empty() || (has_own_continue(s.loop_body()) && !increment.is_empty()) {
             // `continue` jumps to the loop's start, so the increment runs there on every pass but the first.
@@ -937,8 +924,13 @@ pub(super) struct Parameters {
 }
 
 fn has_own_continue(s: Node) -> bool {
+    any_own_continue(s, &|_| true)
+}
+
+/// Whether some `continue` of the loop whose body is `s` matches `test`.
+fn any_own_continue(s: Node, test: &dyn Fn(Node) -> bool) -> bool {
     match s.kind() {
-        Kind::ContinueStatement => true,
+        Kind::ContinueStatement => test(s),
         Kind::ForStatement
         | Kind::ForOfStatement
         | Kind::ForInStatement
@@ -951,10 +943,35 @@ fn has_own_continue(s: Node) -> bool {
         | Kind::ClassDeclaration => false,
         _ => {
             let mut found = false;
-            s.for_each_child(&mut |c| found = found || has_own_continue(c));
+            s.for_each_child(&mut |c| found = found || any_own_continue(c, test));
             found
         }
     }
+}
+
+/// Whether a `continue` in `body` sits where a declaration in the body hides one of the head's `names`, so a store
+/// written there would read the body's variable.
+fn continue_hides(body: Node, names: &[Node]) -> bool {
+    !names.is_empty() && any_own_continue(body, &|c| names.iter().any(|name| c.lookup(name.text()) != name.parent()))
+}
+
+/// Whether a function inside `n` refers to the variable that the identifier `name` declares.
+fn closure_refers_to(n: Node, name: Node) -> bool {
+    if matches!(n.kind(), Kind::ClassDeclaration | Kind::ClassExpression) || super::runs_later(n) {
+        return refers_to(n, name);
+    }
+    let mut found = false;
+    n.for_each_child(&mut |c| found = found || closure_refers_to(c, name));
+    found
+}
+
+fn refers_to(n: Node, name: Node) -> bool {
+    if n.kind() == Kind::Identifier {
+        return n.text() == name.text() && super::is_reference(n) && n.declaration() == name.parent();
+    }
+    let mut found = false;
+    n.for_each_child(&mut |c| found = found || refers_to(c, name));
+    found
 }
 
 /// Wraps a loop body that declares locals in `do ... end`, so the statements after it in the loop see the names
