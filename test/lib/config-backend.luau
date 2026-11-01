@@ -21,6 +21,7 @@ function Backend.new()
 		snapshots = {},
 		failures = {},
 		delays = {},
+		getFailures = {},
 		requests = {},
 		inFlight = 0,
 		maxInFlight = 0,
@@ -91,6 +92,11 @@ function Backend:failNext(scope: Scope, how: "throw" | "load-failed", times: num
 	self.failures[key(scope)] = list
 end
 
+-- `GetValue` raises for the key, in every snapshot, until cleared with false.
+function Backend:failGet(name: string, raises: boolean?)
+	self.getFailures[name] = if raises == false then nil else true
+end
+
 -- Every later request for the scope takes `seconds` of scripted time until changed.
 function Backend:delay(scope: Scope, seconds: number)
 	self.delays[key(scope)] = seconds
@@ -153,6 +159,9 @@ function Backend:snapshot(scope: Scope, failure: string?)
 	return {
 		-- What GetValue returns on a LoadFailed snapshot is unmeasured, so the fake assumes the worst: nothing.
 		get = function(name)
+			if backend.getFailures[name] then
+				error("ConfigService: GetValue failed")
+			end
 			return if snapshot.failed then nil else snapshot.values[name]
 		end,
 		refresh = function()

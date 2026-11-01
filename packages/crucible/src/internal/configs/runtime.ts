@@ -35,6 +35,8 @@ interface Snapshot {
 	updates: number;
 	/** `updates` when the applied values were requested. */
 	applied: number;
+	/** `Refresh` ran but its result was discarded, so the engine snapshot is ahead of the applied values. */
+	dropped: boolean;
 	readonly disconnect: Disconnect;
 }
 
@@ -42,8 +44,7 @@ interface Scope {
 	readonly player?: Player;
 	phase: Phase;
 	snapshot?: Snapshot;
-	/** Advances with every snapshot result read, so each result diagnoses each key at most once. */
-	generation: number;
+	/** Reset with every snapshot result read, so each result diagnoses each key at most once. */
 	diagnosed: Set<string>;
 	readonly ready: Cell;
 	readonly values: Map<Declaration, Cell>;
@@ -61,13 +62,12 @@ const KEEP = table.freeze({});
 
 const declarations = new Array<Declaration>();
 const names = new Set<string>();
-let sealed = false;
+let sealer: ConfigRuntime | undefined;
 
 function newScope(player?: Player): Scope {
 	return {
 		player,
 		phase: Phase.Fetching,
-		generation: 0,
 		diagnosed: new Set(),
 		ready: { value: false },
 		values: new Map(),
@@ -307,7 +307,7 @@ export function declare(name: string, kind: ConfigKind, fallback: unknown, node:
 	if (names.has(name)) error(`Config ${name} is declared twice`, 3);
 	if (declarations.size() >= L.MAX_CONFIG_DECLARATIONS)
 		error(`Config ${name} passes the limit of ${L.MAX_CONFIG_DECLARATIONS} configs`, 3);
-	if (sealed)
+	if (sealer !== undefined && !ended(sealer))
 		error(`${name} was declared after the config registry sealed; declare configs in modules that boot loads`, 3);
 	assertDescriptor(node);
 	const [ok, admitted] = pcall(() => admit(node, fallback, name));
@@ -337,6 +337,10 @@ export function ready(player?: Player): boolean {
 	return slots.get(player)?.ready.value === true;
 }
 
+function seal(runtime: ConfigRuntime) {
+	sealer = runtime;
+}
+
 function ended(runtime: ConfigRuntime): boolean {
 	const s = stateOf(runtime);
 	return s === undefined || !isLive(s);
@@ -351,9 +355,7 @@ function retire() {
 }
 
 function live(): boolean {
-	if (owner === undefined || retired) return false;
-	if (ended(owner)) retire();
-	return !retired;
+	return owner !== undefined && !retired;
 }
 
 /** `subject` is a config name, or undefined for the snapshot request itself. */
@@ -398,7 +400,6 @@ function request<T>(scope: Scope, call: () => T): { readonly ok: boolean; readon
 }
 
 function stage(scope: Scope, snapshot: Snapshot, first: boolean, updates: number): Staged {
-	scope.generation++;
 	scope.diagnosed = new Set();
 	const values = new Map<Declaration, unknown>();
 	for (const declaration of declarations) {
@@ -427,7 +428,7 @@ function failed(snapshot: Snapshot): boolean {
 }
 
 function stale(snapshot: Snapshot): boolean {
-	if (snapshot.updates !== snapshot.applied || failed(snapshot)) return true;
+	if (snapshot.updates !== snapshot.applied || snapshot.dropped || failed(snapshot)) return true;
 	const [ok, outdated] = pcall(() => snapshot.port.outdated());
 	return !ok || outdated === true;
 }
@@ -446,6 +447,7 @@ function fetch(scope: Scope): Staged | undefined {
 		port: snapshotPort,
 		updates: 0,
 		applied: 0,
+		dropped: false,
 		disconnect: snapshotPort.onUpdateAvailable(() => {
 			if (live()) snapshot.updates++;
 		}),
@@ -490,11 +492,12 @@ function commit(results: readonly Staged[]) {
 			scope.phase = Phase.Loaded;
 		}
 		result.snapshot.applied = result.updates;
+		result.snapshot.dropped = false;
 		for (const [declaration, value] of result.values) {
 			let cell: Cell;
 			if (scope.player === undefined) cell = declaration.global;
 			else {
-				cell = scope.values.get(declaration) ?? { value: declaration.fallback };
+				cell = scope.values.get(declaration) ?? { value: declaration.global.value };
 				scope.values.set(declaration, cell);
 			}
 			if (value !== KEEP && !deepEqual(cell.value, value)) cell.value = value;
@@ -545,6 +548,7 @@ export function refresh(): boolean {
 			const result = refreshScope(scope);
 			if (closed) {
 				if (result?.first) result.snapshot.disconnect();
+				else if (result !== undefined) result.snapshot.dropped = true;
 				return;
 			}
 			if (result !== undefined) results.push(result);
@@ -588,7 +592,7 @@ function leave(player: Player) {
 function activate(runtime: ConfigRuntime) {
 	owner = runtime;
 	retired = false;
-	sealed = true;
+	(stateOf(runtime)!.subscriptions ??= []).push(retire);
 	task.spawn(fetchLoop, global);
 	if (!declarations.some((d) => d.kind === "player")) return;
 	const port = configPort();
@@ -598,6 +602,7 @@ function activate(runtime: ConfigRuntime) {
 
 class ConfigRuntime extends Subsystem {
 	protected start() {
+		seal(this);
 		if (declarations.size() === 0) return;
 		configPort().wait(0);
 		if (ended(this)) return;

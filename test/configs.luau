@@ -287,6 +287,7 @@ tests["5 97 admission checks every declared shape"] = function()
 	spec.eq(try({ a = { [1] = 1, [3] = 1 }, m = {}, t = { 1, "x" }, u = 1 }), false, "dense array")
 	spec.eq(try({ a = {}, m = { k = 1 }, t = { 1, "x" }, u = 1 }), false, "map value")
 	spec.eq(try({ a = {}, m = {}, t = { 1 }, u = 1 }), false, "tuple length")
+	spec.eq(try({ a = {}, m = {}, t = { 1, "x", 3 }, u = 1 }), false, "tuple too long")
 	spec.eq(try({ a = {}, m = {}, t = { 1, "x" }, u = 3 }), false, "literal union")
 	spec.eq(try({ a = {}, m = {}, t = { 1, "x" } }), false, "required field missing")
 	spec.eq(try({ a = {}, m = {}, t = { 1, "x" }, u = 1, o = 4 }), false, "optional field type")
@@ -840,12 +841,14 @@ end
 
 tests["103 4 configs touch only RunService and emit forms touch no service"] = function()
 	local w = world()
-	w.emit.config("Shop.Coins", 1, w.n.f64)
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
 	spec.list(w.services, { "RunService" }, "only the server entry's side check before boot")
 	w.backend:join(1)
 	w.start()
 	w.backend:setGlobal("Shop.Coins", 2)
 	w.refresh()
+	spec.eq(coins(), 2, "a read")
+	spec.eq(w.server.configReady(), true, "a readiness check")
 	spec.list(w.services, { "RunService" }, "no service after activation and refresh")
 end
 
@@ -884,6 +887,419 @@ tests["105 106 the default port uses ConfigService only with live data or outsid
 	spec.eq(live and requests, 1, "Studio with CrucibleLiveData uses ConfigService")
 	live, _, requests = run(false, nil)
 	spec.eq(live and requests, 1, "a live server uses ConfigService")
+end
+
+tests["105 the Roblox adapter maps each snapshot to its own ConfigService call"] = function()
+	local calls = {}
+	local listeners = {}
+	local function snapshot(tag, err, outdated)
+		return {
+			Outdated = outdated,
+			Error = err,
+			GetValue = function(_, key)
+				return `{tag}:{key}`
+			end,
+			Refresh = function()
+				table.insert(calls, `refresh {tag}`)
+			end,
+			UpdateAvailable = {
+				Connect = function(_, listener)
+					listeners[tag] = listener
+					return {
+						Disconnect = function()
+							table.insert(calls, `disconnect {tag}`)
+						end,
+					}
+				end,
+			},
+		}
+	end
+	local service = {
+		GetConfigAsync = function()
+			table.insert(calls, "global")
+			return snapshot("G", "None", false)
+		end,
+		GetConfigForPlayerAsync = function(_, player)
+			table.insert(calls, `player {player.UserId}`)
+			return snapshot(`P{player.UserId}`, if player.UserId == 5 then "LF" else "None", player.UserId == 5)
+		end,
+	}
+	local game = {
+		GetService = function(_, name)
+			if name == "ConfigService" then
+				return service
+			end
+			return {
+				IsStudio = function()
+					return false
+				end,
+			}
+		end,
+	}
+	local g = spec.runtime({
+		game = game,
+		Random = { new = function() end },
+		Enum = { ConfigSnapshotErrorState = { LoadFailed = "LF", None = "None" } },
+	})
+	local port = g.module("internal/configs/port").configPort()
+	local global = port.global()
+	local five = port.forPlayer({ UserId = 5 })
+	local six = port.forPlayer({ UserId = 6 })
+	spec.list(calls, { "global", "player 5", "player 6" }, "the global snapshot and each player's own are requested")
+	spec.eq(global.get("k"), "G:k", "the global snapshot's value")
+	spec.eq(five.get("k"), "P5:k", "player 5 reads their own snapshot")
+	spec.eq(six.get("k"), "P6:k", "player 6 reads their own snapshot")
+	spec.eq(global.failed(), false, "None is not a failed load")
+	spec.eq(five.failed(), true, "LoadFailed is a failed load")
+	spec.eq(six.failed(), false, "None is not a failed load for a player")
+	spec.eq(global.outdated(), false, "a current global snapshot")
+	spec.eq(five.outdated(), true, "an outdated player snapshot")
+	spec.eq(six.outdated(), false, "a current player snapshot")
+	five.refresh()
+	spec.eq(calls[#calls], "refresh P5", "refresh goes to that snapshot")
+	local fired = 0
+	local disconnect = six.onUpdateAvailable(function()
+		fired += 1
+	end)
+	listeners.P6()
+	spec.eq(fired, 1, "UpdateAvailable reaches the listener")
+	disconnect()
+	spec.eq(calls[#calls], "disconnect P6", "the disconnect closes that connection")
+end
+
+tests["102 requests that arrive while a queue drains never exceed four"] = function()
+	local w = world()
+	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.start()
+	for id = 1, 6 do
+		w.backend:delay(id, 10)
+		w.backend:join(id)
+	end
+	w.backend:advance(10)
+	for id = 7, 10 do
+		w.backend:delay(id, 100)
+		w.backend:join(id)
+	end
+	spec.eq(w.backend.inFlight, 4, "four in flight")
+	spec.eq(w.backend.maxInFlight, 4, "never more than four")
+end
+
+tests["102 four departed queued fetches do not stall later fetches"] = function()
+	local w = world()
+	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.start()
+	for id = 1, 8 do
+		w.backend:delay(id, 1)
+		w.backend:join(id)
+	end
+	for _ = 5, 8 do
+		w.backend:leave(w.backend.players[5])
+	end
+	w.backend:advance(2)
+	spec.eq(w.backend.inFlight, 0, "every slot is back")
+	for id = 9, 12 do
+		w.backend:delay(id, 100)
+		w.backend:join(id)
+	end
+	spec.eq(w.backend.inFlight, 4, "four later fetches all run")
+end
+
+tests["5 97 numeric ranges bound f32 u16 and u32"] = function()
+	local w = world()
+	local n = w.n
+	local num =
+		w.emit.config("Num", { f = 0, h = 0, w = 0 }, n.object({ { "f", n.f32 }, { "h", n.u16 }, { "w", n.u32 } }))
+	w.start()
+	local function admits(value)
+		local before = #w.diagnostics("Num")
+		w.backend:setGlobal("Num", value)
+		w.refresh()
+		return #w.diagnostics("Num") == before
+	end
+	spec.eq(admits({ f = 3.4028234663852886e38, h = 65535, w = 4294967295 }), true, "every maximum is admitted")
+	spec.eq(num().w, 4294967295, "the u32 maximum is stored")
+	spec.eq(admits({ f = -3.4028234663852886e38, h = 0, w = 0 }), true, "the f32 minimum is admitted")
+	spec.eq(admits({ f = 3.4028236e38, h = 0, w = 0 }), false, "f32 over its range")
+	spec.eq(admits({ f = -3.4028236e38, h = 0, w = 0 }), false, "f32 under its range")
+	spec.eq(admits({ f = 0, h = 65536, w = 0 }), false, "u16 over its ceiling")
+	spec.eq(admits({ f = 0, h = 0, w = 4294967296 }), false, "u32 over its ceiling")
+	spec.eq(admits({ f = 0, h = 0, w = -1 }), false, "u32 below zero")
+	spec.eq(admits({ f = 0, h = 0, w = 1.5 }), false, "u32 fraction")
+	spec.eq(num().f, -3.4028234663852886e38, "the last good value survived every refusal")
+end
+
+tests["5 97 variant unions and bare literals select by tag and value"] = function()
+	local w = world()
+	local n = w.n
+	local tagged = w.emit.config(
+		"Tagged",
+		{ kind = "a", x = 1 },
+		n.union({
+			n.variant("kind", "a", n.object({ { "x", n.f64 } })),
+			n.variant("kind", "b", n.object({ { "y", n.string } })),
+		})
+	)
+	local mode = w.emit.config("Mode", { mode = "on" }, n.object({ { "mode", n.literal("on") } }))
+	w.start()
+	local function admits(name, value)
+		local before = #w.diagnostics(name)
+		w.backend:setGlobal(name, value)
+		w.refresh()
+		return #w.diagnostics(name) == before
+	end
+	spec.eq(admits("Tagged", { kind = "b", y = "z" }), true, "the second variant")
+	spec.eq(tagged().y, "z", "the second variant's body is stored")
+	spec.eq(admits("Tagged", { kind = "b", y = 5 }), false, "a variant body is checked")
+	spec.eq(admits("Tagged", { kind = "c" }), false, "an unknown tag")
+	spec.eq(admits("Tagged", { kind = "a", x = 2 }), true, "the first variant")
+	spec.eq(tagged().x, 2, "the first variant's body is stored")
+	spec.eq(admits("Mode", { mode = "off" }), false, "a bare literal must match")
+	spec.eq(mode().mode, "on", "the literal value survived")
+end
+
+tests["5 97 map keys and string sizes are checked"] = function()
+	local w = world()
+	local n = w.n
+	local keyed = w.emit.config("Keyed", {}, n.map(n.union({ n.literal("a"), n.literal("b") }), n.f64))
+	local text = w.emit.config("Text", "", n.string)
+	w.start()
+	local function admits(name, value)
+		local before = #w.diagnostics(name)
+		w.backend:setGlobal(name, value)
+		w.refresh()
+		return #w.diagnostics(name) == before
+	end
+	spec.eq(admits("Keyed", { a = 1, b = 2 }), true, "declared keys")
+	spec.eq(keyed().b, 2, "stored")
+	spec.eq(admits("Keyed", { a = 1, c = 2 }), false, "a key outside the union")
+	spec.eq(keyed().a, 1, "the last good value survived")
+	spec.eq(admits("Text", string.rep("a", 65536)), true, "a string at the byte cap")
+	spec.eq(#text(), 65536, "stored")
+	spec.eq(admits("Text", string.rep("a", 65537)), false, "a string over the byte cap")
+	spec.eq(#text(), 65536, "the last good value survived")
+end
+
+tests["100 a discarded refresh leaves an outdated-only snapshot stale"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	w.start()
+	w.backend.eventOnPublish = false
+	w.backend:setGlobal("Shop.Coins", 5)
+	w.backend:delay("global", 15)
+	local late = w.refresh()
+	w.backend:advance(10)
+	spec.eq(late.value, false, "false at the bound")
+	spec.eq(coins(), 3, "the value is unchanged")
+	w.backend:advance(6)
+	w.backend:delay("global", 0)
+	local next = w.refresh()
+	spec.eq(next.value, true, "the next call refreshes")
+	spec.eq(coins(), 5, "and applies the value the discarded refresh fetched")
+	spec.eq(w.backend:count("refresh global"), 2, "it asked again")
+	spec.eq(w.refresh().value, true, "now current")
+	spec.eq(w.backend:count("refresh global"), 2, "and asks no more")
+end
+
+tests["100 an UpdateAvailable during a refresh keeps the snapshot stale"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	w.start()
+	w.backend:setGlobal("Shop.Coins", 5)
+	w.backend:delay("global", 2)
+	local first = w.refresh()
+	w.backend:advance(1)
+	w.backend:setGlobal("Shop.Coins", 7)
+	w.backend:advance(1)
+	spec.eq(first.value, false, "an update that arrived mid-refresh leaves the snapshot stale")
+	w.backend:delay("global", 0)
+	spec.eq(w.refresh().value, true, "the next refresh")
+	spec.eq(coins(), 7, "applies the later value")
+end
+
+tests["10 100 a joiner shares a false result"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	w.start()
+	w.backend:setGlobal("Shop.Coins", 4)
+	w.backend:delay("global", 1)
+	w.backend:failNext("global", "throw")
+	local first = w.refresh()
+	local second = w.refresh()
+	w.backend:advance(1)
+	spec.eq(first.value, false, "the caller")
+	spec.eq(second.done and second.value, false, "the joiner")
+	spec.eq(coins(), 3, "values kept")
+end
+
+tests["7 94 each retry wait is a fresh random draw of the capped delay"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	w.backend:failNext("global", "throw", 3)
+	w.backend.jitter = 0.5
+	w.start()
+	spec.eq(w.backend:count("fetch global"), 1, "first attempt")
+	w.backend:advance(0.25)
+	spec.eq(w.backend:count("fetch global"), 1, "0.5 of the 1 s delay is not over yet")
+	w.backend.jitter = 0.25
+	w.backend:advance(0.25)
+	spec.eq(w.backend:count("fetch global"), 2, "retry after 0.5 s")
+	w.backend:advance(0.25)
+	spec.eq(w.backend:count("fetch global"), 2, "0.25 of the 2 s delay is not over yet")
+	w.backend:advance(0.25)
+	spec.eq(w.backend:count("fetch global"), 3, "retry after 0.5 s")
+	w.backend:advance(0.75)
+	spec.eq(w.backend:count("fetch global"), 3, "0.25 of the 4 s delay is not over yet")
+	w.backend:advance(0.25)
+	spec.eq(w.backend:count("fetch global"), 4, "retry after 1 s")
+	spec.eq(coins(), 3, "applied")
+end
+
+tests["7 94 a retry loop stops once its scope is loaded or gone"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.backend.globals["Shop.Coins"] = 3
+	w.backend:failNext("global", "throw", 1)
+	w.start()
+	local refreshed = w.refresh()
+	spec.eq(refreshed.value, true, "a refresh fetches the unloaded scope")
+	spec.eq(coins(), 3, "loaded")
+	w.backend:advance(60)
+	spec.eq(w.backend:count("fetch global"), 2, "the loop saw it loaded and made no third request")
+	w.backend:failNext(7, "throw", 1)
+	local player = w.backend:join(7)
+	w.backend:leave(player)
+	w.backend:advance(100)
+	spec.eq(w.backend:count("fetch 7"), 1, "no retry for a departed player")
+	spec.eq(#w.backend.timers, 0, "and no loop left sleeping")
+end
+
+tests["97 a throwing GetValue keeps the last good value and diagnoses once"] = function()
+	local w = world()
+	local coins = w.emit.config("Shop.Coins", 1, w.n.f64)
+	local label = w.emit.config("Shop.Label", "none", w.n.string)
+	w.backend.globals["Shop.Coins"] = 3
+	w.backend.globals["Shop.Label"] = "a"
+	w.start()
+	w.backend:failGet("Shop.Coins")
+	w.backend:setGlobal("Shop.Coins", 4)
+	w.backend:setGlobal("Shop.Label", "b")
+	spec.eq(w.refresh().value, true, "the refresh itself succeeds")
+	spec.eq(coins(), 3, "the throwing key keeps its last good value")
+	spec.eq(label(), "b", "the other keys still apply")
+	spec.eq(#w.diagnostics("GetValue failed"), 1, "diagnosed once")
+end
+
+tests["8 97 a player's invalid first targeted value keeps the global value"] = function()
+	local w = world()
+	local discount = w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	local bonus = w.emit.playerConfig("Shop.Bonus", 0, w.n.f64)
+	w.backend.globals["Shop.Discount"] = 5
+	w.backend.targeted[7] = { ["Shop.Discount"] = "nine", ["Shop.Bonus"] = "ten" }
+	w.start()
+	local player = w.backend:join(7)
+	spec.eq(w.server.configReady(player), true, "the snapshot was applied")
+	spec.eq(discount(player), 5, "the global value stays")
+	spec.eq(bonus(player), 0, "the fallback when no global value exists")
+	spec.eq(#w.diagnostics("player 7"), 2, "each invalid key diagnosed once")
+	w.backend:setForPlayer(7, "Shop.Discount", 9)
+	spec.eq(w.refresh().value, true, "refresh")
+	spec.eq(discount(player), 9, "a later valid targeted value replaces it")
+end
+
+tests["3 104 a declaration after a configless boot throws and a rolled-back boot leaves the registry open"] = function()
+	local w = world()
+	w.start()
+	w.backend:advance(5)
+	throws(function()
+		w.emit.config("Late", 1, w.n.f64)
+	end, "Late was declared after the config registry sealed", "late declaration")
+	local v = world()
+	local failing = setmetatable({}, { __index = v.g.module("subsystem").Subsystem })
+	failing.__index = failing
+	function failing.new()
+		local self = setmetatable({}, failing)
+		v.g.module("subsystem").Subsystem.constructor(self)
+		return self
+	end
+	function failing:start()
+		error("boot fails")
+	end
+	v.emit.defineClass(failing, { kind = "subsystem", id = "Failing", deps = {}, provides = {} })
+	local ok = pcall(v.ignite)
+	spec.eq(ok, false, "boot rolled back")
+	v.emit.config("AfterRollback", 1, v.n.f64)
+end
+
+tests["104 a duplicate PlayerAdded for a present player makes one scope"] = function()
+	local w = world()
+	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	local player = w.backend:join(7)
+	w.start()
+	w.backend.joined.fire(player)
+	spec.eq(w.backend:count("fetch 7"), 1, "one fetch")
+	spec.eq(w.backend.updateListeners, 2, "one listener each for the global snapshot and the player's")
+end
+
+tests["107 retirement disconnects at once, before any event or read"] = function()
+	local w = world()
+	w.emit.config("Shop.Coins", 1, w.n.f64)
+	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.backend:join(7)
+	w.start()
+	spec.eq(w.backend.updateListeners, 2, "listening before retirement")
+	w.life.request(w.runtimeState(), Want.Destroyed)
+	w.life.drain()
+	spec.eq(w.backend.updateListeners, 0, "snapshot listeners")
+	spec.eq(w.backend:playerListeners(), 0, "player listeners")
+end
+
+tests["107 a queued fetch is dropped at retirement without a request"] = function()
+	local w = world()
+	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
+	w.start()
+	for id = 1, 5 do
+		w.backend:delay(id, 10)
+		w.backend:join(id)
+	end
+	w.life.request(w.runtimeState(), Want.Destroyed)
+	w.life.drain()
+	w.backend:advance(10)
+	spec.eq(w.backend:count("fetch 5"), 0, "the queued fetch makes no request")
+	spec.eq(w.backend.inFlight, 0, "nothing left in flight")
+end
+
+tests["100 a duplicate first result is discarded and its listener disconnected"] = function()
+	local loopFirst = world()
+	local coins = loopFirst.emit.config("Shop.Coins", 1, loopFirst.n.f64)
+	loopFirst.backend.globals["Shop.Coins"] = 3
+	loopFirst.backend:delay("global", 5)
+	loopFirst.start()
+	loopFirst.backend:advance(1)
+	local refreshed = loopFirst.refresh()
+	loopFirst.backend:advance(4)
+	spec.eq(coins(), 3, "the loop's fetch applied")
+	spec.eq(loopFirst.backend.updateListeners, 1, "one listener")
+	loopFirst.backend:advance(1)
+	spec.eq(refreshed.value, true, "the refresh's own fetch found the scope loaded")
+	spec.eq(loopFirst.backend.updateListeners, 1, "the later duplicate does not listen")
+
+	local refreshFirst = world()
+	refreshFirst.emit.config("Shop.Coins", 1, refreshFirst.n.f64)
+	refreshFirst.backend:delay("global", 5)
+	refreshFirst.start()
+	refreshFirst.backend:advance(1)
+	refreshFirst.backend:delay("global", 1)
+	local result = refreshFirst.refresh()
+	refreshFirst.backend:advance(1)
+	spec.eq(result.value, true, "the refresh applied the first snapshot")
+	spec.eq(refreshFirst.backend.updateListeners, 1, "one listener")
+	refreshFirst.backend:advance(3)
+	spec.eq(refreshFirst.backend.updateListeners, 1, "the loop's late duplicate does not listen")
 end
 
 return tests

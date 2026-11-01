@@ -5,6 +5,7 @@ export interface ConfigSnapshotPort {
 	readonly get: (key: string) => unknown;
 	/** `Refresh`. Yields and may throw. */
 	readonly refresh: () => void;
+	/** Unmeasured in Studio: whether this turns true without `UpdateAvailable`. Runtime treats the two as independent. */
 	readonly outdated: () => boolean;
 	/** `Error` is `LoadFailed`. */
 	readonly failed: () => boolean;

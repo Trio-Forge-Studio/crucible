@@ -52,7 +52,7 @@ What a read returns:
 - Before the global snapshot first loads, every read returns the fallback.
 - A player read returns the global snapshot's value until that player's snapshot loads, then their targeted value. A player who left, or was never seen, reads the fallback.
 - A key missing from the dashboard reads as the fallback, so deleting a key resets it.
-- A value that does not match the type keeps the last good value, or the fallback if there is none. Crucible logs one warning per key and snapshot, naming the key, the path and the reason, never the value.
+- A value that does not match the type keeps the last good value, or the fallback if there is none. For a player's first targeted value, the last good value is what they read until then: the global snapshot's value, else the fallback. Crucible logs one warning per key and snapshot, naming the key, the path and the reason, never the value.
 - A JSON field the type does not declare is kept in the returned table, though the type does not show it.
 - Values are frozen copies.
 
@@ -76,7 +76,7 @@ export function payout(coins: number): number {
 
 ## Refresh
 
-`refreshConfigs()` yields. It refreshes every snapshot that has newer values or failed, fetches every snapshot that has not loaded, and applies all of them in one pass. It returns true when every snapshot is current. It returns false when a request failed, a snapshot has not loaded, or the call ran past 10 seconds; values stay at their last good state, and a result that arrives late is dropped. Calls made while a refresh runs share its result.
+`refreshConfigs()` yields. It refreshes every snapshot that has newer values or failed, fetches every snapshot that has not loaded, and applies all of them in one pass. It returns true when every snapshot is current. It returns false when a request failed, a snapshot has not loaded, or the call ran past 10 seconds; values stay at their last good state, and a result that arrives late is dropped, so the next call fetches it again. Calls made while a refresh runs share its result.
 
 ```ts
 import { refreshConfigs } from "@trioforge/crucible/server";
