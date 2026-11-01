@@ -90,5 +90,5 @@ export function installClientSync(fault: FaultSender) {
 	sendFault = fault;
 	if (installed) return;
 	installed = true;
-	define(ClientSync, { kind: "subsystem", id: "Crucible.ClientSync" as TypeId, deps: [], provides: [] });
+	define(ClientSync, { kind: "subsystem", id: "Crucible.ClientSync" as TypeId, deps: [], provides: [] }, true);
 }

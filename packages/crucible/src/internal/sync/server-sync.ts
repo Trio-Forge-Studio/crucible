@@ -353,5 +353,5 @@ export function installServerSync(send: FrameSender) {
 	sender = send;
 	if (installed) return;
 	installed = true;
-	define(ServerSync, { kind: "subsystem", id: "Crucible.ServerSync" as TypeId, deps: [], provides: [] });
+	define(ServerSync, { kind: "subsystem", id: "Crucible.ServerSync" as TypeId, deps: [], provides: [] }, true);
 }
