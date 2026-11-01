@@ -11,8 +11,7 @@ use tsrs_vfs::{FS, bundled::embed as bundled, osvfs};
 
 use crate::Diagnostic;
 
-/// A program with no diagnostics, and the checker that checked it. Every fact query goes to this checker, so it
-/// reads the caches the full check filled.
+/// Every fact query goes to the checker that ran the full check, so it reads the caches that check filled.
 pub(crate) struct Checked {
     pub program: &'static Program,
     pub checker: CheckerHandle,
