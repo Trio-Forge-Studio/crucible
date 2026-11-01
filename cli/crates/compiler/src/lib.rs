@@ -5,10 +5,10 @@ pub mod luau;
 mod macros;
 mod program;
 mod tree;
+mod write;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
-use std::io::{self, Read};
 use std::path::Path;
 
 pub use facts::{
@@ -18,6 +18,8 @@ pub use facts::{
 pub use lower::Error;
 use lower::ImportBase;
 pub use macros::{Macro, MacroKind};
+use write::HEADER;
+pub use write::{Written, write};
 
 /// A configuration, syntax or type error.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,75 +105,6 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
         }
     }
     if errors.is_empty() { Ok(modules) } else { Err(Failure::Lower(errors)) }
-}
-
-/// The first line of every module `compile` emits. `write` treats a `.luau` file as its own only when the file
-/// starts with it.
-const HEADER: &str = "-- Compiled with crucible-compiler\n";
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Written {
-    pub written: usize,
-    pub removed: usize,
-}
-
-/// Writes each module under `out`, skipping files whose bytes already match, and counts the files it wrote. Then it
-/// deletes every `.luau` file under `out` that starts with the compiler's header and is not one of `modules`, and
-/// any folder that deletion leaves empty, and counts the files it deleted. Files the compiler did not emit, such as
-/// `rbxtsc` output and declarations, stay.
-pub fn write(out: &Path, modules: &[Module]) -> io::Result<Written> {
-    let mut changes = Written::default();
-    for module in modules {
-        let path = out.join(&module.path);
-        if std::fs::read(&path).is_ok_and(|old| old == module.source.as_bytes()) {
-            continue;
-        }
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&path, &module.source)?;
-        changes.written += 1;
-    }
-    let current: HashSet<&str> = modules.iter().map(|m| m.path.as_str()).collect();
-    changes.removed = remove_stale(out, "", &current)?;
-    Ok(changes)
-}
-
-fn remove_stale(dir: &Path, prefix: &str, current: &HashSet<&str>) -> io::Result<usize> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
-        Err(e) => return Err(e),
-    };
-    let mut removed = 0;
-    for entry in entries {
-        let entry = entry?;
-        let Ok(name) = entry.file_name().into_string() else { continue };
-        let path = entry.path();
-        let relative = format!("{prefix}{name}");
-        let kind = entry.file_type()?;
-        if kind.is_dir() {
-            let inside = remove_stale(&path, &format!("{relative}/"), current)?;
-            if inside > 0 && std::fs::read_dir(&path)?.next().is_none() {
-                std::fs::remove_dir(&path)?;
-            }
-            removed += inside;
-        } else if kind.is_file()
-            && name.ends_with(".luau")
-            && !current.contains(relative.as_str())
-            && starts_with_header(&path)?
-        {
-            std::fs::remove_file(&path)?;
-            removed += 1;
-        }
-    }
-    Ok(removed)
-}
-
-fn starts_with_header(path: &Path) -> io::Result<bool> {
-    let mut head = Vec::with_capacity(HEADER.len());
-    std::fs::File::open(path)?.take(HEADER.len() as u64).read_to_end(&mut head)?;
-    Ok(head == HEADER.as_bytes())
 }
 
 fn common_dir(paths: &[String]) -> String {
