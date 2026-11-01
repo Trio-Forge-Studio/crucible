@@ -261,6 +261,14 @@ test("K9 the build rejects a replicated initial value that breaks the declared t
 	});
 	assert.match(compile(game, 1), /TS2322|error TS/);
 	game = project({
+		"src/shared/state.ts": imports + 'export const X = replicatedPerPlayer<{ a: number }>("X.State", { a: "s" });',
+	});
+	assert.deepEqual(
+		inspect(game).diagnostics.map((d) => d.messageText),
+		[],
+	);
+	assert.match(compile(game, 1), /TS2322|TS2345/);
+	game = project({
 		"src/shared/state.ts": imports + 'export const X = replicatedPerPlayer<{ a: number }>("X.State", { a: 1 });',
 		"src/client/read.ts": 'import { X } from "../shared/state"; export const a: number = X().a;',
 	});

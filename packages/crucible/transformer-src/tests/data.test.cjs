@@ -691,6 +691,244 @@ test("persist rejections name the annotation to write and serverOnly marks follo
 	compile(game, 1);
 });
 
+const rootMark =
+	"serverOnly marks a template field, never the store's whole value; wrap the value in an object and mark the field";
+const fieldMark =
+	"serverOnly marks a field on an object path from the template root, never an array element, a map value or a union member";
+const symbolKey = "symbol property names cannot cross the network";
+const hideImports = 'import type { ServerOnly } from "@trioforge/crucible";\n';
+const declareStore = (name, type) =>
+	`export const S${name} = profileStore<${type}>("X.${name}", { template: undefined as never });\n`;
+
+test("rule 129 rejects a serverOnly mark on the store's whole value in every spelling", () => {
+	const roots = {
+		Type: declareStore("Type", "ServerOnly<{ secret: number }>"),
+		Call: 'export const SCall = profileStore("X.Call", { template: serverOnly({ secret: 1 }) });\n',
+		CallTyped:
+			'export const SCallTyped = profileStore<ServerOnly<{ secret: number }>>("X.CallTyped", { template: serverOnly({ secret: 1 }) });\n',
+		Const: 'const tmpl = serverOnly({ secret: 1 });\nexport const SConst = profileStore("X.Const", { template: tmpl });\n',
+		Alias: "type Hidden = ServerOnly<{ secret: number }>;\ntype Root = Hidden;\n" + declareStore("Alias", "Root"),
+		Generic: "type Mark<T> = ServerOnly<T>;\n" + declareStore("Generic", "Mark<{ secret: number }>"),
+		EmptyIntersection: declareStore("EmptyIntersection", "ServerOnly<{ secret: number }> & {}"),
+		Scalar: declareStore("Scalar", "ServerOnly<number>"),
+		RecordInside: declareStore("RecordInside", "ServerOnly<Record<string, number>>"),
+		MapInside: declareStore("MapInside", "ServerOnly<Map<string, number>>"),
+		Optional: declareStore("Optional", "ServerOnly<{ secret: number }> | undefined"),
+	};
+	const game = project({ "src/shared/root.ts": shared + hideImports + Object.values(roots).join("") });
+	const result = inspect(game);
+	const diagnostics = h.diagnosticsIn(result, game, "src/shared/root.ts");
+	for (const name of Object.keys(roots))
+		assert.ok(
+			diagnostics.includes(`CRU019: X.${name} value: ${rootMark}`),
+			`${name} reports the root mark: ${diagnostics.join("\n")}`,
+		);
+	assert.equal(
+		diagnostics.filter((d) => d.includes(rootMark)).length,
+		Object.keys(roots).length,
+		"one root report per declaration",
+	);
+	compile(game, 1);
+});
+
+test("rule 129 keeps every serverOnly value that survives a type spelling out of the replica", () => {
+	const rejected = {
+		RootIntersection: [declareStore("RootIntersection", "ServerOnly<{ secret: number }> & { a: number }"), "value"],
+		RootIntersections: [
+			declareStore("RootIntersections", "ServerOnly<{ s: number }> & ServerOnly<{ t: number }>"),
+			"value",
+		],
+		RootExtends: [
+			"interface Mine extends ServerOnly<{ s: number }> { b: number }\n" + declareStore("RootExtends", "Mine"),
+			"value",
+		],
+		RootPartial: [declareStore("RootPartial", "Partial<ServerOnly<{ s: number }>>"), "value"],
+		RootSpread: [
+			'export const SRootSpread = profileStore("X.RootSpread", { template: { ...serverOnly({ b: 1 }) } });\n',
+			"value",
+		],
+		FieldIntersection: [
+			declareStore("FieldIntersection", "{ a: number; b: ServerOnly<{ x: number }> & { y: number } }"),
+			"value.b",
+		],
+		FieldIntersections: [
+			declareStore(
+				"FieldIntersections",
+				"{ a: number; b: ServerOnly<{ x: number }> & ServerOnly<{ y: number }> }",
+			),
+			"value.b",
+		],
+		FieldExtends: [
+			"interface Hides extends ServerOnly<{ s: number }> { b: number }\n" +
+				declareStore("FieldExtends", "{ a: number; m: Hides }"),
+			"value.m",
+		],
+		FieldOmit: [declareStore("FieldOmit", "{ a: number; o: Omit<ServerOnly<{ s: number }>, never> }"), "value.o"],
+		FieldSpread: [
+			'export const SFieldSpread = profileStore("X.FieldSpread", { template: { a: 1, ...serverOnly({ b: 1 }) } });\n',
+			"value",
+		],
+	};
+	const game = project({
+		"src/shared/survive.ts":
+			shared +
+			hideImports +
+			Object.values(rejected)
+				.map(([source]) => source)
+				.join(""),
+	});
+	const diagnostics = h.diagnosticsIn(inspect(game), game, "src/shared/survive.ts");
+	for (const [name, [, at]] of Object.entries(rejected))
+		assert.ok(
+			diagnostics.includes(`CRU019: X.${name} ${at}: ${symbolKey}`),
+			`${name} rejects the brand's symbol key at ${at}: ${diagnostics.join("\n")}`,
+		);
+	compile(game, 1);
+});
+
+test("rule 129 rejects a serverOnly mark inside an array, map, tuple, union or optional object", () => {
+	const positions = {
+		Element: ["{ a: number; b: ServerOnly<number>[] }", "value.b[]", fieldMark],
+		ElementObject: ["{ a: number; b: { s: ServerOnly<number> }[] }", "value.b[].s", fieldMark],
+		MapValue: ["{ a: number; b: Map<string, ServerOnly<number>> }", "value.b.value", fieldMark],
+		MapObjectValue: ["{ a: number; b: Map<string, { s: ServerOnly<number> }> }", "value.b.value.s", fieldMark],
+		RecordValue: ["{ a: number; b: Record<string, ServerOnly<number>> }", "value.b.value", fieldMark],
+		Tuple: ["{ a: number; b: [ServerOnly<number>, string] }", "value.b[0]", fieldMark],
+		UnionLiteral: ['{ a: number; u: ServerOnly<number> | "z" }', "value.u", fieldMark],
+		UnionVariant: ['{ a: number; u: { k: "p"; s: ServerOnly<number> } | { k: "q" } }', "value.u.s", fieldMark],
+		OptionalParent: ["{ a: number; p?: { s: ServerOnly<number> } }", "value.p.s", fieldMark],
+		UnionObjects: [
+			"{ a: number; u: ServerOnly<{ x: number }> | { y: number } }",
+			"value.u",
+			"union members ServerOnly<{ x: number; }>, { y: number; } have no discriminant; give each a distinct literal property",
+		],
+		UnionMarks: [
+			"{ a: number; u: ServerOnly<number> | ServerOnly<string> | undefined }",
+			"value.u",
+			"union members ServerOnly<number>, ServerOnly<string> have no discriminant; give each a distinct literal property",
+		],
+		NestedAliasElement: [
+			"{ a: number; l: Hidden[] }",
+			"value.l[]",
+			fieldMark,
+			"type Hidden = ServerOnly<{ v: number }>;\n",
+		],
+	};
+	const game = project({
+		"src/shared/positions.ts":
+			shared +
+			hideImports +
+			Object.values(positions)
+				.map((position) => position[3] ?? "")
+				.join("") +
+			Object.entries(positions)
+				.map(([name, [type]]) => declareStore(name, type))
+				.join(""),
+	});
+	const diagnostics = h.diagnosticsIn(inspect(game), game, "src/shared/positions.ts");
+	assert.deepEqual(
+		diagnostics,
+		Object.entries(positions).map(([name, [, at, message]]) => `CRU019: X.${name} ${at}: ${message}`),
+	);
+	compile(game, 1);
+});
+
+test("rule 129 marks a field at any object depth through aliases, optionals and partials and prunes what empties", () => {
+	const game = project({
+		"src/shared/marks.ts":
+			shared +
+			hideImports +
+			"type Hidden = ServerOnly<{ v: number }>;\n" +
+			declareStore(
+				"Marks",
+				"{ a: number; c: { w: Hidden; z: string }; h: Hidden; n: Partial<{ b: ServerOnly<number> }>; o?: ServerOnly<number> }",
+			) +
+			declareStore("Only", "{ only: ServerOnly<number> }") +
+			declareStore("Deep", "{ w: { only: ServerOnly<number> } }"),
+	});
+	const result = inspect(game);
+	assert.deepEqual(h.diagnosticsIn(result, game, "src/shared/marks.ts"), []);
+	const found = calls(result.output.get("src/shared/marks.ts"), macros);
+	assert.deepEqual(found.get("X.Marks").args.slice(2), [
+		h.O([
+			["a", h.F],
+			[
+				"c",
+				h.O([
+					["w", h.O([["v", h.F]])],
+					["z", h.S],
+				]),
+			],
+			["h", h.O([["v", h.F]])],
+			["n", h.O([["b", h.U(h.Nil, h.F)]])],
+			["o", h.U(h.Nil, h.F)],
+		]),
+		h.O([
+			["a", h.F],
+			["c", h.O([["z", h.S]])],
+		]),
+		'[["c", "w"], ["h"], ["n", "b"], ["o"]]',
+	]);
+	assert.deepEqual(found.get("X.Only").args.slice(2), [h.O([["only", h.F]]), h.O([]), '[["only"]]']);
+	assert.deepEqual(found.get("X.Deep").args.slice(2), [
+		h.O([["w", h.O([["only", h.F]])]]),
+		h.O([]),
+		'[["w", "only"]]',
+	]);
+	compile(game);
+});
+
+test("K12 a profileStore root is an object with declared fields and a dataStore keeps its record root", () => {
+	const message = "a profile store's value is an object with declared fields; wrap the record in a field";
+	const game = project({
+		"src/shared/records.ts":
+			shared +
+			declareStore("Record", "Record<string, number>") +
+			declareStore("Map", "Map<string, number>") +
+			declareStore("Index", "{ [key: string]: number }") +
+			'export const SInferred = profileStore("X.Inferred", { template: {} as Record<string, number> });\n' +
+			declareStore("Wrapped", "{ upgrades: Record<string, number> }"),
+		"src/server/records.ts":
+			server +
+			'export const DRecord = dataStore<Record<string, number>>("X.DataRecord", { defaults: {} });\n' +
+			'export const DMap = dataStore<Map<string, number>>("X.DataMap", { defaults: new Map() });\n',
+	});
+	const result = inspect(game);
+	assert.deepEqual(
+		h.diagnosticsIn(result, game, "src/shared/records.ts"),
+		["Record", "Map", "Index", "Inferred"].map((name) => `CRU019: X.${name} value: ${message}`),
+	);
+	assert.deepEqual(h.diagnosticsIn(result, game, "src/server/records.ts"), []);
+	const found = calls(result.output.get("src/server/records.ts"), macros);
+	assert.deepEqual(found.get("X.DataRecord").args.slice(2), [h.M(h.S, h.F)]);
+	assert.deepEqual(found.get("X.DataMap").args.slice(2), [h.M(h.S, h.F)]);
+	const wrapped = calls(result.output.get("src/shared/records.ts"), macros).get("X.Wrapped");
+	assert.deepEqual(wrapped.args.slice(2), [
+		h.O([["upgrades", h.M(h.S, h.F)]]),
+		h.O([["upgrades", h.M(h.S, h.F)]]),
+		"[]",
+	]);
+	compile(game, 1);
+});
+
+test("a profileStore field name may hold digits and underscores", () => {
+	const game = project({
+		"src/shared/digits.ts": shared + declareStore("Digits", "{ slot2: number; item_3b: string; Tier1: boolean }"),
+	});
+	const result = inspect(game);
+	assert.deepEqual(h.diagnosticsIn(result, game, "src/shared/digits.ts"), []);
+	const view = h.O([
+		["Tier1", h.B],
+		["item_3b", h.S],
+		["slot2", h.F],
+	]);
+	assert.deepEqual(calls(result.output.get("src/shared/digits.ts"), macros).get("X.Digits").args.slice(2), [
+		view,
+		view,
+		"[]",
+	]);
+});
+
 test("persist depth stops at PERSIST_DEPTH", () => {
 	const nested = (n) => "{v:".repeat(n) + "string" + "}".repeat(n);
 	let game = project({
