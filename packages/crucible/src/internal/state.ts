@@ -194,4 +194,6 @@ export interface LifeEffects {
 	readonly failed: (message: string) => void;
 	/** A teardown failure on a generation with no fault. Logged; it does not fault the generation. */
 	readonly diagnose: (s: ObjectState, hook: Hook, error: unknown) => void;
+	/** The enable interval ended: after `onDisable`, and when the generation is released. */
+	readonly disabled?: (s: ObjectState) => void;
 }

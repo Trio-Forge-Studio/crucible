@@ -51,6 +51,13 @@ export function stateOf(object: LifeObject): ObjectState | undefined {
 	return states.get(object);
 }
 
+let enablingNow: ObjectState | undefined;
+
+/** @internal The generation whose Enable step is running. What it creates belongs to its enable interval. */
+export function enabling(): ObjectState | undefined {
+	return enablingNow;
+}
+
 /** @internal Awake, not faulted, and not asked to go. `get` and queries see only live objects. */
 export function isLive(s: LifeState): boolean {
 	return (
@@ -119,6 +126,8 @@ function construct(s: ObjectState): LifeObject {
 
 function release(s: ObjectState) {
 	if (s.object !== undefined) states.delete(s.object);
+	const disabled = effects().disabled;
+	if (disabled !== undefined) pcall(disabled, s);
 	const subscriptions = s.subscriptions;
 	s.subscriptions = undefined;
 	if (subscriptions === undefined) return;
@@ -187,10 +196,14 @@ function perform(s: ObjectState, step: Step) {
 			s.phase = Phase.Awake;
 			run(s, Hook.Awake);
 			return;
-		case Step.Enable:
+		case Step.Enable: {
 			s.phase = Phase.Enabled;
+			const previous = enablingNow;
+			enablingNow = s;
 			run(s, Hook.OnEnable);
+			enablingNow = previous;
 			return;
+		}
 		case Step.BeginDisabled:
 			s.phase = Phase.Disabled;
 			return;
@@ -224,6 +237,7 @@ function perform(s: ObjectState, step: Step) {
 		case Step.Disable:
 			s.phase = Phase.Disabled;
 			run(s, Hook.OnDisable);
+			fx.disabled?.(s);
 			return;
 		case Step.Destroy: {
 			const thread = s.startThread;

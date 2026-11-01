@@ -12,6 +12,8 @@ import { records, seal, type BehaviourRecord, type ClassRecord, type SubsystemRe
 import { robloxPort, type BootPort } from "./roblox-port";
 import { Scheduler } from "./scheduler";
 import { Hook, Kind, Want, type ObjectState } from "./state";
+import { holdBarrier, releaseBarrier, useReactivePort } from "./reactive/flush";
+import { endInterval } from "./reactive/ownership";
 
 /** @internal */
 export const BOOT_CLASSES = [Subsystem, CrucibleBehaviour];
@@ -170,6 +172,8 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		for (const state of owned) request(state, Want.Destroyed);
 	}
 	useEngine(port);
+	holdBarrier();
+	useReactivePort(port);
 	useImplementerPort(port);
 	useEffects({
 		construct: (s) => {
@@ -207,6 +211,7 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		},
 		diagnose: (s, hook, err) =>
 			runtimeDiagnostic("error", `${where(port, s)} ${HOOK_NAMES[hook]} failed: ${tostring(err)}`),
+		disabled: endInterval,
 	});
 	const [ok, err] = pcall(() => {
 		stop = watch(records().filter((r): r is BehaviourRecord => r.kind === Kind.Behaviour));
@@ -224,12 +229,14 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		for (const s of owned) if (!hasEnded(s)) request(s, Want.Destroyed);
 		drain();
 		owned.clear();
+		releaseBarrier();
 		error(`Crucible boot failed: ${failure}`, 0);
 	}
 	stage = "committed";
 	owned.clear();
 	if (side.name === "server") port.bindToClose(() => shutdown(port, singletons));
 	side.booted();
+	releaseBarrier();
 }
 
 /** @internal */
