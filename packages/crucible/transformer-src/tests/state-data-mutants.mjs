@@ -22,6 +22,12 @@ const DK = ["K9 the build rejects a profileStore", "data.test.cjs"];
 const LP = ["transformer limits equal", "data.test.cjs"];
 const PM = ["persist rejections", "data.test.cjs"];
 const PD = ["persist depth", "data.test.cjs"];
+const RM = ["rule 129 rejects a serverOnly mark on the store's whole value", "data.test.cjs"];
+const RV = ["rule 129 keeps every serverOnly value", "data.test.cjs"];
+const RP = ["rule 129 rejects a serverOnly mark inside an array", "data.test.cjs"];
+const RF = ["rule 129 marks a field at any object depth", "data.test.cjs"];
+const K12 = ["K12 a profileStore root", "data.test.cjs"];
+const DG = ["a profileStore field name may hold digits", "data.test.cjs"];
 const N = "network.cjs";
 const D = "declarations.cjs";
 const C = "data.cjs";
@@ -282,6 +288,45 @@ const mutations = [
 		E,
 	],
 	["K9 emit profileStore takes any options", "options: ProfileOptions<T>,", "options: unknown,", DK, E],
+	[
+		"K9 emit replicatedPerPlayer takes any initial value",
+		"export declare function replicatedPerPlayer<T>(name: string, initial: NoInfer<T>, value: Node)",
+		"export declare function replicatedPerPlayer<T>(name: string, initial: unknown, value: Node)",
+		RK,
+		E,
+	],
+	["rule 129 root mark guard", "if (position.root)", "if (false)", RM, N],
+	["rule 129 root position flag", "path: true, root: true", "path: true", RM, N],
+	[
+		"rule 129 root flag stays at the root",
+		"path: position.path,\n\t\t\t\t\t\t\t\tmarked: position.marked,",
+		"path: position.path,\n\t\t\t\t\t\t\t\troot: position.root,\n\t\t\t\t\t\t\t\tmarked: position.marked,",
+		RF,
+		N,
+	],
+	["rule 129 symbol key guard", 'if (prop.escapedName.toString().startsWith("__@"))', "if (false)", RV, N],
+	[
+		"rule 129 element leaves the object path",
+		"return lower(t, location, { toClient: position.toClient, nilable: false }, depth + 1);",
+		"return lower(t, location, { toClient: position.toClient, nilable: false, path: position.path }, depth + 1);",
+		RP,
+		N,
+	],
+	["K12 record root guard", 'else if (spec.handles && value.kind === "map")', "else if (false)", K12, N],
+	[
+		"K12 record root only for profile stores",
+		'else if (spec.handles && value.kind === "map")',
+		'else if (spec.store && value.kind === "map")',
+		K12,
+		N,
+	],
+	[
+		"rule 134 view name segment allows digits",
+		"const SEGMENT = /^[A-Za-z][A-Za-z0-9_]*$/;",
+		"const SEGMENT = /^[A-Za-z][A-Za-z_]*$/;",
+		DG,
+		D,
+	],
 ];
 if (process.argv.includes("--list")) {
 	console.log(JSON.stringify(mutations.map(([name]) => name)));
