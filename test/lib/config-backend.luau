@@ -61,7 +61,9 @@ function Backend:advance(seconds: number)
 		end
 		local timer = table.remove(self.timers, index)
 		self.now = timer.at
-		task.spawn(timer.thread)
+		if coroutine.status(timer.thread) == "suspended" then
+			task.spawn(timer.thread)
+		end
 	end
 	self.now = target
 end

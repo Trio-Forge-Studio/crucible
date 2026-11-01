@@ -249,6 +249,14 @@ tests["5 97 JSON text is decoded and bad JSON keeps the value"] = function()
 	w.backend:setGlobal("GlobalEvent", string.rep(" ", 100001))
 	w.refresh()
 	spec.eq(#w.diagnostics("over 100000 bytes"), 1, "text over the byte limit refused before decoding")
+	local wide = table.clone(DOUBLE)
+	for i = 1, 20 do
+		wide[`pad${i}`] = string.rep("x", 6000)
+	end
+	w.backend:setGlobal("GlobalEvent", wide)
+	w.refresh()
+	spec.eq(#w.diagnostics("over 100000 bytes"), 2, "a decoded table over the byte limit refused")
+	spec.eq(event().name, "Text", "kept")
 end
 
 tests["5 97 admission checks every declared shape"] = function()
