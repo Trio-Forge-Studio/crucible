@@ -582,6 +582,23 @@ test("network heritage chains deeper than the checker can analyse end in Crucibl
 	}
 });
 
+test("network transformer faults other than a stack overflow keep their own message", () => {
+	const game = chainGame(2);
+	const faults = [
+		[new RangeError("Invalid array length"), "Invalid array length"],
+		[new Error("checker exploded"), "checker exploded"],
+		[new TypeError("x is not a function"), "x is not a function"],
+	];
+	for (const [fault, message] of faults) {
+		const { diagnostics } = inspect(game, undefined, fault);
+		assert.ok(diagnostics.length > 0, message);
+		for (const diagnostic of diagnostics) {
+			assert.equal(diagnostic.code, 90000);
+			assert.equal(diagnostic.messageText, "Crucible: Cannot transform input: " + message);
+		}
+	}
+});
+
 test("network augmentations declaring a value beside a reached payload name fail like any other declaration", () => {
 	const forms = {
 		function: ["function Payload(): void;", true],

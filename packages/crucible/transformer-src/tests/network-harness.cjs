@@ -39,7 +39,7 @@ function project(files, options = {}) {
 	fs.cpSync(path.join(__dirname, "..", "..", "transformer"), path.join(pkg, "transformer"), { recursive: true });
 	return game;
 }
-function inspect(game, only) {
+function inspect(game, only, fault) {
 	const config = ts.getParsedCommandLineOfConfigFile(
 		path.join(game, "tsconfig.json"),
 		{},
@@ -50,7 +50,23 @@ function inspect(game, only) {
 	const sources = program
 		.getSourceFiles()
 		.filter((s) => !s.isDeclarationFile && (!only || s.fileName.endsWith(only)));
-	const result = ts.transform(sources, [transform(program, {}, { ts, addDiagnostic: (d) => diagnostics.push(d) })]);
+	const subject = fault
+		? Object.create(program, {
+				getTypeChecker: {
+					value: () =>
+						new Proxy(program.getTypeChecker(), {
+							get: (checker, name) =>
+								name === "getTypeFromTypeNode"
+									? () => {
+											throw fault;
+										}
+									: checker[name],
+						}),
+				},
+			})
+		: program;
+	const factory = transform(subject, {}, { ts, addDiagnostic: (d) => diagnostics.push(d) });
+	const result = ts.transform(sources, [factory]);
 	const output = new Map(
 		result.transformed.map((s) => [
 			path.relative(game, s.fileName).replaceAll("\\", "/"),

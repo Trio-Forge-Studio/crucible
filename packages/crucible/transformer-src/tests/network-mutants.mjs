@@ -533,9 +533,30 @@ const mutations = [
 	],
 	[
 		"F5 a checker stack overflow gets a Crucible message",
-		"error instanceof RangeError",
+		"error instanceof RangeError && /call stack/i.test(error.message)",
 		"false",
 		"network heritage chains deeper than the checker",
+		"index.cjs",
+	],
+	[
+		"F5 overflow message matches only a stack overflow RangeError",
+		"error instanceof RangeError && /call stack/i.test(error.message)",
+		"error instanceof Error",
+		"network transformer faults other than a stack overflow",
+		"index.cjs",
+	],
+	[
+		"F5 overflow message ignores a TypeError",
+		"error instanceof RangeError && /call stack/i.test(error.message)",
+		"(error instanceof RangeError || error instanceof TypeError)",
+		"network transformer faults other than a stack overflow",
+		"index.cjs",
+	],
+	[
+		"F5 overflow message ignores a RangeError of another kind",
+		"error instanceof RangeError && /call stack/i.test(error.message)",
+		"error instanceof RangeError",
+		"network transformer faults other than a stack overflow",
 		"index.cjs",
 	],
 	[
