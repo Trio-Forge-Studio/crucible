@@ -173,7 +173,12 @@ fn numeric_loop_bounds_know_integers() {
     assert_eq!(integer("limit - 1", "limit"), Some(true), "a bound nested in a difference");
     assert_eq!(integer("let i = count", "count"), Some(false), "a number is not definitely an integer");
     assert_eq!(integer("i < sizes", "sizes"), Some(true), "a union of integer literals");
-    assert_eq!(lookup("loops.ts", span("loops.ts", "limit - 1", "1")), None, "a literal is an integer by syntax");
+    assert_eq!(integer("limit - 1", "1"), Some(true), "an integer literal in a difference");
+    assert_eq!(integer("i < 3", "3"), Some(true), "an integer literal");
+    assert_eq!(integer("i < 2.5", "2.5"), Some(false), "a fractional literal");
+    assert_eq!(integer("count + 0.5", "0.5"), Some(false), "a fractional literal in a sum");
+    assert_eq!(integer("i < items.size()", "items.size()"), Some(true), "roblox-ts trusts the size macro");
+    assert_eq!(integer("items.indexOf(\"a\")", "items.indexOf(\"a\")"), Some(false), "other macros return numbers");
 }
 
 #[test]

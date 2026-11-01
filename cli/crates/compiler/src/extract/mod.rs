@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use tsrs_ast::{Kind, ModifierFlags, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
 use tsrs_checker::{EmitResolver, Type};
 use tsrs_compiler::CheckerHandle;
-use tsrs_core::P;
+use tsrs_core::{P, jsnum};
 
 use crate::facts::{Callee, Crucible, Fact, Facts, FileFacts, Import, Reason, Receiver, Site, Span, Unanswered};
 use crate::macros::Macro;
@@ -452,11 +452,17 @@ impl Extractor {
         }
     }
 
-    /// A numeric `for` loop needs integer bounds. Literals and sums, differences, products and powers of integers
-    /// are integers by their syntax, so only the other leaves ask their type.
+    /// A numeric `for` loop needs integer bounds. Sums, differences, products and powers of integers are integers,
+    /// so only their leaves are answered: a literal by its value, a `size` macro call as an integer, and any other
+    /// expression by its type.
     fn integer_bound(&mut self, n: P<Node>) {
         match n.kind() {
-            Kind::NumericLiteral => {}
+            Kind::NumericLiteral => {
+                self.site();
+                let integer = jsnum::from_string(n.as_numeric_literal().text()).0.fract() == 0.0;
+                let span = self.span(n);
+                self.table.store(span, Site::Constant, |f| &mut f.integer, integer);
+            }
             Kind::BinaryExpression => {
                 let binary = n.as_binary_expression();
                 if matches!(
@@ -475,12 +481,24 @@ impl Extractor {
             }
             _ => {
                 self.site();
-                let t = self.type_of(n);
-                let integer = self.definitely(t, types::is_integer_literal);
+                let integer = self.is_size_macro_call(n) || {
+                    let t = self.type_of(n);
+                    self.definitely(t, types::is_integer_literal)
+                };
                 let span = self.span(n);
                 self.table.store(span, Site::Constant, |f| &mut f.integer, integer);
             }
         }
+    }
+
+    fn is_size_macro_call(&mut self, n: P<Node>) -> bool {
+        if n.kind() != Kind::CallExpression {
+            return false;
+        }
+        let t = self.type_of(n.as_call_expression().expression);
+        let t = self.checker.get_non_optional_type(t);
+        let symbol = self.first_defined_symbol(t);
+        symbol.and_then(|s| self.globals.method_macro(s)).is_some_and(|m| m.name() == "size")
     }
 
     fn for_of(&mut self, n: P<Node>) {
