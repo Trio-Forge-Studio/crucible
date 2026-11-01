@@ -151,8 +151,9 @@ function Backend:snapshot(scope: Scope, failure: string?)
 	table.insert(self.snapshots, snapshot)
 	local backend = self
 	return {
+		-- What GetValue returns on a LoadFailed snapshot is unmeasured, so the fake assumes the worst: nothing.
 		get = function(name)
-			return snapshot.values[name]
+			return if snapshot.failed then nil else snapshot.values[name]
 		end,
 		refresh = function()
 			local refreshFailure = backend:request(scope, "refresh")

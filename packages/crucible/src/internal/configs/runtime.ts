@@ -598,6 +598,7 @@ function activate(runtime: ConfigRuntime) {
 
 class ConfigRuntime extends Subsystem {
 	protected start() {
+		if (declarations.size() === 0) return;
 		configPort().wait(0);
 		if (ended(this)) return;
 		activate(this);

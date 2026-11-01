@@ -719,6 +719,16 @@ tests["104 activation waits once, fetches the global snapshot and connects playe
 	spec.list(v.backend.requests, { "fetch global", "fetch 1", "fetch 2" }, "present then joining players")
 end
 
+tests["104 a game without configs never builds the port or fetches"] = function()
+	local w = world()
+	w.start()
+	w.backend:advance(60)
+	spec.eq(#w.backend.requests, 0, "no request")
+	spec.eq(#w.backend.timers, 0, "start did not wait on the config port")
+	spec.eq(w.server.configReady(), false, "nothing to be ready")
+	spec.eq(w.refresh().value, false, "nothing loaded")
+end
+
 tests["102 at most four requests run at once and player fetches queue in join order"] = function()
 	local w = world()
 	w.emit.playerConfig("Shop.Discount", 0, w.n.f64)
