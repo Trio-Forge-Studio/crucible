@@ -21,6 +21,7 @@ local function declare(r)
 		Keys = r.emit.toClient("Keys.Map", n.map(n.union({ n.literal("a"), n.literal("b") }), n.u8)),
 		Gone = r.emit.askServer("Z.Gone", n["nil"], n.dynamic, nil),
 		Strict = r.emit.askServer("Z.Strict", n.u8, n.dynamic, nil),
+		Words = r.emit.toServer("Words.List", n.array(n.string)),
 	}
 end
 
@@ -55,7 +56,7 @@ return {
 		end)
 		spec.eq(
 			link.server.remote.attributes.Catalog,
-			"A.First\nAdmin.CommandTree\nDoorbell.Rang\nDoors.Toggle\nKeys.Map\nZ.Gone\nZ.Strict",
+			"A.First\nAdmin.CommandTree\nDoorbell.Rang\nDoors.Toggle\nKeys.Map\nWords.List\nZ.Gone\nZ.Strict",
 			"sealed names in byte order"
 		)
 		local ann = link:join("Ann", function(c)
@@ -111,7 +112,7 @@ return {
 		spec.eq(gone.value.reason, "unavailable", "ERROR settles")
 		link:assertClean()
 	end,
-	["19 an invalid payload throws at the call site naming the message, the property path and the reason"] = function()
+	["16 19 an invalid payload or a wrong-direction token throws at the call site naming the message, the property path and the reason"] = function()
 		local link = Link.new()
 		local m
 		link:boot(function(s)
@@ -147,6 +148,38 @@ return {
 						ann.Network.ask(ann.m.Strict, -1)
 					end,
 					"Z.Strict request: integer out of range",
+				},
+				{
+					-- A 262,142-byte payload fits on its own; the 3-byte header takes the packet past MAX_PACKET_BYTES.
+					function()
+						local big = string.rep("w", 65536)
+						ann.Network.send(ann.m.Words, { big, big, big, string.rep("w", 65521) })
+					end,
+					"Words.List payload: packet too large",
+				},
+				{
+					function()
+						link.server.Network.send(ann.player, m.Toggle, { door = part, open = true })
+					end,
+					"Network.send needs a message declared with toClient",
+				},
+				{
+					function()
+						link.server.Network.broadcast(m.Tree)
+					end,
+					"Network.broadcast needs a message declared with toClient",
+				},
+				{
+					function()
+						ann.Network.send(ann.m.Keys, {})
+					end,
+					"Network.send needs a message declared with toServer",
+				},
+				{
+					function()
+						ann.Network.ask(ann.m.Toggle, { door = part, open = true })
+					end,
+					"Network.ask needs a message declared with askServer",
 				},
 			}
 		do
