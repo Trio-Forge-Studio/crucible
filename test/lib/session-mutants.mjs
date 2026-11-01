@@ -18,6 +18,7 @@ const B = src + "internal/boot.ts";
 const N = src + "network.ts";
 const EN = src + "emit/network.ts";
 const CI = src + "client/index.ts";
+const SI = src + "server/index.ts";
 const specs = [
 	"network-handshake",
 	"network-ready",
@@ -81,7 +82,18 @@ const rules = [
 			'if (definition === undefined || definition.kind !== "to-client")',
 			"if (definition === undefined)",
 		],
-		["swap", "each facade forwards one token and one payload of different types"],
+		[
+			"swap send",
+			SI,
+			"active().send(player, message, (payload as unknown[])[0])",
+			"active().send(player, (payload as unknown[])[0], message)",
+		],
+		[
+			"swap ask",
+			CI,
+			"active().ask(message, (request as unknown[])[0])",
+			"active().ask((request as unknown[])[0], message)",
+		],
 		[
 			"pair",
 			CS,
@@ -155,6 +167,18 @@ const rules = [
 		["guard", CL, 'if (serverSide !== (side === "server"))', "if (false as boolean)"],
 		["swap", "the side check compares one kind with one side"],
 		["pair", CS, 'openClaims({ side: "client"', 'openClaims({ side: "server"'],
+	],
+	[
+		"25",
+		[
+			"guard K9",
+			EN,
+			"export function receive<T extends ReceiveTarget>(\n\towner: object,\n\tfield: string,\n\ttarget: T,\n\tcallback: ReceiveCallback<T>,\n): Receiver {",
+			"export function receive(owner: object, field: string, target: unknown, callback: Callback): Receiver {",
+			["network-api"],
+		],
+		["swap", "the target and its callback differ in type"],
+		["pair", "the callback's type derives from the target; the guard mutant unpairs them"],
 	],
 	[
 		"26",
@@ -288,6 +312,7 @@ const rules = [
 		["guard", SS, "\t\t\tif (!isLive(claim)) continue;\n", "\n"],
 		["swap", "the liveness check reads one claim"],
 		["pair", CL, "if (!live.delete(claim)) return;", "if (!live.has(claim)) return;"],
+		["guard copy", CL, "return [...ready];", "return ready;"],
 	],
 	[
 		"37",
@@ -327,6 +352,7 @@ const rules = [
 		],
 		["swap", "a queued ask leaves the queue by its own packet"],
 		["pair", CS, '\t\tthis.settle(nonce, failed("timeout"));\n\t}', "\t}"],
+		["pair charge", CS, "\t\t\tthis.peer.queuedBytes -= entry.packet.charge;\n", "\n"],
 	],
 	[
 		"41",
@@ -432,6 +458,12 @@ const rules = [
 		["guard", SS, "\t\t\tif (this.reportedNoPeer) return;\n", ""],
 		["swap", "a peer is keyed by one engine Player"],
 		["pair", SS, "\t\tfor (const player of this.port.players()) this.add(player);\n", "\n"],
+		[
+			"guard duplicate",
+			SS,
+			"if (this.stage === Stage.Closed || this.peers.has(player)) return;",
+			"if (this.stage === Stage.Closed) return;",
+		],
 	],
 	[
 		"50",
@@ -460,6 +492,7 @@ const rules = [
 		["guard", "a callback thread has one owner, set once"],
 		["swap", "own takes a thread and an ObjectState"],
 		["pair", S, "\t\town(thread, claim.owner);\n", "\n"],
+		["pair disown", S, "\t\t\tdisown(coroutine.running());\n", "\n"],
 	],
 	[
 		"53",
@@ -487,11 +520,18 @@ const rules = [
 		],
 		["swap", "the ceiling compares one count with one constant"],
 		["pair", S, "\t\tpeer.counted += 1;\n", "\n"],
+		[
+			"guard client",
+			CS,
+			"\t\tif (this.peer.counted >= L.MAX_ACTIVE_HANDLERS) return this.fail(this.peer, FailReason.Overloaded);\n",
+			"\n",
+		],
 	],
 	[
 		"55",
 		["guard", S, "\t\tif (!entry.done && peer.state !== PeerState.Ended)\n", "\t\tif (true as boolean)\n"],
 		["swap", "the lifetime timer takes one duration and one callback"],
+		["guard once", S, "\t\tif (!entry.counted) return;\n", "\n"],
 		[
 			"pair",
 			S,
@@ -520,6 +560,7 @@ const rules = [
 			"this.reject(peer, definition, failureReason(value), definition.name);\n\t\t\t\treturn;",
 		],
 		["pair", SS, "\t\tpeer.rejected.add(key);\n", "\n"],
+		["guard metatable", E, "\tif (getmetatable(sidecar) !== undefined) return undefined;\n", "\n"],
 	],
 	[
 		"75",
@@ -542,6 +583,21 @@ const rules = [
 		],
 		["swap", "ending takes one peer"],
 		["pair", SS, "\t\tif (this.peers.get(player) === peer) this.peers.delete(player);\n", "\n"],
+		["pair order", SS, "\t\tif (index !== -1) this.order.remove(index);\n", "\n"],
+		[
+			"guard client ended",
+			CS,
+			"\t\tif (this.peer.state === PeerState.Ended) return;\n\t\tconst header",
+			"\t\tconst header",
+		],
+		[
+			"memory flush",
+			"flush's queue clear and byte reset only release what a ready peer never reads again; end releases both",
+		],
+		[
+			"memory end",
+			"end's cleanup, rejected-key and failed-claim clears empty an unreachable server peer; the client peer has no player, so it never stores a cleanup or reads either set",
+		],
 	],
 	[
 		"77",
@@ -553,6 +609,26 @@ const rules = [
 		],
 		["swap", "a kick takes one Player and one message"],
 		["pair", CS, "\t\tpcall(() => this.fire(peer, controlPacket(Opcode.Fail, [], reason)));\n", "\n"],
+		[
+			"order",
+			SS,
+			"\t\tpcall(() => this.fire(peer, packet));\n\t\tthis.end(peer);\n\t\tpcall(() => this.port.kick(player, L.KICK_MESSAGE));",
+			"\t\tpcall(() => this.port.kick(player, L.KICK_MESSAGE));\n\t\tpcall(() => this.fire(peer, packet));\n\t\tthis.end(peer);",
+		],
+		["guard nonce 0", E, 'assert(nonce > 0, "nonce 0");', ""],
+		["guard ERROR nonce 0", E, 'assert(nonce > 0, "nonce 0");\n\t\theader =', "header ="],
+		[
+			"guard catalog size",
+			CS,
+			'\t\tif (header.index >= catalogSize()) return this.violation("an unknown message index");\n',
+			"\n",
+		],
+		[
+			"guard reply kind",
+			CS,
+			'definition === undefined || definition.kind !== "ask-server"',
+			"definition === undefined",
+		],
 	],
 	[
 		"78",
@@ -569,6 +645,7 @@ const rules = [
 			"\t\t\t\t\tshutdown(port, singletons);\n\t\t\t\t\tside.network.close();",
 			"\t\t\t\t\tshutdown(port, singletons);",
 		],
+		["pair end", SS, "\t\t\tpcall(() => this.end(peer));\n", "\n"],
 	],
 	[
 		"79",
@@ -580,6 +657,7 @@ const rules = [
 			"\t\t\tside.network.commit();\n\t\t\tunbooted = side.booted();",
 		],
 		["pair", B, "\tif (ok) return;\n\tside.network.close();", "\tif (ok) return;"],
+		["pair client end", CS, "\t\tpcall(() => this.end(this.peer));\n", "\n"],
 	],
 	[
 		"80",
@@ -602,9 +680,9 @@ const rules = [
 const mutants = [];
 const absent = [];
 for (const [rule, ...operators] of rules)
-	for (const [operator, file, before, after] of operators)
+	for (const [operator, file, before, after, extra = []] of operators)
 		if (before === undefined) absent.push(`${rule} ${operator}: not applicable, ${file}`);
-		else mutants.push([`${rule} ${operator}`, file, before, after]);
+		else mutants.push([`${rule} ${operator}`, file, before, after, extra]);
 
 const missing = mutants.filter(([, file, before]) => !fs.readFileSync(path.join(repo, file), "utf8").includes(before));
 assert.deepEqual(
@@ -624,9 +702,9 @@ function run(cwd, command, args) {
 }
 
 // A Lune run that printed no summary never ran its specs, so it decides nothing; run it again.
-function specRun(cwd) {
+function specRun(cwd, extra = []) {
 	for (let attempt = 1; ; attempt++) {
-		const result = run(cwd, "lune", ["run", "test", ...specs]);
+		const result = run(cwd, "lune", ["run", "test", ...specs, ...extra]);
 		if (/\d+ passed, \d+ failed/.test(result.stdout)) return result;
 		assert.ok(attempt < 3, `lune printed no summary three times\n${result.stdout}${result.stderr}`);
 	}
@@ -655,18 +733,21 @@ try {
 		]);
 	let built = build();
 	assert.equal(built.status, 0, built.stdout + built.stderr);
-	const baseline = specRun(scratch);
+	const baseline = specRun(scratch, [...new Set(mutants.flatMap(([, , , , extra]) => extra))]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
 	for (const line of absent) console.log(line);
 	let killed = 0;
-	const from = Number(process.argv[2] ?? 0);
-	for (const [index, [name, file, before, after]] of mutants.entries()) {
-		if (index < from) continue;
+	const from = Number(process.argv.find((arg) => /^\d+$/.test(arg)) ?? 0);
+	const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
+	let ran = 0;
+	for (const [index, [name, file, before, after, extra]] of mutants.entries()) {
+		if (index < from || (only !== undefined && !only.split(",").includes(name))) continue;
+		ran++;
 		const original = originals.get(file);
 		fs.writeFileSync(path.join(scratch, file), original.replaceAll(before, after));
 		built = build();
 		assert.equal(built.status, 0, `${name} must compile\n${built.stdout}${built.stderr}`);
-		const tested = specRun(scratch);
+		const tested = specRun(scratch, extra);
 		assert.equal(tested.status, 1, `${name} survived\n${tested.stdout}${tested.stderr}`);
 		const failure = (tested.stdout + tested.stderr).match(/FAIL ((?:network|boot)[^\n]*)/);
 		assert.ok(failure, `${name} must fail a spec assertion`);
@@ -676,9 +757,7 @@ try {
 	}
 	built = build();
 	assert.equal(built.status, 0, built.stdout + built.stderr);
-	console.log(
-		`${killed}/${mutants.length - from} source mutants killed; ${absent.length} operators not applicable; restored build 0`,
-	);
+	console.log(`${killed}/${ran} source mutants killed; ${absent.length} operators not applicable; restored build 0`);
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });
 }
