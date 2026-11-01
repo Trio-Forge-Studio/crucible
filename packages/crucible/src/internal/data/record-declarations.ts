@@ -1,23 +1,27 @@
-import { bootClock } from "../boot";
-import type { DataStore, UpdateResult } from "../../server/data";
 import type { Migration, OperationId, StoreResult } from "../../data";
+import type { DataStore, UpdateResult } from "../../server/data";
 import type { Node } from "../network/schema";
-import { sealSchema, type MigrationStep } from "./admission";
-import { CALL_DEADLINE_SECONDS, MAX_DATA_DECLARATIONS, STORE_NAME_MAX_BYTES } from "./limits";
-import { dataPort } from "./port";
-import type { DataEngine, StoreResult as EngineResult } from "./profiles";
-import { RecordStore, type UpdateOutcome } from "./records";
-import { Waiters } from "./waiters";
+import { sealSchema, type MigrationStep, type Schema } from "./admission";
+import { MAX_DATA_DECLARATIONS, STORE_NAME_MAX_BYTES } from "./limits";
 
-interface Declaration {
+/** @internal */
+export interface RecordDeclaration {
 	readonly name: string;
-	readonly schema: ReturnType<typeof sealSchema>;
+	readonly schema: Schema;
 }
 
-const declarations = new Map<string, Declaration>();
-const bound = new Map<string, RecordStore>();
+/**
+ * @internal What a declared store's calls run on once DataRuntime activates. This module is reached from the emit
+ * entry, so it imports nothing that loads boot; `record-bindings.ts` installs the driver.
+ */
+export interface RecordDriver {
+	read(name: string, key: string): StoreResult<object | undefined>;
+	update(name: string, key: string, change: (current: object) => object, id?: OperationId): UpdateResult<object>;
+}
+
+const declarations = new Map<string, RecordDeclaration>();
 let sealed = false;
-let activation: Waiters | undefined;
+let driver: RecordDriver | undefined;
 
 /** Rule 2's grammar: dot-separated `[A-Za-z][A-Za-z0-9_]*` segments, with `Crucible` reserved as the first. */
 function checkName(name: string) {
@@ -36,38 +40,18 @@ export function sealDeclarations(value: boolean) {
 }
 
 /** @internal The declarations a DataRuntime binds at activation (rule 104). */
-export function declaredRecords(): ReadonlyMap<string, Declaration> {
+export function declaredRecords(): ReadonlyMap<string, RecordDeclaration> {
 	return declarations;
 }
 
-/** @internal Rule 104: gives every declared record store its engine, and wakes calls waiting for activation. */
-export function bindRecords(engine: DataEngine) {
-	for (const [name, declaration] of declarations) bound.set(name, new RecordStore(engine, declaration.schema));
-	activation?.wake();
-}
-
 /** @internal */
-export function unbindRecords() {
-	bound.clear();
+export function installRecordDriver(value: RecordDriver | undefined) {
+	driver = value;
 }
 
-function activated(name: string): RecordStore | undefined {
-	const deadline = bootClock() + CALL_DEADLINE_SECONDS;
-	while (bound.get(name) === undefined && bootClock() < deadline) {
-		activation ??= new Waiters(dataPort());
-		activation.park(deadline);
-	}
-	return bound.get(name);
-}
-
-function publicResult<T>(result: EngineResult<T>): StoreResult<T> {
-	return result.kind === "ok" ? { ok: true, value: result.value } : { ok: false, reason: result.kind };
-}
-
-function publicUpdate<T>(result: UpdateOutcome): UpdateResult<T> {
-	return result.kind === "ok"
-		? { ok: true, value: result.value as T, replayed: result.replayed }
-		: { ok: false, reason: result.kind };
+function installed(name: string): RecordDriver {
+	if (driver === undefined) error(`${name}: the data runtime is not loaded; import @trioforge/crucible/server`, 3);
+	return driver;
 }
 
 /**
@@ -91,14 +75,15 @@ export function declareRecords<T extends object>(
 	declarations.set(name, { name, schema });
 	return table.freeze({
 		read(key: string) {
-			const store = activated(name);
-			if (store === undefined) return { ok: false, reason: "timeout" } as const;
-			return publicResult(store.read(key)) as StoreResult<T | undefined>;
+			return installed(name).read(name, key) as StoreResult<T | undefined>;
 		},
 		update(key: string, change: (current: T) => T, id?: OperationId) {
-			const store = activated(name);
-			if (store === undefined) return { ok: false, reason: "timeout" } as const;
-			return publicUpdate<T>(store.update(key, change as unknown as (current: object) => object, id));
+			return installed(name).update(
+				name,
+				key,
+				change as unknown as (current: object) => object,
+				id,
+			) as UpdateResult<T>;
 		},
 	}) as unknown as DataStore<T>;
 }

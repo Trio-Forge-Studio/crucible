@@ -328,7 +328,7 @@ export class ProfileRuntime {
 		const loaded = loadRecord(this.schema, envelope.payload, envelope.schemaVersion);
 		if (loaded.kind !== "ok") {
 			this.engine.diagnose(
-				`unreadable:${this.schema.name}:${userId}`,
+				`load:${this.schema.name}:${loaded.kind === "newer" ? "newer" : loaded.code}`,
 				loaded.kind === "newer"
 					? `${this.schema.name}: ${userId}'s record was written by a newer build (version ${loaded.version})`
 					: `${this.schema.name}: ${userId}'s record did not load: ${loaded.reason}`,

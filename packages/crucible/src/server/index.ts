@@ -6,6 +6,7 @@ import { networkPort } from "../internal/network/port";
 import { ServerSession } from "../internal/network/server-session";
 import { SyncFrameMessage } from "../internal/sync/frame";
 import { installServerSync } from "../internal/sync/server-sync";
+import "../internal/data/record-bindings";
 
 if (!game.GetService("RunService").IsServer()) error("@trioforge/crucible/server loaded on the client");
 
