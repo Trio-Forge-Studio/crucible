@@ -11,10 +11,20 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 	const f = ts.factory;
 	const symbols = new Map();
 	const unalias = (s) => s && (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
-	let invalidMetadata = false;
+	const describe = (error) =>
+		error instanceof RangeError && error.message === "Maximum call stack size exceeded"
+			? "Cannot transform input: the type checker ran out of stack. A type in this file nests or inherits too deeply to analyse."
+			: `Cannot transform input: ${String(error instanceof Error ? error.message : error).split(/\r?\n/)[0]}`;
+	let startupFault;
 	try {
 		for (const source of program.getSourceFiles()) {
-			const owner = packageOf(source.fileName);
+			let owner;
+			try {
+				owner = packageOf(source.fileName);
+			} catch {
+				startupFault = "Cannot read package metadata. Check the project's package.json files.";
+				break;
+			}
 			if (owner?.json.name !== "@trioforge/crucible") continue;
 			const module = checker.getSymbolAtLocation(source);
 			if (!module) continue;
@@ -23,8 +33,8 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				if (!symbols.has(target)) symbols.set(target, symbol.name);
 			}
 		}
-	} catch {
-		invalidMetadata = true;
+	} catch (error) {
+		startupFault = describe(error);
 	}
 	const api = (symbol) => symbols.get(unalias(symbol));
 	const modifiers = (node, flags) => (ts.getCombinedModifierFlags(node) & flags) !== 0;
@@ -54,8 +64,8 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		if (source.isDeclarationFile) return source;
 		let used = false;
 		report ??= createReporter(ts, diagnosticSink ?? ((d) => context.addDiagnostic(d)));
-		if (invalidMetadata) {
-			report(source, "Crucible", "Cannot read package metadata. Check the project's package.json files.");
+		if (startupFault) {
+			report(source, "Crucible", startupFault);
 			return source;
 		}
 		const isGlobal = (decl) => {
@@ -503,16 +513,8 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				.slice(0, -1)
 				.reverse()
 				.find((part) => ["server", "client", "shared"].includes(part));
-		networkProgram ??= createNetwork({ ts, program, checker, api, kindOf, instanceType, modifiers, isMacro });
-		const network = networkProgram({
-			source,
-			report,
-			runtime,
-			side,
-			visitInput: (node) => ts.visitNode(node, visit),
-		});
-		dataProgram ??= createDataChecks({ ts, program, checker, api });
-		const data = dataProgram({ report, side });
+		let network;
+		let data;
 		const inspect = (node) => {
 			network.inspect(node);
 			data(node);
@@ -712,6 +714,16 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			return next;
 		};
 		try {
+			networkProgram ??= createNetwork({ ts, program, checker, api, kindOf, instanceType, modifiers, isMacro });
+			network = networkProgram({
+				source,
+				report,
+				runtime,
+				side,
+				visitInput: (node) => ts.visitNode(node, visit),
+			});
+			dataProgram ??= createDataChecks({ ts, program, checker, api });
+			data = dataProgram({ report, side });
 			inspect(source);
 			const next = ts.visitEachChild(source, visit, context);
 			if (!used) return next;
@@ -722,13 +734,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			);
 			return f.updateSourceFile(next, [imports, ...next.statements]);
 		} catch (error) {
-			report(
-				source,
-				"Crucible",
-				error instanceof RangeError && /call stack/i.test(error.message)
-					? "Cannot transform input: the type checker ran out of stack. A type in this file nests or inherits too deeply to analyse."
-					: `Cannot transform input: ${String(error instanceof Error ? error.message : error).split(/\r?\n/)[0]}`,
-			);
+			report(source, "Crucible", describe(error));
 			return source;
 		}
 	};
