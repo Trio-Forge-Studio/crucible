@@ -448,6 +448,23 @@ return {
 		end)
 		spec.eq(sealed.value, false, "false at once for a sealed session")
 	end,
+	["rule 11 parked waiters continue in park order when woken together"] = function()
+		local backend, a = world()
+		local waiters = a.graph.module("internal/data/waiters").Waiters.new(a.port)
+		local continued = {}
+		for index = 1, 16 do
+			a.run(function()
+				waiters:park()
+				table.insert(continued, index)
+			end)
+		end
+		backend:advance(1)
+		spec.eq(#continued, 0, "parked until woken")
+		a.run(function()
+			waiters:wake()
+		end)
+		spec.list(continued, { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, "FIFO by park order")
+	end,
 	["rule 18 an onLoad change saves at once and a throwing onLoad fails the load with nothing saved"] = function()
 		local backend = Backend.new()
 		local a = backend:realm()

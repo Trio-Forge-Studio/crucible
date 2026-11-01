@@ -280,6 +280,57 @@ return {
 		assert(#calls >= 4 and calls[4].at > calls[1].at, "later attempts")
 		spec.eq(session(a, pa).safeUntil, calls[1].at + a.mono + 70, "authority from the first attempt's send")
 	end,
+	["rule 19 a held answer after an uncommitted ambiguous attempt resets the authority origin"] = function()
+		local backend, a, b = world()
+		backend:fail("transient", { server = a.id }, 1)
+		local pa, pb = a.join(USER), b.join(USER)
+		local la = load(a, pa)
+		local lb = load(b, pb)
+		backend:advance(1)
+		local calls = backend:callsTo({ server = a.id })
+		spec.eq(calls[1].plan, "transient", "the first attempt was ambiguous")
+		spec.eq(calls[1].committed, nil, "and never committed")
+		spec.eq(lb.value, true, "the other server acquired meanwhile")
+		spec.eq(stored(backend).lease.serverId, b.id, "its lease is live")
+		assert(#calls >= 2 and calls[2].committed == nil and calls[2].outcome.kind == "ok", "the next attempt is held")
+		b.crash()
+		for _ = 1, 2400 do
+			if la.done then
+				break
+			end
+			backend:advance(0.05)
+		end
+		spec.eq(la.value, true, "acquired once the other lease expired")
+		spec.eq(stored(backend).lease.serverId, a.id, "the lease is this server's")
+		calls = backend:callsTo({ server = a.id })
+		local taking
+		for _, call in calls do
+			taking = taking or (call.committed and call)
+		end
+		assert(taking.index > calls[2].index, "taken by a poll after the held answer")
+		spec.eq(
+			session(a, pa).safeUntil,
+			taking.at + a.mono + 70,
+			"authority dates from the first attempt after the held answer, never the ambiguous one"
+		)
+	end,
+	["rule 20 a non-retryable load error kicks at once without a retry"] = function()
+		local backend, a = world(1)
+		backend:fail("reject", { server = a.id }, 1, { code = 403 })
+		local pa = a.join(USER)
+		local start = backend.now
+		local la = load(a, pa)
+		backend:advance(0.5)
+		spec.eq(la.value, false, "the load ended")
+		spec.eq(a.kicked(pa), a.limits.LOAD_FAILED_MESSAGE, "K8: kicked failed")
+		assert(a.kicks[1].at - start <= 0.1 + 1e-6, "at once, on the error's response")
+		backend:advance(130)
+		local calls = backend:callsTo({ server = a.id })
+		spec.eq(#calls, 1, "exactly one storage call: no retry and no abandonment")
+		spec.eq(calls[1].plan, "reject", "the one call was refused")
+		spec.eq(#a.kicks, 1, "kicked once")
+		spec.eq(stored(backend), nil, "nothing written")
+	end,
 	["rule 20 abandon after an ambiguous acquisition removes only its lease"] = function()
 		local backend, a = world(1)
 		backend:fail("committed", { server = a.id }, 1)
