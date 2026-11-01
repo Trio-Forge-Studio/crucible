@@ -77,6 +77,7 @@ fn loops_keep_javascript_order_and_continue() {
             "for _8, item in list do",
             "for key, value in lookup do",
             "for member in members do",
+            ", bound in { bounds() } do",
         ],
     );
 }
@@ -123,6 +124,7 @@ fn truthiness_tests_the_falsy_values_the_facts_allow() {
             "\tlocal _5 = value\n\tif _5 == nil then\n\t\t_5 = true\n\tend",
         ],
     );
+    has("macros.luau", &["assert(n ~= 0 and n == n, \"zero\")"]);
 }
 
 #[test]
