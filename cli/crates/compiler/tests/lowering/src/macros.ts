@@ -37,3 +37,26 @@ export function maps() {
 export function strings(text: string) {
 	return [text.size(), text.sub(1, 2), text.split(",").size(), typeIs(text, "string"), typeOf(1)];
 }
+
+export function order() {
+	const log = new Array<string>();
+	const set = new Set(["a"]);
+	const list = [1, 2, 3];
+	const getSet = () => {
+		log.push("set");
+		return set;
+	};
+	const getList = () => {
+		log.push("list");
+		return list;
+	};
+	const arg = <T>(value: T) => {
+		log.push("arg");
+		return value;
+	};
+	getSet().delete(arg("a"));
+	const removed = getSet().delete(arg("b"));
+	const unordered = getList().unorderedRemove(arg(0));
+	const joined = getList().join(arg("+"));
+	return [log.join(","), removed, unordered, joined];
+}

@@ -12,8 +12,9 @@ mod macros;
 mod program;
 mod tree;
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::io;
+use std::io::{self, Read};
 use std::path::Path;
 
 pub use facts::{
@@ -86,10 +87,15 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
     let paths: Vec<String> = files.iter().map(|f| f.path()).collect();
     let root = checked.root_dir().unwrap_or_else(|| common_dir(&paths));
     let facts = extract::extract(checked);
+    let facts_by_path: HashMap<&str, &FileFacts> = facts.files.iter().map(|f| (f.path.as_str(), f)).collect();
     let mut modules = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
-    for ((file, path), file_facts) in files.into_iter().zip(&paths).zip(&facts.files) {
-        debug_assert_eq!(*path, file_facts.path);
+    for (file, path) in files.into_iter().zip(&paths) {
+        let Some(file_facts) = facts_by_path.get(path.as_str()) else {
+            let message = "the fact table has no entry for this file".to_owned();
+            errors.push(Error { path: path.clone(), line: 1, column: 1, message });
+            continue;
+        };
         let relative = path.strip_prefix(root.as_str()).unwrap_or(path).trim_start_matches('/');
         let stem = relative.rsplit_once('.').map_or(relative, |(stem, _)| stem);
         let (stem, init) = match stem.strip_suffix("index") {
@@ -98,16 +104,35 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
         };
         let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
         match lower::lower(file, file_facts, &unanswered, init) {
-            Ok(chunk) => modules.push(Module { path: format!("{stem}.luau"), source: luau::print(&chunk) }),
+            Ok(chunk) => {
+                let mut source = luau::print(&chunk);
+                source.insert_str(0, HEADER);
+                modules.push(Module { path: format!("{stem}.luau"), source });
+            }
             Err(e) => errors.extend(e),
         }
     }
     if errors.is_empty() { Ok(modules) } else { Err(Failure::Lower(errors)) }
 }
 
-/// Writes each module under `out`, skipping files whose bytes already match. Returns how many files it wrote.
-pub fn write(out: &Path, modules: &[Module]) -> io::Result<usize> {
-    let mut written = 0;
+/// The first line of every module `compile` emits. `write` treats a `.luau` file as its own only when the file
+/// starts with it.
+const HEADER: &str = "-- Compiled with crucible-compiler\n";
+
+/// What `write` changed in the output directory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Written {
+    /// Modules whose file was missing or held other bytes.
+    pub written: usize,
+    /// Stale modules deleted.
+    pub removed: usize,
+}
+
+/// Writes each module under `out`, skipping files whose bytes already match. Then it deletes every `.luau` file
+/// under `out` that starts with the compiler's header and is not one of `modules`, and any folder that deletion
+/// leaves empty. Files the compiler did not emit, such as `rbxtsc` output and declarations, stay.
+pub fn write(out: &Path, modules: &[Module]) -> io::Result<Written> {
+    let mut changes = Written::default();
     for module in modules {
         let path = out.join(&module.path);
         if std::fs::read(&path).is_ok_and(|old| old == module.source.as_bytes()) {
@@ -117,9 +142,48 @@ pub fn write(out: &Path, modules: &[Module]) -> io::Result<usize> {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(&path, &module.source)?;
-        written += 1;
+        changes.written += 1;
     }
-    Ok(written)
+    let current: HashSet<&str> = modules.iter().map(|m| m.path.as_str()).collect();
+    changes.removed = remove_stale(out, "", &current)?;
+    Ok(changes)
+}
+
+fn remove_stale(dir: &Path, prefix: &str, current: &HashSet<&str>) -> io::Result<usize> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        let path = entry.path();
+        let relative = format!("{prefix}{name}");
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            let inside = remove_stale(&path, &format!("{relative}/"), current)?;
+            if inside > 0 && std::fs::read_dir(&path)?.next().is_none() {
+                std::fs::remove_dir(&path)?;
+            }
+            removed += inside;
+        } else if kind.is_file()
+            && name.ends_with(".luau")
+            && !current.contains(relative.as_str())
+            && starts_with_header(&path)?
+        {
+            std::fs::remove_file(&path)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn starts_with_header(path: &Path) -> io::Result<bool> {
+    let mut head = Vec::with_capacity(HEADER.len());
+    std::fs::File::open(path)?.take(HEADER.len() as u64).read_to_end(&mut head)?;
+    Ok(head == HEADER.as_bytes())
 }
 
 fn common_dir(paths: &[String]) -> String {

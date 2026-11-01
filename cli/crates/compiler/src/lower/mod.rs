@@ -66,10 +66,17 @@ pub(crate) fn lower(
 }
 
 /// What a `break` or `continue` inside the current statement would leave.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 enum Breakable {
-    Loop,
+    /// `continue` runs `copy_back` first, to store this pass's copies of the head's variables.
+    Loop {
+        copy_back: Block,
+    },
     Switch,
+}
+
+impl Breakable {
+    const LOOP: Breakable = Breakable::Loop { copy_back: Vec::new() };
 }
 
 pub(crate) struct Lower<'a> {
@@ -184,6 +191,11 @@ impl<'a> Lower<'a> {
         if value.is_simple() { value } else { self.push_temp(value) }
     }
 
+    /// Stores `value` when the statements in `later` run before it is read and could change it.
+    fn store_before(&mut self, value: Expr, later: &[Stmt]) -> Expr {
+        if later.is_empty() || is_stable(&value, later) { value } else { self.push_temp(value) }
+    }
+
     /// Runs `f` with an empty block and returns what it built alongside its result.
     fn capture<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, Block) {
         let outer = std::mem::take(&mut self.out);
@@ -203,17 +215,29 @@ impl<'a> Lower<'a> {
         self.order_values(lowered)
     }
 
+    /// `ordered` for two expressions.
+    fn ordered_pair(&mut self, first: Node, second: Node) -> (Expr, Expr) {
+        let (first, first_setup) = self.capture(|l| l.expr(first));
+        let (second, second_setup) = self.capture(|l| l.expr(second));
+        self.out.extend(first_setup);
+        let first = self.store_before(first, &second_setup);
+        self.out.extend(second_setup);
+        (first, second)
+    }
+
     /// The same as `ordered` for values already lowered with their statements.
     fn order_values(&mut self, lowered: Vec<(Expr, Block)>) -> Vec<Expr> {
         let last = lowered.iter().rposition(|(_, b)| !b.is_empty());
+        let stable: Vec<bool> = (0..lowered.len())
+            .map(|i| {
+                last.is_none_or(|last| i >= last)
+                    || lowered[i + 1..].iter().all(|(_, later)| is_stable(&lowered[i].0, later))
+            })
+            .collect();
         let mut values = Vec::with_capacity(lowered.len());
-        for (i, (value, block)) in lowered.into_iter().enumerate() {
+        for ((value, block), stable) in lowered.into_iter().zip(stable) {
             self.out.extend(block);
-            if last.is_some_and(|last| i < last) && !value.is_simple() {
-                values.push(self.push_temp(value));
-            } else {
-                values.push(value);
-            }
+            values.push(if stable { value } else { self.push_temp(value) });
         }
         values
     }
@@ -270,6 +294,29 @@ impl<'a> Lower<'a> {
         }
         Cow::Borrowed(text)
     }
+}
+
+/// Whether `value` reads the same after `later` runs: it is simple, and `later` assigns no name it reads.
+fn is_stable(value: &Expr, later: &[Stmt]) -> bool {
+    value.is_simple() && !matches!(value, Expr::Name(name) if assigns(later, name))
+}
+
+fn assigns(block: &[Stmt], name: &str) -> bool {
+    let is_name = |e: &Expr| matches!(e, Expr::Name(n) if n == name);
+    block.iter().any(|s| match s {
+        Stmt::Assign(targets, _) => targets.iter().any(is_name),
+        Stmt::Compound(_, target, _) | Stmt::Function(target, None, _) => is_name(target),
+        Stmt::Do(body) | Stmt::While(_, body) | Stmt::Repeat(body, _) => assigns(body, name),
+        Stmt::NumericFor(.., body) | Stmt::GenericFor(.., body) => assigns(body, name),
+        Stmt::If(_, then, otherwise) => assigns(then, name) || otherwise.as_ref().is_some_and(|b| assigns(b, name)),
+        Stmt::Local(..)
+        | Stmt::LocalFunction(..)
+        | Stmt::Function(..)
+        | Stmt::Call(_)
+        | Stmt::Return(_)
+        | Stmt::Break
+        | Stmt::Continue => false,
+    })
 }
 
 /// Globals the emitted code calls, which a source local must not shadow.

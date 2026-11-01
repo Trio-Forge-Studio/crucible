@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use super::{Lower, skip_down};
+use super::{Lower, is_stable, skip_down};
 use crate::facts::{Callee, Constant, Falsy, Receiver};
-use crate::luau::{BinOp, Block, Expr, Field, Part, Stmt, UnOp};
+use crate::luau::{BinOp, Block, Expr, Field, Name, Part, Stmt, UnOp};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Op, UnaryOp};
 
@@ -26,14 +26,11 @@ impl Place {
 pub(super) fn offset(e: Expr, delta: f64) -> Expr {
     match e {
         Expr::Number(n) => Expr::Number(n + delta),
-        Expr::Binary(BinOp::Add, l, r) if matches!(*r, Expr::Number(_)) => {
-            let Expr::Number(n) = *r else { unreachable!() };
-            offset_number(*l, n + delta)
-        }
-        Expr::Binary(BinOp::Sub, l, r) if matches!(*r, Expr::Number(_)) => {
-            let Expr::Number(n) = *r else { unreachable!() };
-            offset_number(*l, delta - n)
-        }
+        Expr::Binary(op @ (BinOp::Add | BinOp::Sub), l, r) => match *r {
+            Expr::Number(n) if op == BinOp::Add => offset_number(*l, n + delta),
+            Expr::Number(n) => offset_number(*l, delta - n),
+            r => offset_number(Expr::Binary(op, l, Box::new(r)), delta),
+        },
         e => offset_number(e, delta),
     }
 }
@@ -139,7 +136,7 @@ impl Lower<'_> {
         if n.in_optional_chain() {
             return self.optional_chain(n, false).unwrap_or(Expr::Nil);
         }
-        let name = n.name().expect("a property access has a name");
+        let Some(name) = n.name() else { return self.unsupported(n, "this property access") };
         if name.kind() == Kind::PrivateIdentifier {
             return self.unsupported(name, "a private name");
         }
@@ -165,11 +162,8 @@ impl Lower<'_> {
                 index => Expr::Paren(Box::new(Expr::global("select").call(vec![offset(index, 1.0), call]))),
             };
         }
-        let mut values = self.ordered([object, n.argument_expression()], |l, e| l.expr(e));
-        let key = values.pop().unwrap();
-        let base = values.pop().unwrap();
-        let key = if matches!(receiver, Some(Receiver::Array | Receiver::LuaTuple)) { offset(key, 1.0) } else { key };
-        base.index(key)
+        let (base, key) = self.ordered_pair(object, n.argument_expression());
+        base.index(element_key(receiver, key))
     }
 
     /// Lowers an assignment target. With `simple`, the base and key are stored so the place can be read and
@@ -179,7 +173,10 @@ impl Lower<'_> {
         match target.kind() {
             Kind::Identifier => Place::Name(self.identifier(target)),
             Kind::PropertyAccessExpression if !target.in_optional_chain() => {
-                let name = target.name().unwrap();
+                let Some(name) = target.name() else {
+                    self.unsupported(target, "this assignment target");
+                    return Place::Name(Expr::Nil);
+                };
                 if name.kind() == Kind::PrivateIdentifier {
                     self.unsupported(name, "a private name");
                 }
@@ -190,10 +187,8 @@ impl Lower<'_> {
             Kind::ElementAccessExpression if !target.in_optional_chain() => {
                 let object = target.expression();
                 let receiver = self.receiver(object);
-                let mut values = self.ordered([object, target.argument_expression()], |l, e| l.expr(e));
-                let key = values.pop().unwrap();
-                let base = values.pop().unwrap();
-                let key = if receiver == Some(Receiver::Array) { offset(key, 1.0) } else { key };
+                let (base, key) = self.ordered_pair(object, target.argument_expression());
+                let key = element_key(receiver, key);
                 if simple {
                     let base = self.push_temp_if_complex(base);
                     let key = self.push_temp_if_complex(key);
@@ -220,6 +215,18 @@ impl Lower<'_> {
         }
     }
 
+    /// Stores the base and key of `place` when the statements in `later` run first and could change them.
+    fn place_before(&mut self, place: Place, later: &[Stmt]) -> Place {
+        match place {
+            Place::Index(base, key) => {
+                let base = self.store_before(base, later);
+                let key = self.store_before(key, later);
+                Place::Index(base, key)
+            }
+            place => place,
+        }
+    }
+
     /// Lowers `=` and the compound assignments. Returns the assigned value when `used`.
     pub(super) fn assignment(&mut self, n: Node, used: bool) -> Option<Expr> {
         let op = n.operator();
@@ -233,7 +240,7 @@ impl Lower<'_> {
         match op {
             Op::Assign => {
                 let (value, block) = self.capture(|l| l.expr(source));
-                let place = if block.is_empty() { place } else { self.simplify_place(place) };
+                let place = self.place_before(place, &block);
                 self.out.extend(block);
                 let value = if used { self.push_temp_if_complex(value) } else { value };
                 self.out.push(Stmt::Assign(vec![place.expr()], vec![value.clone()]));
@@ -259,23 +266,38 @@ impl Lower<'_> {
                 used.then(|| place.expr())
             }
             _ => {
-                let operator = op.compound().unwrap();
+                let Some(operator) = op.compound() else {
+                    self.error(n, "this assignment operator is not supported");
+                    return used.then_some(Expr::Nil);
+                };
                 let (value, block) = self.capture(|l| l.expr(source));
-                let place = if block.is_empty() && !used { place } else { self.simplify_place(place) };
+                let place = self.place_before(place, &block);
+                let mut place = if used { self.simplify_place(place) } else { place };
+                let current = match &place {
+                    Place::Name(name) if !is_stable(name, &block) => Some(self.push_temp(name.clone())),
+                    _ => None,
+                };
                 self.out.extend(block);
                 let concat = operator == Op::Add && self.is_string_plus(target, source);
-                if concat {
-                    let value = self.stringify(source, value);
-                    self.out.push(Stmt::Compound(BinOp::Concat, place.expr(), value));
-                } else if let Some(binop) = arithmetic(operator) {
-                    self.out.push(Stmt::Compound(binop, place.expr(), value));
-                } else if let Some(function) = bitwise(operator) {
-                    let place = self.simplify_place(place.clone());
-                    let call = Expr::global(function).call(vec![place.expr(), value]);
-                    self.out.push(Stmt::Assign(vec![place.expr()], vec![call]));
-                    return used.then(|| place.expr());
+                let (binop, value) = if concat {
+                    (Some(BinOp::Concat), self.stringify(source, value))
                 } else {
-                    self.error(n, "this compound assignment is not supported");
+                    (arithmetic(operator), value)
+                };
+                match (binop, current) {
+                    (Some(binop), None) => self.out.push(Stmt::Compound(binop, place.expr(), value)),
+                    (Some(binop), Some(current)) => {
+                        self.out.push(Stmt::Assign(vec![place.expr()], vec![current.binary(binop, value)]));
+                    }
+                    (None, current) => match bitwise(operator) {
+                        Some(function) => {
+                            place = self.simplify_place(place);
+                            let current = current.unwrap_or_else(|| place.expr());
+                            let call = Expr::global(function).call(vec![current, value]);
+                            self.out.push(Stmt::Assign(vec![place.expr()], vec![call]));
+                        }
+                        None => self.error(n, "this compound assignment is not supported"),
+                    },
                 }
                 used.then(|| place.expr())
             }
@@ -338,9 +360,7 @@ impl Lower<'_> {
             Op::And | Op::Or => self.logical(n),
             Op::Coalesce => self.coalesce(n),
             Op::Add => {
-                let mut values = self.ordered([n.left(), n.right()], |l, e| l.expr(e));
-                let right = values.pop().unwrap();
-                let left = values.pop().unwrap();
+                let (left, right) = self.ordered_pair(n.left(), n.right());
                 if self.is_string_plus(n.left(), n.right()) {
                     let left = self.stringify(n.left(), left);
                     let right = self.stringify(n.right(), right);
@@ -357,9 +377,7 @@ impl Lower<'_> {
             Op::In => self.unsupported(n, "the in operator"),
             Op::InstanceOf => self.unsupported(n, "instanceof"),
             op => {
-                let mut values = self.ordered([n.left(), n.right()], |l, e| l.expr(e));
-                let right = values.pop().unwrap();
-                let left = values.pop().unwrap();
+                let (left, right) = self.ordered_pair(n.left(), n.right());
                 if let Some(binop) = arithmetic(op).or_else(|| comparison(op)) {
                     left.binary(binop, right)
                 } else if let Some(function) = bitwise(op) {
@@ -395,20 +413,10 @@ impl Lower<'_> {
         }
     }
 
-    /// The JavaScript-falsy values `n` may hold. A chain of `&&` or `||` has facts only on its operands.
+    /// The JavaScript-falsy values `n` may hold.
     pub(super) fn falsy(&mut self, n: Node) -> Falsy {
         if let Some(falsy) = self.fact(n).and_then(|f| f.falsy) {
             return falsy;
-        }
-        if n.kind() == Kind::BinaryExpression {
-            match n.operator() {
-                Op::And => return self.falsy(n.left()) | self.falsy(n.right()),
-                Op::Or => return self.falsy(n.right()),
-                _ => {}
-            }
-        }
-        if n.kind() == Kind::ParenthesizedExpression {
-            return self.falsy(n.expression());
         }
         self.error(n, "the type facts do not say which falsy values this may hold");
         Falsy::ALL
@@ -431,7 +439,7 @@ impl Lower<'_> {
         if checks.is_empty() || falsy.contains(Falsy::NIL) || falsy.contains(Falsy::FALSE) {
             checks.push(value);
         }
-        checks.into_iter().reduce(|a, b| a.binary(BinOp::And, b)).unwrap()
+        checks.into_iter().reduce(|a, b| a.binary(BinOp::And, b)).unwrap_or(Expr::Bool(true))
     }
 
     /// Lowers `n` as a condition, where only truthiness matters.
@@ -439,7 +447,7 @@ impl Lower<'_> {
         match n.kind() {
             Kind::ParenthesizedExpression => {
                 let inner = n.expression();
-                if is_logic(inner) || self.fact(n).is_none() {
+                if is_logic(inner) {
                     return self.condition(inner);
                 }
             }
@@ -519,12 +527,10 @@ impl Lower<'_> {
             operands.push(left.right());
             left = left.left();
         }
-        operands.push(left);
-        operands.reverse();
         let can_be_false = self.falsy(n).contains(Falsy::FALSE);
-        let first = self.expr(operands[0]);
+        let first = self.expr(left);
         let mut rest = Vec::new();
-        for &o in &operands[1..] {
+        for &o in operands.iter().rev() {
             rest.push(self.capture(|l| l.expr(o)));
         }
         if !can_be_false && rest.iter().all(|(_, b)| b.is_empty()) {
@@ -539,7 +545,8 @@ impl Lower<'_> {
     }
 
     fn conditional(&mut self, n: Node) -> Expr {
-        let condition = self.condition(n.condition().unwrap());
+        let Some(test) = n.condition() else { return self.unsupported(n, "this conditional") };
+        let condition = self.condition(test);
         let (then, then_block) = self.capture(|l| l.expr(n.when_true()));
         let (otherwise, otherwise_block) = self.capture(|l| l.expr(n.when_false()));
         if then_block.is_empty() && otherwise_block.is_empty() {
@@ -583,8 +590,8 @@ impl Lower<'_> {
             });
             return Expr::Table(values.into_iter().map(Field::Item).collect());
         };
-        if elements.len() == 1 {
-            return self.spread_copy(elements[0].expression());
+        if let [only] = elements.as_slice() {
+            return self.spread_copy(only.expression());
         }
         let head = self.ordered(elements[..first_spread].iter().copied(), |l, e| l.expr(e));
         let result = self.push_temp(Expr::Table(head.into_iter().map(Field::Item).collect()));
@@ -682,8 +689,7 @@ impl Lower<'_> {
             lowered.push(key);
             lowered.push(value);
         }
-        let values = self.order_values(lowered);
-        let fields: Vec<Field> = values.chunks(2).map(|pair| Field::Keyed(pair[0].clone(), pair[1].clone())).collect();
+        let fields = keyed_fields(self.order_values(lowered));
         if first_spread.is_none() {
             return Expr::Table(fields);
         }
@@ -707,7 +713,7 @@ impl Lower<'_> {
             } else {
                 let ((key, key_block), (value, value_block)) = self.object_property(p);
                 self.out.extend(key_block);
-                let key = if value_block.is_empty() { key } else { self.push_temp_if_complex(key) };
+                let key = self.store_before(key, &value_block);
                 self.out.extend(value_block);
                 self.out.push(Stmt::Assign(vec![result.clone().index(key)], vec![value]));
             }
@@ -719,18 +725,27 @@ impl Lower<'_> {
     fn object_property(&mut self, p: Node) -> ((Expr, Block), (Expr, Block)) {
         match p.kind() {
             Kind::PropertyAssignment => {
-                let name = p.name().unwrap();
+                let (Some(name), Some(initializer)) = (p.name(), p.initializer()) else {
+                    self.unsupported(p, "this object member");
+                    return ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()));
+                };
                 let key = self.capture(|l| l.property_key(name));
-                let value = self.capture(|l| l.expr(p.initializer().unwrap()));
+                let value = self.capture(|l| l.expr(initializer));
                 (key, value)
             }
             Kind::ShorthandPropertyAssignment => {
-                let name = p.name().unwrap();
+                let Some(name) = p.name() else {
+                    self.unsupported(p, "this object member");
+                    return ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()));
+                };
                 let value = self.identifier(name);
                 ((Expr::String(Cow::Borrowed(name.text())), Vec::new()), (value, Vec::new()))
             }
             Kind::MethodDeclaration => {
-                let name = p.name().unwrap();
+                let Some(name) = p.name() else {
+                    self.unsupported(p, "this object member");
+                    return ((Expr::Nil, Vec::new()), (Expr::Nil, Vec::new()));
+                };
                 let key = self.capture(|l| l.property_key(name));
                 let function = self.function(p);
                 (key, (Expr::Function(Box::new(function)), Vec::new()))
@@ -747,21 +762,29 @@ impl Lower<'_> {
     pub(super) fn optional_chain(&mut self, n: Node, statement: bool) -> Option<Expr> {
         let mut links = Vec::new();
         let mut cur = n;
-        while cur.in_optional_chain()
-            && matches!(
-                cur.kind(),
-                Kind::PropertyAccessExpression
-                    | Kind::ElementAccessExpression
-                    | Kind::CallExpression
-                    | Kind::NonNullExpression
-            )
-        {
-            links.push(cur);
+        while cur.in_optional_chain() {
+            match cur.kind() {
+                Kind::PropertyAccessExpression | Kind::ElementAccessExpression | Kind::CallExpression => {
+                    links.push(cur)
+                }
+                Kind::NonNullExpression => {}
+                _ => break,
+            }
             cur = cur.expression();
         }
         links.reverse();
-        if links[0].kind() == Kind::CallExpression && self.fact(cur).and_then(|f| f.callee) == Some(Callee::Method) {
-            self.unsupported(n, "an optional call of a method");
+        let Some(&first) = links.first() else {
+            self.unsupported(n, "this optional chain");
+            return if statement { None } else { Some(Expr::Nil) };
+        };
+        if first.kind() == Kind::CallExpression {
+            match self.fact(first.expression()).and_then(|f| f.callee) {
+                Some(Callee::Method) => {
+                    self.unsupported(n, "an optional call of a method");
+                }
+                Some(_) => {}
+                None => self.error(first.expression(), "the type facts do not say how to call this"),
+            }
         }
         let base = self.expr(cur);
         let result = self.push_temp(base);
@@ -777,29 +800,30 @@ impl Lower<'_> {
                 }
                 open = Some(Vec::new());
             }
-            let next_calls_this = links.get(i + 1).is_some_and(|next| {
-                next.kind() == Kind::CallExpression && !next.has_question_dot() && next.expression() == link
+            let call_of_link = links.get(i + 1).copied().filter(|next| {
+                next.kind() == Kind::CallExpression
+                    && !next.has_question_dot()
+                    && skip_non_null(next.expression()) == link
             });
             let (value, block) = self.capture(|l| {
-                if next_calls_this {
-                    l.chain_call(links[i + 1], Some(link), result.clone())
+                if let Some(call) = call_of_link {
+                    l.chain_call(call, ChainCallee::Member(link), result.clone())
                 } else {
                     match link.kind() {
-                        Kind::PropertyAccessExpression => {
-                            result.clone().field(Cow::Borrowed(link.name().unwrap().text()))
-                        }
+                        Kind::PropertyAccessExpression => match link.name() {
+                            Some(name) => result.clone().field(Cow::Borrowed(name.text())),
+                            None => l.unsupported(link, "this property access"),
+                        },
                         Kind::ElementAccessExpression => {
                             let receiver = l.receiver(link.expression());
                             let key = l.expr(link.argument_expression());
-                            let key = if receiver == Some(Receiver::Array) { offset(key, 1.0) } else { key };
-                            result.clone().index(key)
+                            result.clone().index(element_key(receiver, key))
                         }
-                        Kind::CallExpression => l.chain_call(link, None, result.clone()),
-                        _ => result.clone(),
+                        _ => l.chain_call(link, ChainCallee::Value, result.clone()),
                     }
                 }
             });
-            let consumed = if next_calls_this { 2 } else { 1 };
+            let consumed = if call_of_link.is_some() { 2 } else { 1 };
             let last = i + consumed == links.len();
             let target = open.get_or_insert_with(Vec::new);
             target.extend(block);
@@ -825,46 +849,76 @@ impl Lower<'_> {
         if statement { None } else { Some(result) }
     }
 
-    /// A call inside an optional chain on the value `object`. `callee` is the property or element access the call
-    /// goes through, or `None` when `object` is the function itself.
-    fn chain_call(&mut self, call: Node, callee: Option<Node>, object: Expr) -> Expr {
-        let Some(callee) = callee else {
+    /// A call inside an optional chain on the value `object`.
+    fn chain_call(&mut self, call: Node, callee: ChainCallee, object: Expr) -> Expr {
+        let ChainCallee::Member(member) = callee else {
             let args = self.arguments(call);
             return object.call(args);
         };
-        let kind = self.fact(callee).and_then(|f| f.callee);
-        match kind {
-            Some(Callee::Macro(m)) => self.method_macro(m, call, object, false).unwrap_or(Expr::Nil),
-            Some(kind) => {
+        let Some(kind) = self.fact(call.expression()).and_then(|f| f.callee) else {
+            self.error(call.expression(), "the type facts do not say how to call this");
+            return Expr::Nil;
+        };
+        if let Callee::Macro(m) = kind {
+            return self.method_macro(m, call, object, false).unwrap_or(Expr::Nil);
+        }
+        let function: (Expr, Vec<Expr>) = match member.kind() {
+            Kind::PropertyAccessExpression => {
+                let Some(name) = member.name() else { return self.unsupported(member, "this callee") };
+                let name: Name = Cow::Borrowed(name.text());
                 let args = self.arguments(call);
-                match callee.kind() {
-                    Kind::PropertyAccessExpression => {
-                        let name = callee.name().unwrap().text();
-                        if kind == Callee::Method {
-                            self.method_call(object, Cow::Borrowed(name), args)
-                        } else {
-                            object.field(Cow::Borrowed(name)).call(args)
-                        }
-                    }
-                    _ => {
-                        let key = self.expr(callee.argument_expression());
-                        let f = object.clone().index(key);
-                        if kind == Callee::Method {
-                            let mut all = vec![object];
-                            all.extend(args);
-                            f.call(all)
-                        } else {
-                            f.call(args)
-                        }
-                    }
-                }
+                return if kind == Callee::Method {
+                    self.method_call(object, name, args)
+                } else {
+                    object.field(name).call(args)
+                };
             }
-            None => {
-                self.error(callee, "the type facts do not say how to call this");
-                Expr::Nil
+            Kind::ElementAccessExpression => {
+                let receiver = self.receiver(member.expression());
+                let key = self.expr(member.argument_expression());
+                let (args, block) = self.capture(|l| l.arguments(call));
+                let key = self.store_before(element_key(receiver, key), &block);
+                self.out.extend(block);
+                (object.clone().index(key), args)
             }
+            _ => return self.unsupported(member, "this callee in an optional chain"),
+        };
+        let (function, args) = function;
+        if kind == Callee::Method {
+            let mut all = vec![object];
+            all.extend(args);
+            function.call(all)
+        } else {
+            function.call(args)
         }
     }
+}
+
+/// What a call in an optional chain calls.
+#[derive(Clone, Copy)]
+enum ChainCallee {
+    /// The value so far.
+    Value,
+    /// A property or element of the value so far.
+    Member(Node),
+}
+
+/// Pairs alternating keys and values into table fields.
+pub(super) fn keyed_fields(values: Vec<Expr>) -> Vec<Field> {
+    let mut values = values.into_iter();
+    std::iter::from_fn(|| Some(Field::Keyed(values.next()?, values.next()?))).collect()
+}
+
+fn skip_non_null(mut n: Node) -> Node {
+    while n.kind() == Kind::NonNullExpression {
+        n = n.expression();
+    }
+    n
+}
+
+/// The key for indexing a value of `receiver`. Arrays and `LuaTuple` values start at 1 in Luau.
+pub(super) fn element_key(receiver: Option<Receiver>, key: Expr) -> Expr {
+    if matches!(receiver, Some(Receiver::Array | Receiver::LuaTuple)) { offset(key, 1.0) } else { key }
 }
 
 fn is_logic(n: Node) -> bool {

@@ -75,6 +75,12 @@ eq("fallthrough 1", control.fallthrough(1), "one,two")
 eq("fallthrough 2", control.fallthrough(2), "two")
 eq("fallthrough default", control.fallthrough(5), "other")
 eq("for-of", control.iterate({ "x", "y" }, { a = 1, b = 2 }, { m = true, n = true }), "x y a=1 m")
+eq("for-of over a string", control.letters("abc"), "a-b-c")
+eq("closures capture each pass", control.captured(), "0,1,2")
+eq("closures see their own pass", control.capturedAndChanged(), "1,3,5")
+eq("continue keeps a changed variable", control.capturedWithContinue(), "0,4,5")
+eq("increment reads the head's scope", control.shadowedIncrement(), 30)
+eq("do-while condition reads the outer scope", control.shadowedCondition(), 3)
 
 local classes = load("classes")
 list("classes", classes.build(), { "a:leaf+3+1", 2, "leaf", "static", "Leaf" })
@@ -112,16 +118,32 @@ list("optional chain nil", operators.chain(nil), {})
 list("optional chain inner nil", operators.chain({}), {})
 eq("conditional true", operators.ternary(true, 4), 8)
 eq("conditional false", operators.ternary(false, 4), 3)
+eq("non-null call on nil", operators.callNonNull(nil), nil)
+eq(
+	"non-null call",
+	operators.callNonNull({
+		run = function()
+			return 4
+		end,
+	}),
+	4
+)
+list("operands keep their order", operators.order(), { "0,0", "ab", 6 })
+eq("&& keeps NaN falsy", operators.eitherOr(0 / 0), "fallback")
+eq("&& keeps zero falsy", operators.eitherOr(0), "fallback")
+eq("&& passes a truthy value", operators.eitherOr(1), "s")
 
 local macros = load("macros")
 list("arrays", macros.arrays(), { 3, 4, "1-2-3", "10,21,32", 1, 2, 1, -1, 6, true, true, true })
 list("maps", macros.maps(), { 2, false, 1, true, false, 2, true, false })
 list("strings", macros.strings("a,b"), { 3, "a,", 2, true, "number" })
+list("macro operands keep their order", macros.order(), { "set,arg,set,arg,list,arg,list,arg", false, 1, "3+2" })
 
 local patterns = load("patterns")
 list("destructure", patterns.destructure({ 1, 2, nil, 4, 5 }, { a = 9 }), { 1, "one", 1, 30, 2, 9, "default" })
 eq("parameters", patterns.parameters({ x = 1 }, { 3, 4 }, 7, 8), 12)
 list("assign patterns", patterns.assign({ 5, 6 }), { 5, 6, 1 })
+list("LuaTuple elements", patterns.tuples(), { 10, 2, "first", "second" })
 
 if failures > 0 then
 	print(`{failures} failed`)
