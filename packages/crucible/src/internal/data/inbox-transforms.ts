@@ -36,7 +36,6 @@ function addSeen(envelope: Envelope, ids: readonly string[]): Pick<Envelope, "se
 
 /** @internal Each id leaves the inbox or the quarantine, wherever it is, and enters seen as its exact string (rule 72). */
 export function applyAcks(envelope: Envelope, acks: readonly string[]): Envelope {
-	if (acks.size() === 0) return envelope;
 	const gone = new Set(acks);
 	return {
 		...envelope,
