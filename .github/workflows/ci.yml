@@ -39,7 +39,7 @@ jobs:
 
       - name: Build the crucible CLI
         working-directory: cli
-        run: cargo build --locked
+        run: cargo build --locked --package crucible
 
       - name: Run checks and tests
         run: pnpm run check
