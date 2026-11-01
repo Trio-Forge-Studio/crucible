@@ -9,6 +9,7 @@ const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-data-mutants-"));
 const D = "packages/crucible/src/internal/data/";
 const BOOT = "packages/crucible/src/internal/boot.ts";
+const FAKE = "test/lib/data-backend.luau";
 // [rule, kind, file, before, after, spec]. Kinds: guard deletes a reset or guard, swap exchanges two values of one
 // type, pair short-circuits one half of a paired operation.
 const mutants = [
@@ -183,7 +184,14 @@ const mutants = [
 		"",
 		"rule 19 acquisition committed then errored",
 	],
-	["19", "guard", D + "profiles.ts", "\t\t\t\tearliest = undefined;\n", "\n", "rule 24 takeover at expiry"],
+	[
+		"19",
+		"guard",
+		D + "profiles.ts",
+		"\t\t\t\tearliest = undefined;\n",
+		"\n",
+		"rule 19 a held answer after an uncommitted",
+	],
 	[
 		"19",
 		"swap",
@@ -201,6 +209,38 @@ const mutants = [
 		"rule 24 one winner",
 	],
 	["20", "guard", D + "profiles.ts", "\t\t\t\theld = true;\n", "\n", "rule 24 one winner"],
+	[
+		"20",
+		"swap",
+		D + "profiles.ts",
+		"held ? LOAD_BUSY_MESSAGE : LOAD_FAILED_MESSAGE",
+		"held ? LOAD_FAILED_MESSAGE : LOAD_BUSY_MESSAGE",
+		"rule 47 resume after the destination took over",
+	],
+	[
+		"20",
+		"guard",
+		D + "profiles.ts",
+		"\t\t\t\t\tdeadline,\n",
+		"\t\t\t\t\tmath.huge,\n",
+		"rule 47 resume after the destination took over",
+	],
+	[
+		"20",
+		"swap",
+		D + "profiles.ts",
+		"return this.end(session, mayHaveCommitted, LOAD_FAILED_MESSAGE);",
+		"return this.end(session, mayHaveCommitted, LOAD_BUSY_MESSAGE);",
+		"rule 20 a non-retryable load error",
+	],
+	[
+		"20",
+		"pair",
+		D + "scheduler.ts",
+		'if (outcome.kind === "ok" || !outcome.retryable) {',
+		'if (outcome.kind === "ok" || ((false as boolean) && !outcome.retryable)) {',
+		"rule 20 a non-retryable load error",
+	],
 	[
 		"20",
 		"pair",
@@ -465,6 +505,46 @@ const mutants = [
 		"if (sa !== sb) return sa < sb;",
 		"if (sa !== sb) return sb < sa;",
 		"rule 34 dispatch order",
+	],
+	[
+		"34",
+		"swap",
+		D + "scheduler.ts",
+		"const ra = this.rank(a, now);\n\t\tconst rb = this.rank(b, now);",
+		"const ra = this.rank(a, a.enqueuedAt);\n\t\tconst rb = this.rank(b, b.enqueuedAt);",
+		"rule 34 an Ordinary request that ages while every slot is held",
+	],
+	[
+		"34",
+		"swap",
+		D + "scheduler.ts",
+		"const ra = this.rank(a, now);\n\t\tconst rb = this.rank(b, now);",
+		"const ra = this.rank(a, a.enqueuedAt);\n\t\tconst rb = this.rank(b, b.enqueuedAt);",
+		"rule 34 a renewal that turns LeaseCritical while every slot is held",
+	],
+	[
+		"34",
+		"pair",
+		D + "scheduler.ts",
+		"\t\t\t}\n\t\t\tthis.pump();\n",
+		"\t\t\t}\n",
+		"rule 34 an Ordinary request that ages while every slot is held",
+	],
+	[
+		"11",
+		"swap",
+		D + "waiters.ts",
+		"threads.sort((a, b) => a[1] < b[1]);",
+		"threads.sort((a, b) => b[1] < a[1]);",
+		"rule 11 parked waiters continue in park order",
+	],
+	[
+		"11",
+		"guard",
+		D + "waiters.ts",
+		"\t\tthreads.sort((a, b) => a[1] < b[1]);\n",
+		"\n",
+		"rule 11 parked waiters continue in park order",
 	],
 	[
 		"35",
@@ -1008,6 +1088,104 @@ const mutants = [
 		"rule 26 authority loss is diagnosed",
 	],
 	["110", "pair", D + "profiles.ts", "\t\tthis.diagnosed.add(key);\n", "\n", "rule 36 retries"],
+	[
+		"108",
+		"guard",
+		FAKE,
+		"if not gate.open and gate.point == point",
+		"if gate.point == point",
+		"rule 37 save after an already",
+	],
+	["108", "guard", FAKE, "and call.index > gate.after and matches", "and matches", "rule 37 save after an already"],
+	[
+		"108",
+		"guard",
+		FAKE,
+		" and matches(gate.filter, call) then\n\t\t\ttable.insert(gate.parked",
+		" then\n\t\t\ttable.insert(gate.parked",
+		"rule 27 a stale origin save is fenced",
+	],
+	[
+		"108",
+		"guard",
+		FAKE,
+		"if not gate.open and gate.point == point and",
+		"if not gate.open and",
+		"rule 108 a conflicting commit",
+	],
+	[
+		"108",
+		"guard",
+		FAKE,
+		"if plan.remaining > 0 and matches(plan.filter, call) then",
+		"if matches(plan.filter, call) then",
+		"rule 19 acquisition committed then errored",
+	],
+	[
+		"108",
+		"guard",
+		FAKE,
+		"if plan.remaining > 0 and matches(plan.filter, call) then",
+		"if plan.remaining > 0 then",
+		"rule 35 caller timeout versus uncertain",
+	],
+	[
+		"108",
+		"swap",
+		FAKE,
+		'return backend:call(realm, "update", store, key, transform)',
+		'return backend:call(realm, "update", key, store, transform)',
+		"rule 24 one winner",
+	],
+	[
+		"108",
+		"swap",
+		FAKE,
+		"return self.stores[store] and self.stores[store][key]",
+		"return self.stores[key] and self.stores[key][store]",
+		"rule 45 handoff confirmed",
+	],
+	[
+		"108",
+		"swap",
+		FAKE,
+		"serverId = id,\n\t\tjobId = `job-{id}`,",
+		"serverId = `job-{id}`,\n\t\tjobId = id,",
+		"rule 24 one winner",
+	],
+	[
+		"108",
+		"swap",
+		FAKE,
+		"return backend.now + realm.mono\n\tend\n\tfunction realm.wall()\n\t\treturn backend.now + realm.wallOffset",
+		"return backend.now + realm.wallOffset\n\tend\n\tfunction realm.wall()\n\t\treturn backend.now + realm.mono",
+		"rule 21 polls follow the schedule",
+	],
+	[
+		"108",
+		"pair",
+		FAKE,
+		"\t\tfor _, continue in parked do\n\t\t\tcontinue()\n\t\tend\n",
+		"",
+		"rule 27 a stale origin save",
+	],
+	["108", "pair", FAKE, "\t\t\t\tif written ~= nil then\n", "\t\t\t\tif false then\n", "rule 45 handoff confirmed"],
+	[
+		"108",
+		"pair",
+		FAKE,
+		'self:pass(call, "response", function()',
+		"(function(continue) continue() end)(function()",
+		"rule 23 a late response past safeUntil",
+	],
+	[
+		"108",
+		"pair",
+		FAKE,
+		'self:pass(call, "commit", function()',
+		";(function(continue) continue() end)(function()",
+		"rule 37 R1 a new session's first save with an update",
+	],
 ];
 // Type-checks every mutant in one language service, so a mutant that cannot compile fails before the slow runs.
 function typecheck(originals) {
@@ -1043,6 +1221,7 @@ function typecheck(originals) {
 		);
 	const baseline = new Map();
 	for (const [index, [rule, kind, file, before, after]] of mutants.entries()) {
+		if (!file.endsWith(".ts")) continue;
 		const absolute = path.resolve(scratch, file);
 		if (!baseline.has(absolute)) baseline.set(absolute, errors(absolute).length);
 		texts.set(absolute, originals.get(file).replace(before, after));
