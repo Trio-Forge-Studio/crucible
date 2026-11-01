@@ -1,6 +1,15 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { project, inspect, compile, descriptorExpressions, fs, path, ts } = require("./network-harness.cjs");
+const {
+	project,
+	inspect,
+	compile,
+	buildDiagnostics,
+	descriptorExpressions,
+	fs,
+	path,
+	ts,
+} = require("./network-harness.cjs");
 const imports =
 	'import { toServer, toClient, askServer, receive, ClientReady, Subsystem, CrucibleBehaviour, u8, u16, u32, f32, f64, ToServer, ToClient, AskServer, ReceiveTarget } from "@trioforge/crucible";\n';
 const declaration = (type, kind = "toServer", name = "X.Test") => `export const Message = ${kind}<${type}>("${name}");`;
@@ -363,7 +372,17 @@ test("network duplicate names and transitive global or merged payloads fail at t
 		"src/shared/merged.ts",
 		"src/shared/ns-message.ts",
 	]);
-	compile(game, 1);
+	assert.deepEqual(buildDiagnostics(compile(game, 1), "CRU010"), [
+		"src/augment.ts",
+		"src/global-augment.ts",
+		"src/ns-augment.ts",
+		"src/shared/alias.ts",
+		"src/shared/declared-global.ts",
+		"src/shared/global-variant.ts",
+		"src/shared/global.ts",
+		"src/shared/merged.ts",
+		"src/shared/ns-message.ts",
+	]);
 });
 
 test("network augmentations that add no declaration to a reached payload symbol compile", () => {
@@ -410,6 +429,174 @@ test("network augmentations of a base interface a reached payload extends fail a
 	});
 	assert.deepEqual(augmentedFiles(inspect(game)), ["base", "gen", "kbase", "middle", "root"]);
 	assert.match(compile(game, 1), /CRU010/);
+});
+
+const flagged = (game) => augmentedFiles(inspect(game));
+const utilDiagnostics = (output) => buildDiagnostics(output, "CRU010").filter((file) => file.startsWith("src/util/"));
+
+test("network augmentations of a base reached through a typeof query or a call expression fail at the augmentation", () => {
+	const classes = ["KQuery", "KMix", "KAlias", "KInline", "KLeft", "KRight", "KOther"];
+	const game = project({
+		"src/shared/base.ts": [
+			...classes.map((name) => `export class ${name} { k = 1; }`),
+			"export function mix<T extends new () => object>(base: T): T { return base; }",
+			"export function both<A extends new () => object, B extends new () => object>(a: A, b: B): new () => InstanceType<A> & InstanceType<B> { return a as never; }",
+		].join("\n"),
+		"src/shared/model.ts": [
+			"import { " + classes.join(", ") + ', mix, both } from "./base";',
+			"export interface ViaQuery extends InstanceType<typeof KQuery> { own: string }",
+			"export class ViaMix extends mix(KMix) { own = 1; }",
+			"export class ViaBoth extends both(KLeft, KRight) { own = 1; }",
+			'export type ViaAlias = Omit<InstanceType<typeof KAlias>, "k">;',
+			"export interface Unreached extends InstanceType<typeof KOther> { own: string }",
+		].join("\n"),
+		"src/shared/messages.ts":
+			imports +
+			[
+				'import { KInline } from "./base";',
+				'import { ViaQuery, ViaMix, ViaBoth, ViaAlias } from "./model";',
+				'export const One = toServer<ViaQuery>("X.One");',
+				'export const Two = toServer<ViaMix>("X.Two");',
+				'export const Three = toServer<ViaBoth>("X.Three");',
+				'export const Four = toServer<ViaAlias>("X.Four");',
+				'export const Five = toServer<Omit<InstanceType<typeof KInline>, "k">>("X.Five");',
+			].join("\n"),
+		...Object.fromEntries(
+			classes.map((name) => [
+				`src/util/${name.toLowerCase()}.ts`,
+				augmentation("../shared/base", `interface ${name} { extra: string }`),
+			]),
+		),
+	});
+	const expected = ["kalias", "kinline", "kleft", "kmix", "kquery", "kright"];
+	assert.deepEqual(flagged(game), expected);
+	assert.deepEqual(
+		utilDiagnostics(compile(game, 1)),
+		expected.map((name) => `src/util/${name}.ts`),
+	);
+});
+
+test("network augmentations of any base of a multi-base or merged interface fail at the augmentation", () => {
+	const game = project({
+		"src/shared/base.ts":
+			"export interface A { a: string } export interface B { b: string } export interface C { c: string } export interface D { d: string }",
+		"src/shared/model.ts":
+			'import { A, B, C, D } from "./base"; export interface Multi extends A, B { own: string } export interface Merged extends C { first: string } export interface Merged extends D { second: string }',
+		"src/shared/messages.ts":
+			imports +
+			'import { Multi, Merged } from "./model"; export const One = toServer<Multi>("X.One"); export const Two = toServer<Merged>("X.Two");',
+		"src/util/a.ts": augmentation("../shared/base", "interface A { extra: string }"),
+		"src/util/b.ts": augmentation("../shared/base", "interface B { extra: string }"),
+		"src/util/c.ts": augmentation("../shared/base", "interface C { extra: string }"),
+		"src/util/d.ts": augmentation("../shared/base", "interface D { extra: string }"),
+	});
+	assert.deepEqual(flagged(game), ["a", "b", "c", "d"]);
+	assert.deepEqual(utilDiagnostics(compile(game, 1)), [
+		"src/util/a.ts",
+		"src/util/b.ts",
+		"src/util/c.ts",
+		"src/util/d.ts",
+	]);
+});
+
+test("network augmentations of a type in a heritage cycle terminate and still fail", () => {
+	const game = project({
+		"src/shared/model.ts":
+			"export interface A extends B { a: string } export interface B extends A { b: string } export class P extends Q { p = 1; } export class Q extends P { q = 1; }",
+		"src/shared/messages.ts":
+			imports +
+			'import { A, P } from "./model"; export const One = toServer<A>("X.One"); export const Two = toServer<P>("X.Two");',
+		"src/util/b.ts": augmentation("../shared/model", "interface B { extra: string }"),
+		"src/util/q.ts": augmentation("../shared/model", "interface Q { extra: string }"),
+	});
+	assert.deepEqual(flagged(game), ["b", "q"]);
+});
+
+test("network augmentations declaring several values or exported values beside a reached name fail", () => {
+	const forms = {
+		list: ["const a: number, Payload: number;", ["value"]],
+		exported: ["export const Payload: number;", ["value"]],
+		exportedList: ["export const a: number, Payload: number;", ["value"]],
+		unrelatedList: ["const a: number, b: number;", []],
+	};
+	for (const [form, [body, expected]] of Object.entries(forms)) {
+		const game = project({
+			"src/shared/model.ts": "export interface Payload { value: string }",
+			"src/shared/messages.ts":
+				imports + 'import { Payload } from "./model"; export const One = toServer<Payload>("X.One");',
+			"src/util/value.ts": augmentation("../shared/model", body),
+		});
+		assert.deepEqual(flagged(game), expected, form);
+	}
+});
+
+test("network augmentations of a different symbol with the same name are not reported", () => {
+	const game = project({
+		"src/shared/model.ts": "export interface Payload { value: string }",
+		"src/shared/other.ts": "export interface Payload { other: number }",
+		"src/shared/messages.ts":
+			imports + 'import { Payload } from "./model"; export const One = toServer<Payload>("X.One");',
+		"src/util/other.ts": augmentation("../shared/other", "interface Payload { extra: string }"),
+	});
+	assert.deepEqual(flagged(game), []);
+	compile(game);
+});
+
+test("network augmentations of an interface a payload class only implements build cleanly", () => {
+	const game = project({
+		"src/shared/base.ts": "export interface Contract { name: string }",
+		"src/shared/model.ts":
+			'import { Contract } from "./base"; export class Impl implements Contract { name = ""; own = 1; }',
+		"src/shared/messages.ts":
+			imports + 'import { Impl } from "./model"; export const One = toServer<Impl>("X.One");',
+		"src/util/contract.ts": augmentation("../shared/base", "interface Contract { extra?: string }"),
+	});
+	assert.deepEqual(flagged(game), []);
+	compile(game);
+});
+
+const chainGame = (depth) => {
+	const chain = Array.from({ length: depth }, (_, i) => `export interface L${i} extends L${i + 1} { f${i}: number }`);
+	return project({
+		"src/shared/model.ts": [...chain, `export interface L${depth} { leaf: string }`].join("\n"),
+		"src/shared/messages.ts": imports + 'import { L0 } from "./model"; export const One = toServer<L0>("X.One");',
+		"src/util/leaf.ts": augmentation("../shared/model", `interface L${depth} { extra: string }`),
+	});
+};
+
+test("network augmentations behind a deep heritage chain still fail at the augmentation", () => {
+	const result = inspect(chainGame(1000));
+	assert.deepEqual(augmentedFiles(result), ["leaf"]);
+	assert.deepEqual(
+		result.diagnostics.filter((d) => d.code === 90000),
+		[],
+	);
+});
+
+test("network heritage chains deeper than the checker can analyse end in Crucible diagnostics", () => {
+	const result = inspect(chainGame(3000));
+	assert.ok(result.diagnostics.length > 0);
+	for (const diagnostic of result.diagnostics) {
+		assert.equal(diagnostic.code, 90000);
+		assert.match(diagnostic.messageText, /nests or inherits too deeply/);
+	}
+});
+
+test("network transformer faults other than a stack overflow keep their own message", () => {
+	const game = chainGame(2);
+	const faults = [
+		[new RangeError("Invalid array length"), "Invalid array length"],
+		[new Error("checker exploded"), "checker exploded"],
+		[new TypeError("x is not a function"), "x is not a function"],
+	];
+	for (const [fault, message] of faults) {
+		const { diagnostics } = inspect(game, undefined, fault);
+		assert.ok(diagnostics.length > 0, message);
+		for (const diagnostic of diagnostics) {
+			assert.equal(diagnostic.code, 90000);
+			assert.equal(diagnostic.messageText, "Crucible: Cannot transform input: " + message);
+		}
+	}
 });
 
 test("network augmentations declaring a value beside a reached payload name fail like any other declaration", () => {

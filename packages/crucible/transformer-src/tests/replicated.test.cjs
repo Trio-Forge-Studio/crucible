@@ -1,7 +1,19 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const h = require("./state-data-harness.cjs");
-const { project, inspect, compile, calls, evaluate, describe, countNodes, verdicts, normalPath, reported } = h;
+const {
+	project,
+	inspect,
+	compile,
+	buildDiagnostics,
+	calls,
+	evaluate,
+	describe,
+	countNodes,
+	verdicts,
+	normalPath,
+	reported,
+} = h;
 const { fs, path, F, S, Nil, L, U, O, M } = h;
 const fd = fs.readFileSync(path.join(h.fixture, "fd.ts"), "utf8");
 const shapes = (name) => fs.readFileSync(path.join(h.fixture, name), "utf8");
@@ -252,7 +264,7 @@ test("replicated declarations report CRU010 for global, merged and augmented typ
 		),
 	].sort();
 	assert.deepEqual(files, ["src/augment.ts", "src/shared/global.ts", "src/shared/merged.ts"]);
-	compile(game, 1);
+	assert.deepEqual(buildDiagnostics(compile(game, 1), "CRU010"), files);
 });
 
 test("K9 the build rejects a replicated initial value that breaks the declared type", () => {
