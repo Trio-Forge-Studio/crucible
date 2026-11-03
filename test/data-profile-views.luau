@@ -318,6 +318,13 @@ return {
 		assert(table.isfrozen(root), "frozen")
 		spec.eq(ann.d.PlayerData().upgrades.speed(), 2, "a client map entry read")
 		assert(rawequal(ann.d.PlayerData(), ann.d.PlayerData()), "the client root is made once per realm")
+		data(player).upgrades:update(function(m)
+			local copy = table.clone(m)
+			copy.set = 9
+			return copy
+		end)
+		w:heartbeat()
+		spec.eq(ann.d.PlayerData().upgrades["set"](), 9, "a client map key named set is a child, not a write member")
 		local client = ann.d.PlayerData
 		throws(function()
 			client().currency:set(1)
