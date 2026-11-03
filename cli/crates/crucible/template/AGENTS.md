@@ -1,7 +1,6 @@
 # Game development
 
-Run `npx crucible dev` to compile on save and sync the game to Studio.
-Run `npm run build` to compile TypeScript and build `build/start.rbxl` with embedded Rojo.
+Run `npm run build` to compile TypeScript and build `build/start.rbxl` with embedded Rojo. Ask a person to open it in Studio.
 Run `npm run check` before completing a change. It runs Vite+ lint and formatting, then builds the game.
 Run `npm run fmt` to fix formatting. Use the equivalent script commands with your package manager.
 
