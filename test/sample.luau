@@ -280,6 +280,20 @@ return {
 		Network.send(Collect, { size = 5 })
 		w:settle()
 		spec.eq(w:hud(ann), "Coins: 17   Total: 17   Last: +5", "the largest allowed size paid")
+		saved(w, ann.player)
+		spec.eq(stored(w, ANN).payload.pickups, ANN_PICKUPS + 1, "only the paid pickup was counted")
+		w.place:Destroy()
+	end,
+
+	["compiled sample a press before the profile loads pays nothing"] = function()
+		local w = newWorld({ [ANN] = { 12, ANN_PICKUPS } })
+		local ann = w:connect("Ann", ANN)
+		w:press(ann, E)
+		w:settle()
+		spec.eq(w:hud(ann), "Coins: 12   Total: 12   Last: +0", "the early press paid and counted nothing")
+		saved(w, ann.player)
+		spec.eq(stored(w, ANN).payload.coins, 12, "the committed coins")
+		spec.eq(stored(w, ANN).payload.pickups, ANN_PICKUPS, "the committed counter")
 		w.place:Destroy()
 	end,
 }
