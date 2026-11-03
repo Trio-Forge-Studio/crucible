@@ -352,7 +352,7 @@ return {
 		end
 		throws(function()
 			data(player).upgrades:set(upgrades)
-		end, "FD.Players: the owner's views would cost", "the share refusal")
+		end, "bytes, over this store's share of 65536 (1 profile stores)", "the share refusal names the bytes measure")
 		spec.eq(next(data(player).upgrades()), nil, "nothing stored")
 		w:finish()
 	end,

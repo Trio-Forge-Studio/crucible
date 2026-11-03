@@ -425,7 +425,8 @@ return {
 				s.service("Stamp", function(self)
 					self.claim = d.PlayerData:onLoad(function(player, data, reason)
 						table.insert(seen, reason)
-						return d.PlayerData(player).currency() + data.currency
+						local _ = d.PlayerData(player).currency()
+						return data
 					end)
 				end)
 			end,
