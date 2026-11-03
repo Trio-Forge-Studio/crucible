@@ -135,7 +135,6 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			report(at, code, `${node.arguments[0]?.text ?? kind} ${location}: ${reason}`);
 			return { kind: "nil" };
 		};
-		const inherited = new Set();
 		const checkSymbols = (symbols, location) => {
 			for (const symbol of symbols) {
 				if (!symbol) continue;
@@ -150,17 +149,14 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						`${symbol.name} must be declared in one imported module; incremental builds cannot see global declarations or merges.`,
 						"CRU010",
 					);
-				if (!inherited.has(symbol)) {
-					inherited.add(symbol);
-					for (const decl of decls)
-						if (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))
-							for (const clause of decl.heritageClauses ?? [])
-								if (clause.token === ts.SyntaxKind.ExtendsKeyword)
-									for (const base of clause.types) {
-										references(base, location);
-										mention(checker.getTypeAtLocation(base), location);
-									}
-				}
+				for (const decl of decls)
+					if (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))
+						for (const clause of decl.heritageClauses ?? [])
+							if (clause.token === ts.SyntaxKind.ExtendsKeyword)
+								for (const base of clause.types) {
+									references(base, location);
+									mention(checker.getTypeAtLocation(base), location);
+								}
 			}
 		};
 		const mentioned = new Set();

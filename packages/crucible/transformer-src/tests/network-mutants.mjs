@@ -497,14 +497,14 @@ const mutations = [
 	],
 	[
 		"F2 every declaration of a merged symbol contributes heritage",
-		"for (const decl of decls)\n\t\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
-		"for (const decl of decls.slice(0, 1))\n\t\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
+		"for (const decl of decls)\n\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
+		"for (const decl of decls.slice(0, 1))\n\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
 		"network augmentations that add a base to any base of a multi-base",
 	],
 	[
 		"F2 heritage cycle guard",
-		"if (!inherited.has(symbol)) {",
-		"if (true) {",
+		"if (mentioned.has(type)) return;",
+		"",
 		"network augmentations of a type in a heritage cycle",
 	],
 	[
