@@ -1351,6 +1351,19 @@ fn imports_the_place_cannot_hold_are_errors_at_their_specifier() {
 }
 
 #[test]
+fn package_metadata_that_cannot_be_read_is_the_only_report_on_every_file() {
+    let game = Game::new();
+    game.write("src/shared/package.json", "{ not json");
+    game.write("src/shared/model.ts", "export interface Model { a: string }");
+    game.main("import { Subsystem } from \"@trioforge/crucible\";\nimport type { Model } from \"../shared/model\";\nexport class S extends Subsystem { onStart(): void {} }\nexport type M = Model;");
+    let diagnostics = game.facts().diagnostics;
+    let found: Vec<String> =
+        diagnostics.iter().map(|d| format!("{} {} {}", game.relative(d), d.code, d.message)).collect();
+    let message = "90000 Crucible: Cannot read package metadata. Check the project's package.json files.";
+    assert_eq!(found, [format!("src/server/main.ts {message}"), format!("src/shared/model.ts {message}")]);
+}
+
+#[test]
 fn heritage_chains_hundreds_deep_finish_the_rules_and_the_facts() {
     const INTERFACES: usize = 300;
     const CLASSES: usize = 60;
