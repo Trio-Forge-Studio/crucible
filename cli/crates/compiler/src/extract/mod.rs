@@ -4,6 +4,7 @@
 //! not sites yet.
 
 mod crucible;
+mod data;
 mod network;
 mod types;
 

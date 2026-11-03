@@ -1438,6 +1438,54 @@ fn the_augmentation_scan_reports_only_the_augmentation_and_no_diagnostic_of_othe
 }
 
 #[test]
+fn side_entry_references_follow_barrels_namespace_aliases_type_imports_and_dynamic_imports() {
+    let game = written(&[
+        ("src/util/named.ts", "export { Network } from \"@trioforge/crucible/client\";".into()),
+        ("src/util/star.ts", "export * from \"@trioforge/crucible/client\";".into()),
+        ("src/server/named.ts", "import { Network } from \"../util/named\"; export const N = Network;".into()),
+        ("src/server/ns.ts", "import * as util from \"../util/star\"; export const N = util.Network;".into()),
+        (
+            "src/shared/type.ts",
+            "import type { Network } from \"@trioforge/crucible/client\"; export type T = typeof Network;".into(),
+        ),
+        ("src/server/dynamic.ts", "export const N = import(\"@trioforge/crucible/client\");".into()),
+        ("src/server/import-type.ts", "export type N = typeof import(\"@trioforge/crucible/client\");".into()),
+        ("src/client/good.ts", "import { Network as N } from \"@trioforge/crucible/client\"; export const M = N;".into()),
+        (
+            "src/server/good.ts",
+            "import { Network, boot } from \"@trioforge/crucible/server\"; export const N = Network; export const B = boot;".into(),
+        ),
+        (
+            "src/server/facade.ts",
+            "import { Network } from \"@trioforge/crucible/server\"; export function facade() { return Network; }".into(),
+        ),
+        (
+            "src/client/facade.ts",
+            "import { facade } from \"../server/facade\"; export const send = facade().send;".into(),
+        ),
+    ]);
+    let (reports, type_errors) = check(&game);
+    assert_eq!(type_errors, Vec::<String>::new());
+    let flagged = files_with(&reports, 90024);
+    for file in [
+        "src/util/named.ts",
+        "src/util/star.ts",
+        "src/server/named.ts",
+        "src/server/ns.ts",
+        "src/shared/type.ts",
+        "src/server/dynamic.ts",
+        "src/server/import-type.ts",
+        "src/client/facade.ts",
+    ] {
+        assert!(
+            flagged.contains(&file.to_owned()) || type_errors.iter().any(|e| e.starts_with(file)),
+            "{file}: {flagged:?} {type_errors:?}"
+        );
+    }
+    assert!(!reports.iter().any(|r| r.file.ends_with("good.ts")), "{flagged:?}");
+}
+
+#[test]
 fn schema_boundaries_accept_the_limits_and_reject_overflow() {
     let branches = |n: usize| (0..n).map(|i| format!("\"L{i:03}\"")).collect::<Vec<_>>().join("|");
     let nested = |n: usize| format!("{}string{}", "{value:".repeat(n), "}".repeat(n));
@@ -2329,6 +2377,175 @@ fn data_declarations_take_the_declaration_rules_three_name_kinds_and_their_lower
     assert!(
         wrong.contains(&"CRU017: Declare data stores as an exported top-level const in a server module.".to_owned())
     );
+    assert!(wrong.iter().any(|m| m.starts_with("CRU024")), "{wrong:?}");
+}
+
+#[test]
+fn cru027_checks_profile_store_calls_by_the_callee_type_in_every_side_through_barrels() {
+    let store =
+        format!("{SHARED}export const PlayerData = profileStore(\"FD.Players\", {{ template: {{ coins: 0 }} }});\n");
+    let using = |from: &str| format!("import {{ PlayerData }} from \"{from}\";\ndeclare const player: Player;\n");
+    let server = "is server-only; the client reads PlayerData().";
+    let client = "reads the local player's profile; on the server call";
+    let game = data_game();
+    game.write("src/shared/template.ts", &store);
+    game.write("src/shared/barrel.ts", "export { PlayerData } from \"./template\";");
+    game.write(
+        "src/server/good.ts",
+        &format!(
+            "{}PlayerData(player).coins.set(1); PlayerData.loaded(player); PlayerData.handoff(player); PlayerData.players();",
+            using("../shared/template")
+        ),
+    );
+    game.write(
+        "src/client/good.ts",
+        &format!("{}PlayerData().coins(); PlayerData.loaded();", using("../shared/template")),
+    );
+    game.write(
+        "src/shared/good.ts",
+        &format!(
+            "{}import {{ replicatedPaths }} from \"@trioforge/crucible\"; export const paths = replicatedPaths(PlayerData); export const store = PlayerData;",
+            using("./template")
+        ),
+    );
+    let triggers = [
+        ("client", "../shared/template", "PlayerData(player);", format!("CRU027: PlayerData(player) {server}")),
+        ("client", "../shared/template", "PlayerData.handoff(player);", format!("CRU027: PlayerData.handoff {server}")),
+        ("client", "../shared/template", "PlayerData.loaded(player);", format!("CRU027: PlayerData.loaded {server}")),
+        ("client", "../shared/template", "PlayerData[\"save\"](player);", format!("CRU027: PlayerData.save {server}")),
+        ("server", "../shared/template", "PlayerData();", format!("CRU027: PlayerData() {client} PlayerData(player).")),
+        (
+            "server",
+            "../shared/template",
+            "PlayerData.loaded();",
+            format!("CRU027: PlayerData.loaded() {client} PlayerData.loaded(player)."),
+        ),
+        ("shared", "./template", "PlayerData(player);", format!("CRU027: PlayerData(player) {server}")),
+        ("shared", "./template", "PlayerData.players();", format!("CRU027: PlayerData.players {server}")),
+        ("shared", "./template", "PlayerData();", format!("CRU027: PlayerData() {client} PlayerData(player).")),
+        ("client", "../shared/barrel", "PlayerData(player);", format!("CRU027: PlayerData(player) {server}")),
+        ("client", "../shared/barrel", "PlayerData.inspect(1);", format!("CRU027: PlayerData.inspect {server}")),
+        ("server", "../shared/barrel", "PlayerData();", format!("CRU027: PlayerData() {client} PlayerData(player).")),
+        ("shared", "./barrel", "PlayerData(player);", format!("CRU027: PlayerData(player) {server}")),
+        ("shared", "./barrel", "PlayerData();", format!("CRU027: PlayerData() {client} PlayerData(player).")),
+        (
+            "neutral",
+            "../shared/template",
+            "PlayerData();",
+            format!("CRU027: PlayerData() {client} PlayerData(player)."),
+        ),
+        (
+            "client",
+            "../shared/template",
+            "const alias = PlayerData; (alias)(player);",
+            "CRU027: alias(player) is server-only; the client reads alias().".to_owned(),
+        ),
+    ];
+    for (i, (side, from, code, _)) in triggers.iter().enumerate() {
+        game.write(&format!("src/{side}/t{i}.ts"), &format!("{}{code}", using(from)));
+    }
+    let reports = reports_of(&game);
+    for file in ["src/server/good.ts", "src/client/good.ts", "src/shared/good.ts", "src/shared/barrel.ts"] {
+        assert_eq!(messages(&reports, file), Vec::<String>::new(), "{file}");
+    }
+    for (i, (side, _, code, message)) in triggers.iter().enumerate() {
+        assert_eq!(messages(&reports, &format!("src/{side}/t{i}.ts")), std::slice::from_ref(message), "{code}");
+    }
+}
+
+#[test]
+fn cru025_rejects_a_process_receipt_assignment_in_a_program_that_holds_a_grant_claim() {
+    let store =
+        format!("{SHARED}export const PlayerData = profileStore(\"FD.Players\", {{ template: {{ coins: 0 }} }});\n");
+    let claim = "import { Subsystem } from \"@trioforge/crucible\"; import { PlayerData } from \"../shared/template\";\nexport class Shop extends Subsystem { readonly skins = PlayerData.grant(1, (player, data) => data); }";
+    let receipt =
+        |code: &str| format!("declare const handler: (receipt: ReceiptInfo) => Enum.ProductPurchaseDecision;\n{code}");
+    let triggers = [
+        "game.GetService(\"MarketplaceService\").ProcessReceipt = handler;",
+        "const market = game.GetService(\"MarketplaceService\"); market.ProcessReceipt = handler;",
+        "const market = game.GetService(\"MarketplaceService\"); market[\"ProcessReceipt\"] = handler;",
+        "const market = game.GetService(\"MarketplaceService\"); (market).ProcessReceipt = handler;",
+        "const market = game.GetService(\"MarketplaceService\"); (market.ProcessReceipt) = handler;",
+        "export function install(market: MarketplaceService) { market.ProcessReceipt = handler; }",
+    ];
+    let game = data_game();
+    game.write("src/shared/template.ts", &store);
+    game.write("src/server/shop.ts", claim);
+    for (i, code) in triggers.iter().enumerate() {
+        game.write(&format!("src/server/r{i}.ts"), &receipt(code));
+    }
+    game.write(
+        "src/server/other.ts",
+        &receipt("const other = { ProcessReceipt: handler }; other.ProcessReceipt = handler;"),
+    );
+    let reports = reports_of(&game);
+    for (i, code) in triggers.iter().enumerate() {
+        assert_eq!(
+            messages(&reports, &format!("src/server/r{i}.ts")),
+            [
+                "CRU025: Crucible's data module owns ProcessReceipt; register grants with a profile store's grant(productId, ...)."
+            ],
+            "{code}"
+        );
+    }
+    assert_eq!(messages(&reports, "src/server/other.ts"), Vec::<String>::new());
+    assert_eq!(messages(&reports, "src/server/shop.ts"), Vec::<String>::new());
+    let game = data_game();
+    game.write("src/shared/template.ts", &store);
+    game.write(
+        "src/server/shop.ts",
+        "import { PlayerData } from \"../shared/template\"; declare const player: Player; PlayerData(player).coins.set(1);",
+    );
+    game.write("src/server/r.ts", &receipt(triggers[0]));
+    none(&reports_of(&game));
+    game.compile();
+}
+
+#[test]
+fn configs_lower_to_their_emit_calls_and_a_client_or_shared_read_is_cru024() {
+    let declarations = format!(
+        "{SERVER}export interface GlobalEvent {{ readonly name: string; readonly multiplier: number }}\nexport const NO_EVENT: GlobalEvent = {{ name: \"\", multiplier: 1 }};\nexport const GlobalEventConfig = config<GlobalEvent>(\"GlobalEvent\", NO_EVENT);\nexport const Discount = playerConfig<number>(\"Shop.WelcomeDiscount\", 0);\n"
+    );
+    let read = |from: &str| {
+        format!("import {{ GlobalEventConfig, Discount }} from \"{from}\";\ndeclare const player: Player;\n")
+    };
+    let game = data_game();
+    game.write("src/server/configs.ts", &declarations);
+    game.write(
+        "src/server/use.ts",
+        &format!("{}export const event = GlobalEventConfig(); export const d = Discount(player);", read("./configs")),
+    );
+    game.write("src/util/barrel.ts", "export { GlobalEventConfig, Discount } from \"../server/configs\";");
+    game.write(
+        "src/client/global.ts",
+        &format!("{}export const event = GlobalEventConfig().name;", read("../server/configs")),
+    );
+    game.write("src/client/player.ts", &format!("{}export const d = Discount(player);", read("../server/configs")));
+    game.write(
+        "src/shared/global.ts",
+        &format!("{}export const event = GlobalEventConfig();", read("../server/configs")),
+    );
+    game.write("src/shared/player.ts", &format!("{}export const d = Discount(player);", read("../server/configs")));
+    game.write("src/client/barrel.ts", &format!("{}export const event = GlobalEventConfig();", read("../util/barrel")));
+    let reports = reports_of(&game);
+    assert_eq!(messages(&reports, "src/server/configs.ts"), Vec::<String>::new());
+    assert_eq!(messages(&reports, "src/server/use.ts"), Vec::<String>::new());
+    for file in ["client/global.ts", "client/player.ts", "shared/global.ts", "shared/player.ts", "client/barrel.ts"] {
+        let found = messages(&reports, &format!("src/{file}"));
+        assert!(found.iter().any(|m| m.starts_with("CRU024")), "{file}: {found:?}");
+    }
+    let game = data_game();
+    game.write("src/server/configs.ts", &declarations);
+    game.write(
+        "src/server/use.ts",
+        &format!("{}export const event = GlobalEventConfig(); export const d = Discount(player);", read("./configs")),
+    );
+    none(&reports_of(&game));
+    let luau = game.luau("server/configs.luau");
+    let found = calls(&luau, &DATA);
+    assert_eq!(found["GlobalEvent"][1], "NO_EVENT");
+    same(&found["GlobalEvent"][2], &n::o(&[("multiplier", n::f()), ("name", n::s())]), "GlobalEvent");
+    assert_eq!(found["Shop.WelcomeDiscount"][1..], ["0", "__crucible.n.f64"]);
 }
 
 #[test]

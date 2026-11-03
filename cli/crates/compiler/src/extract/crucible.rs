@@ -54,7 +54,7 @@ struct Package {
 /// What a Crucible diagnostic reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Code {
-    /// A rule, CRU001 to CRU023 or CRU026.
+    /// A rule, CRU001 to CRU027.
     Rule(u16),
     /// The project's packages do not let Crucible compute a type id.
     Setup,
@@ -98,6 +98,10 @@ pub(super) struct Api {
     pub emit: Option<PathBuf>,
     /// The `width` brand symbols that make a number a Crucible width such as `u8`.
     pub widths: HashSet<P<Symbol>>,
+    /// The declaration files of `@trioforge/crucible/server` and `/client`.
+    pub entries: HashMap<PathBuf, Side>,
+    /// What each of those entries exports.
+    pub entry_exports: HashMap<P<Symbol>, Side>,
 }
 
 impl Api {
@@ -119,6 +123,8 @@ impl Api {
             made: None,
             emit: None,
             widths: HashSet::new(),
+            entries: HashMap::new(),
+            entry_exports: HashMap::new(),
         };
         let mut modules = Vec::new();
         for &file in program.source_files() {
@@ -147,8 +153,19 @@ impl Api {
                 if api.entry_module(&owner, entry).as_deref() != Some(module.as_str()) {
                     continue;
                 }
+                let side = match entry {
+                    "./server" => Some(Side::Server),
+                    "./client" => Some(Side::Client),
+                    _ => None,
+                };
+                if let Some(side) = side {
+                    api.entries.insert(normalize(&path), side);
+                }
                 for &symbol in &exports {
                     let target = unalias(c, symbol);
+                    if let Some(side) = side {
+                        api.entry_exports.insert(target, side);
+                    }
                     if let Some(&m) = macros.iter().chain(&NETWORK_MACROS).find(|m| m.name() == symbol.name()) {
                         api.macros.insert(target, m);
                     }
@@ -182,6 +199,11 @@ impl Api {
     /// Crucible's transform applies to the programs that use the package, not to the package's own sources.
     pub fn owns(&mut self, file: &Path) -> bool {
         self.package_of(file).is_some_and(|p| p.json["name"] == PACKAGE)
+    }
+
+    /// Whether the package exports a type or value of this name, which tells whether a rule about it can apply.
+    pub fn exports_name(&self, name: &str) -> bool {
+        self.exports.values().any(|&n| n == name)
     }
 
     fn name(&self, c: &mut Checker, symbol: Option<P<Symbol>>) -> Option<&'static str> {
@@ -1123,18 +1145,23 @@ impl Extractor {
             }
             Kind::ExternalModuleReference => self.entry_import(n, Some(n.as_external_module_reference().expression())),
             Kind::CallExpression => self.crucible_call(n, file),
+            Kind::StringLiteral => self.side_entry_specifier(n, file),
+            Kind::BinaryExpression => self.process_receipt(n),
             Kind::ModuleDeclaration => self.augmentation(n),
-            Kind::Identifier if names.contains(n.text()) => {
-                let parent = n.parent();
-                let specifier =
-                    parent.is_some_and(|p| matches!(p.kind(), Kind::ImportSpecifier | Kind::ExportSpecifier));
-                let access = parent.filter(|p| {
-                    p.kind() == Kind::PropertyAccessExpression && p.as_property_access_expression().name == n
-                });
-                if !specifier && !is_callee(access.unwrap_or(n)) {
-                    let symbol = self.checker.get_symbol_at_location_exported(n);
-                    self.macro_value(n, symbol);
+            Kind::Identifier => {
+                if names.contains(n.text()) {
+                    let parent = n.parent();
+                    let specifier =
+                        parent.is_some_and(|p| matches!(p.kind(), Kind::ImportSpecifier | Kind::ExportSpecifier));
+                    let access = parent.filter(|p| {
+                        p.kind() == Kind::PropertyAccessExpression && p.as_property_access_expression().name == n
+                    });
+                    if !specifier && !is_callee(access.unwrap_or(n)) {
+                        let symbol = self.checker.get_symbol_at_location_exported(n);
+                        self.macro_value(n, symbol);
+                    }
                 }
+                self.side_entry_reference(n, file);
             }
             Kind::ElementAccessExpression if !is_callee(n) => {
                 let t = self.checker.get_type_at_location(n);
@@ -1196,6 +1223,7 @@ impl Extractor {
             }
             None => {}
         }
+        self.profile_store_call(n, file);
     }
 
     /// CRU023: a network or data macro anywhere but a call's callee, an import or an export.

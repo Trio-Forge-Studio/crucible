@@ -1,5 +1,5 @@
 //! Crucible's declaration macros and `receive`: the rules each call obeys, the schema a declared type lowers to, and the
-//! program-wide CRU010 augmentation rule. The diagnostics equal the ones
+//! program-wide CRU010 augmentation and CRU024 side entry rules. The diagnostics equal the ones
 //! `packages/crucible/transformer-src/network.cjs` reports.
 
 use std::cmp::Ordering;
@@ -28,6 +28,8 @@ pub(super) struct Program {
     declarations: Option<Vec<Indexed>>,
     /// Every symbol a declaration's lowering reaches.
     reached: Option<HashSet<P<Symbol>>>,
+    /// Whether any profile store call registers a `grant`.
+    pub granted: Option<bool>,
 }
 
 struct Indexed {
@@ -101,7 +103,7 @@ enum Width {
 }
 
 #[derive(Clone, Copy)]
-enum Standard {
+pub(super) enum Standard {
     /// `@rbxts/types`, the Roblox API.
     Types,
     /// The compiler types, which declare `Map` and `Promise`.
@@ -304,7 +306,7 @@ impl Extractor {
     }
 
     /// Whether `symbol` is declared in a file of one of the standard Roblox packages.
-    fn standard(&mut self, symbol: P<Symbol>, which: Standard) -> bool {
+    pub(super) fn standard(&mut self, symbol: P<Symbol>, which: Standard) -> bool {
         symbol.declarations().iter().any(|&d| {
             let Some(file) = tsrs_ast::get_source_file_of_node(d) else { return false };
             let name = file.file_name().replace('\\', "/");
@@ -1439,6 +1441,80 @@ impl Extractor {
                 }
             }
             _ => None,
+        }
+    }
+
+    /// CRU024 at a module specifier that names the other side's entry.
+    pub(super) fn side_entry_specifier(&mut self, literal: P<Node>, file: P<SourceFile>) {
+        if self.crucible.entries.is_empty() {
+            return;
+        }
+        let Some(parent) = literal.parent() else { return };
+        let specifier = match parent.kind() {
+            Kind::ImportDeclaration | Kind::ExportDeclaration => true,
+            Kind::LiteralType => parent.parent().is_some_and(|p| p.kind() == Kind::ImportType),
+            Kind::CallExpression => parent.as_call_expression().expression.kind() == Kind::ImportKeyword,
+            _ => false,
+        };
+        if !specifier {
+            return;
+        }
+        let module = self.checker.resolve_external_module_name_exported(literal, None);
+        let Some(path) = module.and_then(|m| m.declarations().first().copied()).and_then(declaration_file) else {
+            return;
+        };
+        self.wrong_side(literal, &path, file);
+    }
+
+    fn wrong_side(&mut self, at: P<Node>, path: &Path, file: P<SourceFile>) -> bool {
+        let Some(&side) = self.crucible.entries.get(path) else { return false };
+        if self.file_side(file) != Some(side) {
+            let folder = side.folder();
+            let message =
+                format!("This file cannot reference @trioforge/crucible/{folder}; move it under a {folder} folder.");
+            self.report(at, Code::Rule(24), &message);
+        }
+        true
+    }
+
+    /// CRU024 at a name that refers to the other side's entry: a declaration in it, an export of it, or a value of a
+    /// type it exports.
+    pub(super) fn side_entry_reference(&mut self, n: P<Node>, file: P<SourceFile>) {
+        if self.crucible.entries.is_empty() {
+            return;
+        }
+        let Some(symbol) = self.checker.get_symbol_at_location_exported(n).map(|s| unalias(&mut self.checker, s))
+        else {
+            return;
+        };
+        let mut in_entry = false;
+        for &declaration in symbol.declarations() {
+            if let Some(path) = declaration_file(declaration) {
+                in_entry |= self.wrong_side(n, &path, file);
+            }
+        }
+        if in_entry {
+            return;
+        }
+        let owner = match self.crucible.entry_exports.get(&symbol) {
+            Some(&side) => Some(side),
+            None if symbol.flags().intersects(SymbolFlags::Variable | SymbolFlags::Property) => {
+                let t = self.checker.get_type_at_location(n);
+                let alias = t.alias().and_then(|a| a.symbol()).map(|s| unalias(&mut self.checker, s));
+                let by_alias = alias.and_then(|a| self.crucible.entry_exports.get(&a).copied());
+                by_alias.or_else(|| t.symbol().and_then(|s| self.crucible.entry_exports.get(&s).copied()))
+            }
+            None => None,
+        };
+        if let Some(owner) = owner
+            && self.file_side(file) != Some(owner)
+        {
+            let folder = owner.folder();
+            let message = format!(
+                "This file cannot reference @trioforge/crucible/{folder} through {}; move it under a {folder} folder.",
+                n.text()
+            );
+            self.report(n, Code::Rule(24), &message);
         }
     }
 

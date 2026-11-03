@@ -432,8 +432,12 @@ fn review_regressions_cover_alias_macros_abstract_only_imports_empty_files_and_c
     has(&luau, "\t\tx = {\n\t\t\tname = \"X\",");
     game.main(&format!("{header}const a = attribute; const bad = a(1);"));
     assert!(game.found().contains(&"CRU015@src/server/main.ts:2".to_owned()), "{:?}", game.found());
-    game.main("import { boot } from \"@trioforge/crucible/client\"; boot({load: [\"src/server/**/*.ts\"]});");
-    has(&game.luau("server/main.luau"), "crucible-path:ServerScriptService/TS/**/*");
+    game.remove("src/server/main.ts");
+    game.write(
+        "src/client/main.ts",
+        "import { boot } from \"@trioforge/crucible/client\"; boot({load: [\"src/server/**/*.ts\"]});",
+    );
+    has(&game.luau("client/main.luau"), "crucible-path:ServerScriptService/TS/**/*");
 }
 
 #[test]
