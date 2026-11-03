@@ -1192,23 +1192,38 @@ fn heritage_chains_hundreds_deep_finish_the_rules_and_the_facts() {
 }
 
 #[test]
-fn network_and_data_macros_fail_the_compile_until_their_transform_lands() {
+fn network_and_data_macros_lower_to_their_emit_calls() {
     let game = Game::new();
     game.write(
         "src/shared/messages.ts",
-        "import { replicated, syncStatus, toServer } from \"@trioforge/crucible\";\nexport const Ping = toServer<{ a: string }>(\"X.Ping\");\nexport const Score = replicated<number>(\"Score\", 0);\nexport const status = () => syncStatus(Score);",
+        "import { replicated, syncStatus, toServer } from \"@trioforge/crucible\";
+export const Ping = toServer<{ a: string }>(\"X.Ping\");
+export const Score = replicated<number>(\"Score\", 0);
+export const status = () => syncStatus(Score);",
     );
-    game.main("import { config, dataStore, operationId } from \"@trioforge/crucible/server\";\nexport const Limit = config<number>(\"Limit\", 1);\nexport const Saves = dataStore<{ coins: number }>(\"Saves\", { defaults: { coins: 0 } });\nexport const plain = [1].map((n) => n);\nexport const id = operationId();");
-    let found: Vec<String> =
-        game.facts().diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
-    assert_eq!(
-        found,
-        [
-            "src/server/main.ts:2 Crucible: config needs Crucible's network transform, which this compiler does not run yet.",
-            "src/server/main.ts:3 Crucible: dataStore needs Crucible's network transform, which this compiler does not run yet.",
-            "src/shared/messages.ts:2 Crucible: toServer needs Crucible's network transform, which this compiler does not run yet.",
-            "src/shared/messages.ts:3 Crucible: replicated needs Crucible's network transform, which this compiler does not run yet.",
-        ]
+    game.main(
+        "import { config, dataStore, operationId } from \"@trioforge/crucible/server\";
+export const Limit = config<number>(\"Limit\", 1);
+export const Saves = dataStore<{ coins: number }>(\"Saves\", { defaults: { coins: 0 } });
+export const plain = [1].map((n) => n);
+export const id = operationId();",
+    );
+    assert_eq!(game.found(), Vec::<String>::new());
+    let shared = game.luau("shared/messages.luau");
+    has(
+        &shared,
+        "local Ping = __crucible.toServer(\"X.Ping\", __crucible.n.object({ { \"a\", __crucible.n.string } }))",
+    );
+    has(&shared, "local Score = __crucible.replicated(\"Score\", 0, __crucible.n.f64)");
+    let server = game.luau("server/main.luau");
+    has(&server, "local Limit = __crucible.config(\"Limit\", 1, __crucible.n.f64)");
+    has(
+        &server,
+        "local Saves = __crucible.dataStore(\"Saves\", {
+	defaults = {
+		coins = 0,
+	},
+}, __crucible.n.object({ { \"coins\", __crucible.n.f64 } }))",
     );
 }
 
@@ -1242,19 +1257,15 @@ fn network_and_data_macros_used_as_values_are_cru023_at_the_reference() {
 }
 
 #[test]
-fn a_parenthesized_network_macro_call_still_fails_the_compile() {
+fn a_parenthesized_network_macro_call_lowers_like_a_plain_one() {
     let game = Game::new();
     game.main(
-        "import * as S from \"@trioforge/crucible/server\";\nexport const Limit = (S.config)<number>(\"Limit\", 1);\n",
+        "import * as S from \"@trioforge/crucible/server\";
+export const Limit = (S.config)<number>(\"Limit\", 1);
+",
     );
-    let found: Vec<String> =
-        game.facts().diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
-    assert_eq!(
-        found,
-        [
-            "src/server/main.ts:2 Crucible: config needs Crucible's network transform, which this compiler does not run yet."
-        ]
-    );
+    assert_eq!(game.found(), Vec::<String>::new());
+    has(&game.luau("server/main.luau"), "local Limit = __crucible.config(\"Limit\", 1, __crucible.n.f64)");
 }
 
 #[test]
