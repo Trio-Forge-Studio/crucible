@@ -1,4 +1,3 @@
-//! The harness the Crucible transform tests share: a scratch game with the real package installed.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -17,7 +16,6 @@ pub fn slashes(path: &Path) -> String {
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-/// A game in a scratch folder with the Crucible package copied into its `node_modules`, as a consumer installs it.
 pub struct Game {
     pub dir: PathBuf,
 }
@@ -76,7 +74,6 @@ impl Game {
         self
     }
 
-    /// Writes `tsconfig.json` from the standard game config after `edit` changes it.
     pub fn config(&self, edit: impl FnOnce(&mut Value)) -> &Game {
         let roots = repo().join("packages/crucible/node_modules");
         let mut config = json!({
@@ -115,8 +112,6 @@ impl Game {
         path.strip_prefix(&dir).unwrap_or(path).to_owned()
     }
 
-    /// Each Crucible diagnostic as `CRU001@src/server/main.ts:3`, with `Crucible` for a setup error. Errors about
-    /// where the place holds a module are left out.
     pub fn found(&self) -> Vec<String> {
         self.found_at("tsconfig.json")
     }
@@ -136,7 +131,6 @@ impl Game {
         self.found().into_iter().filter(|f| f.contains(&suffix)).collect()
     }
 
-    /// The `file:line` of each type error, for sources that TypeScript 7 rejects.
     pub fn type_errors(&self) -> Vec<String> {
         match self.analyze() {
             Ok(_) => Vec::new(),

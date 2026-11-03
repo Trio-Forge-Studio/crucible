@@ -166,7 +166,6 @@ struct Extractor {
     globals: types::Globals,
     crucible: crucible::Api,
     game: Option<Game>,
-    /// The tsconfig's folder, which duplicate declaration names are reported relative to.
     config_dir: PathBuf,
     network: network::Program,
     facts: Facts,

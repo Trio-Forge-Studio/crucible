@@ -22,11 +22,9 @@ use crate::tree::{File, Position};
 const PACKAGE: &str = "@trioforge/crucible";
 const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "CrucibleObject"];
 /// `@trioforge/crucible/emit` exports a runtime `attribute` and runtime declaration functions that are not the macros.
-/// Each entry may also export any of `NETWORK_MACROS`.
 const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
     [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[Macro::Boot]), ("./client", &[Macro::Boot])];
-/// The declaration macros and `receive`, which a value may not refer to except as a call's callee.
-const NETWORK_MACROS: [Macro; 11] = [
+const DECLARATION_MACROS: [Macro; 11] = [
     Macro::ToServer,
     Macro::ToClient,
     Macro::AskServer,
@@ -40,8 +38,8 @@ const NETWORK_MACROS: [Macro; 11] = [
     Macro::PlayerConfig,
 ];
 
-fn is_network_macro(name: &str) -> bool {
-    NETWORK_MACROS.iter().any(|m| m.name() == name)
+fn is_declaration_macro(name: &str) -> bool {
+    DECLARATION_MACROS.iter().any(|m| m.name() == name)
 }
 /// Lifecycle names from other frameworks that a Crucible class may mean as a hook.
 const HOOK_LOOKALIKES: [&str; 5] = ["onInit", "onStart", "onTick", "onPhysics", "onRender"];
@@ -54,7 +52,6 @@ struct Package {
 /// What a Crucible diagnostic reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Code {
-    /// A rule, CRU001 to CRU027.
     Rule(u16),
     /// The project's packages do not let Crucible compute a type id.
     Setup,
@@ -96,11 +93,8 @@ pub(super) struct Api {
     made: Option<HashMap<P<Symbol>, Made>>,
     /// The declarations of `@trioforge/crucible/emit`.
     pub emit: Option<PathBuf>,
-    /// The `width` brand symbols that make a number a Crucible width such as `u8`.
     pub widths: HashSet<P<Symbol>>,
-    /// The declaration files of `@trioforge/crucible/server` and `/client`.
     pub entries: HashMap<PathBuf, Side>,
-    /// What each of those entries exports.
     pub entry_exports: HashMap<P<Symbol>, Side>,
 }
 
@@ -163,10 +157,12 @@ impl Api {
                 }
                 for &symbol in &exports {
                     let target = unalias(c, symbol);
-                    if let Some(side) = side {
+                    if let Some(side) = side
+                        && (side == Side::Client || !api.entry_exports.contains_key(&target))
+                    {
                         api.entry_exports.insert(target, side);
                     }
-                    if let Some(&m) = macros.iter().chain(&NETWORK_MACROS).find(|m| m.name() == symbol.name()) {
+                    if let Some(&m) = macros.iter().chain(&DECLARATION_MACROS).find(|m| m.name() == symbol.name()) {
                         api.macros.insert(target, m);
                     }
                 }
@@ -201,7 +197,6 @@ impl Api {
         self.package_of(file).is_some_and(|p| p.json["name"] == PACKAGE)
     }
 
-    /// Whether the package exports a type or value of this name, which tells whether a rule about it can apply.
     pub fn exports_name(&self, name: &str) -> bool {
         self.exports.values().any(|&n| n == name)
     }
@@ -229,7 +224,6 @@ impl Api {
         self.macro_of(c, symbol)
     }
 
-    /// The name of the package that holds `file`.
     pub fn package_name(&mut self, file: &Path) -> Option<String> {
         self.package_of(file).and_then(|p| p.json["name"].as_str().map(str::to_owned))
     }
@@ -407,7 +401,6 @@ fn types_condition(value: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-/// The symbols of `width` variables that `n` declares, which brand Crucible's number widths.
 fn widths(c: &mut Checker, n: P<Node>, out: &mut HashSet<P<Symbol>>) {
     if n.kind() == Kind::VariableDeclaration
         && let Some(name) = n.name().filter(|name| name.kind() == Kind::Identifier && name.text() == "width")
@@ -1123,11 +1116,11 @@ impl Extractor {
 
     /// The names that can refer to a network or data macro in `file`: the macros' own, and the ones its imports give.
     fn macro_names(&mut self, file: P<SourceFile>) -> HashSet<&'static str> {
-        let mut names: HashSet<&'static str> = NETWORK_MACROS.iter().map(|m| m.name()).collect();
+        let mut names: HashSet<&'static str> = DECLARATION_MACROS.iter().map(|m| m.name()).collect();
         for &statement in file.as_node().statements() {
             for name in import_names(statement) {
                 let symbol = self.checker.get_symbol_at_location_exported(name);
-                if self.api(symbol).is_some_and(is_network_macro) {
+                if self.api(symbol).is_some_and(is_declaration_macro) {
                     names.insert(name.text());
                 }
             }
@@ -1228,7 +1221,7 @@ impl Extractor {
 
     /// CRU023: a network or data macro anywhere but a call's callee, an import or an export.
     fn macro_value(&mut self, at: P<Node>, symbol: Option<P<Symbol>>) {
-        if let Some(name) = self.api(symbol).filter(|name| is_network_macro(name)) {
+        if let Some(name) = self.api(symbol).filter(|name| is_declaration_macro(name)) {
             let message = format!("{name} is a declaration macro and cannot be used as a value.");
             self.report(at, Code::Rule(23), &message);
         }

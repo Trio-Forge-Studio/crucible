@@ -1,6 +1,4 @@
-//! Crucible's declaration macros and `receive`: the rules each call obeys, the schema a declared type lowers to, and the
-//! program-wide CRU010 augmentation and CRU024 side entry rules. The diagnostics equal the ones
-//! `packages/crucible/transformer-src/network.cjs` reports.
+//! The diagnostics equal the ones `packages/crucible/transformer-src/network.cjs` reports.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -22,13 +20,10 @@ use crate::macros::Macro;
 use crate::project::normalize;
 use crate::tree::File;
 
-/// What the rules learn about the whole program, computed when a rule first asks.
 #[derive(Default)]
 pub(super) struct Program {
     declarations: Option<Vec<Indexed>>,
-    /// Every symbol a declaration's lowering reaches.
     reached: Option<HashSet<P<Symbol>>>,
-    /// Whether any profile store call registers a `grant`.
     pub granted: Option<bool>,
 }
 
@@ -38,28 +33,20 @@ struct Indexed {
     name: Option<&'static str>,
 }
 
-/// Where in a declared value a type sits.
 #[derive(Clone, Copy, Default)]
 struct Context {
     /// The server sends it, and a client may not have streamed in an Instance it names.
     to_client: bool,
-    /// The value may be absent here.
     nilable: bool,
-    /// On an object path from the value's root, where a `serverOnly` mark may sit.
     path: bool,
-    /// Inside a `serverOnly` field.
     marked: bool,
-    /// The store's whole value.
     root: bool,
 }
 
-/// One declaration's lowering.
 struct Lowering {
     call: P<Node>,
     spec: Spec,
-    /// The declaration's name, which starts each diagnostic about its value.
     name: &'static str,
-    /// False while the augmentation rule lowers every declaration to learn what they reach.
     report: bool,
     reached: HashSet<P<Symbol>>,
     active: HashSet<P<Type>>,
@@ -75,7 +62,6 @@ enum Engine {
     Color3,
     CFrame,
     Instance(&'static str),
-    /// A Roblox datatype the codec has no encoding for.
     Unsupported,
 }
 
@@ -104,9 +90,7 @@ enum Width {
 
 #[derive(Clone, Copy)]
 pub(super) enum Standard {
-    /// `@rbxts/types`, the Roblox API.
     Types,
-    /// The compiler types, which declare `Map` and `Promise`.
     CompilerTypes,
 }
 
@@ -152,7 +136,6 @@ fn literal(t: P<Type>) -> Option<Literal> {
     types::literal_bool(t).map(Literal::Boolean)
 }
 
-/// Booleans, then numbers, then strings by their bytes.
 fn compare(a: &Literal, b: &Literal) -> Ordering {
     let rank = |l: &Literal| match l {
         Literal::Boolean(_) => 0,
@@ -189,8 +172,6 @@ fn json_string(text: &str) -> String {
     serde_json::to_string(text).unwrap_or_default()
 }
 
-/// The value the owner's client receives: the saved value without its `serverOnly` fields, and without any object those
-/// removals empty.
 pub(crate) fn replica(node: &Schema) -> Schema {
     let Schema::Object(fields) = node else { return node.clone() };
     let mut kept = Vec::new();
@@ -204,7 +185,6 @@ pub(crate) fn replica(node: &Schema) -> Schema {
     Schema::Object(kept)
 }
 
-/// The `serverOnly` fields' paths. Fields are sorted, so a parent's path comes before its children's.
 fn server_only_paths(node: &Schema) -> Vec<Vec<Box<str>>> {
     fn walk(node: &Schema, prefix: &mut Vec<Box<str>>, out: &mut Vec<Vec<Box<str>>>) {
         let Schema::Object(fields) = node else { return };
@@ -223,7 +203,6 @@ fn server_only_paths(node: &Schema) -> Vec<Vec<Box<str>>> {
     out
 }
 
-/// Each replica field whose view declaration name breaks the naming rule, as its location and the reason.
 fn view_name_problems(store: &str, node: &Schema) -> Vec<(String, String)> {
     let Schema::Object(fields) = node else { return Vec::new() };
     let prefix = format!("{VIEW_NAME_PREFIX}{store}.");
@@ -241,7 +220,7 @@ fn view_name_problems(store: &str, node: &Schema) -> Vec<(String, String)> {
                 format!(
                     "its view name {name} is {} bytes, over {VIEW_NAME_MAX_BYTES}; this store allows field names of at most {} bytes; rename the field, shorten the store name, or mark it serverOnly",
                     name.len(),
-                    VIEW_NAME_MAX_BYTES - prefix.len()
+                    VIEW_NAME_MAX_BYTES as isize - prefix.len() as isize
                 ),
             ));
         }
@@ -249,7 +228,6 @@ fn view_name_problems(store: &str, node: &Schema) -> Vec<(String, String)> {
     problems
 }
 
-/// Every call in `n`.
 fn calls(n: P<Node>, out: &mut Vec<P<Node>>) {
     if n.kind() == Kind::CallExpression {
         out.push(n);
@@ -260,7 +238,6 @@ fn calls(n: P<Node>, out: &mut Vec<P<Node>>) {
     });
 }
 
-/// The declarations an augmentation adds, through variable lists and nested namespaces.
 fn added_declarations(body: Option<P<Node>>, out: &mut Vec<P<Node>>) {
     let Some(body) = body else { return };
     let statements = if body.kind() == Kind::ModuleBlock { body.statements().to_vec() } else { vec![body] };
@@ -281,7 +258,6 @@ fn declaration_file(declaration: P<Node>) -> Option<PathBuf> {
     tsrs_ast::get_source_file_of_node(declaration).map(|f| normalize(Path::new(f.file_name())))
 }
 
-/// An ask's timeout, when its options are exactly `{ timeout: <number literal in (0, 120]> }`.
 fn ask_timeout(options: P<Node>) -> Option<f64> {
     if options.kind() != Kind::ObjectLiteralExpression {
         return None;
@@ -305,7 +281,6 @@ impl Extractor {
         self.crucible.side(path, path)
     }
 
-    /// Whether `symbol` is declared in a file of one of the standard Roblox packages.
     pub(super) fn standard(&mut self, symbol: P<Symbol>, which: Standard) -> bool {
         symbol.declarations().iter().any(|&d| {
             let Some(file) = tsrs_ast::get_source_file_of_node(d) else { return false };
@@ -330,7 +305,6 @@ impl Extractor {
         self.checker.type_to_string_exported(t)
     }
 
-    /// Every declaration macro call in the program, in program order.
     fn declarations(&mut self) -> &[Indexed] {
         if self.network.declarations.is_none() {
             let mut found = Vec::new();
@@ -354,7 +328,6 @@ impl Extractor {
         self.network.declarations.as_deref().unwrap_or_default()
     }
 
-    /// `file:line` of a node, relative to the tsconfig's folder.
     fn location(&self, n: P<Node>) -> String {
         let Some(file) = tsrs_ast::get_source_file_of_node(n) else { return String::new() };
         let line = File::new(file).position(crate::tree::span(n, file.text()).start).line;
@@ -363,7 +336,6 @@ impl Extractor {
         format!("{}:{line}", path.strip_prefix(&dir).unwrap_or(&path))
     }
 
-    /// Whether the declaration is an exported top-level const of a module.
     fn placed(call: P<Node>, file: P<SourceFile>) -> bool {
         let declaration = call.parent().filter(|d| {
             d.kind() == Kind::VariableDeclaration
@@ -381,7 +353,6 @@ impl Extractor {
         })
     }
 
-    /// CRU017 to CRU020 and CRU026 for one declaration macro call, and the fact its call lowers from.
     pub(super) fn declaration(&mut self, call: P<Node>, kind: DeclarationKind, file: P<SourceFile>) {
         let spec = kind.spec();
         if !Self::placed(call, file) || self.file_side(file) != Some(spec.side) {
@@ -463,7 +434,6 @@ impl Extractor {
         self.table.store(span, Site::Crucible, |f| &mut f.crucible, fact);
     }
 
-    /// The schemas a declaration's call emits, and every symbol its value type reaches.
     fn lower_declaration(
         &mut self,
         call: P<Node>,
@@ -553,7 +523,6 @@ impl Extractor {
         Schema::Nil
     }
 
-    /// A state's value type: its type argument, or else the type argument of what the call returns.
     fn target_of(&mut self, call: P<Node>) -> Option<P<Type>> {
         if let Some(&argument) = call.type_arguments().first() {
             return Some(self.checker.get_type_from_type_node_exported(argument));
@@ -566,8 +535,6 @@ impl Extractor {
         self.checker.get_type_arguments_exported(returned).first().copied()
     }
 
-    /// CRU010 for each symbol declared in a global script, a `declare global` block or more than one file, and the
-    /// symbols' heritage, which a merge can change too.
     fn check_symbols(&mut self, l: &mut Lowering, symbols: [Option<P<Symbol>>; 2], location: &str) {
         for symbol in symbols.into_iter().flatten() {
             l.reached.insert(symbol);
@@ -616,7 +583,6 @@ impl Extractor {
         self.check_symbols(l, [t.alias().and_then(|a| a.symbol()), t.symbol()], location);
     }
 
-    /// The symbols a type's syntax names, through aliases, `typeof` queries and what queried functions return.
     fn references(&mut self, l: &mut Lowering, syntax: Option<P<Node>>, location: &str) {
         let Some(syntax) = syntax else { return };
         if !l.referenced.insert(syntax) {
@@ -666,7 +632,6 @@ impl Extractor {
         self.lower_marked(l, t, location, context, depth).0
     }
 
-    /// A type's schema, and whether a `serverOnly` mark wraps it.
     fn lower_marked(
         &mut self,
         l: &mut Lowering,
@@ -860,7 +825,7 @@ impl Extractor {
         self.fail(l, location, &reason)
     }
 
-    /// An array or tuple element or a map value. State drops `undefined` from a map value, which a missing key means.
+    /// State drops `undefined` from a map value, which a missing key means.
     fn element(
         &mut self,
         l: &mut Lowering,
@@ -1167,7 +1132,6 @@ impl Extractor {
         Schema::Union(branches)
     }
 
-    /// The literal values `name` takes in `object`, when it is a required property of distinct literals.
     fn discriminant_values(
         &mut self,
         l: &mut Lowering,
@@ -1192,7 +1156,6 @@ impl Extractor {
         Some(values)
     }
 
-    /// The number of schema nodes, with CRU019 where they nest past the depth limit.
     fn cost(&mut self, l: &Lowering, node: &Schema, depth: u32) -> usize {
         let limit = l.spec.position.depth_limit();
         if depth > limit {
@@ -1227,7 +1190,6 @@ impl Extractor {
         self.api(t.symbol()) == Some("ServerOnly")
     }
 
-    /// An intersection of plain object types, which state flattens into one object.
     fn plain_intersection(&mut self, t: P<Type>) -> bool {
         t.flags().intersects(TypeFlags::Intersection)
             && t.types()
@@ -1270,7 +1232,6 @@ impl Extractor {
             .then_some(Collection::Map)
     }
 
-    /// The Crucible width a `number & { [width]?: "u8" }` brand names.
     fn width(&mut self, t: P<Type>) -> Option<Width> {
         if !t.flags().intersects(TypeFlags::Intersection)
             || !t.types().iter().any(|p| p.flags().intersects(TypeFlags::Number))
@@ -1306,7 +1267,6 @@ impl Extractor {
         Some(if let [width] = found[..] { Width::Brand(width) } else { Width::Conflicting })
     }
 
-    /// CRU021, CRU022 and CRU012 for one `receive` call, and the fact its call lowers from.
     pub(super) fn receive(&mut self, call: P<Node>, file: P<SourceFile>) {
         let field = call.parent().filter(|p| {
             let flags = tsrs_ast::get_combined_modifier_flags(*p);
@@ -1397,7 +1357,6 @@ impl Extractor {
         }
     }
 
-    /// Whether `t` or a base declares the field `name` with a `receive` initializer.
     fn shadows(&mut self, t: P<Type>, name: &str, seen: &mut HashSet<P<Type>>) -> bool {
         if !seen.insert(t) {
             return false;
@@ -1412,8 +1371,6 @@ impl Extractor {
         receiver || self.class_bases(t).into_iter().any(|base| self.shadows(base, name, seen))
     }
 
-    /// The function a callback argument names: a function written inline, a function or method declaration, or a
-    /// const initialized with one.
     fn callback(&mut self, argument: Option<P<Node>>) -> Option<P<Node>> {
         let argument = argument?;
         match argument.kind() {
@@ -1444,7 +1401,6 @@ impl Extractor {
         }
     }
 
-    /// CRU024 at a module specifier that names the other side's entry.
     pub(super) fn side_entry_specifier(&mut self, literal: P<Node>, file: P<SourceFile>) {
         if self.crucible.entries.is_empty() {
             return;
@@ -1477,8 +1433,6 @@ impl Extractor {
         true
     }
 
-    /// CRU024 at a name that refers to the other side's entry: a declaration in it, an export of it, or a value of a
-    /// type it exports.
     pub(super) fn side_entry_reference(&mut self, n: P<Node>, file: P<SourceFile>) {
         if self.crucible.entries.is_empty() {
             return;
@@ -1518,7 +1472,6 @@ impl Extractor {
         }
     }
 
-    /// Every symbol a declaration's lowering reaches.
     fn reached(&mut self) -> &HashSet<P<Symbol>> {
         if self.network.reached.is_none() {
             let declarations: Vec<(P<Node>, DeclarationKind)> =
@@ -1532,8 +1485,6 @@ impl Extractor {
         self.network.reached.get_or_insert_default()
     }
 
-    /// CRU010 at a `declare global` or `declare module` block that adds a declaration to a symbol a declaration's
-    /// value reaches.
     pub(super) fn augmentation(&mut self, n: P<Node>) {
         let named = n.name().is_some_and(|name| name.kind() == Kind::StringLiteral);
         if !named && !tsrs_ast::is_global_scope_augmentation(n) {

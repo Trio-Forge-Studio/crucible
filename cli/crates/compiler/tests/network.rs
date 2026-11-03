@@ -22,7 +22,6 @@ fn declare(t: &str, kind: &str, name: &str) -> String {
     format!("export const Message = {kind}<{t}>(\"{name}\");")
 }
 
-/// A game whose Rojo project also maps `src/util`, as the JavaScript harness's does.
 fn fresh() -> Game {
     let game = Game::new();
     let mut tree = project();
@@ -68,8 +67,6 @@ struct Report {
     message: String,
 }
 
-/// The game's Crucible diagnostics, and the `file:line` of each type error. A file TypeScript 7 rejects is left out,
-/// and the rest checked again, so each case is judged on its own.
 fn check(game: &Game) -> (Vec<Report>, Vec<String>) {
     let mut type_errors = Vec::new();
     loop {
@@ -104,8 +101,6 @@ fn starts_statement(line: &str) -> bool {
     line.starts_with(|c: char| c.is_ascii_alphabetic())
 }
 
-/// Like `check`, but blanks only the top-level statement around each type error, keeping line numbers, so the other
-/// cases in the file are still judged. Returns each blanked statement as its file and first and last line.
 fn check_statements(game: &Game) -> (Vec<Report>, Vec<(String, usize, usize)>) {
     let mut blanked: Vec<(String, usize, usize)> = Vec::new();
     loop {
@@ -139,7 +134,6 @@ fn check_statements(game: &Game) -> (Vec<Report>, Vec<(String, usize, usize)>) {
     }
 }
 
-/// The line of the first statement in `text` that names `name` in a string.
 fn line_naming(text: &str, name: &str) -> Option<usize> {
     let quoted = format!("\"{name}\"");
     text.lines().position(|l| l.contains(&quoted)).map(|i| i + 1)
@@ -169,7 +163,6 @@ fn none(reports: &[Report]) {
     assert_eq!(all, Vec::<String>::new());
 }
 
-/// Code without the whitespace outside its strings, with JavaScript's array brackets and `undefined` in Luau's form.
 /// Luau indexes the `nil` builder as `n["nil"]`, because `nil` is a keyword.
 fn canon(code: &str) -> String {
     canon_tokens(code).replace("__crucible.n{\"nil\"}", "__crucible.n.nil")
@@ -211,7 +204,6 @@ fn canon_tokens(code: &str) -> String {
     out
 }
 
-/// The top-level arguments of the call whose open parenthesis is at `open`.
 fn arguments(code: &str, open: usize) -> Vec<String> {
     let mut args = Vec::new();
     let mut depth = 0;
@@ -258,7 +250,6 @@ fn arguments(code: &str, open: usize) -> Vec<String> {
     args
 }
 
-/// Each `__crucible.<name>(...)` call in Luau with a string first argument, by that string, as its arguments.
 fn calls(luau: &str, names: &[&str]) -> HashMap<String, Vec<String>> {
     let mut found = HashMap::new();
     for name in names {
@@ -277,7 +268,6 @@ const MESSAGES: [&str; 3] = ["toServer", "toClient", "askServer"];
 const DATA: [&str; 7] =
     ["replicated", "replicatedPerPlayer", "profileStore", "dataStore", "profileMessage", "config", "playerConfig"];
 
-/// The JavaScript test's builders, which write a descriptor as `__crucible.n.*` text.
 mod n {
     pub fn kind(name: &str) -> String {
         format!("__crucible.n.{name}")
@@ -319,7 +309,6 @@ fn same(luau: &str, js: &str, label: &str) {
     assert_eq!(canon(luau), canon(js), "{label}");
 }
 
-/// Every declaration fact of a file, by the declaration's name.
 fn declarations(facts: &Facts, game: &Game, file: &str) -> HashMap<String, Declaration> {
     let source = std::fs::read_to_string(game.dir.join(file)).unwrap();
     let table = facts.files.iter().find(|f| f.path.ends_with(file)).unwrap_or_else(|| panic!("{file} has facts"));
@@ -416,7 +405,6 @@ fn describe(node: &Schema, marked: &[Vec<String>], prefix: &[String]) -> String 
     }
 }
 
-/// The probes' node count, which leaves a map's key out.
 fn count(node: &Schema) -> usize {
     1 + match node {
         Schema::Object(fields) => fields.iter().map(|f| count(&f.value)).sum(),
@@ -432,7 +420,6 @@ fn shape(node: &Schema) -> String {
     format!("{} nodes: {}", count(node), describe(node, &[], &[]))
 }
 
-/// One declaration a probe's `lower.out` records.
 #[derive(Debug, Default)]
 struct Verdict {
     name: String,
@@ -441,7 +428,6 @@ struct Verdict {
 }
 
 impl Verdict {
-    /// Each rejection the probe records, as its code and location.
     fn diagnostics(&self) -> Vec<(String, String)> {
         self.details
             .iter()
@@ -467,7 +453,6 @@ impl Verdict {
     }
 }
 
-/// A probe's `lower.out`: one entry per declaration with its verdict and detail lines.
 fn verdicts(file: &str) -> Vec<Verdict> {
     let text = fixture(&format!("state-data/{file}"));
     let mut entries: Vec<Verdict> = Vec::new();
@@ -523,7 +508,6 @@ fn normal_path(at: &str) -> String {
     out
 }
 
-/// Each `CRUxxx: <name> <location>: ` diagnostic of a declaration, as its code and location.
 fn reported(reports: &[Report], name: &str) -> Vec<(String, String)> {
     reports
         .iter()
@@ -536,7 +520,6 @@ fn reported(reports: &[Report], name: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Each probe rejection is reported with a code and location the probe records.
 fn expect_rejections(reports: &[Report], entries: &[(String, Vec<(String, String)>)]) {
     for (name, expected) in entries {
         let mine = reported(reports, name);
@@ -618,7 +601,6 @@ export const Tagged = toServer<{{Kind:\"A\";Tag:\"A\";x:number}}|{{Kind:\"A\";Ta
     has(&luau, "askServer(\"X.Ask\", __crucible.n.string, __crucible.n.u16, 37)");
 }
 
-/// The JavaScript catalogue: a case name, the diagnostic its message starts with, and its source after the imports.
 fn negatives() -> Vec<(String, &'static str, String)> {
     let mut cases: Vec<(String, &'static str, String)> = vec![
         ("local const".into(), "CRU017", "const X = toServer<string>(\"X.Test\");".into()),
@@ -1072,7 +1054,6 @@ fn added_base(module: &str, name: &str) -> String {
     )
 }
 
-/// The `src/util` files with a CRU010, by name.
 fn augmented(game: &Game) -> Vec<String> {
     let files: BTreeSet<String> = reports_of(game)
         .into_iter()
@@ -1918,7 +1899,6 @@ fn case(name: &str) -> String {
     fixture(&format!("state-data/cases/{name}"))
 }
 
-/// The probe's lines under a section title.
 fn section(text: &str, title: &str) -> Vec<String> {
     text.lines()
         .skip_while(|l| !l.starts_with(title))
@@ -1928,7 +1908,6 @@ fn section(text: &str, title: &str) -> Vec<String> {
         .collect()
 }
 
-/// Rule 131's encoding: `[]` for an element, `*` for a map value, a marker-like key escaped.
 fn segment(key: &str) -> String {
     if ["[]", "*"].contains(&key) || key.starts_with('\\') { format!("\\{key}") } else { key.to_owned() }
 }
@@ -1987,7 +1966,6 @@ fn server_only(declaration: &Declaration) -> Vec<Vec<String>> {
     }
 }
 
-/// A probe name as the data cases spell it.
 fn local(name: &str) -> String {
     let name = match name.strip_prefix("N.") {
         Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => format!("N.N{rest}"),
@@ -2316,6 +2294,10 @@ fn data_declarations_take_the_declaration_rules_three_name_kinds_and_their_lower
             ),
         ),
         (
+            "src/shared/longview.ts",
+            format!("{SHARED}export const V = profileStore(\"A{}\", {{ template: {{ a: 0 }} }});", "1".repeat(49)),
+        ),
+        (
             "src/shared/wrong.ts",
             format!(
                 "{SERVER}export const D = dataStore<{{ a: number }}>(\"X.SharedData\", {{ defaults: {{ a: 0 }} }});"
@@ -2371,6 +2353,13 @@ fn data_declarations_take_the_declaration_rules_three_name_kinds_and_their_lower
         messages(&reports, "src/shared/view.ts"),
         [format!(
             "CRU018: Game.Viewz value.{field}: its view name Crucible.Data.Game.Viewz.{field} is 65 bytes, over 64; this store allows field names of at most 39 bytes; rename the field, shorten the store name, or mark it serverOnly"
+        )]
+    );
+    let store = format!("A{}", "1".repeat(49));
+    assert_eq!(
+        messages(&reports, "src/shared/longview.ts"),
+        [format!(
+            "CRU018: {store} value.a: its view name Crucible.Data.{store}.a is 66 bytes, over 64; this store allows field names of at most -1 bytes; rename the field, shorten the store name, or mark it serverOnly"
         )]
     );
     let wrong = messages(&reports, "src/shared/wrong.ts");
@@ -2927,7 +2916,6 @@ fn persist_depth_stops_at_persist_depth() {
     );
 }
 
-/// The `file:line` and code of each type error.
 fn type_codes(game: &Game) -> Vec<(String, i32)> {
     match game.analyze() {
         Ok(_) => Vec::new(),

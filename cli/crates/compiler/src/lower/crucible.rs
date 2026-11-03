@@ -31,7 +31,6 @@ impl Lower<'_> {
         Expr::global("__crucible").field(name)
     }
 
-    /// Crucible's macros, which call `@trioforge/crucible/emit` or the side entry's `boot`.
     pub(super) fn crucible_macro(&mut self, m: Macro, n: Node) -> Expr {
         match m {
             Macro::Attribute => {
@@ -79,7 +78,6 @@ impl Lower<'_> {
         }
     }
 
-    /// `__crucible.<kind>(name, ...kept arguments, ...schemas, ...tail)`.
     fn declaration(&mut self, declaration: &Declaration, n: Node) -> Expr {
         let arguments = n.arguments();
         let kept =
@@ -101,7 +99,6 @@ impl Lower<'_> {
         self.runtime(declaration.kind.name()).call(args)
     }
 
-    /// A schema as the runtime's `n` builders make it.
     fn schema(&mut self, schema: &Schema) -> Expr {
         let n = |l: &mut Self, name: &'static str| l.runtime("n").field(name);
         match schema {

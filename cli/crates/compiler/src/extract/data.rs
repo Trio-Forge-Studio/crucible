@@ -1,6 +1,4 @@
-//! Crucible's data rules. CRU025 leaves `ProcessReceipt` to the data module once a profile store registers a grant, and
-//! CRU027 keeps each profile store call on the side that may make it. The diagnostics equal the ones
-//! `packages/crucible/transformer-src/data.cjs` reports.
+//! The diagnostics equal the ones `packages/crucible/transformer-src/data.cjs` reports.
 
 use tsrs_ast::{Kind, Node, SourceFile};
 use tsrs_core::P;
@@ -10,7 +8,6 @@ use super::crucible::Code;
 use super::network::Standard;
 use crate::declarations::Side;
 
-/// A call to a profile store, or to one of its methods.
 struct StoreCall {
     store: P<Node>,
     member: Option<&'static str>,
@@ -24,7 +21,6 @@ fn unwrap(mut n: P<Node>) -> P<Node> {
     n
 }
 
-/// The property a constant property or element access reads.
 fn member(n: P<Node>) -> Option<&'static str> {
     match n.kind() {
         Kind::PropertyAccessExpression => Some(n.as_property_access_expression().name.text()),
@@ -63,7 +59,6 @@ impl Extractor {
         self.is_store(object).then_some(StoreCall { store: object, member: Some(name) })
     }
 
-    /// Whether any profile store call in the program registers a `grant`.
     fn grants(&mut self) -> bool {
         if let Some(granted) = self.network.granted {
             return granted;
@@ -86,7 +81,6 @@ impl Extractor {
         granted
     }
 
-    /// CRU027: reading the local player's profile is the client's, and every other store call is the server's.
     pub(super) fn profile_store_call(&mut self, call: P<Node>, file: P<SourceFile>) {
         if !self.crucible.exports_name("ProfileStore") {
             return;
@@ -109,7 +103,6 @@ impl Extractor {
         self.report(call, Code::Rule(27), &message);
     }
 
-    /// CRU025 at an assignment to `MarketplaceService.ProcessReceipt` in a program whose profile stores grant products.
     pub(super) fn process_receipt(&mut self, n: P<Node>) {
         let binary = n.as_binary_expression();
         if binary.operator_token.kind() != Kind::EqualsToken || !self.crucible.exports_name("ProfileStore") {

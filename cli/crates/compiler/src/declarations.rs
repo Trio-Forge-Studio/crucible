@@ -16,7 +16,6 @@ pub const VIEW_NAME_PREFIX: &str = "Crucible.Data.";
 pub const VIEW_NAME_MAX_BYTES: usize = 64;
 pub const RESERVED_HANDLE_NAMES: [&str; 4] = ["set", "update", "insert", "remove"];
 
-/// The folder a file sits under, which decides where its code runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Side {
     Server,
@@ -49,14 +48,10 @@ pub enum DeclarationKind {
     PlayerConfig,
 }
 
-/// What a declared value is for, which sets how deep it may nest and what it may hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Position {
-    /// A message payload, which may hold Instances and `unknown`.
     Payload,
-    /// Replicated state.
     State,
-    /// A saved value, which holds JSON.
     Persist,
 }
 
@@ -77,23 +72,17 @@ pub enum TypeArguments {
     AtMostOne,
 }
 
-/// One row of the `kinds` table.
 #[derive(Clone, Copy, Debug)]
 pub struct Spec {
-    /// The plural the placement rule names, such as `messages`.
     pub label: &'static str,
     pub side: Side,
-    /// The name kind the naming rule and duplicate check use. Declarations collide only within one name kind.
     pub names: &'static str,
     pub max_bytes: usize,
     pub type_arguments: TypeArguments,
     pub arguments: usize,
-    /// The source arguments after the name that the emitted call keeps.
     pub passed: &'static [usize],
     pub position: Position,
-    /// The value is a record that a store keeps.
     pub store: bool,
-    /// The value has write handles and `serverOnly` fields, so the call also emits the replica and the marked paths.
     pub handles: bool,
 }
 
@@ -171,7 +160,6 @@ impl DeclarationKind {
         }
     }
 
-    /// The macro, whose name is also the `@trioforge/crucible/emit` function the call lowers to.
     pub const fn macro_(self) -> Macro {
         match self {
             DeclarationKind::ToServer => Macro::ToServer,
@@ -200,7 +188,6 @@ impl DeclarationKind {
 mod tests {
     use super::*;
 
-    /// Each `export const NAME = <number or string>` in a runtime limits file.
     fn runtime_limits(file: &str) -> Vec<(String, String)> {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../packages/crucible/src/internal").join(file);
@@ -215,7 +202,6 @@ mod tests {
             .collect()
     }
 
-    /// The compiler's table, by runtime limits file. A name the file does not declare is the compiler's alone.
     fn table() -> Vec<(&'static str, &'static str, String)> {
         vec![
             ("network/limits.ts", "MESSAGE_NAME_MAX_BYTES", MESSAGE_NAME_MAX_BYTES.to_string()),
