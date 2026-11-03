@@ -29,6 +29,10 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 		[...files.keys()].some((file) => file.includes("/logging-block-")),
 		"the logging guide has ts blocks",
 	);
+	assert.ok(
+		[...files.keys()].some((file) => file.includes("/vide-block-") && file.endsWith(".tsx")),
+		"the vide guide has tsx blocks",
+	);
 	const config = ts.getParsedCommandLineOfConfigFile(
 		`${sample}/tsconfig.json`,
 		{},
@@ -38,7 +42,17 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 				assert.fail(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
 		},
 	);
-	const options = { ...config.options, noEmit: true, incremental: false, tsBuildInfoFile: undefined, plugins: [] };
+	const options = {
+		...config.options,
+		noEmit: true,
+		incremental: false,
+		tsBuildInfoFile: undefined,
+		plugins: [],
+		// tsx blocks are Vide components, as a roblox-ts game compiles them.
+		jsx: ts.JsxEmit.React,
+		jsxFactory: "Vide.jsx",
+		jsxFragmentFactory: "Vide.Fragment",
+	};
 	const host = ts.createCompilerHost(options);
 	const { fileExists, readFile, getSourceFile } = host;
 	host.fileExists = (file) => files.has(file) || fileExists(file);

@@ -264,6 +264,23 @@ fn real_path(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// How a package reaches `file` when it is in a scoped package under a `node_modules` folder: the package that
+/// `TS.getModule` finds by scope and name, then the module's folders and name inside it. The declaration
+/// `src/index.d.ts` names the module `src`.
+pub(crate) fn installed_module(file: &str) -> Option<ModulePath> {
+    let (_, inside) = file.rsplit_once("/node_modules/")?;
+    let mut parts = inside.splitn(3, '/');
+    let scope = parts.next().filter(|s| s.starts_with('@') && s.len() > 1)?;
+    let name = parts.next().filter(|n| !n.is_empty())?;
+    let module = luau_path(Path::new(parts.next()?), true)?;
+    let mut path: Vec<Box<str>> =
+        module.with_extension("").components().map(|c| c.as_os_str().to_string_lossy().into()).collect();
+    if path.last().is_some_and(|last| &**last == "init") {
+        path.pop();
+    }
+    Some(ModulePath::Package { scope: scope.into(), name: name.into(), path })
+}
+
 /// A TypeScript file's Luau module path: `.ts` and `.tsx` become `.luau`, and an `index` module is its folder's
 /// `init`. A declaration also maps to the module it declares when `declaration` is set.
 fn luau_path(file: &Path, declaration: bool) -> Option<PathBuf> {
@@ -343,4 +360,30 @@ pub(crate) fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn package(scope: &str, name: &str, path: &[&str]) -> Option<ModulePath> {
+        Some(ModulePath::Package {
+            scope: scope.into(),
+            name: name.into(),
+            path: path.iter().map(|&p| p.into()).collect(),
+        })
+    }
+
+    #[test]
+    fn an_installed_module_is_its_package_then_its_path_inside() {
+        let pnpm = "/repo/node_modules/.pnpm/@rbxts+vide@0.6.1/node_modules/@rbxts/vide/src/index.d.ts";
+        assert_eq!(installed_module(pnpm), package("@rbxts", "vide", &["src"]), "the last node_modules counts");
+        assert_eq!(
+            installed_module("/game/node_modules/@scope/lib/out/util/helpers.d.ts"),
+            package("@scope", "lib", &["out", "util", "helpers"]),
+        );
+        assert_eq!(installed_module("/game/node_modules/@scope/lib/index.d.ts"), package("@scope", "lib", &[]));
+        assert_eq!(installed_module("/game/node_modules/lib/index.d.ts"), None, "only scoped packages");
+        assert_eq!(installed_module("/game/src/util.ts"), None, "not installed");
+    }
 }

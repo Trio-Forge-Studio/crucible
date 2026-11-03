@@ -596,6 +596,7 @@ fn import_arguments(path: &ModulePath) -> Vec<Expr> {
             (base, path)
         }
         ModulePath::Absolute { service, path } => (service_of(service), path),
+        ModulePath::Package { .. } => return vec![Expr::global("script"), package_module(path)],
     };
     let mut args = vec![Expr::global("script"), base];
     args.extend(names.iter().map(|n| Expr::String(Cow::Owned(n.to_string()))));
@@ -613,8 +614,20 @@ fn instance_at(path: &ModulePath) -> Expr {
             ((0..*parents).fold(Expr::global("script"), |e, _| e.field("Parent")), path)
         }
         ModulePath::Absolute { service, path } => (service_of(service), path),
+        ModulePath::Package { .. } => return package_module(path),
     };
     names.iter().fold(base, |e, name| e.method("WaitForChild", vec![Expr::String(Cow::Owned(name.to_string()))]))
+}
+
+/// `TS.getModule(script, scope, name)` and then a field for each name in the package, as roblox-ts emits it.
+fn package_module(path: &ModulePath) -> Expr {
+    let ModulePath::Package { scope, name, path } = path else { unreachable!("a package module path") };
+    let package = Expr::global("TS.getModule").call(vec![
+        Expr::global("script"),
+        Expr::String(Cow::Owned(scope.to_string())),
+        Expr::String(Cow::Owned(name.to_string())),
+    ]);
+    path.iter().fold(package, |e, name| e.field(name.to_string()))
 }
 
 fn is_hole(e: Node) -> bool {

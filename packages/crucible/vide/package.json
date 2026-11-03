@@ -1,0 +1,4 @@
+{
+	"main": "../out/vide/init.luau",
+	"types": "../out/vide/index.d.ts"
+}

@@ -903,7 +903,12 @@ impl Lower<'_> {
         }
         let text = specifier.text();
         if !text.starts_with('.') {
-            self.error(specifier, format!("`{text}` is a package import, which needs a game's Rojo project"));
+            self.error(
+                specifier,
+                format!(
+                    "`{text}` is not a relative import or a scoped package under node_modules, which a package needs"
+                ),
+            );
             return Expr::Nil;
         }
         let mut up = 0;

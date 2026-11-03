@@ -232,6 +232,9 @@ pub enum ModulePath {
     Relative { parents: u32, path: Vec<Box<str>> },
     /// From a service of the place, then down `path`.
     Absolute { service: Box<str>, path: Vec<Box<str>> },
+    /// From the installed package `scope/name` that `TS.getModule` finds above the script, then down `path`. A
+    /// package's import of another package, as roblox-ts emits it.
+    Package { scope: Box<str>, name: Box<str>, path: Vec<Box<str>> },
 }
 
 /// How a module gets roblox-ts's runtime library.
