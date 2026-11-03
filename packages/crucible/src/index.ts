@@ -16,6 +16,9 @@ export type { Logger, LogRecord, LogSink, SinkSubscription, LogContext, LogPrope
 export { state, computed, effect, watch, untracked, scope, onCleanup } from "./reactive";
 export type { Readable, State } from "./reactive";
 
+export { replicated, replicatedPerPlayer, syncStatus } from "./replicated";
+export type { Replicated, ReplicatedPerPlayer, SyncStatus } from "./replicated";
+
 export { toServer, toClient, askServer, receive, ClientReady } from "./network";
 export type {
 	ToServer,

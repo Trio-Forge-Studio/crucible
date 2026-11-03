@@ -661,8 +661,8 @@ const mutants = [
 		BOOT,
 		[
 			[
-				"			unbooted = side.booted();\n			side.network.commit();",
-				"			unbooted = side.booted();\n			releaseBarrier();\n			side.network.commit();",
+				'			unbooted = side.booted();\n			if (side.name === "client") sealDeclarations();',
+				'			unbooted = side.booted();\n			releaseBarrier();\n			if (side.name === "client") sealDeclarations();',
 			],
 		],
 	],

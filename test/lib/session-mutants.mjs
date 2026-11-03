@@ -30,6 +30,7 @@ const specs = [
 	"network-boot",
 	"network-envelope",
 	"boot-platform",
+	"network-pins",
 ];
 
 // Ruling K3: each rule carries a guard (or reset), a swap and a pair mutant, or says why the code has no such site.
@@ -56,6 +57,13 @@ const rules = [
 		],
 		["swap", "isolation is an import graph with no call to swap"],
 		["pair", "isolation is an import graph with no paired operation"],
+		["guard installed marker (A17 L03)", "test/lib/load.luau", "\t\t\t\tnetwork.installed = true\n", "\n"],
+		[
+			"swap config slot (A17 L05)",
+			"test/lib/load.luau",
+			"loaded[path].installNetworkPort(network)",
+			"loaded[path].installNetworkPort(configPort or network)",
+		],
 	],
 	[
 		"12",
@@ -648,6 +656,12 @@ const rules = [
 		["pair end", SS, "\t\t\tpcall(() => this.end(peer));\n", "\n"],
 		["guard committed indices", SS, "\t\tif (!committed) discardIndices();", "\t\tdiscardIndices();"],
 		["guard committed claims", SS, "\t\tcloseClaims(!committed);", "\t\tcloseClaims(true);"],
+		[
+			"guard server close twice (A17 K01)",
+			SS,
+			"\tclose() {\n\t\tif (this.stage === Stage.Closed) return;\n\t\tconst committed",
+			"\tclose() {\n\t\tconst committed",
+		],
 	],
 	[
 		"79",
@@ -655,14 +669,20 @@ const rules = [
 		[
 			"swap",
 			B,
-			"\t\t\tunbooted = side.booted();\n\t\t\tside.network.commit();",
-			"\t\t\tside.network.commit();\n\t\t\tunbooted = side.booted();",
+			'\t\t\tunbooted = side.booted();\n\t\t\tif (side.name === "client") sealDeclarations();\n\t\t\tside.network.commit();',
+			'\t\t\tif (side.name === "client") sealDeclarations();\n\t\t\tside.network.commit();\n\t\t\tunbooted = side.booted();',
 		],
 		["pair", B, "\tif (ok) return;\n\tside.network.close();", "\tif (ok) return;"],
 		["pair client end", CS, "\t\tpcall(() => this.end(this.peer));\n", "\n"],
 		["guard client committed indices", CS, "\t\tif (!committed) discardIndices();", "\t\tdiscardIndices();"],
 		["guard client committed claims", CS, "\t\tcloseClaims(!committed);", "\t\tcloseClaims(true);"],
 		["guard client close twice", CS, "\t\tif (this.stage === Stage.Closed) return;\n", ""],
+		[
+			"guard undo protected (A17 B10)",
+			B,
+			"const [undone, undoErr] = pcall(undo);",
+			"undo();\n\t\t\t\tconst [undone, undoErr] = [true as boolean, undefined as unknown];",
+		],
 	],
 	[
 		"80",

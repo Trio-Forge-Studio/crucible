@@ -19,7 +19,8 @@ function finite(value: unknown, path: string): number {
 function uint(value: number, maximum: number) {
 	assert(value >= 0 && value <= maximum && value % 1 === 0, "integer out of range");
 }
-function validString(value: string) {
+/** @internal */
+export function validString(value: string) {
 	assert(value.size() <= L.MAX_STRING_BYTES, "string too long");
 	const bytes = buffer.fromstring(value);
 	let offset = 0;
@@ -244,7 +245,8 @@ function dense(value: unknown, path: string): unknown[] {
 	return array;
 }
 
-function frame(values: readonly number[], path: string) {
+/** @internal NET 60: finite, orthonormal, right-handed rows. */
+export function frame(values: readonly number[], path: string) {
 	for (const v of values) finite(v, path);
 	const r = values.filter((_, i) => i >= 3);
 	const dot = (a: number, b: number) => r[a] * r[b] + r[a + 1] * r[b + 1] + r[a + 2] * r[b + 2];

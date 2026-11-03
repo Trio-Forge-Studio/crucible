@@ -32,6 +32,8 @@ const N = "network.cjs";
 const D = "declarations.cjs";
 const C = "data.cjs";
 const E = "tests/fixtures/state-data/emit.d.ts";
+// The package exports replicated and replicatedPerPlayer by name, which shadows the fixture's `export *`.
+const ER = "../out/emit/replicated.d.ts";
 // [name, before, after, [test, suite], file]
 const mutations = [
 	["rule 40 shared side guard", "side(node) !== spec.side", "false", RC, N],
@@ -285,7 +287,7 @@ const mutations = [
 		"initial: NoInfer<T>, value: Node): Replicated<T>;",
 		"initial: unknown, value: Node): Replicated<T>;",
 		RK,
-		E,
+		ER,
 	],
 	["K9 emit profileStore takes any options", "options: ProfileOptions<T>,", "options: unknown,", DK, E],
 	[
@@ -293,7 +295,7 @@ const mutations = [
 		"export declare function replicatedPerPlayer<T>(name: string, initial: NoInfer<T>, value: Node)",
 		"export declare function replicatedPerPlayer<T>(name: string, initial: unknown, value: Node)",
 		RK,
-		E,
+		ER,
 	],
 	["rule 129 root mark guard", "if (position.root)", "if (false)", RM, N],
 	["rule 129 root position flag", "path: true, root: true", "path: true", RM, N],

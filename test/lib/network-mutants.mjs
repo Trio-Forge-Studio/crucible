@@ -17,7 +17,12 @@ const specs = ["network-codec", "network-catalog", "network-fd", "constructs and
 const rules = [
 	[
 		"3",
-		["guard", K, 'assert(segments[0] !== "Crucible", "reserved message name");', ""],
+		[
+			"guard",
+			K,
+			'assert(segments[0] !== "Crucible" || FRAMEWORK_MESSAGES.has(name), "reserved message name");',
+			"",
+		],
 		["swap", "validName's only multi-argument calls pair a condition with its message"],
 		["pair", K, "name.size() > 0 && name.size() <= L.MESSAGE_NAME_MAX_BYTES", "name.size() > 0"],
 	],

@@ -280,7 +280,11 @@ return {
 		local sent, err = pcall(other.server.Network.send, nil, other.server.ClientReady)
 		spec.eq(sent, false, "ClientReady cannot be sent")
 		spec.has(err, "Network.send needs a message declared with toClient", "not a message")
-		spec.eq(other.server.remote.attributes.Catalog, "Ready.Note", "never in the catalog")
+		spec.eq(
+			other.server.remote.attributes.Catalog,
+			"Crucible.State.Fault\nCrucible.State.Frame\nReady.Note",
+			"never in the catalog"
+		)
 		other:assertClean()
 	end,
 }

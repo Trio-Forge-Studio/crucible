@@ -21,6 +21,8 @@ export interface Definition {
 
 const definitions = new Map<string, Definition>();
 const tokens = new Set<Definition>();
+/** The framework's own messages: the only names under the reserved `Crucible.` segment (NET 3, rule 55). */
+const FRAMEWORK_MESSAGES = new Set(["Crucible.State.Fault", "Crucible.State.Frame"]);
 let names = new Array<string>();
 let indices = new Map<string, number>();
 let sealed = false;
@@ -31,13 +33,24 @@ function validName(name: string) {
 		"invalid message name",
 	);
 	const segments = name.split(".");
-	assert(segments[0] !== "Crucible", "reserved message name");
+	assert(segments[0] !== "Crucible" || FRAMEWORK_MESSAGES.has(name), "reserved message name");
 	for (const segment of segments)
 		assert(segment.match("^[A-Za-z][A-Za-z0-9_]*$")[0] !== undefined, "invalid message name");
 }
 
 export function define(spec: MessageSpec): Definition {
 	validName(spec.name);
+	assert(!FRAMEWORK_MESSAGES.has(spec.name), "reserved message name");
+	return register(spec);
+}
+
+/** @internal The trusted path: a framework message under the reserved `Crucible.` segment that game names refuse. */
+export function defineFramework(spec: MessageSpec): Definition {
+	assert(FRAMEWORK_MESSAGES.has(spec.name), "not a framework message");
+	return register(spec);
+}
+
+function register(spec: MessageSpec): Definition {
 	assert(
 		!sealed,
 		`${spec.name} was declared after the network catalog sealed; declare messages in modules that boot loads.`,
