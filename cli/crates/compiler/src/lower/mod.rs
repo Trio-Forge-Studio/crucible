@@ -1,5 +1,6 @@
 mod call;
 mod class;
+mod crucible;
 mod expr;
 mod pattern;
 mod stmt;
@@ -8,7 +9,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::facts::{Fact, FileFacts, Unanswered};
+use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
 use crate::luau::{Block, Expr, Name, Stmt};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 
@@ -39,10 +40,12 @@ pub(crate) fn lower(
     facts: &FileFacts,
     unanswered: &[&Unanswered],
     import_base: ImportBase,
+    place: &Place,
 ) -> Result<Block, Vec<Error>> {
     let mut l = Lower {
         file,
         facts,
+        place,
         path: file.path(),
         import_base,
         errors: Vec::new(),
@@ -50,6 +53,7 @@ pub(crate) fn lower(
         temp_prefix: temp_prefix(file.text()),
         temps: 0,
         uses_ts: false,
+        uses_crucible: false,
         refs: references(file.root()),
         closure_assigned: closure_assigned(file.root()),
         hoisted_name_starts: HashSet::new(),
@@ -104,6 +108,7 @@ enum Usage {
 pub(crate) struct Lower<'a> {
     file: File,
     facts: &'a FileFacts,
+    place: &'a Place,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,
@@ -111,6 +116,7 @@ pub(crate) struct Lower<'a> {
     temp_prefix: String,
     temps: u32,
     uses_ts: bool,
+    uses_crucible: bool,
     refs: Vec<Reference>,
     closure_assigned: HashSet<&'static str>,
     hoisted_name_starts: HashSet<u32>,
@@ -423,6 +429,7 @@ const EMITTED_GLOBALS: &[&str] = &[
     "self",
     "super",
     "TS",
+    "__crucible",
     "_G",
     "script",
     "table",
@@ -515,6 +522,35 @@ fn pattern_names(n: Node, f: &mut dyn FnMut(Node)) {
         }
         _ => {}
     }
+}
+
+/// The arguments of `TS.import` that reach the module at `path`, after `script`.
+fn import_arguments(path: &ModulePath) -> Vec<Expr> {
+    let (base, names) = match path {
+        ModulePath::Relative { parents, path } => {
+            let base = (0..*parents).fold(Expr::global("script"), |e, _| e.field("Parent"));
+            (base, path)
+        }
+        ModulePath::Absolute { service, path } => (service_of(service), path),
+    };
+    let mut args = vec![Expr::global("script"), base];
+    args.extend(names.iter().map(|n| Expr::String(Cow::Owned(n.to_string()))));
+    args
+}
+
+fn service_of(service: &str) -> Expr {
+    Expr::global("game").method("GetService", vec![Expr::String(Cow::Owned(service.to_owned()))])
+}
+
+/// The instance at `path`, waiting for each descendant as it replicates.
+fn instance_at(path: &ModulePath) -> Expr {
+    let (base, names) = match path {
+        ModulePath::Relative { parents, path } => {
+            ((0..*parents).fold(Expr::global("script"), |e, _| e.field("Parent")), path)
+        }
+        ModulePath::Absolute { service, path } => (service_of(service), path),
+    };
+    names.iter().fold(base, |e, name| e.method("WaitForChild", vec![Expr::String(Cow::Owned(name.to_string()))]))
 }
 
 fn is_hole(e: Node) -> bool {

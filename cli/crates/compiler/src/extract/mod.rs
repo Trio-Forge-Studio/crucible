@@ -6,32 +6,66 @@
 mod crucible;
 mod types;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
-use tsrs_ast::{Kind, ModifierFlags, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
+use tsrs_ast::{Kind, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
 use tsrs_checker::{EmitResolver, Type};
 use tsrs_compiler::CheckerHandle;
 use tsrs_core::{P, jsnum};
 
-use crate::facts::{Callee, Crucible, Fact, Facts, Falsy, FileFacts, Import, Reason, Receiver, Site, Span, Unanswered};
+use crate::Diagnostic;
+use crate::facts::{
+    Callee, Fact, Facts, Falsy, FileFacts, Import, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
+};
 use crate::macros::Macro;
 use crate::program::Checked;
+use crate::project::{Game, absolute};
+use crucible::Code;
 
 pub(crate) fn extract(checked: Checked) -> Facts {
+    let root = checked.source_root();
+    let out_dir = checked.out_dir();
+    let dir = checked.config_dir();
     let Checked { program, mut checker, host } = checked;
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
     let globals = types::Globals::new(&mut checker);
     let crucible = crucible::Api::new(program, &mut checker, host);
+    let mut facts = Facts::default();
+    let game = match Game::load(Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
+        Ok(game) => game,
+        Err(message) => {
+            facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code: 0, message });
+            None
+        }
+    };
+    if let Some(game) = &game {
+        match absolute(&game.runtime_lib) {
+            Some(path) => facts.place.runtime_lib = RuntimeLib::Require(path),
+            None => facts.diagnostics.push(Diagnostic {
+                path: None,
+                line: 0,
+                column: 0,
+                code: 0,
+                message: "roblox-ts's runtime library has no instance path".to_owned(),
+            }),
+        }
+        facts.place.crucible_emit =
+            crucible.emit.as_deref().and_then(|emit| game.module(emit)).and_then(|r| absolute(&r));
+    }
     let mut x = Extractor {
         checker,
         resolver,
         globals,
         crucible,
-        facts: Facts::default(),
+        game,
+        facts,
         text: "",
         path: String::new(),
         table: Table::default(),
         pending: Vec::new(),
+        modules: Vec::new(),
+        reported: HashSet::new(),
     };
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
@@ -39,7 +73,20 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         }
         x.source_file(file);
     }
+    x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     x.facts
+}
+
+/// When an import's module must be reachable in the place.
+enum Kept {
+    Always,
+    /// When any of these bindings stays.
+    AnyOf(Vec<Span>),
+}
+
+struct ModuleUse {
+    specifier: P<Node>,
+    kept: Kept,
 }
 
 /// The checker does not mark a const enum import as referenced, because TypeScript inlines const enum members.
@@ -114,11 +161,14 @@ struct Extractor {
     resolver: P<EmitResolver>,
     globals: types::Globals,
     crucible: crucible::Api,
+    game: Option<Game>,
     facts: Facts,
     text: &'static str,
     path: String,
     table: Table,
     pending: Vec<ConstEnumImport>,
+    modules: Vec<ModuleUse>,
+    reported: HashSet<(String, u32, Code)>,
 }
 
 impl Extractor {
@@ -136,6 +186,18 @@ impl Extractor {
             let import = if pending.used { Import::Keep } else { Import::Elide };
             self.table.store(pending.span, Site::Import, |f| &mut f.import, import);
         }
+        for module in std::mem::take(&mut self.modules) {
+            let kept = match &module.kept {
+                Kept::Always => true,
+                Kept::AnyOf(bindings) => {
+                    bindings.iter().any(|b| self.table.facts.get(b).is_some_and(|f| f.import == Some(Import::Keep)))
+                }
+            };
+            if kept {
+                self.module_path(module.specifier);
+            }
+        }
+        self.crucible_file(file);
         let table = std::mem::take(&mut self.table);
         for (span, site) in table.conflicts {
             self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
@@ -239,7 +301,6 @@ impl Extractor {
                 }
                 self.function(n);
             }
-            Kind::ClassDeclaration => self.crucible_class(n),
             Kind::EnumMember => {
                 self.site();
                 if let Some(value) = self.checker.get_constant_value(n).and_then(types::constant) {
@@ -671,7 +732,11 @@ impl Extractor {
     }
 
     fn import_declaration(&mut self, n: P<Node>) {
-        let Some(clause) = n.as_import_declaration().import_clause else { return };
+        let declaration = n.as_import_declaration();
+        let Some(clause) = declaration.import_clause else {
+            self.modules.push(ModuleUse { specifier: declaration.module_specifier, kept: Kept::Always });
+            return;
+        };
         if clause.is_type_only() {
             return;
         }
@@ -692,6 +757,8 @@ impl Extractor {
                 _ => {}
             }
         }
+        let spans = bindings.iter().map(|&(_, name)| self.span(name)).collect();
+        self.modules.push(ModuleUse { specifier: declaration.module_specifier, kept: Kept::AnyOf(spans) });
         for (declaration, name) in bindings {
             self.site();
             let span = self.span(name);
@@ -721,6 +788,17 @@ impl Extractor {
         if clause.kind() != Kind::NamedExports {
             return;
         }
+        if let Some(module) = declaration.module_specifier {
+            let spans = clause
+                .as_named_exports()
+                .elements
+                .nodes()
+                .iter()
+                .filter(|s| !s.is_type_only())
+                .map(|s| self.span(s.name().unwrap()))
+                .collect();
+            self.modules.push(ModuleUse { specifier: module, kept: Kept::AnyOf(spans) });
+        }
         for &specifier in clause.as_named_exports().elements.nodes() {
             if specifier.is_type_only() {
                 continue;
@@ -742,14 +820,38 @@ impl Extractor {
         }
     }
 
-    fn crucible_class(&mut self, n: P<Node>) {
-        if n.modifier_flags().intersects(ModifierFlags::Abstract) {
+    /// Where a kept import's module is in a game, from the importing script.
+    fn module_path(&mut self, specifier: P<Node>) {
+        if self.game.is_none() {
             return;
         }
-        let Some(class) = self.crucible_registration(n) else { return };
         self.site();
-        let span = self.span(n);
-        self.table.store(span, Site::Crucible, |f| &mut f.crucible, Box::new(Crucible::Class(class)));
+        let target = self
+            .checker
+            .get_symbol_at_location_exported(specifier)
+            .and_then(|s| s.declarations().first().copied())
+            .and_then(tsrs_ast::get_source_file_of_node)
+            .map(|f| f.file_name().replace('\\', "/"));
+        let Some(game) = &self.game else { return };
+        let Some(target) = target else {
+            return self.report(specifier, Code::Place, "the module this names has no source file");
+        };
+        if target.ends_with(".server.ts") || target.ends_with(".client.ts") {
+            return self.report(specifier, Code::Place, "a script is not a module and cannot be imported");
+        }
+        let Some(script) = game.module(Path::new(&self.path)) else {
+            return self.report(specifier, Code::Place, "the Rojo project maps no instance for this file's output");
+        };
+        let Some(module) = game.module(Path::new(&target)) else {
+            return self.report(specifier, Code::Place, "the Rojo project maps no instance for this module");
+        };
+        match game.rojo.import(&script, &module) {
+            Ok(path) => {
+                let span = self.span(specifier);
+                self.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));
+            }
+            Err(message) => self.report(specifier, Code::Place, message),
+        }
     }
 }
 

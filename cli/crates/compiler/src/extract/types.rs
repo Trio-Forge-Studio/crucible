@@ -190,41 +190,29 @@ impl Extractor {
         if !t.object_flags().intersects(ObjectFlags::ClassOrInterface) {
             return Vec::new();
         }
-        let mut out = Vec::new();
-        let mut stack = vec![t];
-        let mut seen = HashSet::new();
-        while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
-                continue;
-            }
-            for &base in self.checker.get_base_types_exported(current) {
-                out.push(base);
-                if base.object_flags().intersects(ObjectFlags::ClassOrInterface) {
-                    stack.push(base);
-                }
-            }
-        }
-        out
+        self.checker.get_base_types_exported(t).to_vec()
     }
 
     pub(super) fn definitely(&mut self, t: P<Type>, f: Predicate) -> bool {
         let t = self.constraint(t);
-        self.definitely_inner(t, f)
+        self.definitely_inner(t, f, &mut HashMap::new())
     }
 
-    fn definitely_inner(&mut self, t: P<Type>, f: Predicate) -> bool {
-        if t.flags().intersects(TypeFlags::Union) {
-            return t.types().iter().all(|&m| self.definitely_inner(m, f));
+    /// `known` holds each type already answered, so a base shared along many heritage paths is visited once.
+    fn definitely_inner(&mut self, t: P<Type>, f: Predicate, known: &mut HashMap<P<Type>, bool>) -> bool {
+        if let Some(&answer) = known.get(&t) {
+            return answer;
         }
-        if t.flags().intersects(TypeFlags::Intersection) {
-            return t.types().iter().any(|&m| self.definitely_inner(m, f));
-        }
-        for base in self.base_types(t) {
-            if self.definitely_inner(base, f) {
-                return true;
-            }
-        }
-        f(self, t)
+        known.insert(t, false);
+        let answer = if t.flags().intersects(TypeFlags::Union) {
+            t.types().iter().all(|&m| self.definitely_inner(m, f, known))
+        } else if t.flags().intersects(TypeFlags::Intersection) {
+            t.types().iter().any(|&m| self.definitely_inner(m, f, known))
+        } else {
+            self.base_types(t).into_iter().any(|base| self.definitely_inner(base, f, known)) || f(self, t)
+        };
+        known.insert(t, answer);
+        answer
     }
 
     pub(super) fn possibly_string(&mut self, t: P<Type>) -> bool {
@@ -244,16 +232,26 @@ impl Extractor {
 
     pub(super) fn falsy(&mut self, t: P<Type>) -> Falsy {
         let t = self.constraint(t);
-        self.falsy_inner(t)
+        self.falsy_inner(t, &mut HashMap::new())
     }
 
-    fn falsy_inner(&mut self, t: P<Type>) -> Falsy {
+    fn falsy_inner(&mut self, t: P<Type>, known: &mut HashMap<P<Type>, Falsy>) -> Falsy {
+        if let Some(&falsy) = known.get(&t) {
+            return falsy;
+        }
+        known.insert(t, Falsy::NONE);
+        let falsy = self.falsy_uncached(t, known);
+        known.insert(t, falsy);
+        falsy
+    }
+
+    fn falsy_uncached(&mut self, t: P<Type>, known: &mut HashMap<P<Type>, Falsy>) -> Falsy {
         if t.flags().intersects(TypeFlags::UnionOrIntersection) {
-            return t.types().iter().fold(Falsy::NONE, |acc, &m| acc | self.falsy_inner(m));
+            return t.types().iter().fold(Falsy::NONE, |acc, &m| acc | self.falsy_inner(m, known));
         }
         let mut falsy = Falsy::NONE;
         for base in self.base_types(t) {
-            falsy = falsy | self.falsy_inner(base);
+            falsy = falsy | self.falsy_inner(base, known);
         }
         if t.flags().intersects(TypeFlags::TypeVariable | TypeFlags::AnyOrUnknown) {
             return Falsy::ALL;
@@ -412,14 +410,17 @@ impl Extractor {
 
     pub(super) fn possibly_roblox(&mut self, t: P<Type>) -> bool {
         let t = self.constraint(t);
-        self.possibly_roblox_inner(t)
+        self.possibly_roblox_inner(t, &mut HashSet::new())
     }
 
-    fn possibly_roblox_inner(&mut self, t: P<Type>) -> bool {
-        if t.flags().intersects(TypeFlags::UnionOrIntersection) {
-            return t.types().iter().any(|&m| self.possibly_roblox_inner(m));
+    fn possibly_roblox_inner(&mut self, t: P<Type>, seen: &mut HashSet<P<Type>>) -> bool {
+        if !seen.insert(t) {
+            return false;
         }
-        if self.base_types(t).into_iter().any(|base| self.possibly_roblox_inner(base)) {
+        if t.flags().intersects(TypeFlags::UnionOrIntersection) {
+            return t.types().iter().any(|&m| self.possibly_roblox_inner(m, seen));
+        }
+        if self.base_types(t).into_iter().any(|base| self.possibly_roblox_inner(base, seen)) {
             return true;
         }
         if t.flags().intersects(TypeFlags::TypeVariable | TypeFlags::AnyOrUnknown) || self.is_defined_type(t) {

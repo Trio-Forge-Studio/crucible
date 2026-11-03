@@ -4,6 +4,7 @@
 use std::fmt;
 use std::ops::BitOr;
 
+use crate::Diagnostic;
 use crate::macros::Macro;
 
 /// A node's source range in UTF-8 bytes, from the start of its first token to its end. Leading trivia is excluded.
@@ -32,8 +33,10 @@ pub struct Fact {
     /// How many values each step of an iterated `LuaTuple` iterator has. Absent where the tuple's length varies.
     pub step_length: Option<u32>,
     pub import: Option<Import>,
-    /// Set at a registered class and at an `inject` call.
+    /// Set at a registered class, an `inject` call and a `boot` load glob.
     pub crucible: Option<Box<Crucible>>,
+    /// Where an imported module's instance is, set at an import's module specifier in a game.
+    pub module: Option<Box<ModulePath>>,
 }
 
 impl Fact {
@@ -136,6 +139,37 @@ pub enum Crucible {
     Class(Class),
     /// An `inject` call. Without a type argument its target is `Invalid`.
     Inject(Dependency),
+    /// A `boot` load glob, as the instance path pattern the runtime matches, such as
+    /// `crucible-path:ServerScriptService/TS/systems/**`.
+    Load(Box<str>),
+}
+
+/// An instance path a module reaches another module by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModulePath {
+    /// Up `parents` levels from the script, then down `path`.
+    Relative { parents: u32, path: Vec<Box<str>> },
+    /// From a service of the place, then down `path`.
+    Absolute { service: Box<str>, path: Vec<Box<str>> },
+}
+
+/// How a module gets roblox-ts's runtime library.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum RuntimeLib {
+    /// From `_G[script]`, which `TS.import` sets for each module it loads, as in a package.
+    #[default]
+    Global,
+    /// By requiring it at its instance path. A game's scripts and the modules `boot` requires have no `_G[script]`.
+    Require(ModulePath),
+}
+
+/// What every module of a program shares about the place it runs in.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Place {
+    pub runtime_lib: RuntimeLib,
+    /// `@trioforge/crucible/emit`, which registration and Crucible's macros call. `None` outside a game that has
+    /// the package.
+    pub crucible_emit: Option<ModulePath>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -167,7 +201,7 @@ pub enum Dependency {
     One(Box<str>),
     /// `All<T>`.
     All(Box<str>),
-    /// A target the transform rejects.
+    /// A target CRU001 or CRU005 rejects, or one without a type id. The pass reports it and the compile fails.
     Invalid,
 }
 
@@ -189,7 +223,7 @@ pub enum Check {
     Color3,
     Literal(Literal),
     Union(Vec<Check>),
-    /// A type the transform rejects.
+    /// A type CRU007 rejects. The pass reports it and the compile fails.
     Invalid,
 }
 
@@ -272,6 +306,10 @@ pub struct Facts {
     pub unanswered: Vec<Unanswered>,
     /// Sites visited, answered or not.
     pub sites: usize,
+    /// Errors in code that type-checks: Crucible's rules, and modules or place paths the game cannot reach. Sorted
+    /// by path and position.
+    pub diagnostics: Vec<Diagnostic>,
+    pub place: Place,
 }
 
 impl Facts {

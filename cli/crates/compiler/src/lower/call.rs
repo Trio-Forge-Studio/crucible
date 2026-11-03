@@ -294,12 +294,7 @@ impl Lower<'_> {
                 let object = self.expr(target.expression());
                 self.expand_method_macro(m, n, object, usage)
             }
-            MacroKind::Crucible => {
-                Some(self.unsupported(
-                    n,
-                    &format!("Crucible's `{}` macro, which lands with the Crucible transform", m.name()),
-                ))
-            }
+            MacroKind::Crucible => Some(self.crucible_macro(m, n)),
             MacroKind::Constructor | MacroKind::Identifier => Some(self.unsupported(n, "this macro call")),
         }
     }

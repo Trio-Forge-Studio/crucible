@@ -28,10 +28,50 @@ impl Checked {
             .collect()
     }
 
-    pub fn root_dir(&self) -> Option<String> {
-        let root = &self.program.options().root_dir;
-        (!root.is_empty()).then(|| root.replace('\\', "/"))
+    /// The folder the output layout mirrors: `rootDir`, or else the deepest folder that holds every source file and
+    /// `rootDirs` entry.
+    pub fn source_root(&self) -> String {
+        let options = self.program.options();
+        if !options.root_dir.is_empty() {
+            return options.root_dir.replace('\\', "/");
+        }
+        let mut dirs: Vec<String> = self
+            .program
+            .source_files()
+            .iter()
+            .filter(|f| !f.is_declaration_file() && !f.is_js())
+            .map(|f| f.file_name().replace('\\', "/"))
+            .map(|path| path.rsplit_once('/').map_or(String::new(), |(dir, _)| dir.to_owned()))
+            .collect();
+        dirs.extend(options.root_dirs.iter().flatten().map(|d| d.replace('\\', "/").trim_end_matches('/').to_owned()));
+        common_dir(&dirs)
     }
+
+    pub fn out_dir(&self) -> Option<String> {
+        let out = &self.program.options().out_dir;
+        (!out.is_empty()).then(|| out.replace('\\', "/"))
+    }
+
+    /// The folder of the tsconfig, or the current folder.
+    pub fn config_dir(&self) -> String {
+        let config = self.program.options().config_file_path.replace('\\', "/");
+        match config.rsplit_once('/') {
+            Some((dir, _)) => dir.to_owned(),
+            None => self.host.cwd.clone(),
+        }
+    }
+}
+
+fn common_dir(dirs: &[String]) -> String {
+    let Some(first) = dirs.first() else { return String::new() };
+    let mut root = first.clone();
+    while !dirs.iter().all(|d| *d == root || d.starts_with(&format!("{root}/"))) {
+        match root.rsplit_once('/') {
+            Some((parent, _)) => root = parent.to_owned(),
+            None => return String::new(),
+        }
+    }
+    root
 }
 
 pub(crate) struct ConfigHost {
