@@ -49,7 +49,7 @@ struct Package {
 /// What a Crucible diagnostic reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Code {
-    /// A rule, CRU001 to CRU016.
+    /// A rule, CRU001 to CRU016 or CRU023.
     Rule(u16),
     /// The project's packages do not let Crucible compute a type id.
     Setup,
@@ -64,6 +64,13 @@ enum Generic {
     Provides,
     /// A type code resolves: only a behaviour's tag parameter, and only with `string`.
     Target,
+}
+
+/// When TypeScript 5's checker made a class or interface type, and whether the type has a `this` type.
+#[derive(Clone, Copy)]
+struct Made {
+    turn: usize,
+    this_type: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -87,6 +94,8 @@ pub(super) struct Api {
     host: ConfigHost,
     /// A `package.json` above a program file does not parse.
     invalid_metadata: bool,
+    /// When TypeScript 5 makes each class and interface type, computed when a union of instance classes needs it.
+    made: Option<HashMap<P<Symbol>, Made>>,
     /// The declarations of `@trioforge/crucible/emit`.
     pub emit: Option<PathBuf>,
 }
@@ -107,6 +116,7 @@ impl Api {
             root_dir,
             host,
             invalid_metadata: false,
+            made: None,
             emit: None,
         };
         let mut modules = Vec::new();
@@ -180,8 +190,10 @@ impl Api {
         self.macros.get(&unalias(c, symbol?)).copied()
     }
 
+    /// The Crucible macro a call expands, which is none while package metadata cannot be read, because then the
+    /// transform does not run.
     pub fn macro_at(&self, c: &mut CheckerHandle, call: P<Node>) -> Option<Macro> {
-        if self.macros.is_empty() {
+        if self.macros.is_empty() || self.invalid_metadata {
             return None;
         }
         let symbol = c.get_symbol_at_location_exported(call.as_call_expression().expression);
@@ -452,6 +464,31 @@ fn dirname(path: &str) -> &str {
         Some(i) => trimmed[..i].trim_end_matches('/'),
         None if path.starts_with('/') => "/",
         None => ".",
+    }
+}
+
+/// Whether a call calls `n`, through any parentheses.
+fn is_callee(mut n: P<Node>) -> bool {
+    while let Some(parent) = n.parent().filter(|p| p.kind() == Kind::ParenthesizedExpression) {
+        n = parent;
+    }
+    n.parent().is_some_and(|p| p.kind() == Kind::CallExpression && p.as_call_expression().expression == n)
+}
+
+/// The local names that a file's imports bind.
+fn import_names(statement: P<Node>) -> Vec<P<Node>> {
+    match statement.kind() {
+        Kind::ImportEqualsDeclaration => vec![statement.as_import_equals_declaration().name],
+        Kind::ImportDeclaration => {
+            let Some(clause) = statement.as_import_declaration().import_clause else { return Vec::new() };
+            let clause = clause.as_import_clause();
+            let mut names: Vec<P<Node>> = clause.name.into_iter().collect();
+            if let Some(named) = clause.named_bindings.filter(|n| n.kind() == Kind::NamedImports) {
+                names.extend(named.as_named_imports().elements.nodes().iter().filter_map(|e| e.name()));
+            }
+            names
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -815,10 +852,14 @@ impl Extractor {
             if class.tag.is_none() {
                 self.report(node, Code::Rule(2), "A concrete behaviour tag must be exactly one string literal.");
             }
-            let parts = match member(self, "instance") {
+            let mut parts = match member(self, "instance") {
                 Some(t) if t.flags().intersects(TypeFlags::Union) => t.types().iter().copied().map(Some).collect(),
                 t => vec![t],
             };
+            if parts.len() > 1 {
+                let made = self.made();
+                parts.sort_by_key(|p| p.and_then(|t| made.get(&t.symbol()?)).map_or(usize::MAX, |m| m.turn));
+            }
             let allowed = self
                 .checker
                 .resolve_name_exported("Instances", Some(node), SymbolFlags::Type, false)
@@ -856,6 +897,92 @@ impl Extractor {
             }
         }
         Some(class)
+    }
+
+    /// TypeScript 5 orders a union by when its checker made each member type, and the transformer lists a behaviour's
+    /// instance classes in that order. The checker makes a type at the first reference in the transformer's walk of
+    /// the program, and makes an interface's bases as it makes the interface. TypeScript 7 orders a union by name.
+    fn made(&mut self) -> &HashMap<P<Symbol>, Made> {
+        if self.crucible.made.is_none() {
+            let mut made = HashMap::new();
+            let mut aliases = HashSet::new();
+            for &file in self.crucible.program.source_files() {
+                if !file.is_declaration_file() && !file.is_js() {
+                    self.make_referenced(file.as_node(), &mut made, &mut aliases);
+                }
+            }
+            self.crucible.made = Some(made);
+        }
+        self.crucible.made.get_or_insert_default()
+    }
+
+    fn make_referenced(&mut self, n: P<Node>, made: &mut HashMap<P<Symbol>, Made>, aliases: &mut HashSet<P<Symbol>>) {
+        let name = match n.parent() {
+            // The transformer's walk makes a class's base at the class, and an interface's bases only when it makes
+            // the interface.
+            Some(clause) if clause.kind() == Kind::HeritageClause => {
+                let class =
+                    clause.parent().is_some_and(|c| matches!(c.kind(), Kind::ClassDeclaration | Kind::ClassExpression));
+                (class && clause.as_heritage_clause().token == Kind::ExtendsKeyword)
+                    .then(|| tsrs_ast::get_heritage_clause_element_name(n))
+            }
+            _ => (n.kind() == Kind::TypeReference).then(|| n.as_type_reference_node().type_name),
+        };
+        if let Some(symbol) = name.and_then(|name| self.checker.get_symbol_at_location_exported(name)) {
+            let symbol = unalias(&mut self.checker, symbol);
+            if symbol.flags().intersects(SymbolFlags::Class | SymbolFlags::Interface) {
+                self.make(symbol, made);
+            } else if symbol.flags().intersects(SymbolFlags::TypeAlias) && aliases.insert(symbol) {
+                for &declaration in symbol.declarations() {
+                    if let Some(aliased) = declaration.type_node() {
+                        self.make_referenced(aliased, made, aliases);
+                    }
+                }
+            }
+        }
+        n.for_each_child(&mut |child| {
+            self.make_referenced(child, made, aliases);
+            false
+        });
+    }
+
+    /// Makes a class or interface type as TypeScript 5's `getDeclaredTypeOfClassOrInterface` does, and returns whether
+    /// the type has a `this` type.
+    fn make(&mut self, symbol: P<Symbol>, made: &mut HashMap<P<Symbol>, Made>) -> bool {
+        if let Some(m) = made.get(&symbol) {
+            return m.this_type;
+        }
+        made.insert(symbol, Made { turn: made.len(), this_type: false });
+        let generic = symbol.declarations().iter().any(|&d| {
+            matches!(d.kind(), Kind::ClassDeclaration | Kind::ClassExpression | Kind::InterfaceDeclaration)
+                && !d.type_parameters().is_empty()
+        });
+        let this_type = symbol.flags().intersects(SymbolFlags::Class) || generic || !self.thisless(symbol, made);
+        if let Some(m) = made.get_mut(&symbol) {
+            m.this_type = this_type;
+        }
+        this_type
+    }
+
+    /// TypeScript 5's `isThislessInterface`, which makes each base interface it reaches.
+    fn thisless(&mut self, symbol: P<Symbol>, made: &mut HashMap<P<Symbol>, Made>) -> bool {
+        for &declaration in symbol.declarations() {
+            if declaration.kind() != Kind::InterfaceDeclaration {
+                continue;
+            }
+            if declaration.flags().intersects(NodeFlags::ContainsThis) {
+                return false;
+            }
+            for &base in tsrs_ast::get_extends_heritage_clause_elements(declaration) {
+                let name = tsrs_ast::get_heritage_clause_element_name(base);
+                let symbol = self.checker.get_symbol_at_location_exported(name).map(|s| unalias(&mut self.checker, s));
+                let Some(base) = symbol.filter(|s| s.flags().intersects(SymbolFlags::Interface)) else { return false };
+                if self.make(base, made) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Whether `t` instantiates a generic parameter that its kind of use forbids.
@@ -946,11 +1073,26 @@ impl Extractor {
             return;
         }
         if !self.crucible.is_empty() {
-            self.crucible_walk(file.as_node(), file);
+            let names = self.macro_names(file);
+            self.crucible_walk(file.as_node(), file, &names);
         }
     }
 
-    fn crucible_walk(&mut self, n: P<Node>, file: P<SourceFile>) {
+    /// The names that can refer to a network or data macro in `file`: the macros' own, and the ones its imports give.
+    fn macro_names(&mut self, file: P<SourceFile>) -> HashSet<&'static str> {
+        let mut names: HashSet<&'static str> = NETWORK_MACROS.into_iter().collect();
+        for &statement in file.as_node().statements() {
+            for name in import_names(statement) {
+                let symbol = self.checker.get_symbol_at_location_exported(name);
+                if self.api(symbol).is_some_and(|m| NETWORK_MACROS.contains(&m)) {
+                    names.insert(name.text());
+                }
+            }
+        }
+        names
+    }
+
+    fn crucible_walk(&mut self, n: P<Node>, file: P<SourceFile>, names: &HashSet<&'static str>) {
         match n.kind() {
             Kind::ImportDeclaration | Kind::ExportDeclaration => self.entry_import(n, n.module_specifier()),
             Kind::ImportType => {
@@ -960,6 +1102,22 @@ impl Extractor {
             }
             Kind::ExternalModuleReference => self.entry_import(n, Some(n.as_external_module_reference().expression())),
             Kind::CallExpression => self.crucible_call(n),
+            Kind::Identifier if names.contains(n.text()) => {
+                let parent = n.parent();
+                let specifier =
+                    parent.is_some_and(|p| matches!(p.kind(), Kind::ImportSpecifier | Kind::ExportSpecifier));
+                let access = parent.filter(|p| {
+                    p.kind() == Kind::PropertyAccessExpression && p.as_property_access_expression().name == n
+                });
+                if !specifier && !is_callee(access.unwrap_or(n)) {
+                    let symbol = self.checker.get_symbol_at_location_exported(n);
+                    self.macro_value(n, symbol);
+                }
+            }
+            Kind::ElementAccessExpression if !is_callee(n) => {
+                let t = self.checker.get_type_at_location(n);
+                self.macro_value(n, t.symbol());
+            }
             Kind::ClassDeclaration | Kind::ClassExpression => self.crucible_class_rules(n, file),
             Kind::TypeReference => {
                 let t = self.checker.get_type_from_type_node_exported(n);
@@ -976,7 +1134,7 @@ impl Extractor {
             _ => {}
         }
         n.for_each_child(&mut |child| {
-            self.crucible_walk(child, file);
+            self.crucible_walk(child, file, names);
             false
         });
         if matches!(n.kind(), Kind::ClassDeclaration | Kind::ClassExpression)
@@ -1010,12 +1168,25 @@ impl Extractor {
             Some(Macro::Boot) => self.boot(n),
             _ => {
                 let symbol = self.checker.get_symbol_at_location_exported(callee);
-                if let Some(name) = self.api(symbol).filter(|name| NETWORK_MACROS.contains(name)) {
+                let name = self.api(symbol).or_else(|| {
+                    let name = self.checker.get_resolved_signature_exported(n).declaration()?.name()?;
+                    let symbol = self.checker.get_symbol_at_location_exported(name);
+                    self.api(symbol)
+                });
+                if let Some(name) = name.filter(|name| NETWORK_MACROS.contains(name)) {
                     let message =
                         format!("{name} needs Crucible's network transform, which this compiler does not run yet.");
                     self.report(n, Code::Setup, &message);
                 }
             }
+        }
+    }
+
+    /// CRU023: a network or data macro anywhere but a call's callee, an import or an export.
+    fn macro_value(&mut self, at: P<Node>, symbol: Option<P<Symbol>>) {
+        if let Some(name) = self.api(symbol).filter(|name| NETWORK_MACROS.contains(name)) {
+            let message = format!("{name} is a declaration macro and cannot be used as a value.");
+            self.report(at, Code::Rule(23), &message);
         }
     }
 

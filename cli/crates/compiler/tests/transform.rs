@@ -288,9 +288,7 @@ fn registration_payloads_inherited_deps_tags_attributes_provides_and_symbol_iden
     assert_eq!(class(&registered, "ConstTag").instance, ["Instance".into()]);
     let aliased = class(&registered, "AliasedTag");
     assert_eq!(aliased.tag.as_deref(), Some("AliasTag"));
-    let mut instance = aliased.instance.clone();
-    instance.sort();
-    assert_eq!(instance, ["BasePart".into(), "Model".into()]);
+    assert_eq!(aliased.instance, ["Model".into(), "BasePart".into()], "the transformer lists them in this order");
     assert_eq!(class(&registered, "ThroughAlias").tag.as_deref(), Some("Alias"));
     let attribute = |name: &str| door.attributes.iter().find(|a| &*a.field == name).unwrap_or_else(|| panic!("{name}"));
     assert_eq!((attribute("fleetId").check.clone(), attribute("fleetId").required), (Check::String, true));
@@ -1355,7 +1353,7 @@ fn package_metadata_that_cannot_be_read_is_the_only_report_on_every_file() {
     let game = Game::new();
     game.write("src/shared/package.json", "{ not json");
     game.write("src/shared/model.ts", "export interface Model { a: string }");
-    game.main("import { Subsystem } from \"@trioforge/crucible\";\nimport type { Model } from \"../shared/model\";\nexport class S extends Subsystem { onStart(): void {} }\nexport type M = Model;");
+    game.main("import { Subsystem, inject } from \"@trioforge/crucible\";\nimport type { Model } from \"../shared/model\";\nexport class S extends Subsystem { onStart(): void {} }\nexport type M = Model;\nexport const model = inject<Model>();\nexport const again = inject<Model>();");
     let diagnostics = game.facts().diagnostics;
     let found: Vec<String> =
         diagnostics.iter().map(|d| format!("{} {} {}", game.relative(d), d.code, d.message)).collect();
@@ -1400,4 +1398,82 @@ fn network_and_data_macros_fail_the_compile_until_their_transform_lands() {
             "src/shared/messages.ts:3 Crucible: replicated needs Crucible's network transform, which this compiler does not run yet.",
         ]
     );
+}
+
+#[test]
+fn network_and_data_macros_used_as_values_are_cru023_at_the_reference() {
+    let game = Game::new();
+    game.write(
+        "src/shared/values.ts",
+        "import * as C from \"@trioforge/crucible\";\nimport { replicated, replicatedPerPlayer as perPlayer, receive } from \"@trioforge/crucible\";\nexport { toServer } from \"@trioforge/crucible\";\nexport const f = replicated;\nfunction use(value: unknown) {}\nuse(perPlayer);\nexport const g = C.toClient;\nexport const h = C[\"askServer\"];\nexport const i = (receive);\n",
+    );
+    game.main("import * as S from \"@trioforge/crucible/server\";\nexport const c = S.dataStore;\nexport type P = typeof S.playerConfig;\n");
+    let found: Vec<String> = game
+        .facts()
+        .diagnostics
+        .iter()
+        .map(|d| format!("{}:{}:{} {} {}", game.relative(d), d.line, d.column, d.code, d.message))
+        .collect();
+    let value = |name: &str| format!("90023 CRU023: {name} is a declaration macro and cannot be used as a value.");
+    assert_eq!(
+        found,
+        [
+            format!("src/server/main.ts:2:20 {}", value("dataStore")),
+            format!("src/server/main.ts:3:26 {}", value("playerConfig")),
+            format!("src/shared/values.ts:4:18 {}", value("replicated")),
+            format!("src/shared/values.ts:6:5 {}", value("replicatedPerPlayer")),
+            format!("src/shared/values.ts:7:20 {}", value("toClient")),
+            format!("src/shared/values.ts:8:18 {}", value("askServer")),
+            format!("src/shared/values.ts:9:19 {}", value("receive")),
+        ]
+    );
+}
+
+#[test]
+fn a_parenthesized_network_macro_call_still_fails_the_compile() {
+    let game = Game::new();
+    game.main(
+        "import * as S from \"@trioforge/crucible/server\";\nexport const Limit = (S.config)<number>(\"Limit\", 1);\n",
+    );
+    let found: Vec<String> =
+        game.facts().diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
+    assert_eq!(
+        found,
+        [
+            "src/server/main.ts:2 Crucible: config needs Crucible's network transform, which this compiler does not run yet."
+        ]
+    );
+}
+
+#[test]
+fn attribute_inject_and_boot_used_as_values_compile_as_the_transformer_leaves_them() {
+    let game = Game::new();
+    game.main("import { attribute, inject } from \"@trioforge/crucible\";\nimport { boot } from \"@trioforge/crucible/server\";\nexport const macros = [attribute, inject, boot];\n");
+    assert_eq!(game.found(), Vec::<String>::new());
+    let luau = game.luau("server/main.luau");
+    has(&luau, "local attribute = _0.attribute");
+    has(&luau, "local inject = _0.inject");
+    has(&luau, ".boot");
+    has(&luau, "local macros = { attribute, inject, boot }");
+}
+
+#[test]
+fn instance_classes_list_in_the_order_typescript_5_first_makes_their_types() {
+    let game = Game::new();
+    game.write("src/shared/parts.ts", "export type Seated = Seat;\n");
+    game.main("import { CrucibleBehaviour } from \"@trioforge/crucible\";\nimport type { Seated } from \"../shared/parts\";\ninterface Gear extends Tool {}\nexport type S = Seated;\nexport class Mixed extends CrucibleBehaviour<\"Mixed\", Part | Model | Folder> {}\nexport class Later extends CrucibleBehaviour<\"Later\", BasePart | Model> {}\nexport class Shared extends CrucibleBehaviour<\"Shared\", Accessory | Seat> {}\nexport class Heard extends CrucibleBehaviour<\"Heard\", Sound | Tool> {}\nexport class Aliased extends CrucibleBehaviour<\"Aliased\", Pair> {}\nexport const fire: Fire | undefined = undefined;\ntype Pair = Sparkles | Fire;\n");
+    let facts = game.facts();
+    assert_eq!(facts.diagnostics, []);
+    let registered = classes(&facts, "src/server/main.ts");
+    let instance =
+        |name: &str| -> Vec<String> { class(&registered, name).instance.iter().map(|n| n.to_string()).collect() };
+    assert_eq!(instance("Mixed"), ["Part", "Model", "Folder"], "each member in the order the union names it");
+    assert_eq!(instance("Later"), ["BasePart", "Model"], "making Part made its base interfaces, BasePart among them");
+    assert_eq!(instance("Shared"), ["Seat", "Accessory"], "an earlier file made Seat");
+    assert_eq!(
+        instance("Heard"),
+        ["Sound", "Tool"],
+        "an interface's base is made with the interface, not where it is named"
+    );
+    assert_eq!(instance("Aliased"), ["Sparkles", "Fire"], "the alias made its members where the class used it");
 }

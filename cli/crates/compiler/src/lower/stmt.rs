@@ -226,13 +226,20 @@ impl Lower<'_> {
 
     fn return_statement(&mut self, s: Node) {
         let Some(e) = s.expression_opt() else {
-            return self.leave(Exit::Return, Vec::new());
+            return self.leave(Exit::ReturnNothing, Vec::new());
         };
         let values = self.return_values(e);
         let several = values.len() > 1
             || (values.last().is_some_and(Expr::is_multi)
                 && self.fact(e).and_then(|f| f.receiver) == Some(Receiver::LuaTuple));
-        self.leave(if several { Exit::ReturnSeveral } else { Exit::Return }, values);
+        let exit = if values.is_empty() {
+            Exit::ReturnNothing
+        } else if several {
+            Exit::ReturnSeveral
+        } else {
+            Exit::Return
+        };
+        self.leave(exit, values);
     }
 
     /// Lowers a `return`, `break` or `continue`. One that leaves the function of a `try` or `catch` body returns the
@@ -257,13 +264,13 @@ impl Lower<'_> {
             match exit {
                 Exit::Return => returned.extend(values),
                 Exit::ReturnSeveral => returned.push(Expr::global("table.pack").call(values)),
-                Exit::Break | Exit::Continue => {}
+                Exit::Break | Exit::Continue | Exit::ReturnNothing => {}
             }
             self.current_block.push(Stmt::Return(returned));
             return;
         }
         match exit {
-            Exit::Return | Exit::ReturnSeveral => self.current_block.push(Stmt::Return(values)),
+            Exit::Return | Exit::ReturnSeveral | Exit::ReturnNothing => self.current_block.push(Stmt::Return(values)),
             Exit::Break => self.current_block.push(Stmt::Break),
             Exit::Continue => {
                 if let Some(Breakable::Loop { copy_back }) = self.breakables.last() {
@@ -363,7 +370,7 @@ impl Lower<'_> {
                     let packed = Expr::Name(value.clone());
                     vec![Expr::global("table.unpack").call(vec![packed.clone(), Expr::Number(1.0), packed.field("n")])]
                 }
-                Exit::Break | Exit::Continue => Vec::new(),
+                Exit::Break | Exit::Continue | Exit::ReturnNothing => Vec::new(),
             };
             let (_, then) = self.capture(|l| l.leave(exit, values));
             let condition = Expr::Name(code.clone()).binary(BinOp::Eq, Expr::Number(f64::from(exit as u8)));

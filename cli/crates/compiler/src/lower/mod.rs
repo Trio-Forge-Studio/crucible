@@ -87,16 +87,18 @@ impl Breakable {
 /// A way out of a `try` or `catch` body's function, which returns its code first.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Exit {
-    /// A `return` with at most one value, which the function returns after the code.
+    /// A `return` with one value, which the function returns after the code.
     Return = 1,
     /// A `return` with several values, which the function returns in one `table.pack` after the code.
     ReturnSeveral = 2,
     Break = 3,
     Continue = 4,
+    /// A `return` without a value, which returns no values rather than one `nil`.
+    ReturnNothing = 5,
 }
 
 impl Exit {
-    const ALL: [Exit; 4] = [Exit::Return, Exit::ReturnSeveral, Exit::Break, Exit::Continue];
+    const ALL: [Exit; 5] = [Exit::Return, Exit::ReturnSeveral, Exit::Break, Exit::Continue, Exit::ReturnNothing];
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -162,10 +164,9 @@ fn is_reference(identifier: Node) -> bool {
             | Kind::PropertyDeclaration
             | Kind::MethodDeclaration
             | Kind::EnumMember
-            | Kind::ImportSpecifier
             | Kind::ImportClause
             | Kind::NamespaceImport => named,
-            Kind::BindingElement => named || p.property_name() == Some(identifier),
+            Kind::BindingElement | Kind::ImportSpecifier => named || p.property_name() == Some(identifier),
             _ => false,
         }
     })
@@ -358,27 +359,76 @@ impl<'a> Lower<'a> {
     }
 
     fn statements(&mut self, statements: Nodes) {
-        self.hoist(statements);
+        let hoisted = self.hoist(statements);
         for s in statements.iter() {
+            self.hoisted_stmt(s, &hoisted);
+        }
+    }
+
+    /// Declares first the locals that code reads or captures before their statement. JavaScript makes a block's
+    /// function declarations before its first statement. So the functions that code reaches before their statement,
+    /// and the functions those reach, go before the first statement that names one of them, and the later locals they
+    /// capture are declared first too.
+    fn hoist(&mut self, statements: Nodes) -> Hoisted {
+        let start = statements.get(0).map_or(0, |s| s.span().start);
+        let functions: Vec<Node> = statements.iter().filter(|&s| is_function_declaration(s)).collect();
+        let mut made: Vec<Node> =
+            functions.iter().copied().filter(|&f| self.function_referenced_in(f, start, f.span().start)).collect();
+        let mut i = 0;
+        while let Some(&reaching) = made.get(i) {
+            let span = reaching.span();
+            for &f in &functions {
+                if !made.contains(&f) && self.function_referenced_in(f, span.start, span.end) {
+                    made.push(f);
+                }
+            }
+            i += 1;
+        }
+        made.sort_unstable_by_key(|f| f.span().start);
+        let before = statements.iter().find(|&s| {
+            let span = s.span();
+            made.contains(&s) || made.iter().any(|&f| self.function_referenced_in(f, span.start, span.end))
+        });
+        let moved_from = before.map_or(u32::MAX, |s| s.span().start);
+        let mut names = Vec::new();
+        for s in statements.iter() {
+            let position = made.iter().position(|&f| f == s);
+            let made_before =
+                if s.span().start < moved_from { &[][..] } else { &made[..position.unwrap_or(made.len())] };
+            for declared in declared_names(s) {
+                let text = declared.name.text();
+                let early =
+                    position.is_none() && self.referenced_between(text, start, declared.visible_from, declared.start);
+                let captured = made_before.iter().any(|f| {
+                    let span = f.span();
+                    self.referenced_between(text, span.start, span.end, declared.start)
+                });
+                if early || captured {
+                    self.hoisted_name_starts.insert(declared.start);
+                    names.push(Cow::Borrowed(text));
+                }
+            }
+        }
+        if !names.is_empty() {
+            self.current_block.push(Stmt::Local(names, Vec::new()));
+        }
+        Hoisted { functions: made, before }
+    }
+
+    /// Lowers a statement of a block, after the function declarations that `hoist` moved before it.
+    fn hoisted_stmt(&mut self, s: Node, hoisted: &Hoisted) {
+        if hoisted.before == Some(s) {
+            for &f in &hoisted.functions {
+                self.stmt(f);
+            }
+        }
+        if !hoisted.functions.contains(&s) {
             self.stmt(s);
         }
     }
 
-    fn hoist(&mut self, statements: Nodes) {
-        let start = statements.get(0).map_or(0, |s| s.span().start);
-        let mut hoisted = Vec::new();
-        for s in statements.iter() {
-            for declared in declared_names(s) {
-                let text = declared.name.text();
-                if self.referenced_between(text, start, declared.visible_from, declared.start) {
-                    self.hoisted_name_starts.insert(declared.start);
-                    hoisted.push(Cow::Borrowed(text));
-                }
-            }
-        }
-        if !hoisted.is_empty() {
-            self.current_block.push(Stmt::Local(hoisted, Vec::new()));
-        }
+    fn function_referenced_in(&self, f: Node, start: u32, end: u32) -> bool {
+        f.name().is_some_and(|name| self.referenced_between(name.text(), start, end, name.span().start))
     }
 
     fn referenced_between(&self, name: &str, start: u32, end: u32, except: u32) -> bool {
@@ -456,6 +506,12 @@ const EMITTED_GLOBALS: &[&str] = &[
     "unpack",
 ];
 
+/// The function declarations of a block that go before the first statement that names one of them.
+struct Hoisted {
+    functions: Vec<Node>,
+    before: Option<Node>,
+}
+
 struct Declared {
     name: Node,
     start: u32,
@@ -474,9 +530,12 @@ fn declared_names(s: Node) -> Vec<Declared> {
                 }
             }
         }
-        Kind::FunctionDeclaration | Kind::ClassDeclaration | Kind::EnumDeclaration | Kind::ModuleDeclaration
-            if !s.is_ambient() =>
-        {
+        Kind::FunctionDeclaration if is_function_declaration(s) => {
+            if let Some(name) = s.name() {
+                push(name, span.start);
+            }
+        }
+        Kind::ClassDeclaration | Kind::EnumDeclaration | Kind::ModuleDeclaration if !s.is_ambient() => {
             if let Some(name) = s.name() {
                 push(name, span.start);
             }
@@ -508,6 +567,11 @@ fn declared_names(s: Node) -> Vec<Declared> {
         _ => {}
     }
     out
+}
+
+/// A function declaration with a body, which an overload signature has not.
+fn is_function_declaration(s: Node) -> bool {
+    s.kind() == Kind::FunctionDeclaration && !s.is_ambient() && s.body().is_some()
 }
 
 fn pattern_names(n: Node, f: &mut dyn FnMut(Node)) {
