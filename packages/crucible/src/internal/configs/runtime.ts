@@ -3,6 +3,7 @@ import { runtimeDiagnostic } from "../diagnostics";
 import { isLive, stateOf } from "../lifecycle";
 import { admitsNil, assertDescriptor, runtimeKind, type Branch, type Node } from "../network/schema";
 import type { Disconnect } from "../port";
+import { createStateNode, readState, write, type StateNode } from "../reactive/graph";
 import { define, type TypeId } from "../registry";
 import * as L from "./limits";
 import { configPort, type ConfigSnapshotPort } from "./port";
@@ -10,9 +11,8 @@ import { configPort, type ConfigSnapshotPort } from "./port";
 export type ConfigKind = "global" | "player";
 
 /** One value a reader sees. Commit is its only writer. */
-interface Cell {
-	value: unknown;
-}
+/** A config value as reactive state, so a read is tracked (rule 93) and a commit wakes its readers once. */
+type Cell = StateNode;
 
 export interface Declaration {
 	readonly name: string;
@@ -69,13 +69,15 @@ function newScope(player?: Player): Scope {
 		player,
 		phase: Phase.Fetching,
 		diagnosed: new Set(),
-		ready: { value: false },
+		ready: createStateNode(false),
 		values: new Map(),
 	};
 }
 
 const global = newScope();
 const slots = new Map<Player, Scope>();
+/** Bumped at every join, so a read for a player with no scope yet reruns once their scope exists (rule 93). */
+const roster = createStateNode(0);
 let owner: ConfigRuntime | undefined;
 let retired = false;
 let listeners = new Array<Disconnect>();
@@ -315,26 +317,34 @@ export function declare(name: string, kind: ConfigKind, fallback: unknown, node:
 		const f = failure(admitted);
 		error(`Config ${name} has an invalid fallback at ${f.path}: ${f.reason}`, 3);
 	}
-	const declaration: Declaration = { name, kind, node, fallback: admitted, global: { value: admitted } };
+	const declaration: Declaration = { name, kind, node, fallback: admitted, global: createStateNode(admitted) };
 	names.add(name);
 	declarations.push(declaration);
 	return declaration;
 }
 
 export function readGlobal(declaration: Declaration): unknown {
-	return declaration.global.value;
+	return readState(declaration.global);
 }
 
 export function readPlayer(declaration: Declaration, player: Player): unknown {
 	const scope = slots.get(player);
-	if (scope === undefined) return declaration.fallback;
-	if (scope.phase !== Phase.Loaded) return declaration.global.value;
-	return scope.values.get(declaration)!.value;
+	if (scope === undefined) {
+		readState(roster);
+		return declaration.fallback;
+	}
+	if (readState(scope.ready) !== true) return readState(declaration.global);
+	return readState(scope.values.get(declaration)!);
 }
 
 export function ready(player?: Player): boolean {
-	if (player === undefined) return global.ready.value as boolean;
-	return slots.get(player)?.ready.value === true;
+	if (player === undefined) return readState(global.ready) as boolean;
+	const scope = slots.get(player);
+	if (scope === undefined) {
+		readState(roster);
+		return false;
+	}
+	return readState(scope.ready) === true;
 }
 
 function seal(runtime: ConfigRuntime) {
@@ -497,12 +507,12 @@ function commit(results: readonly Staged[]) {
 			let cell: Cell;
 			if (scope.player === undefined) cell = declaration.global;
 			else {
-				cell = scope.values.get(declaration) ?? { value: declaration.global.value };
+				cell = scope.values.get(declaration) ?? createStateNode(declaration.global.value);
 				scope.values.set(declaration, cell);
 			}
-			if (value !== KEEP && !deepEqual(cell.value, value)) cell.value = value;
+			if (value !== KEEP && !deepEqual(cell.value, value)) write(cell, value);
 		}
-		scope.ready.value = true;
+		write(scope.ready, true);
 	}
 }
 
@@ -577,6 +587,7 @@ function join(player: Player) {
 	if (!live() || slots.has(player)) return;
 	const scope = newScope(player);
 	slots.set(player, scope);
+	write(roster, (roster.value as number) + 1);
 	task.spawn(fetchLoop, scope);
 }
 
@@ -586,6 +597,7 @@ function leave(player: Player) {
 	if (scope === undefined) return;
 	slots.delete(player);
 	scope.phase = Phase.Gone;
+	write(scope.ready, false);
 	scope.snapshot?.disconnect();
 }
 

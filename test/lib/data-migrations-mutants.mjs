@@ -2153,22 +2153,22 @@ const mutants = [
 			"data-record-declarations.luau: rule 3 a declaration after the registry seals throws and sealing off allows it again",
 		],
 	),
-	m("3", "guard", RD, "\t\tif (declarations.has(name)) error(`${name} is already declared`, 3);\n", "", [
+	m("3", "guard", RD, "\t\tif (storeNameTaken(name)) error(`${name} is already declared`, 3);\n", "", [
 		"data-record-declarations.luau: rule 3 a duplicate name throws naming it",
 	]),
 	m(
 		"3",
 		"guard",
 		RD,
-		"if (declarations.size() >= MAX_DATA_DECLARATIONS)",
-		"if (declarations.size() > MAX_DATA_DECLARATIONS)",
+		"if (dataDeclarationCount() >= MAX_DATA_DECLARATIONS)",
+		"if (dataDeclarationCount() > MAX_DATA_DECLARATIONS)",
 		["data-record-declarations.luau: rule 3 a realm holds at most 256 data declarations"],
 	),
 	m(
 		"3",
 		"guard",
 		RD,
-		"\t\tif (declarations.size() >= MAX_DATA_DECLARATIONS)\n\t\terror(`${name}: more than ${MAX_DATA_DECLARATIONS} data declarations`, 3);\n",
+		"\t\tif (dataDeclarationCount() >= MAX_DATA_DECLARATIONS)\n\t\terror(`${name}: more than ${MAX_DATA_DECLARATIONS} data declarations`, 3);\n",
 		"",
 		["data-record-declarations.luau: rule 3 a realm holds at most 256 data declarations"],
 	),

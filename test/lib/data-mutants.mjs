@@ -849,8 +849,8 @@ const mutants = [
 		"13",
 		"swap",
 		D + "session.ts",
-		"return work(x, y);",
-		"return work(y as never, x as never);",
+		"result = work(x, y);",
+		"result = work(y as never, x as never);",
 		"K4 a write from a thread spawned",
 	],
 	[

@@ -1,4 +1,4 @@
-import type { Migration, OperationId, StoreFailure, StoreResult } from "../data";
+import type { Migration, OperationId, ProfileMessage, StoreFailure, StoreResult } from "../data";
 import { newOperationId } from "../internal/data/operation-id";
 import { dataPort } from "../internal/data/port";
 
@@ -50,4 +50,12 @@ export function dataStore<T extends object>(_name: string, _options: StoreOption
 /** A fresh operation identity. Create it once per logical operation and reuse it for that operation's retries. */
 export function operationId(): OperationId {
 	return newOperationId(dataPort()) as OperationId;
+}
+
+/**
+ * Declares a durable message to a player's profile. It must initialize an exported top-level const in a server module,
+ * with the payload type explicit. A payload type changes only by adding optional fields.
+ */
+export function profileMessage<P>(_name: string): ProfileMessage<P> {
+	error("Crucible data needs the @trioforge/crucible/transformer plugin");
 }

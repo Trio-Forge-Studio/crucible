@@ -22,7 +22,7 @@ end
 -- options.declare(realm) returns the realm's declarations; options.serve(server, declarations, world) defines the
 -- server's publishers; options.patch(world) runs before boot; options.globals reaches every realm's module env.
 function world.new(options)
-	local link = Link.new({ globals = options.globals })
+	local link = Link.new({ globals = options.globals, data = options.data, configs = options.configs })
 	local self = setmetatable({ link = link, options = options, sent = {}, refuse = 0 }, world)
 	local server = link.server
 	self.server = server
@@ -80,7 +80,7 @@ function world:join(name: string, options)
 	local declare = options.declare or self.options.declare
 	local client = self.link:join(name, function(c)
 		c.d = declare(c)
-	end, { boot = false })
+	end, { boot = false, userId = options.userId })
 	client.api = client.graph.module("")
 	if options.patch then
 		options.patch(client)
