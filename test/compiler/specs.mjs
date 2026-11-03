@@ -21,21 +21,25 @@ fs.mkdirSync(path.join(run, "packages/crucible"), { recursive: true });
 fs.mkdirSync(path.join(run, "build"));
 
 const out = path.join(run, "packages/crucible/out");
-step("cargo", [
-	"run",
-	"--release",
-	"--quiet",
-	"--locked",
-	"--manifest-path",
-	"cli/Cargo.toml",
-	"-p",
-	"crucible-compiler",
-	"--example",
-	"compile",
-	"--",
-	"packages/crucible/tsconfig.ts7.json",
-	out,
-]);
+const game = path.join(run, "sample-game-out");
+const compile = (tsconfig, to) =>
+	step("cargo", [
+		"run",
+		"--release",
+		"--quiet",
+		"--locked",
+		"--manifest-path",
+		"cli/Cargo.toml",
+		"-p",
+		"crucible-compiler",
+		"--example",
+		"compile",
+		"--",
+		tsconfig,
+		to,
+	]);
+compile("packages/crucible/tsconfig.ts7.json", out);
+compile("examples/sample-game/tsconfig.ts7.json", game);
 
 (function copyDeclarations(dir) {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -60,5 +64,5 @@ for (const name of fs.readdirSync(path.join(repo, "packages/crucible"))) {
 	if (name !== "out") link(path.join(repo, "packages/crucible", name), path.join(run, "packages/crucible", name));
 }
 
-step("lune", ["run", "test/compiler/place", place, out, path.join(run, "build/sample-game.rbxl")]);
+step("lune", ["run", "test/compiler/place", place, out, game, path.join(run, "build/sample-game.rbxl")]);
 step("lune", ["run", "test", ...process.argv.slice(2)], { cwd: run });
