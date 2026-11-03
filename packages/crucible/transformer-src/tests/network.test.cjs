@@ -558,6 +558,159 @@ test("network augmentations of a class a payload reaches only through a function
 	);
 });
 
+const addedBaseClasses = [
+	"KVariable",
+	"KAwaited",
+	"KNonNull",
+	"KElement",
+	"KDefault",
+	"KMapped",
+	"KMember",
+	"KConst",
+	"KWrapped",
+	"KInlineProp",
+	"KWith",
+	"KSpare",
+	"KUnreached",
+];
+const addedBaseGame = () =>
+	project({
+		"src/shared/base.ts": [
+			"export interface Added { added: string }",
+			...addedBaseClasses.map((name) => `export class ${name} { k = 1; keep = 1; }`),
+			"export const variable = new KVariable();",
+			"export const makeAwaited = async () => new KAwaited();",
+			"export const makeNonNull = (): KNonNull | undefined => undefined;",
+			"export const makeElements = () => [new KElement()];",
+			"export const mapped = new KMapped();",
+			"export const holder = { member: new KMember() };",
+			"export const ConstAlias: new () => KConst = KConst;",
+			"export const makeWrapped = () => ({ v: new KWrapped() });",
+			"export class Carrier { g = new KInlineProp(); }",
+			"export interface IOnly { k: number }",
+			"export class Frame { f: IOnly = { k: 1 }; }",
+			"export type Tree = { kids: Tree[]; leaf: number };",
+			"export const tree: Tree = { kids: [], leaf: 1 };",
+			"export const unreached = new KUnreached();",
+		].join("\n"),
+		"src/shared/model.ts": [
+			"import { KDefault, KSpare, KMapped, mapped } from './base';",
+			"export interface Holder<T = KDefault> { v: Omit<T, 'k'> }",
+			"export interface Pair<T = KSpare> { v: Omit<T, 'k'> }",
+			"export type Flat<T> = { [P in keyof T]: T[P] };",
+			"export type Mapped = Flat<typeof mapped>;",
+			"export type Unwrap<T> = T extends { v: infer U } ? Omit<U, 'k'> : never;",
+			"export type Unreached = Omit<KMapped, 'k'>;",
+		].join("\n"),
+		"src/shared/messages.ts":
+			imports +
+			[
+				'import { variable, makeAwaited, makeNonNull, makeElements, holder, ConstAlias, makeWrapped, Carrier, Frame, tree, KWith } from "./base";',
+				'import { Holder, Pair, Mapped, Unwrap } from "./model";',
+				'export const A = toServer<Omit<typeof variable, "k">>("X.A");',
+				'export const B = toServer<Omit<Awaited<ReturnType<typeof makeAwaited>>, "k">>("X.B");',
+				'export const C = toServer<Omit<NonNullable<ReturnType<typeof makeNonNull>>, "k">>("X.C");',
+				'export const D = toServer<Omit<ReturnType<typeof makeElements>[number], "k">>("X.D");',
+				'export const E = toServer<Holder>("X.E");',
+				'export const F = toServer<Mapped>("X.F");',
+				'export const G = toServer<Omit<typeof holder.member, "k">>("X.G");',
+				'export const H = toServer<Omit<InstanceType<typeof ConstAlias>, "k">>("X.H");',
+				'export const I = toServer<Unwrap<ReturnType<typeof makeWrapped>>>("X.I");',
+				'export const J = toServer<{ [P in keyof Carrier["g"]]: Carrier["g"][P] }>("X.J");',
+				'export const K = toServer<Omit<Frame["f"], "k">>("X.K");',
+				'export const L = toServer<Omit<typeof tree, "kids">>("X.L");',
+				'export const M = toServer<Pair<KWith>>("X.M");',
+			].join("\n"),
+		...Object.fromEntries(
+			[...addedBaseClasses, "IOnly"].map((name) => [
+				`src/util/${name.toLowerCase()}.ts`,
+				addedBase("../shared/base", name),
+			]),
+		),
+	});
+
+test("network augmentations that add a base to a class a payload reaches only through a flattened type fail", () => {
+	const game = addedBaseGame();
+	const expected = [
+		"kawaited",
+		"kconst",
+		"kdefault",
+		"kelement",
+		"kinlineprop",
+		"kmapped",
+		"kmember",
+		"knonnull",
+		"kvariable",
+		"kwith",
+		"kwrapped",
+		"ionly",
+	].sort();
+	assert.deepEqual(flagged(game), expected);
+	assert.deepEqual(
+		utilDiagnostics(compile(game, 1)),
+		expected.map((name) => `src/util/${name}.ts`),
+	);
+});
+
+test("network augmentations of an enum a payload reaches only through a union fail", () => {
+	const members = {
+		src: "export enum Color { Red, Green } export enum Shade { Light, Dark } export enum Spare { A, B }\nexport const makeColor = (): Color | undefined => Color.Red;\nexport const makeShade = (): Shade | undefined => Shade.Light;",
+		messages:
+			imports +
+			'import { makeColor, makeShade } from "./base";\nexport const A = toServer<NonNullable<ReturnType<typeof makeColor>>>("X.A");\nexport const B = toServer<{ shade: NonNullable<ReturnType<typeof makeShade>> }>("X.B");',
+	};
+	const game = project({
+		"src/shared/base.ts": members.src,
+		"src/shared/messages.ts": members.messages,
+		"src/util/color.ts": augmentation("../shared/base", "enum Color { Blue = 2 }"),
+		"src/util/shade.ts": augmentation("../shared/base", "enum Shade { Mid = 2 }"),
+		"src/util/spare.ts": augmentation("../shared/base", "enum Spare { C = 2 }"),
+	});
+	assert.deepEqual(flagged(game), ["color", "shade"]);
+	assert.deepEqual(utilDiagnostics(compile(game, 1)), ["src/util/color.ts", "src/util/shade.ts"]);
+});
+
+test("network augmentations that add only optional properties to an all-optional interface fail", () => {
+	const game = project({
+		"src/shared/base.ts":
+			"export interface Options { k?: number } export class Frame { f: Options = {}; }\nexport interface Other { k?: number }",
+		"src/shared/messages.ts":
+			imports +
+			'import { Frame } from "./base";\nexport const A = toServer<{ [P in keyof Frame["f"]]: Frame["f"][P] }>("X.A");',
+		"src/util/options.ts": augmentation("../shared/base", "interface Options { extra?: string }"),
+		"src/util/other.ts": augmentation("../shared/base", "interface Other { extra?: string }"),
+	});
+	assert.deepEqual(flagged(game), ["options"]);
+	assert.deepEqual(utilDiagnostics(compile(game, 1)), ["src/util/options.ts"]);
+});
+
+test("network augmentations that a Pick payload cannot see are still rejected, a known limitation", () => {
+	const cases = {
+		returnPick: {
+			"src/shared/base.ts": "export class Pk { k = 1; keep = 1; } export const make = () => new Pk();",
+			"src/shared/messages.ts":
+				imports +
+				'import { make } from "./base";\nexport const One = toServer<Pick<ReturnType<typeof make>, "keep">>("X.One");',
+			"src/util/extra.ts": augmentation("../shared/base", "interface Pk { extra: string }"),
+		},
+		instancePick: {
+			"src/shared/messages.ts":
+				imports + 'export const One = toServer<Pick<Part, "Name" | "Anchored">>("X.One");',
+			"src/util/extra.ts": "export {}; declare global { interface Instance { extra: string } }",
+		},
+		basePartPick: {
+			"src/shared/messages.ts":
+				imports + 'export const One = toServer<Pick<Part, "Name" | "Anchored">>("X.One");',
+			"src/util/extra.ts": "export {}; declare global { interface BasePart { extra: string } }",
+		},
+		partialPick: {
+			"src/shared/messages.ts": imports + 'export const One = toServer<Partial<Pick<Part, "Name">>>("X.One");',
+			"src/util/extra.ts": "export {}; declare global { interface Instance { extra: string } }",
+		},
+	};
+	for (const [form, files] of Object.entries(cases)) assert.deepEqual(flagged(project(files)), ["extra"], form);
+});
+
 test("network augmentations of any base of a multi-base or merged interface fail at the augmentation", () => {
 	const game = project({
 		"src/shared/base.ts":
@@ -801,6 +954,14 @@ test("network package metadata that cannot be read is reported as a package.json
 	const game = project({
 		"src/shared/messages.ts": imports + 'export const One = toServer<{ a: string }>("X.One");',
 		"src/shared/package.json": "{ not json",
+	});
+	crucibleOnly(inspect(game), "Crucible: Cannot read package metadata. Check the project's package.json files.");
+});
+
+test("network package.json that is a directory is reported as a package.json problem", () => {
+	const game = project({
+		"src/shared/messages.ts": imports + 'export const One = toServer<{ a: string }>("X.One");',
+		"src/shared/package.json/keep.txt": "",
 	});
 	crucibleOnly(inspect(game), "Crucible: Cannot read package metadata. Check the project's package.json files.");
 });
