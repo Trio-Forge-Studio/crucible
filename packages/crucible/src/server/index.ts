@@ -6,6 +6,7 @@ import { networkPort } from "../internal/network/port";
 import { ServerSession } from "../internal/network/server-session";
 import { SyncFrameMessage } from "../internal/sync/frame";
 import { installServerSync } from "../internal/sync/server-sync";
+import "../internal/data/record-bindings";
 
 if (!game.GetService("RunService").IsServer()) error("@trioforge/crucible/server loaded on the client");
 
@@ -15,6 +16,9 @@ export { config, playerConfig, configReady, refreshConfigs } from "../configs";
 export type { Config, PlayerConfig } from "../configs";
 export { publish } from "./publish";
 export type { Publication } from "./publish";
+export { dataStore, operationId } from "./data";
+export type { DataStore, StoreOptions, UpdateResult } from "./data";
+export type { OperationId, StoreFailure, StoreResult } from "../data";
 
 function active(): ServerSession {
 	return session ?? error("Crucible networking is not ready; send from a constructor, a hook, or later", 0);

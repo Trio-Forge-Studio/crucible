@@ -121,8 +121,8 @@ function item(raw: unknown, name: string): InboxItem {
 function readEnvelope(raw: unknown, kind: EnvelopeKind): Envelope {
 	if (!typeIs(raw, "table")) fail("not a table");
 	const t = raw as Record<string, unknown>;
-	if (t.format !== 1) fail(`format ${tostring(t.format)}`);
-	if (t.kind !== kind) fail(`kind ${tostring(t.kind)}`);
+	if (t.format !== 1) fail("bad format");
+	if (t.kind !== kind) fail("bad kind");
 	const payload = t.payload;
 	if (payload !== undefined && !typeIs(payload, "table")) fail("bad payload");
 	let lease: Lease | undefined;

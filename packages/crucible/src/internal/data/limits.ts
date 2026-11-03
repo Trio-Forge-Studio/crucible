@@ -103,6 +103,21 @@ export const INBOX_RETRY_SECONDS = [5, 15, 60, 60];
 export const INBOX_MAX_ATTEMPTS = 5;
 /** @internal */
 export const OPERATION_MARKERS_PER_KEY = 256;
+/** @internal An operation id older than this is refused as expired (rule 88). */
+export const OPERATION_ID_MAX_AGE_SECONDS = 3_600;
+/** @internal Roblox's DataStore name limit; a store name is its DataStore name (rule 2). */
+export const STORE_NAME_MAX_BYTES = 50;
+/** @internal Data declarations per realm (rule 3). */
+export const MAX_DATA_DECLARATIONS = 256;
+/** @internal A generic store's key is 1 to this many bytes (rule 86). */
+export const KEY_MAX_BYTES = 50;
+
+/** @internal Persist admission (rules 14, 76). */
+export const PERSIST_DEPTH = 28;
+/** @internal */
+export const PERSIST_STRING_BYTES = 65_536;
+/** @internal */
+export const PERSIST_ADMISSION_VISITS = 100_000;
 
 /** @internal Shutdown against core's sweep (rules 50 to 56). */
 export const FINAL_PHASE_SECONDS = 10;

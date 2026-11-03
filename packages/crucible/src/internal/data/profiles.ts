@@ -1,6 +1,6 @@
 import { bootClock } from "../boot";
 import { runtimeDiagnostic } from "../diagnostics";
-import { loadRecord, type Schema } from "./admission";
+import { loadRecord, sealSchema, type Schema } from "./admission";
 import { jsonBytes, parseEnvelope, type Envelope } from "./envelope";
 import {
 	abandonAcquisition,
@@ -102,7 +102,7 @@ export class DataEngine {
 	}
 
 	profile(schema: Schema, hooks: ProfileHooks = NO_HOOKS): ProfileRuntime {
-		const runtime = new ProfileRuntime(this, schema, hooks);
+		const runtime = new ProfileRuntime(this, sealSchema(schema), hooks);
 		this.profiles.push(runtime);
 		return runtime;
 	}
@@ -328,8 +328,10 @@ export class ProfileRuntime {
 		const loaded = loadRecord(this.schema, envelope.payload, envelope.schemaVersion);
 		if (loaded.kind !== "ok") {
 			this.engine.diagnose(
-				`unreadable:${this.schema.name}:${userId}`,
-				`${this.schema.name}: ${userId}'s record did not load: ${loaded.kind}`,
+				`load:${this.schema.name}:${loaded.kind === "newer" ? "newer" : loaded.code}`,
+				loaded.kind === "newer"
+					? `${this.schema.name}: ${userId}'s record was written by a newer build (version ${loaded.version})`
+					: `${this.schema.name}: ${userId}'s record did not load: ${loaded.reason}`,
 			);
 			return this.end(session, true, loaded.kind === "newer" ? SERVER_UPDATING_MESSAGE : LOAD_FAILED_MESSAGE);
 		}
