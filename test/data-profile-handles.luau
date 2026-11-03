@@ -558,6 +558,11 @@ return {
 			c()
 		end, "computed must not write state", "the computed's write")
 		spec.eq(data(player).currency(), 0, "unchanged")
+		local live = w:run(function()
+			return data:inspect(4120)
+		end)
+		w:settle()
+		spec.eq(live.value.value.currency, 0, "the session committed nothing either")
 		w:finish()
 	end,
 

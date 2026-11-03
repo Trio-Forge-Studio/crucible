@@ -294,6 +294,7 @@ return {
 
 	["57 104 without a grant claim ProcessReceipt stays unset"] = function()
 		local w = newWorld()
+		w:advance(0.05)
 		spec.eq(w.marketplace.ProcessReceipt, nil, "the game may own ProcessReceipt")
 	end,
 

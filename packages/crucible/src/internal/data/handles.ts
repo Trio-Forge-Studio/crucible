@@ -50,7 +50,7 @@ function mapKey(name: string): never {
 
 function writer(handle: unknown, method: string): HandleNode {
 	const node = nodeOf(handle);
-	if (node === undefined || node.source.client) mapKey(method);
+	if (node === undefined) mapKey(method);
 	return node;
 }
 

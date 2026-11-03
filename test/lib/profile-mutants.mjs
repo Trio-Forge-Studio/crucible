@@ -209,7 +209,7 @@ const mutants = [
 		"result = work(x, y);",
 		CL + "13 A4 K7",
 	),
-	m("13", "pair", S, "\tdepth -= 1;\n", "", HAN + "E1 "),
+	m("13", "pair", S, "\tdepth -= 1;\n", "", HAN + "E3 E4 12"),
 	m("13", "pair", S, "\tdepth += 1;\n", "", HAN + "123 a handle write to another player"),
 	m(
 		"13",
@@ -342,9 +342,9 @@ const mutants = [
 		"116",
 		"pair",
 		H,
-		"if (node === undefined || node.source.client) mapKey(method);",
-		"if (node === undefined) mapKey(method);",
-		VIEW + "124 134 E17",
+		"RESERVED.has(key) && !node.source.client",
+		"(false as boolean) && RESERVED.has(key)",
+		HAN + "E1 ",
 	),
 	m(
 		"117",
