@@ -535,6 +535,26 @@ impl Node {
         self.list(block.as_case_block().clauses.nodes())
     }
 
+    pub fn try_block(&self) -> Node {
+        self.wrap(self.n.as_try_statement().try_block)
+    }
+
+    pub fn catch_clause(&self) -> Option<Node> {
+        self.wrap_opt(self.n.as_try_statement().catch_clause)
+    }
+
+    pub fn finally_block(&self) -> Option<Node> {
+        self.wrap_opt(self.n.as_try_statement().finally_block)
+    }
+
+    pub fn catch_variable(&self) -> Option<Node> {
+        self.wrap_opt(self.n.as_catch_clause().variable_declaration)
+    }
+
+    pub fn catch_block(&self) -> Node {
+        self.wrap(self.n.as_catch_clause().block)
+    }
+
     pub fn head(&self) -> Node {
         self.wrap(self.n.as_template_expression().head)
     }

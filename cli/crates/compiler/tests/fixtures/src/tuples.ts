@@ -6,3 +6,5 @@ export const both = [first, second];
 for (const [key, value] of pairs(new Map<string, number>())) print(key, value);
 declare const step: IterableFunction<number>;
 for (const value of step) print(value);
+declare const steps: IterableFunction<LuaTuple<number[]>>;
+for (const [count] of steps) print(count);

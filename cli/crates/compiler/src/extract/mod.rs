@@ -536,6 +536,13 @@ impl Extractor {
     fn for_of(&mut self, n: P<Node>) {
         let for_of = n.as_for_in_or_of_statement();
         let receiver = self.iterable(for_of.expression, Site::Iterable);
+        if receiver == Some(Receiver::LuaTupleIterFn) {
+            let t = self.type_of(for_of.expression);
+            if let Some(length) = self.step_length(t) {
+                let span = self.span(for_of.expression);
+                self.table.store(span, Site::Iterable, |f| &mut f.step_length, length);
+            }
+        }
         let pattern = for_of.initializer;
         let inline = pattern.kind() == Kind::ArrayLiteralExpression
             && matches!(receiver, Some(Receiver::Map | Receiver::LuaTupleIterFn));

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tsrs_ast::{Kind, Node, Symbol, SymbolFlags};
-use tsrs_checker::{Checker, LiteralValue, ObjectFlags, SignatureKind, Type, TypeFlags};
+use tsrs_checker::{Checker, ElementFlags, LiteralValue, ObjectFlags, SignatureKind, Type, TypeFlags};
 use tsrs_core::P;
 
 use super::Extractor;
@@ -329,6 +329,31 @@ impl Extractor {
         Self::is_iterable_function(x, t)
             && t.object_flags().intersects(ObjectFlags::Reference)
             && x.checker.get_type_arguments_exported(t).first().is_some_and(|&step| x.is_lua_tuple(step))
+    }
+
+    /// The length of every step of a `LuaTuple` iterator, when each member of the type steps through tuples of one
+    /// fixed length.
+    pub(super) fn step_length(&mut self, t: P<Type>) -> Option<u32> {
+        let t = self.checker.get_non_nullable_type(t);
+        let t = self.constraint(t);
+        let members = if t.flags().intersects(TypeFlags::Union) { t.types() } else { std::slice::from_ref(&t) };
+        let mut lengths = members.iter().map(|&member| self.member_step_length(member));
+        let first = lengths.next()??;
+        lengths.all(|length| length == Some(first)).then_some(first)
+    }
+
+    fn member_step_length(&mut self, t: P<Type>) -> Option<u32> {
+        if !Self::is_lua_tuple_iterable_function(self, t) {
+            return None;
+        }
+        let step = *self.checker.get_type_arguments_exported(t).first()?;
+        let parts = if step.flags().intersects(TypeFlags::Intersection) { step.types() } else { &[step] };
+        let tuple = parts.iter().find(|part| part.is_tuple_type())?;
+        let flags = tuple.target()?.as_tuple_type().element_flags();
+        if flags.iter().any(|f| f.intersects(ElementFlags::Variable)) {
+            return None;
+        }
+        u32::try_from(flags.len()).ok()
     }
 
     /// Every site that classifies a value asks this one question, so two sites on one node agree.

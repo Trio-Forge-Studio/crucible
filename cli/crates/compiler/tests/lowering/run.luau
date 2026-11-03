@@ -80,6 +80,52 @@ eq("closures see their own pass", control.capturedAndChanged(), "1,3,5")
 eq("continue keeps a changed variable", control.capturedWithContinue(), "0,4,5")
 eq("increment reads the head's scope", control.shadowedIncrement(), 30)
 eq("do-while condition reads the outer scope", control.shadowedCondition(), 3)
+eq("whole LuaTuple iterator steps", control.wholeSteps({ a = 1 }, { { 1, 2 }, { 3, 4 } }), "1 a=1 a:1 1:3 2:7")
+
+local exceptions = load("exceptions")
+eq("a thrown string reaches catch unchanged", exceptions.caught(0), "plain")
+eq("a thrown table reaches catch as itself", exceptions.isMarker(exceptions.caught(1)), true)
+eq("a thrown number reaches catch", exceptions.caught(2), 42)
+eq("an engine error reaches catch", exceptions.caught(3), "raised")
+eq("return inside try", exceptions.caught(4), "none")
+eq(
+	"an empty catch swallows",
+	exceptions.swallow(function()
+		error("boom")
+	end),
+	false
+)
+eq("try without a throw", exceptions.swallow(function() end), true)
+eq("finally after falling through", exceptions.finallyPaths("normal"), "fell|try,end,finally")
+eq("finally after return", exceptions.finallyPaths("return"), "returned|try,finally")
+eq("finally after catch", exceptions.finallyPaths("throw"), "caught|try,catch thrown,finally")
+eq("finally on break and continue", exceptions.loopExits(), "body 0,finally 0,finally 1,body 2,finally 2,finally 3")
+eq(
+	"break and continue in catch",
+	exceptions.catchExits({ 1, -1, -3, -2, 5 }),
+	"ok 1,finally 1,finally -1,caught -3,finally -3,finally -2"
+)
+eq("break from a switch inside try", exceptions.switchBreak(1), "one,finally")
+eq("switch default after try", exceptions.switchBreak(2), "other")
+local thrownTable = {}
+eq("a throw passes finally unchanged", exceptions.throughFinally(thrownTable), thrownTable)
+eq("a string passes finally unchanged", exceptions.throughFinally("s"), "s")
+eq("rethrow keeps the table", exceptions.rethrown(thrownTable), thrownTable)
+eq("rethrow keeps the string", exceptions.rethrown("again"), "again")
+local catchLog = {}
+local catchOk, catchError = pcall(exceptions.catchThrows, catchLog)
+eq("a throw from catch escapes", catchOk, false)
+eq("a throw from catch keeps its value", catchError, "second")
+eq("finally runs before a throw from catch escapes", catchLog[1], "finally")
+eq("finally return replaces a throw", exceptions.finallyReplacesThrow(), "finally")
+eq("finally return replaces a return", exceptions.finallyReplacesReturn(), "finally")
+local nestedLog = {}
+eq("return through nested finally", exceptions.nestedReturn(nestedLog), 7)
+list("nested finally order", nestedLog, { "inner", "outer" })
+list("LuaTuple return through finally", { exceptions.tupleThroughFinally() }, { 1, "one" })
+eq("finally ran for the LuaTuple return", exceptions.finishedCount(), 1)
+eq("catch destructures the thrown value", exceptions.patternInCatch(), 5)
+eq("finally ran after the destructuring catch", exceptions.finishedCount(), 2)
 
 local classes = load("classes")
 list("classes", classes.build(), { "a:leaf+3+1", 2, "leaf", "static", "Leaf" })

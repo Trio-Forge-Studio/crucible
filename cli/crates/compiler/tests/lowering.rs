@@ -31,6 +31,7 @@ fn every_source_file_becomes_a_module_and_index_becomes_init() {
     let expected = [
         "classes.luau",
         "control.luau",
+        "exceptions.luau",
         "macros.luau",
         "modules.luau",
         "nested/init.luau",
@@ -173,6 +174,34 @@ fn lua_tuples_bind_and_return_several_values() {
 }
 
 #[test]
+fn throw_keeps_its_value_and_try_runs_its_bodies_in_pcall() {
+    has(
+        "exceptions.luau",
+        &[
+            "error(\"plain\", 0)",
+            "\tpcall(function()\n\t\tf()\n\t\tdone = true\n\tend)\n\treturn done",
+            "\tif not _0 then\n\t\tlocal e = _1\n\t\treturn e\n\telseif _1 == 1 then\n\t\treturn _2\n\tend",
+            "\tif not _9 then\n\t\t_9, _10, _11 = pcall(function(e)",
+            "\ttable.insert(log, \"finally\")\n\tif not _9 then\n\t\terror(_10, 0)\n\tend\n\tif _10 == 1 then\n\t\treturn _11\n\tend",
+            "\t\t\tif _13 == 3 then\n\t\t\t\tbreak\n\t\t\telseif _13 == 4 then\n\t\t\t\tcontinue\n\t\t\tend",
+            "return 2, table.pack(1, \"one\")",
+            "return table.unpack(_62, 1, _62.n)",
+        ],
+    );
+}
+
+#[test]
+fn a_lua_tuple_iterator_step_binds_as_a_whole() {
+    has(
+        "control.luau",
+        &[
+            "for _43, _44 in pairs(scores) do\n\t\tlocal step = { _43, _44 }",
+            "for _45 in pairs(scores) do\n\t\tcount += 1",
+        ],
+    );
+}
+
+#[test]
 fn out_of_scope_constructs_are_errors_at_their_location() {
     let Err(Failure::Lower(errors)) = crucible_compiler::compile(&fixture("lowering-errors/tsconfig.json")) else {
         panic!("the refused constructs fail the compile");
@@ -191,7 +220,7 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
         "7:1 export let is not supported; export a const",
         "10:9 loose equality is not supported; use === or !==",
         "14:8 `table` cannot be a Luau local name",
-        "19:2 try is not supported",
+        "19:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
         "25:9 instanceof is not supported",
     ];
     assert_eq!(found, expected);

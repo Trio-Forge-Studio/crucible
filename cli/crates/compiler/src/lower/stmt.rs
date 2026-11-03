@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use super::{Breakable, ImportBase, Lower, is_hole, skip_parens_and_assertions};
+use super::{Breakable, Exit, ImportBase, Lower, is_hole, skip_parens_and_assertions};
 use crate::facts::{Callee, Constant, Import, Receiver};
-use crate::luau::{BinOp, Block, Expr, Field, Function, Name, Stmt};
+use crate::luau::{BinOp, Block, Expr, Field, Function, Name, Stmt, UnOp};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Nodes, Op, UnaryOp};
 
@@ -36,13 +36,7 @@ impl Lower<'_> {
             Kind::VariableStatement => self.variable_statement(s),
             Kind::ExpressionStatement => self.expr_stmt(s.expression()),
             Kind::IfStatement => self.if_statement(s),
-            Kind::ReturnStatement => {
-                let values = match s.expression_opt() {
-                    Some(e) => self.return_values(e),
-                    None => Vec::new(),
-                };
-                self.current_block.push(Stmt::Return(values));
-            }
+            Kind::ReturnStatement => self.return_statement(s),
             Kind::ForStatement => self.for_statement(s),
             Kind::ForOfStatement => self.for_of(s),
             Kind::WhileStatement => self.while_statement(s),
@@ -51,21 +45,17 @@ impl Lower<'_> {
                 if s.has_label() {
                     self.error(s, "labeled break is not supported");
                 }
-                self.current_block.push(Stmt::Break);
+                self.leave(Exit::Break, Vec::new());
             }
             Kind::ContinueStatement => {
                 if s.has_label() {
                     self.error(s, "labeled continue is not supported");
                 }
-                match self.breakables.last() {
-                    Some(Breakable::Switch) => self.error(s, "continue inside a switch is not supported"),
-                    Some(Breakable::Loop { copy_back }) => {
-                        let copy_back = copy_back.clone();
-                        self.current_block.extend(copy_back);
-                    }
-                    None => {}
+                let target = self.breakables.iter().rev().find(|b| !matches!(b, Breakable::Try { .. }));
+                if target == Some(&Breakable::Switch) {
+                    self.error(s, "continue inside a switch is not supported");
                 }
-                self.current_block.push(Stmt::Continue);
+                self.leave(Exit::Continue, Vec::new());
             }
             Kind::SwitchStatement => self.switch_statement(s),
             Kind::FunctionDeclaration => self.function_declaration(s),
@@ -75,11 +65,13 @@ impl Lower<'_> {
             Kind::ImportDeclaration => self.import_declaration(s),
             Kind::ExportDeclaration => self.export_declaration(s),
             Kind::ThrowStatement => {
-                self.unsupported(s, "throw");
+                let value = match s.expression_opt() {
+                    Some(e) => self.expr(e),
+                    None => Expr::Nil,
+                };
+                self.current_block.push(Stmt::Call(throw(value)));
             }
-            Kind::TryStatement => {
-                self.unsupported(s, "try");
-            }
+            Kind::TryStatement => self.try_statement(s),
             Kind::LabeledStatement => {
                 self.unsupported(s, "a labeled statement");
             }
@@ -213,6 +205,154 @@ impl Lower<'_> {
                 vec![Expr::global("table.unpack").call(vec![value])]
             }
         }
+    }
+
+    fn return_statement(&mut self, s: Node) {
+        let Some(e) = s.expression_opt() else {
+            return self.leave(Exit::Return, Vec::new());
+        };
+        let values = self.return_values(e);
+        let several = values.len() > 1
+            || (values.last().is_some_and(Expr::is_multi)
+                && self.fact(e).and_then(|f| f.receiver) == Some(Receiver::LuaTuple));
+        self.leave(if several { Exit::ReturnSeveral } else { Exit::Return }, values);
+    }
+
+    /// Lowers a `return`, `break` or `continue`. One that leaves the function of a `try` or `catch` body returns the
+    /// exit's code from that function instead, and the code after its `pcall` leaves the same way.
+    fn leave(&mut self, exit: Exit, values: Vec<Expr>) {
+        let mut crossed = None;
+        for b in self.breakables.iter_mut().rev() {
+            match b {
+                Breakable::Try { exits } => {
+                    crossed = Some(exits);
+                    break;
+                }
+                Breakable::Loop { .. } | Breakable::Switch if matches!(exit, Exit::Break | Exit::Continue) => break,
+                Breakable::Loop { .. } | Breakable::Switch => {}
+            }
+        }
+        if let Some(exits) = crossed {
+            if !exits.contains(&exit) {
+                exits.push(exit);
+            }
+            let mut returned = vec![Expr::Number(f64::from(exit as u8))];
+            match exit {
+                Exit::Return => returned.extend(values),
+                Exit::ReturnSeveral => returned.push(Expr::global("table.pack").call(values)),
+                Exit::Break | Exit::Continue => {}
+            }
+            self.current_block.push(Stmt::Return(returned));
+            return;
+        }
+        match exit {
+            Exit::Return | Exit::ReturnSeveral => self.current_block.push(Stmt::Return(values)),
+            Exit::Break => self.current_block.push(Stmt::Break),
+            Exit::Continue => {
+                if let Some(Breakable::Loop { copy_back }) = self.breakables.last() {
+                    let copy_back = copy_back.clone();
+                    self.current_block.extend(copy_back);
+                }
+                self.current_block.push(Stmt::Continue);
+            }
+        }
+    }
+
+    /// `pcall` runs the `try` body in a function. Without a `finally` body the `catch` body runs inline after it. With
+    /// one, the `catch` body runs in a second `pcall` and the `finally` body runs inline after both, so a `return`,
+    /// `break` or throw in it replaces the pending one, as in JavaScript.
+    fn try_statement(&mut self, s: Node) {
+        let mut exits = Vec::new();
+        let body = self.guarded(Vec::new(), &mut exits, |l| l.statements(s.try_block().statements()));
+        let ok = self.temp();
+        let thrown = self.temp();
+        let value = self.temp();
+        let failed = Expr::unary(UnOp::Not, Expr::Name(ok.clone()));
+        if let (Some(clause), None) = (s.catch_clause(), s.finally_block()) {
+            let (_, handler) = self.capture(|l| {
+                if let Some(name) = clause.catch_variable().and_then(|d| d.name()) {
+                    l.bind_value(name, Expr::Name(thrown.clone()));
+                }
+                l.statements(clause.catch_block().statements());
+            });
+            let dispatch = self.repeat_exit(&exits, &thrown, &value);
+            if handler.is_empty() && dispatch.is_empty() {
+                self.current_block.push(Stmt::Call(pcall(vec![body])));
+                return;
+            }
+            let names = pcall_results(&exits, ok, thrown, value);
+            self.current_block.push(Stmt::Local(names, vec![pcall(vec![body])]));
+            self.current_block.push(Stmt::If(failed, handler, (!dispatch.is_empty()).then_some(dispatch)));
+            return;
+        }
+        let retry = s.catch_clause().map(|clause| self.catch_call(clause, &thrown, &mut exits));
+        let names = pcall_results(&exits, ok, thrown.clone(), value.clone());
+        let targets = names.iter().cloned().map(Expr::Name).collect();
+        self.current_block.push(Stmt::Local(names, vec![pcall(vec![body])]));
+        if let Some(call) = retry {
+            self.current_block.push(Stmt::If(failed.clone(), vec![Stmt::Assign(targets, vec![call])], None));
+        }
+        if let Some(finally) = s.finally_block() {
+            let block = self.block(finally.statements());
+            self.current_block.extend(scoped(block));
+        }
+        self.current_block.push(Stmt::If(failed, vec![Stmt::Call(throw(Expr::Name(thrown.clone())))], None));
+        let dispatch = self.repeat_exit(&exits, &thrown, &value);
+        self.current_block.extend(dispatch);
+    }
+
+    /// `pcall` on the `catch` body's function, which takes the thrown value when the clause has a variable.
+    fn catch_call(&mut self, clause: Node, thrown: &Name, exits: &mut Vec<Exit>) -> Expr {
+        let variable = clause.catch_variable().and_then(|d| d.name());
+        let param =
+            variable.map(|name| if name.kind() == Kind::Identifier { self.local_name(name) } else { self.temp() });
+        let function = self.guarded(param.iter().cloned().collect(), exits, |l| {
+            if let (Some(pattern), Some(param)) = (variable, &param)
+                && pattern.kind() != Kind::Identifier
+            {
+                l.bind_value(pattern, Expr::Name(param.clone()));
+            }
+            l.statements(clause.catch_block().statements());
+        });
+        let mut args = vec![function];
+        if param.is_some() {
+            args.push(Expr::Name(thrown.clone()));
+        }
+        pcall(args)
+    }
+
+    /// Lowers a `try` or `catch` body as a function for `pcall`, and adds the exits that leave it to `exits`.
+    fn guarded(&mut self, params: Vec<Name>, exits: &mut Vec<Exit>, body: impl FnOnce(&mut Self)) -> Expr {
+        self.breakables.push(Breakable::Try { exits: Vec::new() });
+        let (_, block) = self.capture(body);
+        if let Some(Breakable::Try { exits: left }) = self.breakables.pop() {
+            for exit in left {
+                if !exits.contains(&exit) {
+                    exits.push(exit);
+                }
+            }
+        }
+        Expr::Function(Box::new(Function { params, varargs: false, body: block }))
+    }
+
+    /// Leaves the way a guarded function said it left, from the exit's code in `code` and the returned value in
+    /// `value`.
+    fn repeat_exit(&mut self, exits: &[Exit], code: &Name, value: &Name) -> Block {
+        let mut chain = None;
+        for exit in Exit::ALL.into_iter().rev().filter(|exit| exits.contains(exit)) {
+            let values = match exit {
+                Exit::Return => vec![Expr::Name(value.clone())],
+                Exit::ReturnSeveral => {
+                    let packed = Expr::Name(value.clone());
+                    vec![Expr::global("table.unpack").call(vec![packed.clone(), Expr::Number(1.0), packed.field("n")])]
+                }
+                Exit::Break | Exit::Continue => Vec::new(),
+            };
+            let (_, then) = self.capture(|l| l.leave(exit, values));
+            let condition = Expr::Name(code.clone()).binary(BinOp::Eq, Expr::Number(f64::from(exit as u8)));
+            chain = Some(vec![Stmt::If(condition, then, chain)]);
+        }
+        chain.unwrap_or_default()
     }
 
     fn with_breakable<T>(&mut self, kind: Breakable, f: impl FnOnce(&mut Self) -> T) -> T {
@@ -388,6 +528,7 @@ impl Lower<'_> {
             return;
         };
         let receiver = if receiver == Receiver::LuaTuple { Receiver::Array } else { receiver };
+        let body = s.loop_body().span();
         let source = self.expr(iterable);
         let simple_name =
             |l: &mut Self, n: Node| -> Option<Name> { (n.kind() == Kind::Identifier).then(|| l.local_name(n)) };
@@ -430,14 +571,25 @@ impl Lower<'_> {
                         names.push(self.temp());
                     }
                     (names, vec![source], None)
-                } else if receiver == Receiver::Map {
-                    let (k, v) = (self.temp(), self.temp());
-                    let entry =
-                        Expr::Table(vec![Field::Item(Expr::Name(k.clone())), Field::Item(Expr::Name(v.clone()))]);
-                    (vec![k, v], vec![source], Some((binding, entry)))
+                } else if binding.kind() == Kind::Identifier
+                    && !self.referenced_between(binding.text(), body.start, body.end, u32::MAX)
+                {
+                    (vec![self.temp()], vec![source], None)
                 } else {
-                    self.unsupported(binding, "this binding over a LuaTuple iterator");
-                    return;
+                    let length = match receiver {
+                        Receiver::Map => Some(2),
+                        _ => self.fact(iterable).and_then(|f| f.step_length),
+                    };
+                    let Some(length) = length else {
+                        self.unsupported(
+                            binding,
+                            "binding a whole step of a LuaTuple iterator whose length is not fixed",
+                        );
+                        return;
+                    };
+                    let values: Vec<Name> = (0..length.max(1)).map(|_| self.temp()).collect();
+                    let step = Expr::Table(values.iter().map(|v| Field::Item(Expr::Name(v.clone()))).collect());
+                    (values, vec![source], Some((binding, step)))
                 }
             }
             Receiver::String => {
@@ -934,6 +1086,26 @@ impl Lower<'_> {
 pub(super) struct Parameters {
     pub(super) names: Vec<Name>,
     pub(super) rest: bool,
+}
+
+/// Level 0 keeps a thrown string as it is, without the position Luau would prepend, so a `catch` sees the value the
+/// `throw` gave.
+fn throw(value: Expr) -> Expr {
+    Expr::global("error").call(vec![value, Expr::Number(0.0)])
+}
+
+fn pcall(args: Vec<Expr>) -> Expr {
+    Expr::global("pcall").call(args)
+}
+
+/// The names `pcall`'s results go to: whether the body finished, then the thrown value or the exit's code, then the
+/// returned value when a `return` left the body.
+fn pcall_results(exits: &[Exit], ok: Name, thrown: Name, value: Name) -> Vec<Name> {
+    let mut names = vec![ok, thrown];
+    if exits.iter().any(|exit| matches!(exit, Exit::Return | Exit::ReturnSeveral)) {
+        names.push(value);
+    }
+    names
 }
 
 fn has_own_continue(s: Node) -> bool {
