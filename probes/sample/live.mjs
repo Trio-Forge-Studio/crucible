@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { connect, text } from "../modules/mcp.mjs";
 import { checkFlow, markerLines } from "./evidence.mjs";
 import { playFlow } from "./flow.mjs";
+import { chunks, parseRbxmx, steps } from "./rbxmx.mjs";
 
 const PLACE_ID = 101113691364993;
 const UNIVERSE_ID = 10774131158;
@@ -44,7 +45,7 @@ importTree.StarterPlayerScripts = {
 	$className: "Folder",
 };
 const importProject = path.join(build, `${label}.project.json`);
-const importModel = path.join(build, `${label}.rbxm`);
+const importModel = path.join(build, `${label}.rbxmx`);
 fs.writeFileSync(importProject, JSON.stringify({ name: "S1Import", tree: importTree }, null, 2));
 execFileSync("rojo", ["build", importProject, "-o", importModel], { stdio: "inherit" });
 
@@ -57,7 +58,10 @@ const commandLine = `"${exe}" ${launchArgs}`;
 const sessionFile = path.join(results, `${label}-session.json`);
 if (fs.existsSync(sessionFile)) {
 	const previous = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
-	if (ps(`@(Get-CimInstance Win32_Process -Filter 'ProcessId=${previous.pid}').Count`) !== "0")
+	const line = ps(
+		`(Get-CimInstance Win32_Process -Filter 'ProcessId=${previous.pid}' -ErrorAction SilentlyContinue).CommandLine`,
+	);
+	if (line.includes(`-placeId ${PLACE_ID}`) && line.toLowerCase().includes("robloxstudiobeta.exe"))
 		throw Error(`Previous owned PID ${previous.pid} has not exited`);
 }
 
@@ -121,29 +125,30 @@ try {
 	identity.nativeLog = nativeLog;
 
 	const marker = `S1-IDENT-${pid}-${Date.now()}`;
-	const rejected = new Set();
+	const attempts = new Map();
+	identity.candidates = [];
 	const connectDeadline = Date.now() + 240000;
 	while (!studioId && Date.now() < connectDeadline) {
 		if (!owns()) throw Error("Owned Studio exited during startup");
 		const studios = JSON.parse(text(await call("list_roblox_studios"))).studios;
 		for (const studio of studios) {
-			if (baseline.has(studio.id) || excludeIds.has(studio.id) || rejected.has(studio.id)) continue;
+			if (baseline.has(studio.id) || excludeIds.has(studio.id) || (attempts.get(studio.id) ?? 0) >= 5) continue;
+			if (!identity.candidates.some((seen) => seen.id === studio.id)) identity.candidates.push(studio);
+			attempts.set(studio.id, (attempts.get(studio.id) ?? 0) + 1);
 			// A print is the only call sent to a candidate before it is proven mine.
 			await call("execute_luau", {
 				datamodel_type: "Edit",
 				code: `print("${marker}") return 1`,
 				studio_id: studio.id,
-			}).catch(() => undefined);
-			await delay(2500);
+			}).catch((error) => (identity.candidateError = String(error)));
+			await delay(4000);
 			if (readLog().includes(marker)) studioId = studio.id;
-			else rejected.add(studio.id);
 			break;
 		}
 		if (!studioId) await delay(3000);
 	}
 	if (!studioId) throw Error("Own Studio did not connect to MCP. Check sign-in and Assistant MCP settings.");
 	identity.studioId = studioId;
-	identity.rejectedStudioIds = [...rejected];
 	save();
 
 	identity.version = await luau(
@@ -154,29 +159,22 @@ try {
 	if (!identity.version.includes(`placeId=${PLACE_ID} gameId=${UNIVERSE_ID}`))
 		throw Error("Studio is not on the published test place");
 
-	identity.insert = await luau(
-		"Edit",
-		`
-local ok, model = pcall(function()
-	return game:GetService("InsertService"):LoadLocalAsset(${JSON.stringify(importModel)})
-end)
-if not ok then return "load failed: " .. tostring(model) end
-local moved = 0
-for _, name in { "ReplicatedStorage", "ServerScriptService" } do
-	for _, child in model[name]:GetChildren() do
-		child.Parent = game:GetService(name)
-		moved += 1
-	end
-end
-for _, child in model.StarterPlayerScripts:GetChildren() do
-	child.Parent = game:GetService("StarterPlayer").StarterPlayerScripts
-	moved += 1
-end
-game:GetService("ServerStorage"):SetAttribute("CrucibleLiveData", true)
-model:Destroy()
-return "moved " .. moved
-`,
+	const model = parseRbxmx(fs.readFileSync(importModel, "utf8"));
+	// The package folder carries its own node_modules, which the sample never requires.
+	const skipPackageDependencies = (parent, node) => parent.at(-1) === "crucible" && node.name === "node_modules";
+	const homes = {
+		ReplicatedStorage: ["ReplicatedStorage"],
+		ServerScriptService: ["ServerScriptService"],
+		StarterPlayerScripts: ["StarterPlayer", "StarterPlayerScripts"],
+	};
+	const pieces = chunks(
+		model.children.flatMap((folder) => steps(folder, homes[folder.name], skipPackageDependencies)),
+		120000,
 	);
+	if (pieces.some((piece) => piece.length > 190000)) throw Error("A module is too large for one execute_luau call");
+	for (const piece of pieces) await luau("Edit", piece, 120000);
+	await luau("Edit", 'game:GetService("ServerStorage"):SetAttribute("CrucibleLiveData", true) return 1');
+	identity.insert = `moved ${pieces.length} chunks`;
 	console.log(identity.insert);
 	if (!identity.insert.startsWith("moved"))
 		throw Error(`The sample did not load into the session: ${identity.insert}`);

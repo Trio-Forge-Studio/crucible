@@ -152,7 +152,6 @@ try {
 		const native = readLog()
 			.replace(/\r\n/g, "\n")
 			.replace(/[ \t]+$/gm, "");
-		fs.writeFileSync(path.join(results, `${label}-native.log`), native);
 		fs.writeFileSync(path.join(results, `${label}.log`), markerLines(native, runId).join("\n") + "\n");
 	}
 	if (owns()) {

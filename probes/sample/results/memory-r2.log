@@ -1,0 +1,10 @@
+2026-11-03T23:26:36.118Z,23.118044,1968,6,Info [FLog::CreatorOutput] S1|7a801216-0916-446e-a4f6-431cf695c710|server|marker
+2026-11-03T23:26:36.173Z,23.173744,1968,6,Info [FLog::CreatorOutput] S1|7a801216-0916-446e-a4f6-431cf695c710|client|marker
+2026-11-03T23:26:36.307Z,23.307287,24d8,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 1
+2026-11-03T23:26:36.337Z,23.337719,0e1c,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 1   Total: 1   Last: +1
+2026-11-03T23:26:36.519Z,23.519674,24d8,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 1
+2026-11-03T23:26:36.551Z,23.551611,406c,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 2   Total: 2   Last: +1
+2026-11-03T23:26:36.753Z,23.753300,0e1c,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 1
+2026-11-03T23:26:36.786Z,23.786354,406c,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 3   Total: 3   Last: +1
+2026-11-03T23:26:38.741Z,25.741852,24d8,6,Info [FLog::CreatorOutput] S2 controller shutdown
+2026-11-03T23:26:39.143Z,26.143787,24d8,6,Info [FLog::CreatorOutput] S2 store shutdown
