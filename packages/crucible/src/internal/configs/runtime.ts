@@ -76,6 +76,8 @@ function newScope(player?: Player): Scope {
 
 const global = newScope();
 const slots = new Map<Player, Scope>();
+/** Bumped at every join, so a read for a player with no scope yet reruns once their scope exists (rule 93). */
+const roster = createStateNode(0);
 let owner: ConfigRuntime | undefined;
 let retired = false;
 let listeners = new Array<Disconnect>();
@@ -327,7 +329,10 @@ export function readGlobal(declaration: Declaration): unknown {
 
 export function readPlayer(declaration: Declaration, player: Player): unknown {
 	const scope = slots.get(player);
-	if (scope === undefined) return declaration.fallback;
+	if (scope === undefined) {
+		readState(roster);
+		return declaration.fallback;
+	}
 	if (readState(scope.ready) !== true) return readState(declaration.global);
 	return readState(scope.values.get(declaration)!);
 }
@@ -335,7 +340,11 @@ export function readPlayer(declaration: Declaration, player: Player): unknown {
 export function ready(player?: Player): boolean {
 	if (player === undefined) return readState(global.ready) as boolean;
 	const scope = slots.get(player);
-	return scope !== undefined && readState(scope.ready) === true;
+	if (scope === undefined) {
+		readState(roster);
+		return false;
+	}
+	return readState(scope.ready) === true;
 }
 
 function seal(runtime: ConfigRuntime) {
@@ -578,6 +587,7 @@ function join(player: Player) {
 	if (!live() || slots.has(player)) return;
 	const scope = newScope(player);
 	slots.set(player, scope);
+	write(roster, (roster.value as number) + 1);
 	task.spawn(fetchLoop, scope);
 }
 
