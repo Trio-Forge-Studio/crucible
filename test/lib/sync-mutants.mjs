@@ -19,6 +19,7 @@ const B = src + "internal/boot.ts";
 const R = src + "replicated.ts";
 const EM = src + "emit/replicated.ts";
 const CI = src + "client/index.ts";
+const EMIT = src + "emit/index.ts";
 const REG = src + "internal/registry.ts";
 const specs = ["sync-frames", "sync-players", "sync-client", "sync-budgets", "sync-publish"];
 const types = ["sync-types"];
@@ -144,6 +145,18 @@ const rules = [
 			"\t\t\tif (!rawequal(result, child) && copy === undefined) copy = table.clone(source);\n\t\t\tif (copy !== undefined) copy[key] = result;",
 			"\t\t\tif (copy !== undefined) copy[key] = result;",
 		],
+		[
+			"guard admission limit above",
+			V,
+			"\t\tif (this.steps >= SYNC_ADMISSION_VISITS) this.reject(",
+			"\t\tif (this.steps > SYNC_ADMISSION_VISITS) this.reject(",
+		],
+		[
+			"guard admission limit below",
+			V,
+			"\t\tif (this.steps >= SYNC_ADMISSION_VISITS) this.reject(",
+			"\t\tif (this.steps >= SYNC_ADMISSION_VISITS - 1) this.reject(",
+		],
 		["swap", V, "\ta.charge(stringBytes(name), 1, 1, path);", "\ta.charge(1, stringBytes(name), 1, path);"],
 		[
 			"pair",
@@ -240,6 +253,21 @@ const rules = [
 		],
 	],
 	[
+		"56 V2",
+		[
+			"guard game route record",
+			REG,
+			"\t\trecord = { ...base, kind: Kind.Subsystem, first };",
+			"\t\trecord = { ...base, kind: Kind.Subsystem, first: first || (emitted as unknown as { first?: boolean }).first === true };",
+		],
+		[
+			"guard game route define",
+			EMIT,
+			"emitted: EmittedClass) {\n\tdefine(klass, emitted);",
+			"emitted: EmittedClass, first?: boolean) {\n\tdefine(klass, emitted, first);",
+		],
+	],
+	[
 		"57",
 		[
 			"guard",
@@ -271,6 +299,8 @@ const rules = [
 			"\t\tif (!this.incomplete && !this.retiredSince && currentEpoch() === this.settledEpoch) return;\n",
 			"\n",
 		],
+		["guard retirement cleared", SS, "\t\tthis.retiredSince = false;\n", "\n"],
+		["guard incomplete cleared", SS, "\t\t\tthis.incomplete = false;\n", "\n"],
 	],
 	[
 		"59",
@@ -404,6 +434,8 @@ const rules = [
 			"\tbytes += varuintSize(frame.failed.size());",
 			"\tbytes += varuintSize(frame.values.size());",
 		],
+		["guard varuint boundary above", F, "\twhile (value >= 128) {", "\twhile (value > 128) {"],
+		["guard varuint boundary below", F, "\twhile (value >= 128) {", "\twhile (value >= 127) {"],
 		[
 			"swap values length",
 			F,
@@ -437,6 +469,30 @@ const rules = [
 			SS,
 			"\t\t\tconst work: Work = { visits: 0, limit: SYNC_PEER_VISITS };",
 			"\t\t\tconst work: Work = { visits: 0, limit: math.huge };",
+		],
+		[
+			"guard peer visits above",
+			V,
+			"\tif (work.visits >= work.limit) error(OVER_BUDGET);",
+			"\tif (work.visits > work.limit) error(OVER_BUDGET);",
+		],
+		[
+			"guard peer visits below",
+			V,
+			"\tif (work.visits >= work.limit) error(OVER_BUDGET);",
+			"\tif (work.visits >= work.limit - 1) error(OVER_BUDGET);",
+		],
+		[
+			"guard heartbeat bytes above",
+			SS,
+			"spent + cost.bytes > SYNC_HEARTBEAT_BYTES) return undefined;",
+			"spent + cost.bytes > SYNC_HEARTBEAT_BYTES + 1) return undefined;",
+		],
+		[
+			"guard heartbeat bytes below",
+			SS,
+			"spent + cost.bytes > SYNC_HEARTBEAT_BYTES) return undefined;",
+			"spent + cost.bytes >= SYNC_HEARTBEAT_BYTES) return undefined;",
 		],
 		[
 			"guard bytes",

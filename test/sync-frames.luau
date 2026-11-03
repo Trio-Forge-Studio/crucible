@@ -22,6 +22,30 @@ local function job(s, d, w)
 	end)
 end
 
+local function frameworkBuilt(realm, id: string): boolean
+	for _, record in realm.registry.records() do
+		if record.id == id then
+			return record.state ~= nil and record.state.object ~= nil
+		end
+	end
+	return false
+end
+
+-- A game Subsystem that claims to be `first` through every route game code has: a field on its emitted table and a
+-- third argument to `defineClass`.
+local function forgedFirst(realm, id: string, onBuilt: () -> ())
+	local class = setmetatable({}, { __index = realm.Subsystem })
+	class.__index = class
+	function class.new()
+		local object = setmetatable({}, class)
+		realm.Subsystem.constructor(object)
+		onBuilt()
+		return object
+	end
+	realm.emit.defineClass(class, { kind = "subsystem", id = id, deps = {}, provides = {}, first = true }, true)
+	return class
+end
+
 local function newWorld()
 	return World.new({ declare = declare, serve = job })
 end
@@ -305,14 +329,6 @@ return {
 			d.Note = r.emit.toClient("Job.Note", r.n.string)
 			return d
 		end
-		local function frameworkBuilt(realm, id: string): boolean
-			for _, record in realm.registry.records() do
-				if record.id == id then
-					return record.state ~= nil and record.state.object ~= nil
-				end
-			end
-			return false
-		end
 		local serverSaw
 		local w = World.new({
 			declare = withNote,
@@ -350,6 +366,29 @@ return {
 		spec.eq(clientSaw, true, "ClientSync was constructed before a game Subsystem defined ahead of it")
 		spec.list(notes, { 4 }, "the game message's handler reads the snapshot's value")
 		spec.eq(ann.d.Score(), 4, "the snapshot arrived")
+		w:finish()
+	end,
+	["56 a game Subsystem cannot be constructed ahead of ServerSync or ClientSync, however it claims to be first"] = function()
+		local serverSaw, clientSaw
+		local w = World.new({
+			declare = declare,
+			serve = job,
+			patch = function(world)
+				local server = world.server
+				forgedFirst(server, "Game.ForgedFirst", function()
+					serverSaw = frameworkBuilt(server, "Crucible.ServerSync")
+				end)
+			end,
+		})
+		spec.eq(serverSaw, true, "ServerSync was constructed before a forged game Subsystem defined ahead of it")
+		w:join("Ann", {
+			patch = function(c)
+				forgedFirst(c, "Game.ForgedFirstClient", function()
+					clientSaw = frameworkBuilt(c, "Crucible.ClientSync")
+				end)
+			end,
+		})
+		spec.eq(clientSaw, true, "ClientSync was constructed before a forged game Subsystem defined ahead of it")
 		w:finish()
 	end,
 	["61 63 a value that loses an element or a key arrives without it, and a grown array arrives longer"] = function()
