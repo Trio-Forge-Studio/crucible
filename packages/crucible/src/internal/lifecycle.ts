@@ -315,7 +315,7 @@ function settle(reconciler: Reconciler) {
 class Reconciler {
 	private readonly stack = new Array<Entry>();
 	private readonly fresh = new Array<Entry>();
-	/** Open scopes: the drain itself or a `within` callback. */
+	/** Open scopes: the drain itself, a `within` callback, or an `openScope` caller. */
 	private depth = 0;
 	/** The generation whose step is running, which C5's chain length follows. */
 	private stepping?: ObjectState;
@@ -330,7 +330,18 @@ class Reconciler {
 		return this.depth > 0;
 	}
 
-	/** The only place `depth` changes. `call` never throws, so the decrement always runs. */
+	/** Opens a scope with no worker of its own. The caller pairs it with `leave` and must not throw between them. */
+	open() {
+		this.depth += 1;
+	}
+
+	/** Closes a scope `open` opened. True when it was the outermost and left work for `drain`. */
+	leave(): boolean {
+		this.depth -= 1;
+		return this.depth === 0 && (this.stack.size() > 0 || this.fresh.size() > 0 || this.pairsQueued);
+	}
+
+	/** `call` never throws, so the decrement always runs. */
 	private enter<A, B>(
 		callback: (a: A, b: B) => unknown,
 		a: A,
@@ -628,6 +639,20 @@ const reconciler = new Reconciler();
 /** @internal True while a drain runs, including inside every hook and callback it calls. */
 export function isDraining(): boolean {
 	return reconciler.isDraining();
+}
+
+/**
+ * @internal
+ * Opens a scope like `within` for a caller that runs its own worker: requests made until `closeScope` wait for it.
+ * Pair the two, with nothing between them that can throw.
+ */
+export function openScope() {
+	reconciler.open();
+}
+
+/** @internal Closes the scope `openScope` opened. True when it was the outermost and requests wait: call `drain`. */
+export function closeScope(): boolean {
+	return reconciler.leave();
 }
 
 /**
