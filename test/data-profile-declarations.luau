@@ -109,6 +109,21 @@ return {
 			'{ "n", "a", "b" } is marked serverOnly in its template value but not in its type',
 			"a literal a.b key never matches a nested a.b"
 		)
+		local nestedMark = fixture.template(r.api)
+		nestedMark.vault = r.api.serverOnly({ pin = r.api.serverOnly(0) })
+		throws(
+			function()
+				r.emit.profileStore(
+					"FD.Players",
+					{ template = nestedMark },
+					persist,
+					replica,
+					{ { "analytics" }, { "notes" }, { "purchaseLog" }, { "vault" } }
+				)
+			end,
+			'FD.Players { "vault", "pin" } is marked serverOnly in its template value but not in its type',
+			"a mark below a typed path is not that path"
+		)
 		spec.list(crucibleNames(r), {}, "no failed store declared a view")
 	end,
 
@@ -137,6 +152,15 @@ return {
 			show(paths),
 			"{n} {n,\\*} {n,\\[]} {n,\\\\k} {n,a} {n,a,b} {n,a.b}",
 			"a literal a.b key is one segment, marker-like keys are escaped, prefixes sort first"
+		)
+		local split = n.object({ { "a", n.object({ { "bc", n.f64 } }) }, { "ab", n.object({ { "c", n.f64 } }) } })
+		local joined = a.emit.profileStore("Game.Split", {
+			template = { n = { a = { bc = 0 }, ab = { c = 0 } } },
+		}, n.object({ { "n", split } }), n.object({ { "n", split } }), {})
+		spec.eq(
+			show(b.api.replicatedPaths(joined)),
+			"{n} {n,a} {n,a,bc} {n,ab} {n,ab,c}",
+			"two paths whose joined segments agree stay two paths"
 		)
 		spec.eq(type(paths[1]), "table", "a path is an array of segments, never a string")
 		assert(table.isfrozen(paths) and table.isfrozen(paths[1]), "frozen")

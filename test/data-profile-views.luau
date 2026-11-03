@@ -364,6 +364,87 @@ return {
 		w:finish()
 	end,
 
+	["127 a write within the store's bytes but over its entries share is refused naming the entries measure"] = function()
+		local w, _, player, data = loaded()
+		local upgrades = {}
+		for i = 1, 4100 do
+			upgrades[`n{i}`] = 1
+		end
+		throws(
+			function()
+				data(player).upgrades:set(upgrades)
+			end,
+			"entries, over this store's share of 4000 (1 profile stores)",
+			"the share refusal names the entries measure"
+		)
+		spec.eq(next(data(player).upgrades()), nil, "nothing stored")
+		w:finish()
+	end,
+
+	["125 129 a public object's serverOnly child never reaches its owner's client before load, loaded or sealed"] = function()
+		local function mixed(r)
+			local api = r.graph.module("")
+			local n = r.n
+			return {
+				PlayerData = r.emit.profileStore(
+					"FD.Mixed",
+					{
+						template = {
+							currency = 0,
+							profile = { name = "anon", secretNote = api.serverOnly("MIXED-DEFAULT-SECRET") },
+						},
+					},
+					n.object({
+						{ "currency", n.f64 },
+						{ "profile", n.object({ { "name", n.string }, { "secretNote", n.string } }) },
+					}),
+					n.object({ { "currency", n.f64 }, { "profile", n.object({ { "name", n.string } }) } }),
+					{ { "profile", "secretNote" } }
+				),
+			}
+		end
+		local backend = Backend.new()
+		backend:seed(
+			"FD.Mixed",
+			"4120",
+			DM.envelope({
+				payload = {
+					currency = 3,
+					profile = { name = "ann", secretNote = "MIXED-STORED-SECRET", extra = "MIXED-UNKNOWN" },
+				},
+			})
+		)
+		local w = newWorld({ declare = mixed, backend = backend })
+		local ann = w:player("Ann", 4120)
+		local pd = ann.d.PlayerData
+		spec.eq(pd().profile.secretNote(), nil, "a pre-load child read of the serverOnly key")
+		spec.eq(pd().profile().secretNote, nil, "a pre-load object read")
+		spec.eq(pd()().profile.secretNote, nil, "a pre-load root read")
+		spec.eq(pd().profile.name(), "anon", "the public child reads its default")
+		w:settle()
+		w:settle()
+		spec.eq(pd:loaded(), true, "loaded")
+		spec.eq(pd().profile.name(), "ann", "the public child")
+		spec.eq(pd().profile.secretNote(), nil, "a loaded child read of the serverOnly key")
+		spec.eq(pd().profile().secretNote, nil, "a loaded object read")
+		spec.eq(pd().profile().extra, nil, "an unknown key")
+		local decoded = wireTexts(w, ann)
+		spec.has(decoded, "ann", "the decoded frames carry the public child")
+		assert(string.find(decoded, "MIXED", 1, true) == nil, "no decoded frame carries a serverOnly or unknown value")
+		assert(string.find(decoded, "secretNote", 1, true) == nil, "no decoded frame names the serverOnly key")
+		local box = w:run(function()
+			return w.server.d.PlayerData:handoff(ann.player)
+		end)
+		w:advance(2)
+		w:heartbeat()
+		spec.eq(box.value.ok, true, "handed off")
+		spec.eq(pd:loaded(), false, "sealed")
+		spec.eq(pd().profile.secretNote(), nil, "a sealed child read")
+		spec.eq(pd().profile().secretNote, nil, "a sealed object read")
+		assert(string.find(wireTexts(w, ann), "MIXED", 1, true) == nil, "nothing secret after the seal")
+		w:finish()
+	end,
+
 	["127 with two profile stores each share is half, and a template over its share fails boot"] = function()
 		local n
 		local function twoStores(r)

@@ -82,6 +82,30 @@ local function collect(done: () -> boolean): boolean
 end
 
 return {
+	["12 117 a write before DataRuntime constructs or after a rolled-back boot returns false"] = function()
+		local early = { UserId = 9, Name = "Early" }
+		local seen = {}
+		local w = World.new({
+			declare = declare,
+			serve = function(s, d, world)
+				world.link.present[early] = {}
+				seen.write = d.PlayerData(early).currency:set(5)
+				seen.read = d.PlayerData(early).currency()
+				s.service("Broken", function()
+					error("constructor failed")
+				end)
+			end,
+			mustBoot = false,
+		})
+		spec.eq(seen.write, false, "a write at module load, before boot, returns false")
+		spec.eq(seen.read, 0, "and a read gives the template's value")
+		assert(not w.booted, "boot rolled back")
+		local data = w.server.d.PlayerData
+		spec.eq(data(early).currency:set(5), false, "a write after the rollback returns false")
+		spec.eq(data(early).currency(), 0, "and a read gives the template's value")
+		spec.eq(data:loaded(early), false, "not loaded")
+	end,
+
 	["E1 116 117 nested reads and a nested set"] = function()
 		local w, _, player, data = loaded()
 		spec.eq(data(player).settings.volume(), 0.5, "a nested object field reads its default")
@@ -415,6 +439,27 @@ return {
 			end),
 			"a dropped slot's root is collected with its whole tree, parent links included"
 		)
+		w:finish()
+	end,
+
+	["121 an object-field child nothing else holds outlives an entry child the same collection frees"] = function()
+		local w, _, player, data = loaded()
+		-- Reached in a separate frame, so no register of this one still holds either handle.
+		local function reach()
+			local weak = setmetatable({}, { __mode = "v" })
+			weak.field = data(player).settings
+			weak.entry = data(player).mastery.house9
+			return weak
+		end
+		local weak = reach()
+		assert(
+			collect(function()
+				return weak.entry == nil
+			end),
+			"an entry handle nothing holds is collected"
+		)
+		assert(weak.field ~= nil, "an object-field child is kept by its parent")
+		assert(rawequal(weak.field, data(player).settings), "and stays canonical")
 		w:finish()
 	end,
 
