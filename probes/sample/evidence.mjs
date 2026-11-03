@@ -15,12 +15,13 @@ export function markerLines(native, runId) {
 		.filter((line) => line.includes("S1|") || line.includes("Sample.") || line.includes("S2 "));
 }
 
-// Each step must raise the owner's coins and the total by the gain the client reports, in order.
-export function checkFlow(steps, multiplier) {
+// Each step must raise the owner's coins and the total by the gain the client reports, in order. A fresh profile starts
+// at zero; a saved one starts wherever the last run left it.
+export function checkFlow(steps, multiplier, { fresh = true } = {}) {
 	const failures = [];
 	let previous = steps[0];
 	if (!previous) return ["no HUD reading"];
-	if (previous.coins !== 0 || previous.total !== 0) failures.push(`start is ${JSON.stringify(previous)}`);
+	if (fresh && (previous.coins !== 0 || previous.total !== 0)) failures.push(`start is ${JSON.stringify(previous)}`);
 	for (const step of steps.slice(1)) {
 		if (step.last !== multiplier) failures.push(`last gain ${step.last} is not ${multiplier}`);
 		if (step.coins !== previous.coins + multiplier) failures.push(`coins ${previous.coins} -> ${step.coins}`);

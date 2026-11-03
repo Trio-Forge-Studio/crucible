@@ -6,7 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { connect, text } from "../modules/mcp.mjs";
 import { createPlaceName, selectStudio } from "../modules/session.mjs";
 import { ownsProcess } from "../../test/studio/session.mjs";
-import { checkFlow, markerLines, parseHud } from "./evidence.mjs";
+import { checkFlow, markerLines } from "./evidence.mjs";
+import { playFlow } from "./flow.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const results = path.join(root, "probes/sample/results");
@@ -91,16 +92,6 @@ async function waitFor(pattern, timeoutMs) {
 	}
 	return false;
 }
-const HUD_CODE = `
-local gui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
-local screen = gui and gui:FindFirstChild("CoinHud")
-local label = screen and screen:FindFirstChild("Coins")
-return label and label.Text or "missing"
-`;
-async function hud() {
-	return parseHud(await luau("Client", HUD_CODE));
-}
-
 try {
 	await mcp.request("initialize", {
 		protocolVersion: "2025-06-18",
@@ -134,38 +125,8 @@ try {
 
 	await call("start_stop_play", { is_start: true });
 	if (!(await waitFor(/S2 server booted/, 90000))) throw Error("Server did not boot");
-	await luau("Server", `print("S1|${runId}|server|marker")`);
-	await luau("Client", `print("S1|${runId}|client|marker")`);
-	if (!(await waitFor(new RegExp(`S1\\|${runId}\\|client\\|marker`), 30000))) throw Error("Client marker missing");
-
-	const steps = [];
-	const readings = [];
-	const loaded = Date.now() + 60000;
-	let first;
-	while (Date.now() < loaded) {
-		first = await hud();
-		if (first) break;
-		await delay(1000);
-	}
-	if (!first) throw Error("HUD never appeared");
-	steps.push(first);
-	readings.push({ at: new Date().toISOString(), step: "loaded", ...first });
-	for (let press = 1; press <= PRESSES; press++) {
-		await call("user_keyboard_input", {
-			datamodel_type: "Client",
-			actions: [{ action: "keyPress", key_code: "E" }],
-		});
-		const wait = Date.now() + 15000;
-		let reading;
-		while (Date.now() < wait) {
-			reading = await hud();
-			if (reading && reading.coins === press) break;
-			await delay(500);
-		}
-		if (!reading) throw Error(`HUD missing after press ${press}`);
-		steps.push(reading);
-		readings.push({ at: new Date().toISOString(), step: `press-${press}`, ...reading });
-	}
+	const readings = await playFlow({ luau, call, waitFor }, { runId, presses: PRESSES, expectedGain: 1 });
+	const steps = readings.map(({ coins, total, last }) => ({ coins, total, last }));
 	identity.screenshot = path.join(results, `${label}-client.png`);
 	ps(
 		`& powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${quote(path.join(root, "probes/modules/window.ps1"))} -ProcId ${pid} -Out ${quote(identity.screenshot)}`,

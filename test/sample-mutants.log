@@ -1,0 +1,27 @@
+BASELINE sample build and compiled lifecycle specs 0
+KILLED V1 owned session matches a 12-character prefix; rebuild or syntax 0; named spec 1
+KILLED probe check paired command skipped; rebuild or syntax 0; named spec 1
+KILLED startup launch cap guard changed; rebuild or syntax 0; named spec 1
+KILLED fixture real declaration copy deleted; rebuild or syntax 0; named spec 1
+KILLED owned PID place guard deleted; rebuild or syntax 0; named spec 1
+KILLED owned PID same typed selector arguments swapped; rebuild or syntax 0; named spec 1
+KILLED startup retry paired wait deleted; rebuild or syntax 0; named spec 1
+KILLED fixture paired manifest copy skipped; rebuild or syntax 0; named spec 1
+KILLED fixture same typed side destinations swapped; rebuild or syntax 0; named spec 1
+KILLED owned session ambiguity check short circuited; rebuild or syntax 0; named spec 1
+KILLED sample required attribute guard removed; rebuild or syntax 0; named spec 1
+KILLED sample boot and flag paired operation short circuited; rebuild or syntax 0; named spec 1
+KILLED sample same typed load paths swapped; rebuild or syntax 0; named spec 1
+KILLED sample pickup upper bound removed; rebuild or syntax 0; named spec 1
+KILLED sample pickup lower bound removed; rebuild or syntax 0; named spec 1
+KILLED sample unwritable profile guard ignored; rebuild or syntax 0; named spec 1
+KILLED sample reply to the client deleted; rebuild or syntax 0; named spec 1
+KILLED sample total publication deleted; rebuild or syntax 0; named spec 1
+KILLED sample expired event still pays its multiplier; rebuild or syntax 0; named spec 1
+KILLED sample config multiplier ignored; rebuild or syntax 0; named spec 1
+KILLED sample server-only mark removed; rebuild or syntax 0; named spec 1
+KILLED sample migration ignores the old field; rebuild or syntax 0; named spec 1
+KILLED sample press key changed; rebuild or syntax 0; named spec 1
+KILLED sample maximum pickup widened; rebuild or syntax 0; named spec 1
+RESTORED sample build and compiled lifecycle specs 0
+exit 0

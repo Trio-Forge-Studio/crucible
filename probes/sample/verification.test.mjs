@@ -20,6 +20,27 @@ test("a flow passes only when every press adds the multiplier to the coins and t
 	assert.equal(checkFlow([good[0], { coins: 1, total: 2, last: 1 }], 1).length, 1);
 	assert.equal(checkFlow([{ coins: 1, total: 0, last: 0 }], 1).length, 1);
 	assert.deepEqual(checkFlow([], 1), ["no HUD reading"]);
+	assert.deepEqual(
+		checkFlow(
+			[
+				{ coins: 7, total: 7, last: 0 },
+				{ coins: 9, total: 9, last: 2 },
+			],
+			2,
+			{ fresh: false },
+		),
+		[],
+	);
+	assert.equal(
+		checkFlow(
+			[
+				{ coins: 7, total: 7, last: 0 },
+				{ coins: 9, total: 9, last: 2 },
+			],
+			2,
+		).length,
+		1,
+	);
 });
 
 test("log lines count only after this run's server marker", () => {
