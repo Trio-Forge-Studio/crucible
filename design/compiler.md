@@ -1,6 +1,6 @@
 # Crucible compiler design
 
-The Crucible compiler is a proposed replacement for roblox-ts that compiles Roblox games written in TypeScript to Luau. It lives in this repository as crates in the `cli` workspace and runs inside the `crucible` binary, so `crucible build` compiles in process with no Node and no separate command. Its one overriding requirement is the speed and footprint of the compiler itself, so that many agents can build separate worktrees of one game on one machine. The quality of the emitted Luau is secondary, and matching roblox-ts output is not a goal. This document records the measurements taken on 2026-11-01, the design they lead to, and the phases that each end in a budget check. No product code exists yet.
+The Crucible compiler is a proposed replacement for roblox-ts that compiles Roblox games written in TypeScript to Luau. It lives in this repository as crates in the `cli` workspace and runs inside the `crucible` binary, so `crucible build` compiles in process with no Node and no separate command. Its one overriding requirement is the speed and footprint of the compiler itself, so that many agents can build separate worktrees of one game on one machine. The quality of the emitted Luau is secondary, and matching roblox-ts output is not a goal. This document records the measurements taken on 2026-11-01, the design they lead to, and the phases that each end in a budget check. Phases 0 to 4 are merged. `crucible build` still runs `rbxtsc` until phase 6.
 
 ## Goal and pass bar
 
