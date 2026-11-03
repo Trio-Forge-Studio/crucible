@@ -61,6 +61,15 @@ return {
 				return data
 			end)
 		end, "FD.Players.onLoad runs while a server Subsystem is constructed", "onLoad")
+		w.server.construction.setClaim({ record = { kind = 1, id = "Crate" } })
+		local ok, err = pcall(function()
+			w.server.d.PlayerData:receive(w.server.d.Gift, function(_, data)
+				return data
+			end)
+		end)
+		w.server.construction.clearClaim()
+		assert(not ok, "a claim while a behaviour is constructed throws")
+		spec.has(err, "FD.Players.receive runs while a server Subsystem is constructed", "naming the claim")
 	end,
 
 	["6 18 onLoad claims run in construction order then field order, get plain data, and their change saves at once"] = function()
@@ -320,6 +329,37 @@ return {
 		local inbox = w:envelope(fixture.STORE, 4120).inbox
 		spec.eq(#inbox, 1, "the message stays queued")
 		w:leave(ann)
+		w:finish()
+	end,
+
+	["6 a retired onLoad claim never runs again and claims are frozen once DataRuntime started"] = function()
+		local ran = 0
+		local w = newWorld(function(s, d, world)
+			s.service("Stamp", function(self)
+				world.stamp = self
+				self.claim = d.PlayerData:onLoad(function(_, data)
+					ran += 1
+					return data
+				end)
+			end)
+		end)
+		w:advance(0.05)
+		w.server.life.fault(w.server.state(w.stamp), 8, "retired")
+		w.link:flush()
+		local ann = w:player("Ann", 4120)
+		w:settle()
+		spec.eq(w.server.d.PlayerData:loaded(ann.player), true, "the load succeeded")
+		spec.eq(ran, 0, "the retired claim never ran")
+		local construction = w.server.construction
+		construction.setClaim(w.server.state(w:dataRuntime()))
+		local ok, err = pcall(function()
+			w.server.d.PlayerData:onLoad(function(_, data)
+				return data
+			end)
+		end)
+		construction.clearClaim()
+		assert(not ok, "a claim after activation throws")
+		spec.has(err, "claims are frozen once the data runtime has started", "naming the freeze")
 		w:finish()
 	end,
 

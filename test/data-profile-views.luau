@@ -281,6 +281,18 @@ return {
 		assert(w:kicked(ann.player) ~= nil, "Ann is kicked once her release settles")
 	end,
 
+	["126 M3 one failed field view turns loaded() false and its reads keep the last value"] = function()
+		local w, ann, player, data = loaded()
+		data(player).currency:set(17)
+		w:heartbeat()
+		spec.eq(ann.d.PlayerData:loaded(), true, "loaded")
+		local revision = #w:frames(ann)
+		w:inject(ann, { failed = { fixture.view("currency") }, kind = "update", revision = revision + 1, values = {} })
+		spec.eq(ann.d.PlayerData:loaded(), false, "a failed field declaration makes loaded() false")
+		spec.eq(ann.d.PlayerData().currency(), 17, "the failed field keeps its last value")
+		spec.eq(ann.d.PlayerData().settings.volume(), 0.5, "the other fields read as before")
+	end,
+
 	["124 134 E17 the field declarations are the public fields, the client root holds them, and client writes throw"] = function()
 		local w, ann, player, data = loaded()
 		local names = {}
@@ -305,6 +317,7 @@ return {
 		)
 		assert(table.isfrozen(root), "frozen")
 		spec.eq(ann.d.PlayerData().upgrades.speed(), 2, "a client map entry read")
+		assert(rawequal(ann.d.PlayerData(), ann.d.PlayerData()), "the client root is made once per realm")
 		local client = ann.d.PlayerData
 		throws(function()
 			client().currency:set(1)
