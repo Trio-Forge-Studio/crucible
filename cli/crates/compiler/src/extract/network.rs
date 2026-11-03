@@ -1,5 +1,5 @@
-//! Crucible's declaration macros: the rules each call obeys, the schema a declared type lowers to, and the program-wide
-//! CRU010 augmentation rule. The diagnostics equal the ones
+//! Crucible's declaration macros and `receive`: the rules each call obeys, the schema a declared type lowers to, and the
+//! program-wide CRU010 augmentation rule. The diagnostics equal the ones
 //! `packages/crucible/transformer-src/network.cjs` reports.
 
 use std::cmp::Ordering;
@@ -17,7 +17,8 @@ use crate::declarations::{
     DeclarationKind, MAX_ASK_TIMEOUT_SECONDS, MAX_SCHEMA_NODES, MAX_UNION_BRANCHES, Position, RESERVED_HANDLE_NAMES,
     Side, Spec, TypeArguments, VIEW_NAME_MAX_BYTES, VIEW_NAME_PREFIX,
 };
-use crate::facts::{Crucible, Declaration, Field, KeyLiteral, Literal, MapKey, Schema, Site, Tail};
+use crate::facts::{ClassKind, Crucible, Declaration, Field, KeyLiteral, Literal, MapKey, Schema, Site, Tail};
+use crate::macros::Macro;
 use crate::project::normalize;
 use crate::tree::File;
 
@@ -1301,6 +1302,144 @@ impl Extractor {
             }
         }
         Some(if let [width] = found[..] { Width::Brand(width) } else { Width::Conflicting })
+    }
+
+    /// CRU021, CRU022 and CRU012 for one `receive` call, and the fact its call lowers from.
+    pub(super) fn receive(&mut self, call: P<Node>, file: P<SourceFile>) {
+        let field = call.parent().filter(|p| {
+            let flags = tsrs_ast::get_combined_modifier_flags(*p);
+            p.kind() == Kind::PropertyDeclaration
+                && p.initializer() == Some(call)
+                && flags.intersects(ModifierFlags::Readonly)
+                && !flags.intersects(ModifierFlags::Static)
+        });
+        let instance = field.and_then(|f| f.parent()).and_then(|class| self.instance_type(class));
+        let subsystem = instance.is_some_and(|t| self.kind_of(t) == Some(ClassKind::Subsystem));
+        let (Some(field), Some(instance), true) = (field, instance, subsystem) else {
+            self.report(call, Code::Rule(21), "receive() must initialize a readonly instance field of a Subsystem.");
+            return;
+        };
+        let name = field.name().and_then(|n| self.checker.get_symbol_at_location_exported(n)).map(|s| s.name());
+        if let Some(name) = name {
+            let mut seen = HashSet::new();
+            let shadows = self.class_bases(instance).into_iter().any(|base| self.shadows(base, name, &mut seen));
+            if shadows {
+                self.report(call, Code::Rule(21), "A receiver field cannot shadow an inherited receiver.");
+            }
+        }
+        let target = call.arguments().first().map(|&a| self.checker.get_type_at_location(a));
+        let token = target
+            .filter(|t| !t.flags().intersects(TypeFlags::UnionOrIntersection))
+            .and_then(|t| self.api(t.symbol()))
+            .filter(|token| matches!(*token, "ToServer" | "ToClient" | "AskServer" | "ClientReady"));
+        match token {
+            None => {
+                self.report(call, Code::Rule(21), "receive target must be exactly one message token or ClientReady.")
+            }
+            Some(token) => {
+                let required = if token == "ToClient" { Side::Client } else { Side::Server };
+                if self.file_side(file) != Some(required) {
+                    let message = format!("{token} must be received by a {} Subsystem.", required.folder());
+                    self.report(call, Code::Rule(22), &message);
+                }
+                if let Some(callback) = self.callback(call.arguments().get(1).copied()) {
+                    self.callback_returns(call, callback, token);
+                }
+            }
+        }
+        if let Some(name) = name {
+            self.site();
+            let span = self.span(call);
+            let fact = Box::new(Crucible::Receive { field: name.into() });
+            self.table.store(span, Site::Crucible, |f| &mut f.crucible, fact);
+        }
+    }
+
+    fn callback_returns(&mut self, call: P<Node>, callback: P<Node>, token: &str) {
+        let signature = self.checker.get_signature_from_declaration_exported(callback);
+        let returned = self.checker.get_return_type_of_signature_exported(signature);
+        let parts = members(returned);
+        let asynchronous = tsrs_ast::get_combined_modifier_flags(callback).intersects(ModifierFlags::Async);
+        let promise = parts
+            .iter()
+            .any(|&t| t.symbol().is_some_and(|s| s.name() == "Promise" && self.standard(s, Standard::CompilerTypes)));
+        if asynchronous || promise {
+            self.report(
+                call,
+                Code::Rule(12),
+                "Network callbacks cannot be async or return a Promise; spawn a thread inside the callback.",
+            );
+            return;
+        }
+        if token == "AskServer" {
+            return;
+        }
+        let returns = parts.iter().any(|&t| {
+            !t.flags().intersects(TypeFlags::Void | TypeFlags::Undefined | TypeFlags::Never)
+                && !(token == "ClientReady"
+                    && !self.checker.get_signatures_of_type_exported(t, SignatureKind::Call).is_empty())
+        });
+        if returns {
+            let allowed = if token == "ClientReady" { " or a cleanup function" } else { "; use a block body" };
+            let message =
+                format!("{token} callbacks return nothing{allowed}; this one can return {}.", self.shown(returned));
+            self.report(call, Code::Rule(12), &message);
+        }
+    }
+
+    fn class_bases(&mut self, t: P<Type>) -> Vec<P<Type>> {
+        if t.object_flags().intersects(tsrs_checker::ObjectFlags::ClassOrInterface) {
+            self.checker.get_base_types_exported(t).to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Whether `t` or a base declares the field `name` with a `receive` initializer.
+    fn shadows(&mut self, t: P<Type>, name: &str, seen: &mut HashSet<P<Type>>) -> bool {
+        if !seen.insert(t) {
+            return false;
+        }
+        let property = self.checker.get_property_of_type_exported(t, name);
+        let receiver = property.is_some_and(|p| {
+            p.declarations().iter().any(|&d| {
+                d.kind() == Kind::PropertyDeclaration
+                    && d.initializer().is_some_and(|i| self.is_crucible_call(i, Macro::Receive))
+            })
+        });
+        receiver || self.class_bases(t).into_iter().any(|base| self.shadows(base, name, seen))
+    }
+
+    /// The function a callback argument names: a function written inline, a function or method declaration, or a
+    /// const initialized with one.
+    fn callback(&mut self, argument: Option<P<Node>>) -> Option<P<Node>> {
+        let argument = argument?;
+        match argument.kind() {
+            Kind::FunctionExpression | Kind::ArrowFunction => Some(argument),
+            Kind::Identifier | Kind::PropertyAccessExpression => {
+                let name = if argument.kind() == Kind::PropertyAccessExpression {
+                    argument.as_property_access_expression().name
+                } else {
+                    argument
+                };
+                let symbol =
+                    self.checker.get_symbol_at_location_exported(name).map(|s| unalias(&mut self.checker, s))?;
+                let [declaration] = symbol.declarations() else { return None };
+                let declaration = *declaration;
+                match declaration.kind() {
+                    Kind::FunctionDeclaration | Kind::MethodDeclaration => Some(declaration),
+                    Kind::VariableDeclaration
+                        if tsrs_ast::get_combined_node_flags(declaration).intersects(NodeFlags::Const) =>
+                    {
+                        declaration
+                            .initializer()
+                            .filter(|i| matches!(i.kind(), Kind::ArrowFunction | Kind::FunctionExpression))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Every symbol a declaration's lowering reaches.

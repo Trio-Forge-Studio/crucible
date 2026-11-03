@@ -828,6 +828,137 @@ fn the_diagnostic_catalogue_rejects_every_unsupported_declaration() {
     );
 }
 
+const RECEIVE_MESSAGES: &str = "export const Event = toServer<string>(\"X.Event\"); export const Out = toClient<string>(\"X.Out\"); export const Ask = askServer<string, number>(\"X.Ask\"); export const AskAny = askServer<string, unknown>(\"X.AskAny\");";
+
+fn receiver_header() -> String {
+    format!("{IMPORTS}import {{Event, Out, Ask, AskAny}} from \"../shared/messages\";\n")
+}
+
+#[test]
+fn receives_lower_owner_field_target_and_callback_and_keep_their_placement_sides_and_returns() {
+    let game = fresh();
+    game.write("src/shared/messages.ts", &format!("{IMPORTS}{RECEIVE_MESSAGES}"));
+    game.write(
+        "src/server/good.ts",
+        &format!(
+            "{}
+declare const cond: boolean;
+function factory(): (p: Player, v: string) => void {{ return () => {{}}; }}
+function stop(): never {{ throw \"stop\"; }}
+let mutable: (p: Player, v: string) => void = () => 5;
+export abstract class Base extends Subsystem {{ readonly input = receive(Event, (p, s) => {{ print(p.Name, s); }}); readonly plain: unknown = 1; }}
+export class Good extends Base {{
+ override readonly plain = receive(Event, () => {{}});
+ readonly stops = receive(Event, () => stop());
+ readonly loose = receive(Event, mutable);
+ readonly ready = receive(ClientReady, p => cond ? () => print(p.Name) : undefined);
+ readonly readyBlock = receive(ClientReady, p => {{ if(cond) return () => print(p.Name); }});
+ readonly request = receive(Ask, (p, s) => s.size());
+ readonly made = receive(Event, factory());
+}}",
+            receiver_header()
+        ),
+    );
+    game.write(
+        "src/client/good.ts",
+        &format!(
+            "{}export class Good extends Subsystem {{ readonly out = receive(Out, s => {{ print(s); }}); }}",
+            receiver_header()
+        ),
+    );
+    none(&reports_of(&game));
+    let luau = game.luau("server/good.luau");
+    has(&luau, "self.input = __crucible.receive(self, \"input\", Event, function(p, s)");
+    has(&luau, "self.plain = __crucible.receive(self, \"plain\", Event, function() end)");
+    has(&luau, "self.made = __crucible.receive(self, \"made\", Event, (factory()))");
+    has(&game.luau("client/good.luau"), "self.out = __crucible.receive(self, \"out\", Out, function(s)");
+
+    let bad: [(&str, &str); 23] = [
+        ("CRU021", "const x = receive(Event, () => {});"),
+        (
+            "CRU021",
+            "class X extends CrucibleBehaviour { readonly tag = \"x\"; readonly r = receive(Event, () => {}); }",
+        ),
+        ("CRU021", "class X extends Subsystem { static readonly r = receive(Event, () => {}); }"),
+        ("CRU021", "class X extends Subsystem { r = receive(Event, () => {}); }"),
+        ("CRU021", "class X extends Subsystem { method() { receive(Event, () => {}); } }"),
+        (
+            "CRU021",
+            "declare const target: ToServer<string> | ToClient<string>; class X extends Subsystem { readonly r = receive(target, () => {}); }",
+        ),
+        (
+            "CRU021",
+            "declare const target: ReceiveTarget; class X extends Subsystem { readonly r = receive(target, () => {}); }",
+        ),
+        ("CRU021", "declare const target: any; class X extends Subsystem { readonly r = receive(target, () => {}); }"),
+        (
+            "CRU021",
+            "abstract class Base extends Subsystem { readonly r = receive(Event, () => {}); } class X extends Base { readonly r = receive(Event, () => {}); }",
+        ),
+        ("CRU017", "class X extends Subsystem { readonly r = receive(toServer<string>(\"X.Inline\"), () => {}); }"),
+        ("CRU021", "class X extends Subsystem { readonly r = receive(Event, () => { receive(Event, () => {}); }); }"),
+        ("CRU022", "class X extends Subsystem { readonly r = receive(Out, () => {}); }"),
+        ("CRU012", "class X extends Subsystem { readonly r = receive(Event, async () => {}); }"),
+        (
+            "CRU012",
+            "const cb: (p: Player, s: string) => void = async () => {}; class X extends Subsystem { readonly r = receive(Event, cb); }",
+        ),
+        ("CRU012", "class X extends Subsystem { readonly r = receive(Event, p => new Set<Player>().add(p)); }"),
+        ("CRU012", "function cb() { return 5; } class X extends Subsystem { readonly r = receive(Event, cb); }"),
+        (
+            "CRU012",
+            "declare const cond: boolean; class X extends Subsystem { readonly r = receive(Event, p => cond ? new Set<Player>().add(p) : undefined); }",
+        ),
+        (
+            "CRU012",
+            "declare const cond: boolean; const cb: (p: Player) => void = p => cond ? (async () => {})() : undefined; class X extends Subsystem { readonly r = receive(ClientReady, cb); }",
+        ),
+        (
+            "CRU012",
+            "declare const cond: boolean; const cb: (p: Player) => void = p => cond ? 5 : undefined; class X extends Subsystem { readonly r = receive(ClientReady, cb); }",
+        ),
+        (
+            "CRU012",
+            "const helper = { cb() { return 7; } }; class X extends Subsystem { readonly r = receive(Event, helper.cb); }",
+        ),
+        ("CRU012", "class X extends Subsystem { readonly r = receive(Ask, async () => 5); }"),
+        ("CRU012", "class X extends Subsystem { readonly r = receive(Event, () => () => {}); }"),
+        (
+            "CRU012",
+            "function later(): Promise<number> { return undefined as never; } class X extends Subsystem { readonly r = receive(AskAny, () => later()); }",
+        ),
+    ];
+    let game = fresh();
+    game.write("src/shared/messages.ts", &format!("{IMPORTS}{RECEIVE_MESSAGES}"));
+    for (i, (_, source)) in bad.iter().enumerate() {
+        game.write(&format!("src/server/b{i}.ts"), &format!("{}{source}", receiver_header()));
+    }
+    for (side, token) in [("client", "ClientReady"), ("shared", "Event"), ("neutral", "Event")] {
+        game.write(
+            &format!("src/{side}/bad.ts"),
+            &format!("{}class X extends Subsystem {{ readonly r = receive({token}, () => {{}}); }}", receiver_header()),
+        );
+    }
+    let (reports, type_errors) = check(&game);
+    assert_eq!(
+        type_errors,
+        ["src/server/b1.ts:3", "src/server/b20.ts:3"],
+        "a behaviour needs its tag, and an async Ask callback returns a Promise its type rejects"
+    );
+    for (i, (code, _)) in bad.iter().enumerate() {
+        let file = format!("src/server/b{i}.ts");
+        if [1, 20].contains(&i) {
+            continue;
+        }
+        let found = messages(&reports, &file);
+        assert!(found.iter().any(|m| m.starts_with(code)), "receiver {i} reports {code}: {found:?}");
+    }
+    for side in ["client", "shared", "neutral"] {
+        let found = messages(&reports, &format!("src/{side}/bad.ts"));
+        assert!(found.iter().any(|m| m.starts_with("CRU022")), "{side}: {found:?}");
+    }
+}
+
 #[test]
 fn duplicate_names_and_transitive_global_or_merged_payloads_fail_at_the_declaring_file() {
     let game = fresh();
@@ -1368,6 +1499,48 @@ export const Alias=toServer<Partial<Record<\"z\"|\"a\",number>>>(\"X.Alias\");
     for file in ["union.ts", "depth.ts", "nodes.ts", "fake-width.ts"] {
         assert!(reports.iter().any(|r| r.file.ends_with(file) && r.code == 90019), "{file}");
     }
+}
+
+#[test]
+fn callback_parameter_types_survive_imported_payload_aliases() {
+    let game = written(&[
+        ("src/shared/model.ts", "export interface Payload { value: string }".into()),
+        ("src/shared/messages.ts", format!("{IMPORTS}import {{Payload}} from \"./model\";{}", declaration("Payload"))),
+        (
+            "src/server/service.ts",
+            format!(
+                "{IMPORTS}import {{Message}} from \"../shared/messages\"; export class Service extends Subsystem {{ readonly r=receive(Message,(p,payload)=>{{print(p.Name,payload.value);}}); }}"
+            ),
+        ),
+    ]);
+    none(&reports_of(&game));
+    game.compile();
+}
+
+#[test]
+fn declaration_and_receiver_aliases_and_namespaces_keep_macro_symbol_identity() {
+    let game = written(&[
+        ("src/shared/macros.ts", "export {toServer as message, receive as claim} from \"@trioforge/crucible\";".into()),
+        (
+            "src/shared/messages.ts",
+            "import {message} from \"./macros\"; import * as C from \"@trioforge/crucible\"; export const Named=message<string>(\"X.Named\"); export const Namespace=C.toServer<number>(\"X.Namespace\"); export const Bracket=C[\"toServer\"]<boolean>(\"X.Bracket\"); export const Paren=(C.toServer)<undefined>(\"X.Paren\");".into(),
+        ),
+        (
+            "src/server/service.ts",
+            "import {Subsystem as Base} from \"@trioforge/crucible\"; import {claim} from \"../shared/macros\"; import {Named} from \"../shared/messages\"; export class Service extends Base { readonly r=claim<typeof Named>(Named,(p,value)=>{print(p.Name,value);}); }".into(),
+        ),
+        (
+            "src/client/caller.ts",
+            "import {Network as N} from \"@trioforge/crucible/client\"; import {Named,Namespace} from \"../shared/messages\"; N.send(Named,\"literal\"); N.send(Namespace,19);".into(),
+        ),
+    ]);
+    none(&reports_of(&game));
+    let messages = game.luau("shared/messages.luau");
+    has(&messages, "local Named = __crucible.toServer(\"X.Named\", __crucible.n.string)");
+    has(&messages, "local Namespace = __crucible.toServer(\"X.Namespace\", __crucible.n.f64)");
+    has(&messages, "local Bracket = __crucible.toServer(\"X.Bracket\", __crucible.n.bool)");
+    has(&messages, "local Paren = __crucible.toServer(\"X.Paren\", __crucible.n[\"nil\"])");
+    has(&game.luau("server/service.luau"), "self.r = __crucible.receive(self, \"r\", Named, function(p, value)");
 }
 
 #[test]
@@ -2597,6 +2770,36 @@ Network.send(ClientReady);
 }
 
 #[test]
+fn an_unknown_response_accepts_an_empty_callback_and_callbacks_that_break_their_target_are_type_errors() {
+    let messages = "import { askServer, toServer } from \"@trioforge/crucible\"; export const Query = askServer<undefined, unknown>(\"X.Query\"); export const Typed = askServer<undefined, string | undefined>(\"X.Typed\"); export const Event = toServer<string>(\"X.Event\"); export const Ask = askServer<string, number>(\"X.Ask\");";
+    let receiver = |field: &str| {
+        format!(
+            "import {{ receive, Subsystem, ClientReady, ToServer }} from \"@trioforge/crucible\"; import {{ Query, Typed, Event, Ask }} from \"../shared/messages\"; export class Q extends Subsystem {{ readonly r = {field}; }}"
+        )
+    };
+    let game = written(&[
+        ("src/shared/messages.ts", messages.to_owned()),
+        ("src/server/query.ts", receiver("receive(Query, () => {})")),
+    ]);
+    none(&reports_of(&game));
+    game.compile();
+    let game = written(&[
+        ("src/shared/messages.ts", messages.to_owned()),
+        ("src/server/typed.ts", receiver("receive(Typed, () => {})")),
+    ]);
+    assert_eq!(type_codes(&game), [], "TypeScript 7 reads a block body without a return as returning undefined");
+    for (field, code) in [
+        ("receive(Event, (p: Player, s: number) => {})", 2345),
+        ("receive(ClientReady, (p: string) => {})", 2345),
+        ("receive(Ask, (p, s) => s)", 2322),
+        ("receive<ToServer<number>>(Event, (p, n) => {})", 2345),
+    ] {
+        let game = written(&[("src/shared/messages.ts", messages.to_owned()), ("src/server/case.ts", receiver(field))]);
+        assert_eq!(type_codes(&game), [("src/server/case.ts:1".to_owned(), code)], "{field}");
+    }
+}
+
+#[test]
 fn explicit_receive_type_arguments_check_a_named_callback() {
     let game = written(&[
         (
@@ -2609,6 +2812,65 @@ fn explicit_receive_type_arguments_check_a_named_callback() {
         ),
     ]);
     assert_eq!(type_codes(&game), [("src/server/named.ts:1".to_owned(), 2345)]);
+}
+
+#[test]
+fn every_declaration_kind_and_receive_lower_to_their_exact_emit_call() {
+    let game = data_game();
+    game.write(
+        "src/shared/kinds.ts",
+        &format!(
+            "{SHARED}import {{ toClient, askServer, replicatedPerPlayer }} from \"@trioforge/crucible\";
+export const A = toServer<{{ a: string }}>(\"K.ToServer\");
+export const B = toClient<u8>(\"K.ToClient\");
+export const C = askServer<string, number>(\"K.Ask\", {{ timeout: 5 }});
+export const D = replicated<number>(\"K.Replicated\", 0);
+export const E = replicatedPerPlayer<boolean>(\"K.PerPlayer\", false);
+export const F = profileStore(\"K.Profile\", {{ template: {{ coins: 0, secret: serverOnly(\"\") }} }});
+"
+        )
+        .replace("{ toClient,", "{ toClient, type u8,"),
+    );
+    game.write(
+        "src/server/kinds.ts",
+        &format!(
+            "{SERVER}import {{ Subsystem, receive }} from \"@trioforge/crucible\";
+import {{ A }} from \"../shared/kinds\";
+export const G = dataStore<{{ coins: number }}>(\"K.Data\", {{ defaults: {{ coins: 0 }} }});
+export const H = profileMessage<string>(\"K.Message\");
+export const I = config<number>(\"K.Config\", 1);
+export const J = playerConfig<string>(\"K.PlayerConfig\", \"x\");
+export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, value) => {{}}); }}
+"
+        ),
+    );
+    none(&reports_of(&game));
+    let shared = game.luau("shared/kinds.luau");
+    for line in [
+        "local A = __crucible.toServer(\"K.ToServer\", __crucible.n.object({ { \"a\", __crucible.n.string } }))",
+        "local B = __crucible.toClient(\"K.ToClient\", __crucible.n.u8)",
+        "local C = __crucible.askServer(\"K.Ask\", __crucible.n.string, __crucible.n.f64, 5)",
+        "local D = __crucible.replicated(\"K.Replicated\", 0, __crucible.n.f64)",
+        "local E = __crucible.replicatedPerPlayer(\"K.PerPlayer\", false, __crucible.n.bool)",
+    ] {
+        has(&shared, line);
+    }
+    let profile = &calls(&shared, &DATA)["K.Profile"];
+    let persist = n::o(&[("coins", n::f()), ("secret", n::s())]);
+    assert_eq!(
+        profile[2..].iter().map(|a| canon(a)).collect::<Vec<_>>(),
+        expected(&[persist, n::o(&[("coins", n::f())]), "[[\"secret\"]]".into()])
+    );
+    let server = game.luau("server/kinds.luau");
+    for line in [
+        "local H = __crucible.profileMessage(\"K.Message\", __crucible.n.string)",
+        "local I = __crucible.config(\"K.Config\", 1, __crucible.n.f64)",
+        "local J = __crucible.playerConfig(\"K.PlayerConfig\", \"x\", __crucible.n.string)",
+        "self.ping = __crucible.receive(self, \"ping\", A, function(player, value) end)",
+    ] {
+        has(&server, line);
+    }
+    same(&calls(&server, &DATA)["K.Data"][2], &n::o(&[("coins", n::f())]), "K.Data");
 }
 
 #[test]

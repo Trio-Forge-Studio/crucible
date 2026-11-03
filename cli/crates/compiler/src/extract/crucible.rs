@@ -54,7 +54,7 @@ struct Package {
 /// What a Crucible diagnostic reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Code {
-    /// A rule, CRU001 to CRU020, CRU023 or CRU026.
+    /// A rule, CRU001 to CRU023 or CRU026.
     Rule(u16),
     /// The project's packages do not let Crucible compute a type id.
     Setup,
@@ -1188,11 +1188,7 @@ impl Extractor {
             Some(Macro::Inject) => self.inject_rules(n),
             Some(Macro::Attribute) => self.attribute_rules(n),
             Some(Macro::Boot) => self.boot(n),
-            Some(Macro::Receive) => self.report(
-                n,
-                Code::Setup,
-                "receive needs Crucible's network transform, which this compiler does not run yet.",
-            ),
+            Some(Macro::Receive) => self.receive(n, file),
             Some(m) => {
                 if let Some(kind) = DeclarationKind::of(m) {
                     self.declaration(n, kind, file);

@@ -61,6 +61,14 @@ impl Lower<'_> {
                 let args = self.macro_arguments(n);
                 callee.call(args)
             }
+            Macro::Receive => {
+                let Some(Crucible::Receive { field }) = self.fact(n).and_then(|f| f.crucible.as_deref()) else {
+                    return self.unsupported(n, "receive() outside a receiver field initializer");
+                };
+                let mut args = vec![Expr::global("self"), string(field)];
+                args.extend(self.macro_arguments(n));
+                self.runtime("receive").call(args)
+            }
             _ if DeclarationKind::of(m).is_some() => {
                 let Some(Crucible::Declaration(declaration)) = self.fact(n).and_then(|f| f.crucible.as_deref()) else {
                     return self.unsupported(n, &format!("`{}` without its declaration facts", m.name()));
