@@ -21,9 +21,11 @@ import { MAX_EFFECT_RUNS_PER_FLUSH, MAX_FLUSH_ROUNDS, MAX_RUNS_PER_EFFECT } from
 import {
 	adopt,
 	endLifetime,
+	hold,
 	newLifetime,
 	NO_OWNER,
 	ownerLabel,
+	Release,
 	resolveOwner,
 	retire,
 	Role,
@@ -159,7 +161,7 @@ function complete(effect: EffectNode, run: Lifetime, frame: Frame, completion: C
 		fail(effect, failure);
 		return;
 	}
-	if (value !== undefined) run.releases.push(value as () => void);
+	if (value !== undefined) hold(run, Release.Call, value);
 	if (effect.stopped) return;
 	const reads = frame.deps!;
 	rewire(effect, effect.dependencies, reads);

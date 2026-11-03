@@ -64,11 +64,14 @@ export function pop(frame: Frame) {
 	if (stack.size() === 0) stacks.delete(thread);
 }
 
-function discard(worker: thread): Frame[] {
+const NONE_OPEN: readonly Frame[] = [];
+
+function discard(worker: thread): readonly Frame[] {
 	const stack = stacks.get(worker);
+	if (stack === undefined) return NONE_OPEN;
 	stacks.delete(worker);
 	const open = new Array<Frame>();
-	if (stack !== undefined) for (let i = stack.size() - 1; i >= 0; i--) open.push(stack[i]);
+	for (let i = stack.size() - 1; i >= 0; i--) open.push(stack[i]);
 	return open;
 }
 

@@ -336,6 +336,7 @@ function evaluate(node: ComputedNode) {
 
 /** @internal Finishes every computed a body left open: its evaluation failed with the body's error. */
 export function finishOpen(completion: Completion) {
+	if (completion.open.size() === 0) return;
 	const message = tostring(completion.value);
 	const failure = { reason: completion.result === CallResult.Yielded ? YIELDED : message, message };
 	for (const frame of completion.open)

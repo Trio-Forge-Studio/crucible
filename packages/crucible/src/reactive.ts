@@ -9,7 +9,7 @@ import {
 	write,
 	type StateNode,
 } from "./internal/reactive/graph";
-import { createScope, registerCleanup } from "./internal/reactive/ownership";
+import { createScope, registerCleanup, registerOwned } from "./internal/reactive/ownership";
 
 declare const stateKind: unique symbol;
 
@@ -103,4 +103,27 @@ export function scope(setup: () => void): () => void {
  */
 export function onCleanup(release: () => void): void {
 	registerCleanup(release);
+}
+
+/**
+ * What `own` releases: a function, called with no arguments; a connection, disconnected; an Instance, destroyed; a
+ * thread, cancelled with `task.cancel`; or an object, through its `destroy()` or else its `Destroy()`. A `State` is a
+ * callable table, not a function, so it is not one.
+ */
+export type Ownable =
+	| ((() => void) & { readonly [stateKind]?: never })
+	| RBXScriptConnection
+	| Instance
+	| thread
+	| { destroy(): void }
+	| { Destroy(): void };
+
+/**
+ * Releases `value` once when the current owner ends, exactly as `onCleanup` would release a function that does it,
+ * and returns `value`. How it is released is decided now, from its type. Under an owner that already ended it is
+ * released at once. With no owner it throws, and so does a value that is not `Ownable`.
+ */
+export function own<T extends Ownable>(value: T): T {
+	registerOwned(value);
+	return value;
 }

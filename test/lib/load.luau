@@ -11,6 +11,9 @@ local ROOT = "packages/crucible/out"
 
 local nodes: { [string]: Node } = {}
 
+-- The bytecode optimization level for modules loaded after `spec.optimize` sets it. Unset, Lune's default applies.
+local optimization: number? = nil
+
 local function node(path: string): Node
 	local existing = nodes[path]
 	if existing then
@@ -100,7 +103,11 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 			for key, value in globals or {} do
 				env[key] = value
 			end
-			local chunk = luau.load(fs.readFile(fileOf(path)), { debugName = path, environment = env })
+			local source = fs.readFile(fileOf(path))
+			if optimization then
+				source = luau.compile(source, { optimizationLevel = optimization })
+			end
+			local chunk = luau.load(source, { debugName = path, environment = env })
 			loaded[path] = chunk()
 			if string.match(path, "/internal/log%-output$") and loggingPort then
 				loaded[path].installLoggingPort(loggingPort)
@@ -129,6 +136,10 @@ end
 local spec = {}
 
 local shared = graph()
+
+function spec.optimize(level: number)
+	optimization = level
+end
 
 -- Loads `packages/crucible/out/<relative>` once per process.
 function spec.module(relative: string, globals: { [string]: any }?): any
