@@ -147,12 +147,12 @@ class ProfileBinding {
 		return this.slot(player)?.root ?? rootHandle(inertSource(this), this.declaration.persist);
 	}
 
-	/** Rule 13 and RX 7, before the session is even looked up. */
+	/** Rule 13's checks, then RX 7's: inside a computed a handle write is a state write. */
 	guard(session: Session | undefined) {
-		guardPure("write state");
 		session?.assertIdle();
 		assertOutsideCallback();
 		if (insideDataCallback()) error("a write inside a data callback; return the data instead", 0);
+		guardPure("write state");
 	}
 
 	/** Rule 12: the one gate. Before activation there is no session, so a write returns false. */

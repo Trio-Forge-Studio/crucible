@@ -24,6 +24,7 @@ function fixture.nodes(n)
 		{ "currency", n.f64 },
 		{ "mastery", mastery },
 		{ "nickname", n.union({ n["nil"], n.string }) },
+		{ "notes", n.string },
 		{ "purchaseLog", n.map(n.string, n.f64) },
 		{ "questProgress", n.array(n.f64) },
 		{ "settings", settings },
@@ -44,7 +45,7 @@ function fixture.nodes(n)
 	return persist, replica
 end
 
-fixture.SERVER_ONLY = { { "analytics" }, { "purchaseLog" }, { "vault", "pin" } }
+fixture.SERVER_ONLY = { { "analytics" }, { "notes" }, { "purchaseLog" }, { "vault", "pin" } }
 
 -- The template as game code writes it, `serverOnly` marks included. Fresh tables on every call.
 function fixture.template(api)
@@ -53,6 +54,7 @@ function fixture.template(api)
 		career = { jobs = {} },
 		currency = 0,
 		mastery = {},
+		notes = api.serverOnly(""),
 		purchaseLog = api.serverOnly({}),
 		questProgress = {},
 		settings = { vibration = true, volume = 0.5 },

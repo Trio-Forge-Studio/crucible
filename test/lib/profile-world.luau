@@ -196,6 +196,22 @@ function World:player(name: string, userId: number, options)
 	return client
 end
 
+-- The player leaves: networking's PlayerRemoving, then data's.
+function World:leave(client)
+	self.link:leave(client)
+	self.link:flush()
+end
+
+-- Runs `fn` on a new thread at once, as task.spawn does, and returns what it returned.
+function World.spawn(fn)
+	local box = {}
+	coroutine.resume(coroutine.create(function()
+		box.value = fn()
+		box.done = true
+	end))
+	return box
+end
+
 -- Advances the shared timeline, then raises any error a backend-resumed thread or the link recorded.
 function World:advance(seconds: number)
 	self.link:advance(seconds)
@@ -215,6 +231,22 @@ end
 -- Runs `fn` on a server thread; `box.done` and `box.value` report its return.
 function World:run(fn)
 	return self.link:run(fn)
+end
+
+-- The framework's DataRuntime object.
+function World:dataRuntime()
+	for _, record in self.server.registry.records() do
+		if record.id == "Crucible.DataRuntime" then
+			return record.state.object
+		end
+	end
+	error("no DataRuntime")
+end
+
+-- Ends DataRuntime's generation after boot, as a fault would (rule 107).
+function World:retireData()
+	self.server.life.fault(self.server.state(self:dataRuntime()), 8, "retired")
+	self.link:flush()
 end
 
 -- The kick message the server sent `player`, or nil.
