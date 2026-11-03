@@ -65,6 +65,7 @@ pub(super) struct Api {
     /// The protected instance methods Crucible's own classes declare, which are its lifecycle hooks.
     hooks: HashSet<&'static str>,
     packages: HashMap<PathBuf, Option<Rc<Package>>>,
+    kinds: HashMap<P<Type>, Option<ClassKind>>,
     configs: HashMap<PathBuf, Option<PathBuf>>,
     roots: HashMap<PathBuf, Option<PathBuf>>,
     root_dir: Option<PathBuf>,
@@ -85,6 +86,7 @@ impl Api {
             macros: HashMap::new(),
             hooks: HashSet::new(),
             packages: HashMap::new(),
+            kinds: HashMap::new(),
             configs: HashMap::new(),
             roots: HashMap::new(),
             root_dir,
@@ -519,7 +521,12 @@ impl Extractor {
     }
 
     fn kind_of(&mut self, t: P<Type>) -> Option<ClassKind> {
-        self.class_kind(t, &mut HashSet::new())
+        if let Some(&kind) = self.crucible.kinds.get(&t) {
+            return kind;
+        }
+        let kind = self.class_kind(t, &mut HashSet::new());
+        self.crucible.kinds.insert(t, kind);
+        kind
     }
 
     fn instance_type(&mut self, class: P<Node>) -> Option<P<Type>> {

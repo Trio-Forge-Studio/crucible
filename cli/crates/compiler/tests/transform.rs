@@ -1349,3 +1349,21 @@ fn imports_the_place_cannot_hold_are_errors_at_their_specifier() {
         "local shared = TS.import(script, game:GetService(\"ReplicatedStorage\"), \"TS\", \"util\").shared",
     );
 }
+
+#[test]
+fn heritage_chains_hundreds_deep_finish_the_rules_and_the_facts() {
+    const INTERFACES: usize = 300;
+    const CLASSES: usize = 60;
+    let mut model: Vec<String> =
+        (0..INTERFACES).map(|i| format!("export interface L{i} extends L{} {{ f{i}: number }}", i + 1)).collect();
+    model.push(format!("export interface L{INTERFACES} {{ leaf: string }}"));
+    model.push("import { Subsystem } from \"@trioforge/crucible\";".to_owned());
+    model.push(format!("export abstract class C{CLASSES} extends Subsystem {{}}"));
+    model.extend((0..CLASSES).rev().map(|i| format!("export abstract class C{i} extends C{} {{ c{i} = 1; }}", i + 1)));
+    let game = Game::new();
+    game.write("src/shared/model.ts", &model.join("\n"));
+    game.main("import { inject } from \"@trioforge/crucible\";\nimport { C0, L0 } from \"../shared/model\";\nexport const one = inject<L0>();\nexport const leaf = one.leaf + one.f0;\nexport class Leaf extends C0 {}");
+    let luau = game.luau("server/main.luau");
+    has(&luau, "__crucible.resolve(\"fixture-game/shared/model:L0\")");
+    has(&luau, "__crucible.defineClass(Leaf, {");
+}
