@@ -195,8 +195,8 @@ fn a_lua_tuple_iterator_step_binds_as_a_whole() {
     has(
         "control.luau",
         &[
-            "for _43, _44 in pairs(scores) do\n\t\tlocal step = { _43, _44 }",
-            "for _45 in pairs(scores) do\n\t\tcount += 1",
+            "for _61, _62 in pairs(scores) do\n\t\tlocal step = { _61, _62 }",
+            "for _63 in pairs(scores) do\n\t\tcount += 1",
         ],
     );
 }
