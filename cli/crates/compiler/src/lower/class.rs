@@ -173,10 +173,10 @@ impl Lower<'_> {
             let Parameters { names: params, rest: varargs } = l.parameters(c.parameters());
             let Some(body) = c.body() else { return (params, varargs) };
             let statements = body.statements();
-            l.hoist(statements);
+            let hoisted = l.hoist(statements);
             let split = statements.iter().position(is_super_call).map_or(0, |i| i + 1);
             for st in statements.iter().take(split) {
-                l.stmt(st);
+                l.hoisted_stmt(st, &hoisted);
             }
             for p in c.parameters().iter() {
                 if p.is_parameter_property()
@@ -189,7 +189,7 @@ impl Lower<'_> {
             }
             l.property_initializers(s);
             for st in statements.iter().skip(split) {
-                l.stmt(st);
+                l.hoisted_stmt(st, &hoisted);
             }
             (params, varargs)
         });

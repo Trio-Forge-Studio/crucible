@@ -183,3 +183,48 @@ export function patternInCatch() {
 		finished += 1;
 	}
 }
+
+export function bareReturnInTry(): void {
+	try {
+		return;
+	} catch {}
+}
+
+export function bareReturnThroughFinally(log: string[]): void {
+	try {
+		return;
+	} finally {
+		log.push("finally");
+	}
+}
+
+export function bareReturnInCatch(log: string[]): void {
+	try {
+		throw "thrown";
+	} catch {
+		return;
+	} finally {
+		log.push("finally");
+	}
+}
+
+export function bareReturnInNestedFinally(): void {
+	try {
+		try {
+			log0();
+		} finally {
+			// oxlint-disable-next-line no-unsafe-finally
+			return;
+		}
+	} catch {}
+}
+
+function log0() {}
+
+export function emptyTupleInTry(): LuaTuple<[]> {
+	try {
+		return $tuple();
+	} catch {
+		return $tuple();
+	}
+}

@@ -17,9 +17,9 @@ pub struct Written {
 }
 
 /// Writes each module under `out`, skipping files whose bytes already match, and counts the files it wrote. Then it
-/// deletes every `.luau` file under `out` that starts with the compiler's header and is not one of `modules`, and
-/// any folder that deletion leaves empty, and counts the files it deleted. Files the compiler did not emit, such as
-/// `rbxtsc` output and declarations, stay.
+/// deletes every `.luau` file under `out` that starts with the compiler's header and is not one of `modules`, the
+/// temporary files of a case-only rename that failed, and any folder that deletion leaves empty, and counts the
+/// files it deleted. Files the compiler did not emit, such as `rbxtsc` output and declarations, stay.
 ///
 /// On a case-insensitive file system, a module whose source changed only in case is written into the existing file
 /// under its old name. That file is renamed to the module's path, because Rojo names the instance after the file.
@@ -154,7 +154,7 @@ fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, ch
         {
             // The exact name is absent from the listing although `write` just wrote it, so the file system
             // resolved that name to this entry and ignores case.
-            rename_case(disk, &dir.join(name), &dir.join(target))?;
+            rename_case(disk, dir, &present, name, target)?;
             changes.renamed += 1;
             name = target;
         }
@@ -169,8 +169,7 @@ fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, ch
                 }
             }
             EntryKind::File
-                if name.ends_with(".luau")
-                    && !wanted.is_some_and(|w| w.contains(name))
+                if (is_temporary(name) || name.ends_with(".luau") && !wanted.is_some_and(|w| w.contains(name)))
                     && disk.starts_with(&path, HEADER.as_bytes())? =>
             {
                 disk.remove_file(&path)?;
@@ -186,12 +185,38 @@ fn same_name(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.to_lowercase() == b.to_lowercase()
 }
 
-/// Some file systems treat a rename that changes only case as a no-op, so it goes through a temporary name.
-fn rename_case(disk: &mut impl Disk, from: &Path, to: &Path) -> io::Result<()> {
-    let mut temporary = from.as_os_str().to_owned();
-    temporary.push(".crucible-rename");
-    disk.rename(from, Path::new(&temporary))?;
-    disk.rename(Path::new(&temporary), to)
+/// Some file systems treat a rename that changes only case as a no-op, so it goes through a temporary name that no
+/// entry of `dir` has, because a rename replaces the file it lands on. If the second rename fails, the entry goes back
+/// to its old name.
+fn rename_case(disk: &mut impl Disk, dir: &Path, present: &HashSet<&str>, from: &str, to: &str) -> io::Result<()> {
+    let mut n = 1;
+    let temporary = loop {
+        let name = temporary_name(from, n);
+        if !present.iter().any(|p| same_name(p, &name)) {
+            break dir.join(name);
+        }
+        n += 1;
+    };
+    disk.rename(&dir.join(from), &temporary)?;
+    if let Err(error) = disk.rename(&temporary, &dir.join(to)) {
+        // When this fails too, the next sweep deletes the compiler's files under the temporary name.
+        let _ = disk.rename(&temporary, &dir.join(from));
+        return Err(error);
+    }
+    Ok(())
+}
+
+const TEMPORARY: &str = ".crucible-rename";
+
+fn temporary_name(name: &str, n: u32) -> String {
+    if n == 1 { format!("{name}{TEMPORARY}") } else { format!("{name}{TEMPORARY}-{n}") }
+}
+
+/// Whether `rename_case` could have given a module file this name.
+fn is_temporary(name: &str) -> bool {
+    let Some((module, suffix)) = name.rsplit_once(TEMPORARY) else { return false };
+    let n = if suffix.is_empty() { Some(1) } else { suffix.strip_prefix('-').and_then(|n| n.parse().ok()) };
+    module.ends_with(".luau") && n.is_some_and(|n| temporary_name(module, n) == name)
 }
 
 #[cfg(test)]
@@ -208,6 +233,8 @@ mod tests {
     struct Folding {
         /// Keyed by the lowercase path. The value holds the path with its stored case, and no contents for a folder.
         entries: BTreeMap<String, (String, Option<Vec<u8>>)>,
+        /// A rename to exactly this path fails.
+        refused: Option<String>,
     }
 
     fn key(path: &Path) -> String {
@@ -268,6 +295,9 @@ mod tests {
 
         fn rename(&mut self, from: &Path, to: &Path) -> io::Result<()> {
             let (from_key, to_stored) = (key(from), to.to_string_lossy().replace('\\', "/"));
+            if self.refused.as_ref() == Some(&to_stored) {
+                return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+            }
             let moved: Vec<String> = self
                 .entries
                 .keys()
@@ -315,5 +345,51 @@ mod tests {
         assert_eq!(changes, Written { written: 1, renamed: 1, removed: 0 });
         assert_eq!(disk.names("out"), ["FOO.luau", "Systems"]);
         assert_eq!(disk.read(Path::new("out/FOO.luau")).unwrap(), new_bytes[0].source.as_bytes());
+    }
+
+    #[test]
+    fn a_case_only_rename_never_replaces_a_file_beside_it() {
+        let mut disk = Folding::default();
+        write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 1\n")]).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename"), b"mine").unwrap();
+
+        let changes = write_to(&mut disk, Path::new("out"), &[module("Foo.luau", "return 1\n")]).unwrap();
+        assert_eq!(changes, Written { written: 0, renamed: 1, removed: 0 });
+        assert_eq!(disk.names("out"), ["Foo.luau", "foo.luau.crucible-rename"]);
+        assert_eq!(disk.read(Path::new("out/foo.luau.crucible-rename")).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn a_failed_case_only_rename_puts_the_module_back_and_the_next_write_finishes_it() {
+        let mut disk = Folding { refused: Some("out/Foo.luau".to_owned()), ..Folding::default() };
+        write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 1\n")]).unwrap();
+
+        let recased = [module("Foo.luau", "return 1\n")];
+        assert!(write_to(&mut disk, Path::new("out"), &recased).is_err());
+        assert_eq!(disk.names("out"), ["foo.luau"]);
+
+        disk.refused = None;
+        let changes = write_to(&mut disk, Path::new("out"), &recased).unwrap();
+        assert_eq!(changes, Written { written: 0, renamed: 1, removed: 0 });
+        assert_eq!(disk.names("out"), ["Foo.luau"]);
+    }
+
+    #[test]
+    fn the_sweep_removes_the_temporary_files_a_failed_rename_left_and_no_others() {
+        let mut disk = Folding::default();
+        let header = |body: &str| format!("{HEADER}{body}").into_bytes();
+        disk.create_dir_all(Path::new("out")).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename"), &header("return 1\n")).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename-2"), &header("return 1\n")).unwrap();
+        disk.write(Path::new("out/bar.luau.crucible-rename"), b"mine").unwrap();
+        disk.write(Path::new("out/notes.crucible-rename"), &header("")).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename-x"), &header("")).unwrap();
+
+        let changes = write_to(&mut disk, Path::new("out"), &[module("Foo.luau", "return 1\n")]).unwrap();
+        assert_eq!(changes, Written { written: 1, renamed: 0, removed: 2 });
+        assert_eq!(
+            disk.names("out"),
+            ["bar.luau.crucible-rename", "Foo.luau", "foo.luau.crucible-rename-x", "notes.crucible-rename"]
+        );
     }
 }

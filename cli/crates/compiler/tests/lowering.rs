@@ -62,9 +62,19 @@ fn relative_imports_go_through_ts_import_from_the_module_folder() {
 }
 
 #[test]
-fn a_local_used_before_its_declaration_is_declared_first() {
-    has("modules.luau", &["local TS = _G[script]\nlocal late\n", "\nfunction late()\n"]);
+fn a_function_used_before_its_declaration_is_made_first_with_the_locals_it_captures() {
+    has("modules.luau", &["\nlocal function late()\n\treturn \"late\"\nend\nlocal function early()\n"]);
     has("modules.luau", &["local Counter = {}\ndo\n\tlocal count = 0\n", "\tCounter.advance = advance\nend"]);
+    has(
+        "modules.luau",
+        &[
+            "\tlocal total = base\n\tlocal function add(n)\n",
+            "\tend\n\tlocal first = add(1)",
+            "\tlocal isOdd\n\tlocal function isEven(k)\n",
+            "\tfunction isOdd(k)\n",
+            "\tlocal value\n\tlocal function get()\n",
+        ],
+    );
 }
 
 #[test]
@@ -181,8 +191,8 @@ fn throw_keeps_its_value_and_try_runs_its_bodies_in_pcall() {
             "error(\"plain\", 0)",
             "\tpcall(function()\n\t\tf()\n\t\tdone = true\n\tend)\n\treturn done",
             "\tif not _0 then\n\t\tlocal e = _1\n\t\treturn e\n\telseif _1 == 1 then\n\t\treturn _2\n\tend",
-            "\tif not _9 then\n\t\t_9, _10, _11 = pcall(function(e)",
-            "\ttable.insert(log, \"finally\")\n\tif not _9 then\n\t\terror(_10, 0)\n\tend\n\tif _10 == 1 then\n\t\treturn _11\n\tend",
+            "\tif not _6 then\n\t\t_6, _7, _8 = pcall(function(e)",
+            "\ttable.insert(log, \"finally\")\n\tif not _6 then\n\t\terror(_7, 0)\n\tend\n\tif _7 == 1 then\n\t\treturn _8\n\tend",
             "\t\t\tif _13 == 3 then\n\t\t\t\tbreak\n\t\t\telseif _13 == 4 then\n\t\t\t\tcontinue\n\t\t\tend",
             "return 2, table.pack(1, \"one\")",
             "return table.unpack(_62, 1, _62.n)",
