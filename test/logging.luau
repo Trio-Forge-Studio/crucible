@@ -303,10 +303,12 @@ return {
 		local w = world()
 		w.log:info("before boot")
 		spec.eq(w.e.gameLogs[1].message, "before boot", "module log")
-		local h = require("./lib/place")()
-		h.load(h.place:GetService("ServerScriptService").TS.main)
-		spec.eq(#h.engine.gameLogs, 4, "sample levels before boot")
-		h.place:Destroy()
+		local sample = require("./lib/sample-world").new()
+		sample:bootServer()
+		for index, level in { "game debug", "game info", "game warn", "deliberate game error" } do
+			spec.has(sample.server.engine.gameLogs[index].message, `S2 {level}`, "sample level before boot")
+		end
+		sample.place:Destroy()
 	end,
 	["L12 failed rendering drops the record and recovers"] = function()
 		local w = world()
