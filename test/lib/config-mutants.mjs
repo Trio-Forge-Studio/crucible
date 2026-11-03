@@ -10,6 +10,7 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-config-mutants-"
 const R = "packages/crucible/src/internal/configs/runtime.ts";
 const P = "packages/crucible/src/internal/configs/port.ts";
 const C = "packages/crucible/src/configs.ts";
+const REACTIVE = "configs-reactive.luau: ";
 // [rule, operator, name, file, before, after, spec filter]. Operators: guard (delete a guard or reset), swap (two
 // same-typed arguments or operands), pair (short-circuit one half of a paired operation), value (a changed result).
 const mutants = [
@@ -75,7 +76,7 @@ const mutants = [
 		"guard",
 		"read of an unknown player",
 		R,
-		"\tconst scope = slots.get(player);\n\tif (scope === undefined) return declaration.fallback;\n",
+		"\tconst scope = slots.get(player);\n\tif (scope === undefined) {\n\t\treadState(roster);\n\t\treturn declaration.fallback;\n\t}\n",
 		"\tconst scope = slots.get(player)!;\n",
 		"92 93 declarations",
 	],
@@ -122,8 +123,8 @@ const mutants = [
 		"swap",
 		"fallback and global value swapped",
 		R,
-		"\tif (scope === undefined) return declaration.fallback;\n\tif (readState(scope.ready) !== true) return readState(declaration.global);",
-		"\tif (scope === undefined) return readState(declaration.global);\n\tif (readState(scope.ready) !== true) return declaration.fallback;",
+		"\t\treturn declaration.fallback;\n\t}\n\tif (readState(scope.ready) !== true) return readState(declaration.global);",
+		"\t\treturn readState(declaration.global);\n\t}\n\tif (readState(scope.ready) !== true) return declaration.fallback;",
 		"8 95 96",
 	],
 	["95", "pair", "player cell never stored", R, "\t\t\t\tscope.values.set(declaration, cell);\n", "\n", "8 95 96"],
@@ -690,6 +691,78 @@ const mutants = [
 		'export function readGlobal(declaration: Declaration): unknown {\n\tgame.GetService("Players");\n',
 		"103 4 configs touch only",
 	],
+	[
+		"93",
+		"guard",
+		"a player's cell read untracked",
+		R,
+		"\treturn readState(scope.values.get(declaration)!);",
+		"\treturn scope.values.get(declaration)!.value;",
+		`${REACTIVE}93 96 an effect created after a player joins`,
+	],
+	[
+		"95",
+		"guard",
+		"a joined player's global value read untracked",
+		R,
+		"if (readState(scope.ready) !== true) return readState(declaration.global);",
+		"if (readState(scope.ready) !== true) return declaration.global.value;",
+		`${REACTIVE}93 95 96 an effect created before boot`,
+	],
+	[
+		"96",
+		"guard",
+		"global readiness read untracked",
+		R,
+		"if (player === undefined) return readState(global.ready) as boolean;",
+		"if (player === undefined) return global.ready.value as boolean;",
+		`${REACTIVE}93 96 configReady()`,
+	],
+	[
+		"96",
+		"guard",
+		"a player's readiness read untracked",
+		R,
+		"\treturn readState(scope.ready) === true;\n",
+		"\treturn scope.ready.value === true;\n",
+		`${REACTIVE}93 96 an effect created after a player joins`,
+	],
+	[
+		"101",
+		"pair",
+		"leave keeps the ready flag",
+		R,
+		"\twrite(scope.ready, false);\n",
+		"\n",
+		`${REACTIVE}93 96 an effect created after a player joins`,
+	],
+	[
+		"93",
+		"pair",
+		"join leaves the roster unchanged",
+		R,
+		"\twrite(roster, (roster.value as number) + 1);\n",
+		"\n",
+		`${REACTIVE}93 96 an effect created before a player joins`,
+	],
+	[
+		"93",
+		"guard",
+		"an absent player's config read untracked",
+		R,
+		"\t\treadState(roster);\n\t\treturn declaration.fallback;",
+		"\t\treturn declaration.fallback;",
+		`${REACTIVE}93 96 an effect created before a player joins`,
+	],
+	[
+		"96",
+		"guard",
+		"an absent player's readiness read untracked",
+		R,
+		"\t\treadState(roster);\n\t\treturn false;",
+		"\t\treturn false;",
+		`${REACTIVE}93 96 an effect created before a player joins`,
+	],
 ];
 function run(command, args) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout: 300000 });
@@ -721,7 +794,7 @@ try {
 			"packages/crucible",
 		]);
 	assert.equal(build().status, 0, "baseline build");
-	const baseline = run("lune", ["run", "test", "configs.luau"]);
+	const baseline = run("lune", ["run", "test", "configs"]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
 	const from = Number(process.argv[2] ?? 0);
 	const only = process.argv[3] === undefined ? undefined : new RegExp(process.argv[3]);
@@ -733,10 +806,11 @@ try {
 		assert.equal(original.split(before).length, 2, `${name}: the pattern occurs exactly once`);
 		fs.writeFileSync(path.join(scratch, file), original.replace(before, after));
 		const compiled = build();
-		const tested = compiled.status === 0 ? run("lune", ["run", "test", `configs.luau: ${target}`]) : undefined;
+		const filter = target.startsWith(REACTIVE) ? target : `configs.luau: ${target}`;
+		const tested = compiled.status === 0 ? run("lune", ["run", "test", filter]) : undefined;
 		const output = tested === undefined ? compiled.stdout + compiled.stderr : tested.stdout + tested.stderr;
 		fs.writeFileSync(path.join(scratch, file), original);
-		if (tested?.status === 1 && output.includes(`FAIL configs.luau: ${target}`)) {
+		if (tested?.status === 1 && output.includes(`FAIL ${filter}`)) {
 			console.log(`KILLED rule ${rule} ${operator} | ${name} | ${target}`);
 			killed++;
 		} else {
