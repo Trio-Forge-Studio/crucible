@@ -32,11 +32,11 @@ function pack(directory, destination) {
 	return join(destination, JSON.parse(result.stdout)[0].filename);
 }
 
-function project(name, tarballs) {
+function project(name, tarballs, flags = []) {
 	const directory = join(root, name);
 	mkdirSync(directory);
 	writeFileSync(join(directory, "package.json"), JSON.stringify({ name, private: true }));
-	const result = run("npm", ["install", "--save-dev", "--no-audit", "--no-fund", ...tarballs], directory);
+	const result = run("npm", ["install", "--save-dev", "--no-audit", "--no-fund", ...flags, ...tarballs], directory);
 	assert.equal(result.status, 0, result.stderr);
 	return directory;
 }
@@ -121,7 +121,8 @@ test("release staging rejects a tag that differs from the Cargo version", () => 
 });
 
 test("the shim names the missing platform package", () => {
-	const app = project("bare", [shim]);
+	// The public registry holds published platform packages, so leave them out.
+	const app = project("bare", [shim], ["--omit=optional"]);
 	const result = run("npx", ["crucible", "--version"], app);
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, new RegExp(`@trioforge/crucible-cli-${host} is not installed`));

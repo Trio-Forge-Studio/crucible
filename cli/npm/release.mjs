@@ -8,9 +8,15 @@ import { cliVersion, PLATFORMS, stage } from "./stage.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const [binaryDirectory, outputDirectory, notices] = process.argv.slice(2);
 assert.ok(binaryDirectory && outputDirectory && notices, "Usage: node cli/npm/release.mjs <binaries> <out> <notices>");
-const version = cliVersion();
+const release = cliVersion();
 if (process.env.GITHUB_EVENT_NAME === "push") {
-	assert.equal(process.env.GITHUB_REF, `refs/tags/v${version}`, "release tag must match cli/Cargo.toml");
+	assert.equal(process.env.GITHUB_REF, `refs/tags/v${release}`, "release tag must match cli/Cargo.toml");
+}
+// npm refuses even a dry-run publish of a released version, and the Cargo version stays released until the next bump.
+let version = release;
+if (process.env.GITHUB_EVENT_NAME === "pull_request") {
+	assert.ok(process.env.GITHUB_RUN_ID, "pull request staging needs GITHUB_RUN_ID");
+	version = `${release}-pr.${process.env.GITHUB_RUN_ID}`;
 }
 assert.ok(readFileSync(notices, "utf8").includes("rojo "), "generated notices are required");
 const output = resolve(outputDirectory);
@@ -23,13 +29,15 @@ const packages = stage(
 		]),
 	),
 	resolve(notices),
+	version,
 );
 const runtime = join(output, "packages", "runtime");
 mkdirSync(runtime);
 const source = join(root, "packages", "crucible");
 const manifest = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
 assert.equal(manifest.private, undefined);
-assert.equal(manifest.version, version, "runtime and CLI versions must match");
+assert.equal(manifest.version, release, "runtime and CLI versions must match");
+manifest.version = version;
 delete manifest.scripts;
 delete manifest.devDependencies;
 for (const entry of manifest.files) {
