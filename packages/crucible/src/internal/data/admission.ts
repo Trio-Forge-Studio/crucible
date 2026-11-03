@@ -14,6 +14,8 @@ export interface Schema {
 	/** The persist descriptor. Absent, a schema declares no field, so every key is undeclared and kept in place. */
 	readonly node?: Node;
 	readonly migrations?: readonly MigrationStep[];
+	/** A profile's owner views (rules 14, 127): throws when an admitted value cannot replicate. `committed` may be unset. */
+	readonly check?: (value: object, committed: object | undefined) => void;
 }
 
 /** @internal */

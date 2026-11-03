@@ -3,7 +3,7 @@ export { n } from "../internal/network/schema";
 export { config, playerConfig } from "./configs";
 export { toServer, toClient, askServer, receive } from "./network";
 export { replicated, replicatedPerPlayer } from "./replicated";
-export { dataStore } from "./data";
+export { dataStore, profileStore, profileMessage } from "./data";
 
 import type { All } from "../all";
 import type { CrucibleObject } from "../crucible-object";

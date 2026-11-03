@@ -59,6 +59,11 @@ export class Inbox {
 		this.receivers.set(message.name, { message, receive });
 	}
 
+	/** A retired receive claim: its messages stay queued for a live receiver (rule 6). */
+	unreceive(name: string) {
+		this.receivers.delete(name);
+	}
+
 	/** Rules 66 to 70. Yields until the id is durably queued or seen, or the call fails. */
 	send(userId: number, message: MessageDecl, payload: unknown, id?: string): StoreResult<undefined> {
 		const admitted = message.admit(payload);

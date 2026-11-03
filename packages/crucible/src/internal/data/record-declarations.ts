@@ -23,8 +23,30 @@ const declarations = new Map<string, RecordDeclaration>();
 let sealed = false;
 let driver: RecordDriver | undefined;
 
-/** Rule 2's grammar: dot-separated `[A-Za-z][A-Za-z0-9_]*` segments, with `Crucible` reserved as the first. */
-function checkName(name: string) {
+const profiles = new Set<string>();
+
+/** @internal Rule 2: profile and generic stores share one index of store names. */
+export function storeNameTaken(name: string): boolean {
+	return declarations.has(name) || profiles.has(name);
+}
+
+/** @internal Rule 3: every data declaration in this realm counts toward MAX_DATA_DECLARATIONS. */
+export function dataDeclarationCount(): number {
+	return declarations.size() + profiles.size();
+}
+
+/** @internal */
+export function registerProfileName(name: string) {
+	profiles.add(name);
+}
+
+/** @internal True after DataRuntime constructed (rule 3). */
+export function dataRegistrySealed(): boolean {
+	return sealed;
+}
+
+/** @internal Rule 2's grammar: dot-separated `[A-Za-z][A-Za-z0-9_]*` segments, with `Crucible` reserved as the first. */
+export function checkStoreName(name: string) {
 	if (name.size() === 0 || name.size() > STORE_NAME_MAX_BYTES)
 		error(`${name}: a store name is 1 to ${STORE_NAME_MAX_BYTES} bytes`, 4);
 	const segments = name.split(".");
@@ -64,11 +86,11 @@ export function declareRecords<T extends object>(
 	migrations: readonly Migration[] | undefined,
 	value: Node,
 ): DataStore<T> {
-	checkName(name);
+	checkStoreName(name);
 	if (sealed)
 		error(`${name} was declared after the data registry sealed; declare stores in modules that boot loads`, 3);
-	if (declarations.has(name)) error(`${name} is already declared`, 3);
-	if (declarations.size() >= MAX_DATA_DECLARATIONS)
+	if (storeNameTaken(name)) error(`${name} is already declared`, 3);
+	if (dataDeclarationCount() >= MAX_DATA_DECLARATIONS)
 		error(`${name}: more than ${MAX_DATA_DECLARATIONS} data declarations`, 3);
 	const steps = [...(migrations ?? [])] as unknown as MigrationStep[];
 	const schema = sealSchema({ name, version: steps.size(), defaults, node: value, migrations: steps });

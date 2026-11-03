@@ -1,4 +1,5 @@
 import { bootClock } from "../boot";
+import { createStateNode, update } from "../reactive/graph";
 import { call, CallResult } from "../runner";
 import { admitWrite, type Schema } from "./admission";
 import { jsonBytes, type InboxItem } from "./envelope";
@@ -29,22 +30,43 @@ export type SealReason = "leave" | "handoff" | "shutdown" | "authority" | "fence
 export type Released = "committed" | "fenced" | "given up";
 
 const callbackThreads = new Set<thread>();
+/** Data never writes this state: its `update` frame is what makes reactive reject a nested write (rule 13, K7). */
+const transaction = createStateNode(0);
+let depth = 0;
 
-/** @internal Runs a data callback on a no-yield worker whose thread may not write data (rule 13); a yield or throw is thrown here. */
+/**
+ * @internal Runs a data callback on a no-yield worker whose thread may not write data, inside the `update` of a private
+ * reactive state so a state, publish or apply write throws (rule 13); a yield or throw is thrown here.
+ */
 export function dataCallback<A, B>(work: (a: A, b: B) => unknown, a: A, b: B): unknown {
 	let worker: thread | undefined;
+	depth += 1;
 	const [status, value] = call(
 		(x: A, y: B) => {
 			worker = coroutine.running();
 			callbackThreads.add(worker);
-			return work(x, y);
+			let result: unknown;
+			update(transaction, (current) => {
+				result = work(x, y);
+				return current;
+			});
+			return result;
 		},
 		a,
 		b,
 	);
+	depth -= 1;
 	if (worker !== undefined) callbackThreads.delete(worker);
 	if (status !== CallResult.Ok) error(value, 0);
 	return value;
+}
+
+/**
+ * @internal True while any data callback runs. Callbacks never yield, so code running then was started inside one,
+ * on its thread or a thread it spawned (rule 123).
+ */
+export function insideDataCallback(): boolean {
+	return depth > 0;
 }
 
 /** @internal Rule 13: no data write on a data callback's own thread. */
@@ -156,6 +178,7 @@ export class Session {
 		const bytes = jsonBytes(admitted);
 		if (bytes > PAYLOAD_MAX_BYTES)
 			error(`${this.schema.name}: ${this.userId}'s profile is ${bytes} bytes, over ${PAYLOAD_MAX_BYTES}`, 0);
+		this.schema.check?.(admitted, this.value);
 		return admitted;
 	}
 
