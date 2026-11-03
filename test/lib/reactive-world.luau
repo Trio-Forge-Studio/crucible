@@ -1,12 +1,13 @@
 -- A fresh runtime whose reactive core has the fake engine's port and a released barrier, as boot's commit leaves it.
 -- `patch(graph)` runs before the flush module loads, so it can replace an export the flush imports, which is how
--- specs inject an internal error where the flush calls into ownership, the graph or the diagnostic sink.
+-- specs inject an internal error where the flush calls into ownership, the graph or the diagnostic sink. `globals`
+-- override Lune's for every module, such as a `typeof` that knows fake engine values.
 local Engine = require("./engine")
 local spec = require("./load")
 
-return function(patch: ((any) -> ())?)
+return function(patch: ((any) -> ())?, globals: { [string]: any }?)
 	local engine = Engine.new()
-	local graph = spec.runtime(nil, engine.loggingPort)
+	local graph = spec.runtime(globals, engine.loggingPort)
 	if patch then
 		patch(graph)
 	end

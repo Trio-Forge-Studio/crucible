@@ -5,8 +5,8 @@ Keep game state in reactive values and run effects when it changes, with lifetim
 Import the reactive API from the root of `@trioforge/crucible`. The root is safe to import on the server and the client. Reactive state is per Luau VM: server and client values are separate.
 
 ```ts
-import { computed, effect, onCleanup, scope, state, untracked, watch } from "@trioforge/crucible";
-import type { Readable, State } from "@trioforge/crucible";
+import { computed, effect, onCleanup, own, scope, state, untracked, watch } from "@trioforge/crucible";
+import type { Ownable, Readable, State } from "@trioforge/crucible";
 ```
 
 ## Values
@@ -53,7 +53,7 @@ print(total()); // 15
 - A result `rawequal` to the cached one keeps the cache, so nothing that depends on it runs again.
 - A `read` that throws or yields caches the failure. Every read rethrows it, with the original traceback, until a dependency changes. The dependencies it read before failing count, and so do those of its last successful evaluation.
 - A computed that reads itself, directly or through others, fails with `computed at <origin> reads itself`.
-- `read` must be pure. Writing state, or calling `effect`, `watch`, `scope` or `onCleanup` inside it throws. It cannot yield.
+- `read` must be pure. Writing state, or calling `effect`, `watch`, `scope`, `onCleanup` or `own` inside it throws. It cannot yield.
 - It needs no owner. A computed that nothing observes holds no subscription on its sources, so it is collected with whatever holds it.
 
 ## Effects
@@ -131,7 +131,7 @@ Every effect, watch, scope and cleanup has an owner, found when it is created:
 2. Otherwise, inside code a Crucible object runs, the owner is that object:
    - while the object's `onEnable` runs, including callbacks it triggers synchronously as that object, the owner is the current enable interval. It ends right after `onDisable` returns, and at destroy or fault;
    - anywhere else, such as the constructor, a field initializer, `awake`, `start`, `onDisable`, a frame hook or a later callback, the owner is the object itself. It ends after `onDestroy`.
-3. Otherwise there is no owner. `effect`, `watch` and `onCleanup` throw, and `scope` makes a root.
+3. Otherwise there is no owner. `effect`, `watch`, `onCleanup` and `own` throw, and `scope` makes a root.
 
 So a behaviour builds its reactions in `onEnable` and needs no `onDisable` code to undo them. A pooled behaviour rebuilds them on every enable.
 
@@ -170,7 +170,43 @@ A Subsystem has no `onEnable`, so its reactions live for the session. A disabled
 
 Ending an owner ends its child effects and scopes first, newest first, then runs its cleanups, newest first. Each cleanup runs at once and protected. A throw or yield is reported, and the next cleanup still runs. A lifecycle request a cleanup makes, such as `setEnabled`, applies after the current lifecycle step.
 
-Under an owner that has already ended, `effect` and `watch` create nothing, `scope` returns a dispose without running `setup`, and `onCleanup` runs `release` at once.
+`own(value)` registers `value` itself as a cleanup and returns it. The release depends on the value's type, and `own` picks it when you call it:
+
+| Value | Released with |
+| --- | --- |
+| A function | A call with no arguments |
+| An `RBXScriptConnection` | `Disconnect()` |
+| An `Instance` | `Destroy()` |
+| A `thread` | `task.cancel` |
+| An object with `destroy()` or `Destroy()` | That method, or `destroy()` when it has both |
+
+```ts
+import { CrucibleBehaviour, own } from "@trioforge/crucible";
+
+const RunService = game.GetService("RunService");
+
+export class Thruster extends CrucibleBehaviour<"Thruster", BasePart> {
+	protected override onEnable() {
+		const center = own(new Instance("Attachment"));
+		center.Parent = this.instance;
+		own(RunService.PreSimulation.Connect((dt) => this.push(center, dt)));
+		own(task.delay(5, () => this.stall()));
+		own(() => RunService.UnbindFromRenderStep("ThrusterCamera"));
+	} // At disable the camera unbinds, the delay is cancelled, the connection disconnects and the attachment is destroyed.
+
+	private push(center: Attachment, dt: number) {
+		center.WorldCFrame = this.instance.CFrame.mul(new CFrame(0, 0, -dt));
+	}
+
+	private stall() {
+		this.instance.Anchored = true;
+	}
+}
+```
+
+An owned value is a cleanup. It shares the owner, the newest-first order and the failure reporting of `onCleanup`. A failed release is reported with the source line of its function or method, or with the Instance's full name. Each call registers one release, so a value owned twice is released twice. The type `Ownable` lists what `own` takes. Anything else is a type error, and at runtime `own` throws `own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy() or Destroy()`. A `State` is a callable table, not a function, so `own` rejects it.
+
+Under an owner that has already ended, `effect` and `watch` create nothing, `scope` returns a dispose without running `setup`, `onCleanup` runs `release` at once, and `own` releases `value` at once.
 
 A thread made with `task.spawn`, `task.defer` or `coroutine.wrap` has no owner and tracks nothing, even inside an effect run. Server `onShutdown` hooks run that way, so `effect` throws there while writes still work.
 
@@ -197,10 +233,10 @@ The flush bounds its own work:
 
 ## What the types reject
 
-A read is a call, so an uncalled readable in a condition is a type error. A `State` does not widen to a wider value type, and an effect returns nothing or a cleanup.
+A read is a call, so an uncalled readable in a condition is a type error. A `State` does not widen to a wider value type, an effect returns nothing or a cleanup, and `own` takes only an `Ownable`.
 
 ```ts
-import { computed, effect, onCleanup, state, type Readable, type State } from "@trioforge/crucible";
+import { computed, effect, onCleanup, own, state, type Readable, type State } from "@trioforge/crucible";
 
 const open = state(false);
 // @ts-expect-error an uncalled read in a condition is always true
@@ -224,4 +260,15 @@ doubled.set(3);
 effect(() => true);
 // @ts-expect-error onCleanup takes a function
 onCleanup(5);
+
+// own returns its argument with its own type.
+export const attachment: Attachment = own(new Instance("Attachment"));
+// @ts-expect-error a number is not ownable
+own(5);
+// @ts-expect-error an object needs destroy() or Destroy()
+own({ close() {} });
+// @ts-expect-error a State is a callable table, not a function
+own(open);
+// @ts-expect-error own calls a function with no arguments
+own((dt: number) => print(dt));
 ```

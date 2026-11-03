@@ -3,7 +3,7 @@ import { current, enabling, hasEnded } from "../lifecycle";
 import type { ClassRecord } from "../registry";
 import { CallResult } from "../runner";
 import type { ObjectState } from "../state";
-import { boundary, FrameKind, pop, push, top, type Completion } from "./context";
+import { boundary, FrameKind, pop, push, top, type Completion, type Frame } from "./context";
 import { contained, finishOpen, guardPure, NodeKind, originOf, releaseEdges, type EffectFields } from "./graph";
 import { OWNER_CHILDREN_WARNING } from "./limits";
 
@@ -17,6 +17,31 @@ export const enum Role {
 	Run,
 	/** `scope(setup)`: a child of its owner, or a root. */
 	Scope,
+}
+
+/** @internal How a lifetime releases one owned value. `own` decides it once, when the value is owned. */
+export const enum Release {
+	Call,
+	Disconnect,
+	DestroyInstance,
+	Cancel,
+	/** A table's `destroy()`. */
+	DestroyMethod,
+	/** A table's `Destroy()`. */
+	DestroyUpperMethod,
+}
+
+interface Destroyable {
+	destroy(): void;
+}
+
+interface UpperDestroyable {
+	Destroy(): void;
+}
+
+interface DestroyFields {
+	readonly destroy?: unknown;
+	readonly Destroy?: unknown;
 }
 
 interface Linked {
@@ -38,7 +63,8 @@ export interface Lifetime extends Linked {
 	head?: Owned;
 	tail?: Owned;
 	count: number;
-	readonly releases: (() => void)[];
+	/** What it releases when it ends, oldest first, as pairs of a `Release` and its value. */
+	readonly releases: unknown[];
 	/** Latched first when it starts ending: nothing new attaches and no queued run of its effects starts. */
 	ended: boolean;
 	/** Its children and releases have been ended. */
@@ -171,7 +197,10 @@ function interval(s: ObjectState): Lifetime {
  * interval while its Enable step runs, or its generation; else none. A returned lifetime may have ended.
  */
 export function resolveOwner(): Lifetime | undefined {
-	const frame = top();
+	return ownerAt(top());
+}
+
+function ownerAt(frame: Frame | undefined): Lifetime | undefined {
 	if (frame?.lifetime !== undefined) return frame.lifetime;
 	const s = current();
 	if (s === undefined) return undefined;
@@ -253,7 +282,7 @@ function finish(lifetime: Lifetime) {
 		child = previous;
 	}
 	const releases = lifetime.releases;
-	for (let i = releases.size() - 1; i >= 0; i--) runRelease(lifetime, releases[i]);
+	for (let i = releases.size() - 2; i >= 0; i -= 2) releaseValue(lifetime, releases[i] as Release, releases[i + 1]);
 	releases.clear();
 	leave(lifetime);
 }
@@ -270,31 +299,81 @@ export function retire(effect: EffectNode) {
 	leave(effect);
 }
 
-interface Release {
+interface ReleaseJob {
 	readonly lifetime: Lifetime;
-	readonly release: () => void;
+	readonly kind: Release;
+	readonly value: unknown;
 }
 
-function releaseBody(job: Release) {
+function releaseBody(job: ReleaseJob) {
 	const frame = { kind: FrameKind.Owning, lifetime: job.lifetime };
 	push(frame);
-	job.release();
+	const value = job.value;
+	if (job.kind === Release.Call) (value as () => void)();
+	else if (job.kind === Release.DestroyMethod) (value as Destroyable).destroy();
+	else (value as UpperDestroyable).Destroy();
 	pop(frame);
 }
 
-/**
- * @internal
- * Runs one release now, in its own boundary, as its ended lifetime: a yield is cancelled, a throw or yield is reported
- * and nobody is faulted. Inside a drain its lifecycle requests apply after the current step.
- */
-export function runRelease(lifetime: Lifetime, release: () => void) {
-	contained(lifetime.owner, releaseBody, { lifetime, release }, (completion) => {
-		if (completion.result !== CallResult.Ok)
-			runtimeDiagnostic(
-				"error",
-				`Crucible: cleanup at ${originOf(release)} (${ownerLabel(lifetime.owner)}) failed: ${tostring(completion.value)}`,
-			);
+function releaseLabel(kind: Release, value: unknown): string {
+	if (kind === Release.Disconnect) return "of a connection";
+	if (kind === Release.DestroyInstance) return `of ${describe(value as Instance)}`;
+	if (kind === Release.Cancel) return "of a thread";
+	const code =
+		kind === Release.Call
+			? value
+			: kind === Release.DestroyMethod
+				? (value as DestroyFields).destroy
+				: (value as DestroyFields).Destroy;
+	return typeIs(code, "function") ? `at ${originOf(code)}` : `of ${tostring(value)}`;
+}
+
+function reportRelease(lifetime: Lifetime, kind: Release, value: unknown, err: unknown) {
+	runtimeDiagnostic(
+		"error",
+		`Crucible: cleanup ${releaseLabel(kind, value)} (${ownerLabel(lifetime.owner)}) failed: ${tostring(err)}`,
+	);
+}
+
+function runRelease(lifetime: Lifetime, kind: Release, value: unknown) {
+	contained(lifetime.owner, releaseBody, { lifetime, kind, value }, (completion) => {
+		if (completion.result !== CallResult.Ok) reportRelease(lifetime, kind, value, completion.value);
 	});
+}
+
+function disconnect(connection: RBXScriptConnection) {
+	connection.Disconnect();
+}
+
+function destroyInstance(instance: Instance) {
+	instance.Destroy();
+}
+
+/**
+ * Releases one value now, as its ended lifetime: a throw is reported and nobody is faulted. A function or a
+ * `destroy()` runs in its own boundary, which cancels and reports a yield and, inside a drain, applies its lifecycle
+ * requests after the current step. `Disconnect`, `Destroy` and `task.cancel` run no Luau on this thread and cannot
+ * yield, so a `pcall` is their boundary.
+ */
+function releaseValue(lifetime: Lifetime, kind: Release, value: unknown) {
+	let engine: (value: never) => void;
+	if (kind === Release.Disconnect) engine = disconnect;
+	else if (kind === Release.DestroyInstance) engine = destroyInstance;
+	else if (kind === Release.Cancel) engine = task.cancel;
+	else {
+		runRelease(lifetime, kind, value);
+		return;
+	}
+	const [ok, err] = pcall(engine, value as never);
+	if (!ok) pcall(reportRelease, lifetime, kind, value, err);
+}
+
+/** @internal */
+export function hold(lifetime: Lifetime, kind: Release, value: unknown) {
+	const releases = lifetime.releases;
+	const size = releases.size();
+	releases[size] = kind;
+	releases[size + 1] = value;
 }
 
 /**
@@ -354,11 +433,47 @@ export function createScope(setup: () => void): () => void {
 	return () => endLifetime(scope);
 }
 
+/** `guardPure("register cleanups")` that returns the frame it read, so `register` does not read it again. */
+function cleanupFrame(): Frame | undefined {
+	const frame = top();
+	const pure = frame?.pure;
+	if (pure !== undefined) error(`${pure} must not register cleanups`, 0);
+	return frame;
+}
+
+function register(frame: Frame | undefined, kind: Release, value: unknown) {
+	const owner = ownerAt(frame);
+	if (owner === undefined) error(NO_OWNER, 0);
+	if (owner.ended) releaseValue(owner, kind, value);
+	else hold(owner, kind, value);
+}
+
 /** @internal */
 export function registerCleanup(release: () => void) {
-	guardPure("register cleanups");
-	const owner = resolveOwner();
-	if (owner === undefined) error(NO_OWNER, 0);
-	if (owner.ended) runRelease(owner, release);
-	else owner.releases.push(release);
+	const frame = cleanupFrame();
+	// A nil from untyped Luau would shift every pair after it, so it is dropped.
+	if (release === undefined) return;
+	register(frame, Release.Call, release);
+}
+
+const NOT_OWNABLE =
+	"own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy() or Destroy()";
+
+function classify(value: unknown): Release {
+	const typeName = typeOf(value);
+	if (typeName === "RBXScriptConnection") return Release.Disconnect;
+	if (typeName === "Instance") return Release.DestroyInstance;
+	if (typeName === "function") return Release.Call;
+	if (typeName === "thread") return Release.Cancel;
+	if (typeName === "table") {
+		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;
+		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;
+	}
+	error(`${NOT_OWNABLE}; got a ${typeName}`, 0);
+}
+
+/** @internal */
+export function registerOwned(value: unknown) {
+	const frame = cleanupFrame();
+	register(frame, classify(value), value);
 }

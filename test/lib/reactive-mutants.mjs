@@ -315,8 +315,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"	const owner = resolveOwner();\n	if (owner === undefined) error(NO_OWNER, 0);\n	if (owner.ended)",
-				"	const owner = resolveOwner()!;\n	if (owner.ended)",
+				"	const owner = ownerAt(frame);\n	if (owner === undefined) error(NO_OWNER, 0);\n	if (owner.ended)",
+				"	const owner = ownerAt(frame)!;\n	if (owner.ended)",
 			],
 		],
 	],
@@ -380,7 +380,12 @@ const mutants = [
 		"swap",
 		[26],
 		FLUSH,
-		[["run.releases.push(value as () => void);", "run.releases.insert(0, value as () => void);"]],
+		[
+			[
+				"hold(run, Release.Call, value);",
+				"{\n		(run.releases as defined[]).insert(0, value as defined);\n		(run.releases as defined[]).insert(0, Release.Call);\n	}",
+			],
+		],
 	],
 	[
 		"previous run never ended",
@@ -415,8 +420,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"	if (owner.ended) runRelease(owner, release);\n	else owner.releases.push(release);",
-				"	owner.releases.push(release);",
+				"	if (owner.ended) releaseValue(owner, kind, value);\n	else hold(owner, kind, value);",
+				"	hold(owner, kind, value);",
 			],
 		],
 	],
@@ -434,8 +439,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"	for (let i = releases.size() - 1; i >= 0; i--) runRelease(lifetime, releases[i]);",
-				"	for (let i = 0; i < releases.size(); i++) runRelease(lifetime, releases[i]);",
+				"	for (let i = releases.size() - 2; i >= 0; i -= 2) releaseValue(lifetime, releases[i] as Release, releases[i + 1]);",
+				"	for (let i = 0; i < releases.size(); i += 2) releaseValue(lifetime, releases[i] as Release, releases[i + 1]);",
 			],
 		],
 	],
@@ -446,8 +451,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"		if (completion.result !== CallResult.Ok)\n			runtimeDiagnostic(",
-				"		if (false as boolean)\n			runtimeDiagnostic(",
+				"		if (completion.result !== CallResult.Ok) reportRelease(lifetime, kind, value, completion.value);",
+				"		if (false as boolean) reportRelease(lifetime, kind, value, completion.value);",
 			],
 		],
 	],
@@ -730,8 +735,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"		if (completion.result !== CallResult.Ok)\n			runtimeDiagnostic(",
-				"		runtimeDiagnostic(",
+				"		if (completion.result !== CallResult.Ok) reportRelease(lifetime, kind, value, completion.value);",
+				"		reportRelease(lifetime, kind, value, completion.value);",
 			],
 		],
 	],
@@ -754,6 +759,57 @@ const mutants = [
 		FLUSH,
 		[["busiest.sort((a, b) => a.runs > b.runs);", "busiest.sort((a, b) => b.runs > a.runs);"]],
 	],
+	[
+		"engine release unprotected",
+		"guard",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				"	const [ok, err] = pcall(engine, value as never);\n	if (!ok) pcall(reportRelease, lifetime, kind, value, err);",
+				"	engine(value as never);",
+			],
+		],
+	],
+	[
+		"engine release failure unreported",
+		"pair",
+		[28],
+		OWNERSHIP,
+		[["	if (!ok) pcall(reportRelease,", "	if (false as boolean) pcall(reportRelease,"]],
+	],
+	[
+		"connection released as an Instance",
+		"swap",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				"	if (kind === Release.Disconnect) engine = disconnect;",
+				"	if (kind === Release.Disconnect) engine = destroyInstance;",
+			],
+		],
+	],
+	[
+		"Destroy() preferred over destroy()",
+		"swap",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				'		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;\n		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;',
+				'		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;\n		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;',
+			],
+		],
+	],
+	[
+		"table method kinds swapped",
+		"swap",
+		[28],
+		OWNERSHIP,
+		[["	else if (job.kind === Release.DestroyMethod)", "	else if (job.kind === Release.DestroyUpperMethod)"]],
+	],
+	["nil cleanup appended", "guard", [28], OWNERSHIP, [["	if (release === undefined) return;\n", ""]]],
 ];
 
 function run(command, args, timeout = 300000) {

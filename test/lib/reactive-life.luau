@@ -1,14 +1,15 @@
 -- A compiled lifecycle driven by scripts, with the reactive core attached the way boot attaches it: the enable
 -- interval ends through `LifeEffects.disabled`, and the flush defers through the fake engine. `scripts[id]` holds
 -- an object's hooks; `lookup(hook)` runs when lifecycle asks for a hook caller, so a spec can make it throw.
+-- `globals` override Lune's for every module.
 local Engine = require("./engine")
 local spec = require("./load")
 
 local HOOKS = { [1] = "awake", [2] = "onEnable", [4] = "onDisable", [5] = "onDestroy" }
 
-return function()
+return function(globals: { [string]: any }?)
 	local engine = Engine.new()
-	local graph = spec.runtime(nil, engine.loggingPort)
+	local graph = spec.runtime(globals, engine.loggingPort)
 	local w = { engine = engine, graph = graph, events = {}, scripts = {}, failures = {}, threads = {} }
 	w.api = graph.module("")
 	w.life = graph.module("internal/lifecycle")
