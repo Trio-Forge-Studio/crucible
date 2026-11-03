@@ -1,0 +1,16 @@
+{
+	"extends": "../../../../../tsconfig.ts7.json",
+	"compilerOptions": {
+		"jsx": "preserve",
+		"typeRoots": [
+			"../../../../../packages/crucible/node_modules/@trioforge",
+			"../../../../../packages/crucible/node_modules/@rbxts"
+		],
+		"types": ["compiler-types", "types"],
+		"paths": {
+			"@trioforge/crucible": ["../../../../../packages/crucible/out/index.d.ts"],
+			"@trioforge/crucible/*": ["../../../../../packages/crucible/out/*/index.d.ts"]
+		}
+	},
+	"include": ["src"]
+}
