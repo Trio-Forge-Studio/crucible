@@ -172,6 +172,21 @@ return {
 		spec.eq(final.payload.coins, 7, "the open-phase write was saved")
 		assert(realm.events.dataEnd - realm.events.dataStart < 3, "the hook returned once released")
 	end,
+	["rule 51 A18 the early flush is requested at Release priority, ahead of Receipt work"] = function()
+		local backend, realm = world()
+		local player = loaded(backend, realm)
+		backend:advance(23)
+		set(realm, player, 3)
+		local gate = backend:gate("commit", { server = realm.id })
+		local session = realm.store.sessions[player]
+		realm.store:requestWrite(session, 3)
+		backend:advance(0.1)
+		assert(session.writing ~= nil, "a renewal is in flight")
+		realm.store:flush(session)
+		spec.eq(session.want, 1, "the flush waits at Release, rule 34's second rank, not Renew")
+		gate.release()
+		backend:advance(1)
+	end,
 	["rule 26 K15 an early flush in flight at the safe bound is not sent after it, only the release"] = function()
 		local backend, realm = world(function(r)
 			while true do

@@ -1,7 +1,15 @@
 import { Subsystem } from "../../subsystem";
 import { readClaim } from "../construction-claim";
 import { isLive, stateOf } from "../lifecycle";
-import { createStateNode, guardPure, readState, write, type StateNode } from "../reactive/graph";
+import {
+	createComputedNode,
+	createStateNode,
+	guardPure,
+	readComputed,
+	readState,
+	write,
+	type StateNode,
+} from "../reactive/graph";
 import { define, type ClassRecord, type TypeId } from "../registry";
 import { Kind, type ObjectState } from "../state";
 import { claimPublication } from "../sync/declarations";
@@ -78,6 +86,8 @@ function varuintSize(value: number): number {
 /** A player's slot: one state holding the admitted value while writable, else undefined (rule 9). */
 class Slot implements HandleSource {
 	readonly node: StateNode = createStateNode(undefined);
+	/** Whether the node holds a value, cut off so a data write never reruns a reader of `loaded` (rule 9). */
+	readonly live = createComputedNode(() => readState(this.node) !== undefined);
 	readonly client = false;
 	readonly name: string;
 	readonly root: object;
@@ -196,7 +206,7 @@ class ProfileBinding {
 
 	loaded(player: Player): boolean {
 		const slot = this.slot(player);
-		if (slot === undefined || readState(slot.node) === undefined) return false;
+		if (slot === undefined || readComputed(slot.live) !== true) return false;
 		return this.runtime?.writable(player) === true;
 	}
 
@@ -547,7 +557,7 @@ function construct() {
 		);
 		claimPublication(declaration.live, (who: Player) => {
 			const slot = binding.slot(who);
-			return slot !== undefined && readState(slot.node) !== undefined;
+			return slot !== undefined && readComputed(slot.live) === true;
 		});
 		for (const field of declaration.fields)
 			claimPublication(field.handle, (who: Player) => {

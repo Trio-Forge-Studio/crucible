@@ -1,4 +1,3 @@
-import { compile } from "../network/codec";
 import { assertDescriptor, n, type Node, type ObjectNode } from "../network/schema";
 import { readState } from "../reactive/graph";
 import { MAX_REPLICATED_DECLARATIONS } from "../reactive/limits";
@@ -93,12 +92,12 @@ function unwrap(value: unknown, path: string[], found: string[][]): unknown {
 function checkMarks(name: string, found: string[][], expected: readonly (readonly string[])[]) {
 	const marked = [...found].sort(pathLess);
 	const typed = [...expected].sort(pathLess);
-	for (const path of typed)
-		if (!marked.some((other) => samePath(other, path)))
-			error(`${name} ${showPath(path)} is serverOnly in its type but its template value is not marked`, 0);
 	for (const path of marked)
 		if (!typed.some((other) => samePath(other, path)))
 			error(`${name} ${showPath(path)} is marked serverOnly in its template value but not in its type`, 0);
+	for (const path of typed)
+		if (!marked.some((other) => samePath(other, path)))
+			error(`${name} ${showPath(path)} is serverOnly in its type but its template value is not marked`, 0);
 }
 
 /** A field view's descriptor: the field's replica node admitting undefined (rule 125). */
@@ -245,7 +244,6 @@ export function declareProfileStore(
 		node: persist,
 		migrations: steps,
 	});
-	compile(replica);
 	const clientTemplate = admitReplicated(compilePlan(replica), name, schema.defaults) as object;
 	const views = declareViews(name, replica);
 	const declaration: ProfileDeclaration = {

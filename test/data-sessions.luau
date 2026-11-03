@@ -117,6 +117,23 @@ local function onlyTheRelease(queue)
 	spec.eq(stored(backend).lease, nil, "the lease is released, never extended after the seal")
 end
 
+-- A18 (D1-verify-r6 U2a): with storage back 0.05 s after the safe bound, work queued before it still never sends.
+local function onlyTheReleaseJustAfter(queue)
+	local backend, a = world()
+	local pa = loaded(backend, a)
+	local issued = outage(backend, a)
+	local bound = issued + a.limits.LOCAL_AUTHORITY_SECONDS
+	local old = session(a, pa)
+	queue(a, pa)
+	backend:advance(bound + 0.05 - backend.now)
+	spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+	recover(backend)
+	backend:advance(3)
+	spec.eq(committedAfter(backend, a, bound), 1, "one commit after the safe bound")
+	spec.eq(old.released, "committed", "and it is the release")
+	spec.eq(stored(backend).lease, nil, "the lease is released, never extended after the seal")
+end
+
 local function releaseRecovered(offset: number)
 	local backend, a = world()
 	local pa = loaded(backend, a)
@@ -801,6 +818,12 @@ return {
 	end,
 	["rule 26 K15 a queued renewal is never sent after the safe bound, only the release"] = function()
 		onlyTheRelease(function() end)
+	end,
+	["rule 26 K15 A18 storage back 0.05 s after the safe bound still sends only the release"] = function()
+		onlyTheReleaseJustAfter(function(a, pa)
+			set(a, pa, 41)
+			save(a, pa, 100)
+		end)
 	end,
 	["rule 26 K15 a queued save is never sent after the safe bound, only the release"] = function()
 		onlyTheRelease(function(a, pa)

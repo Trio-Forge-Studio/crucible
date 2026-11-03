@@ -495,6 +495,7 @@ function link:realm(side: string, name: string)
 		Color3 = roblox.Color3,
 		CFrame = roblox.CFrame,
 		pairs = self.globals and self.globals.pairs or pairs,
+		Enum = self.globals and self.globals.Enum,
 		require = function(required)
 			assert(required == module, "only the Game module loads")
 			if realm.required == nil then
