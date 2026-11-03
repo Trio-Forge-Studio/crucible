@@ -26,6 +26,7 @@ fn main() -> ExitCode {
     println!("sites       {}", facts.sites);
     println!("facts       {}", facts.len());
     println!("unanswered  {}", facts.unanswered.len());
+    println!("diagnostics {}", facts.diagnostics.len());
     for u in facts.unanswered.iter().take(20) {
         println!("  {}:{}-{} {:?} {:?}", u.path, u.span.start, u.span.end, u.site, u.reason);
     }

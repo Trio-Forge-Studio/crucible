@@ -520,19 +520,15 @@ fn cru015_rejects_static_fields_nested_calls_plain_classes_and_subsystem_fields(
 #[test]
 fn cru010_rejects_global_provides_attributes_and_primitive_aliases() {
     let header = "import { attribute, CrucibleBehaviour, Subsystem } from \"@trioforge/crucible\";\n";
-    for text in [
-        "declare global { interface GlobalType {} }\nexport class Bad extends Subsystem implements GlobalType {}",
-        "declare global { interface GlobalValue { readonly x: number; } }\nexport class Bad extends CrucibleBehaviour<\"Bad\"> { field: GlobalValue = attribute<GlobalValue>({x: 1}); }",
-    ] {
-        let game = Game::new();
-        game.main(&format!("{header}{text}"));
-        match game.analyze() {
-            Ok(facts) => assert!(facts.diagnostics.iter().any(|d| d.code == 90010), "{text}"),
-            Err(errors) => {
-                assert!(game.type_errors().contains(&"src/server/main.ts:3".to_owned()), "{text}: {}", lines(&errors))
-            }
-        }
-    }
+    let provides = Game::new();
+    provides.main(&format!("{header}declare global {{ interface GlobalType {{}} }}\nexport class Bad extends Subsystem implements GlobalType {{}}"));
+    assert!(provides.found().contains(&"CRU010@src/server/main.ts:3".to_owned()), "{:?}", provides.found());
+    let attribute = Game::new();
+    attribute.main(&format!("{header}declare global {{ interface GlobalValue {{ readonly x: number; }} }}\nexport class Bad extends CrucibleBehaviour<\"Bad\"> {{ field: GlobalValue = attribute<GlobalValue>({{x: 1}}); }}"));
+    assert!(
+        attribute.type_errors().contains(&"src/server/main.ts:3".to_owned()),
+        "a non-attribute value is a type error"
+    );
     let alias = Game::new();
     alias.main(
         "import { attribute, CrucibleBehaviour } from \"@trioforge/crucible\";\ndeclare global {\n type GlobalSpeed = number;\n}\n\nexport class Van extends CrucibleBehaviour<\"Van\"> {\n readonly speed = attribute<GlobalSpeed>();\n}",
@@ -819,6 +815,7 @@ fn exact_line_diagnostics_and_reviewer_bypasses() {
         "export const bad = inject<number>();",
         "export function make<T>() { return inject<T>(); }",
         "enum Target { A, B }\nexport const bad = inject<Target>();",
+        "import \"@trioforge/crucible/internal/foo\";",
         "import type { Missing } from \"@trioforge/crucible/missing\";",
         "export const bad = inject<Missing>();",
         "export class Bad extends Subsystem { onInit(value: Missing) {} }",
