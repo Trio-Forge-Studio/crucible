@@ -4,6 +4,7 @@ mod lower;
 pub mod luau;
 mod macros;
 mod program;
+mod project;
 mod tree;
 mod write;
 
@@ -13,7 +14,7 @@ use std::path::Path;
 
 pub use facts::{
     Attribute, Callee, Check, Class, ClassKind, Constant, Crucible, Dependency, Fact, Facts, Falsy, FileFacts, Import,
-    Literal, Reason, Receiver, Site, Span, Unanswered,
+    Literal, ModulePath, Place, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
 };
 pub use lower::Error;
 use lower::ImportBase;
@@ -21,7 +22,7 @@ pub use macros::{Macro, MacroKind};
 use write::HEADER;
 pub use write::{Written, write};
 
-/// A configuration, syntax or type error.
+/// A configuration, syntax, type or Crucible error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     /// The absolute path with forward slashes, if the error has a location.
@@ -29,6 +30,8 @@ pub struct Diagnostic {
     /// One-based line and column, in bytes.
     pub line: u32,
     pub column: u32,
+    /// TypeScript's code, 90000 plus the rule's number for a Crucible rule such as CRU001, and 0 for an error that
+    /// has none.
     pub code: i32,
     pub message: String,
 }
@@ -38,7 +41,10 @@ impl fmt::Display for Diagnostic {
         if let Some(path) = &self.path {
             write!(f, "{path}({},{}): ", self.line, self.column)?;
         }
-        write!(f, "error TS{}: {}", self.code, self.message)
+        match self.code {
+            0 => write!(f, "error: {}", self.message),
+            code => write!(f, "error TS{code}: {}", self.message),
+        }
     }
 }
 
@@ -60,25 +66,32 @@ pub struct Module {
 #[derive(Clone, Debug)]
 pub enum Failure {
     Check(Vec<Diagnostic>),
+    /// Crucible's rules, and modules the game's place cannot reach.
+    Crucible(Vec<Diagnostic>),
     Lower(Vec<Error>),
 }
 
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Failure::Check(diagnostics) => diagnostics.iter().try_for_each(|d| writeln!(f, "{d}")),
+            Failure::Check(diagnostics) | Failure::Crucible(diagnostics) => {
+                diagnostics.iter().try_for_each(|d| writeln!(f, "{d}"))
+            }
             Failure::Lower(errors) => errors.iter().try_for_each(|e| writeln!(f, "{e}")),
         }
     }
 }
 
-/// Any diagnostic or lowering error fails the whole compile, and no module is returned.
+/// Any diagnostic, Crucible rule or lowering error fails the whole compile, and no module is returned.
 pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
     let files = checked.files();
     let paths: Vec<String> = files.iter().map(|f| f.path()).collect();
-    let root = checked.root_dir().unwrap_or_else(|| common_dir(&paths));
+    let root = checked.source_root();
     let facts = extract::extract(checked);
+    if !facts.diagnostics.is_empty() {
+        return Err(Failure::Crucible(facts.diagnostics));
+    }
     let facts_by_path: HashMap<&str, &FileFacts> = facts.files.iter().map(|f| (f.path.as_str(), f)).collect();
     let mut modules = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
@@ -95,7 +108,7 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
             _ => (stem.to_owned(), ImportBase::ScriptParent),
         };
         let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
-        match lower::lower(file, file_facts, &unanswered, import_base) {
+        match lower::lower(file, file_facts, &unanswered, import_base, &facts.place) {
             Ok(chunk) => {
                 let mut source = luau::print(&chunk);
                 source.insert_str(0, HEADER);
@@ -105,16 +118,4 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
         }
     }
     if errors.is_empty() { Ok(modules) } else { Err(Failure::Lower(errors)) }
-}
-
-fn common_dir(paths: &[String]) -> String {
-    let Some(first) = paths.first() else { return String::new() };
-    let mut root = first.rsplit_once('/').map_or("", |(dir, _)| dir).to_owned();
-    while !paths.iter().all(|p| p.starts_with(&format!("{root}/"))) {
-        match root.rsplit_once('/') {
-            Some((parent, _)) => root = parent.to_owned(),
-            None => return String::new(),
-        }
-    }
-    root
 }

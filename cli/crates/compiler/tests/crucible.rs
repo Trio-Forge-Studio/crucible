@@ -128,3 +128,41 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
     paths.sort();
     assert_eq!(paths, expected);
 }
+
+#[test]
+fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
+    let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.ts7.json"))
+        .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"));
+    let mut paths: Vec<&str> = modules.iter().map(|m| m.path.as_str()).collect();
+    paths.sort_unstable();
+    assert_eq!(
+        paths,
+        [
+            "client/main.client.luau",
+            "client/systems/renderer.luau",
+            "server/main.server.luau",
+            "server/systems/controller.luau",
+            "server/systems/member.luau",
+            "server/systems/store.luau",
+        ]
+    );
+    let source = |path: &str| &modules.iter().find(|m| m.path == path).unwrap().source;
+    let runtime = "local TS = require(game:GetService(\"ReplicatedStorage\"):WaitForChild(\"rbxts_include\"):WaitForChild(\"RuntimeLib\"))";
+    for module in &modules {
+        assert!(module.source.contains(runtime), "{} requires the runtime library:\n{}", module.path, module.source);
+    }
+    assert!(
+        source("server/main.server.luau").contains("load = { \"crucible-path:ServerScriptService/TS/systems/**\" },")
+    );
+    assert!(
+        source("client/main.client.luau")
+            .contains("load = { \"crucible-path:StarterPlayer/StarterPlayerScripts/TS/systems/**\" },")
+    );
+    let controller = source("server/systems/controller.luau");
+    assert!(controller.contains(
+        "__crucible.defineClass(Controller, {\n\tkind = \"subsystem\",\n\tid = \"@trioforge/crucible-sample-game/server/systems/controller:Controller\",\n\tdeps = { \"@trioforge/crucible-sample-game/server/systems/store:Store\" },\n\tprovides = {},\n})"
+    ));
+    let member = source("server/systems/member.luau");
+    assert!(member.contains("self.speed = __crucible.attribute(self, \"speed\", 17)"));
+    assert!(member.contains("\ttag = \"S2Member\",\n\tinstance = { \"Part\" },\n\tattributes = {"));
+}

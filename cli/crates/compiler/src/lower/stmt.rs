@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use super::{Breakable, Exit, ImportBase, Lower, is_hole, skip_parens_and_assertions};
-use crate::facts::{Callee, Constant, Import, Receiver};
+use crate::facts::{Callee, Constant, Import, Receiver, RuntimeLib};
 use crate::luau::{BinOp, Block, Expr, Field, Function, Name, Stmt, UnOp};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Nodes, Op, UnaryOp};
@@ -17,11 +17,28 @@ impl Lower<'_> {
             Expr::Table(exports.into_iter().map(|(name, value)| Field::Keyed(Expr::String(name), value)).collect())
         };
         body.push(Stmt::Return(vec![value]));
+        if self.uses_crucible {
+            match &self.place.crucible_emit {
+                Some(emit) => {
+                    self.uses_ts = true;
+                    let import = Expr::global("TS.import").call(super::import_arguments(emit));
+                    body.insert(0, Stmt::Local(vec![Cow::Borrowed("__crucible")], vec![import]));
+                }
+                None => {
+                    let root = self.file.root();
+                    self.error(
+                        root,
+                        "Crucible's macros and registration need a game that maps @trioforge/crucible/emit",
+                    );
+                }
+            }
+        }
         if self.uses_ts {
-            body.insert(
-                0,
-                Stmt::Local(vec![Cow::Borrowed("TS")], vec![Expr::global("_G").index(Expr::global("script"))]),
-            );
+            let runtime = match &self.place.runtime_lib {
+                RuntimeLib::Global => Expr::global("_G").index(Expr::global("script")),
+                RuntimeLib::Require(path) => Expr::global("require").call(vec![super::instance_at(path)]),
+            };
+            body.insert(0, Stmt::Local(vec![Cow::Borrowed("TS")], vec![runtime]));
         }
         body
     }
@@ -870,11 +887,16 @@ impl Lower<'_> {
         }
     }
 
-    /// `TS.import(script, <folder>, <names>...)` for a relative module specifier.
+    /// `TS.import(script, <folder>, <names>...)`, from the module's place path in a game, or else relative to the
+    /// importing module.
     fn import_call(&mut self, specifier: Node) -> Expr {
+        if let Some(path) = self.fact(specifier).and_then(|f| f.module.as_deref()) {
+            self.uses_ts = true;
+            return Expr::global("TS.import").call(super::import_arguments(path));
+        }
         let text = specifier.text();
         if !text.starts_with('.') {
-            self.error(specifier, format!("`{text}` is a package import; only relative imports are supported"));
+            self.error(specifier, format!("`{text}` is a package import, which needs a game's Rojo project"));
             return Expr::Nil;
         }
         let mut up = 0;
