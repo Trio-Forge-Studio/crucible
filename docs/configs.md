@@ -58,6 +58,8 @@ What a read returns:
 
 Values are applied once at the first fetch, then change only inside `refreshConfigs`.
 
+Reads are tracked. An effect or computed that reads a config reruns when the value it read changes: at the first fetch, at a refresh, when a player's snapshot loads and when they leave. That holds for an effect that read a player's config before the player joined. `configReady` is tracked the same way.
+
 ## Know when values are real
 
 `configReady()` is true once the global snapshot has been applied. `configReady(player)` is true once that player's snapshot has been applied, and false before and after they leave. Check it where a fallback or an untargeted value must not be acted on.
