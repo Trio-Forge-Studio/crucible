@@ -1367,3 +1367,22 @@ fn heritage_chains_hundreds_deep_finish_the_rules_and_the_facts() {
     has(&luau, "__crucible.resolve(\"fixture-game/shared/model:L0\")");
     has(&luau, "__crucible.defineClass(Leaf, {");
 }
+
+#[test]
+fn network_and_data_macros_fail_the_compile_until_their_transform_lands() {
+    let game = Game::new();
+    game.write(
+        "src/shared/messages.ts",
+        "import { toServer } from \"@trioforge/crucible\";\nexport const Ping = toServer<{ a: string }>(\"X.Ping\");",
+    );
+    game.main("import { config } from \"@trioforge/crucible/server\";\nexport const Limit = config<number>(\"Limit\", 1);\nexport const plain = [1].map((n) => n);");
+    let found: Vec<String> =
+        game.facts().diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
+    assert_eq!(
+        found,
+        [
+            "src/server/main.ts:2 Crucible: config needs Crucible's network transform, which this compiler does not run yet.",
+            "src/shared/messages.ts:2 Crucible: toServer needs Crucible's network transform, which this compiler does not run yet.",
+        ]
+    );
+}

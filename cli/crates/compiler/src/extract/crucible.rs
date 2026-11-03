@@ -23,6 +23,21 @@ const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "CrucibleObjec
 /// `@trioforge/crucible/emit` exports a runtime `attribute` that is not the macro.
 const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
     [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[Macro::Boot]), ("./client", &[Macro::Boot])];
+/// The declaration macros of Crucible's network and data transform. Their runtime functions raise an error, so a call
+/// the compiler cannot lower fails the compile instead.
+const NETWORK_MACROS: [&str; 11] = [
+    "toServer",
+    "toClient",
+    "askServer",
+    "receive",
+    "replicated",
+    "replicatedPerPlayer",
+    "profileStore",
+    "dataStore",
+    "profileMessage",
+    "config",
+    "playerConfig",
+];
 /// Lifecycle names from other frameworks that a Crucible class may mean as a hook.
 const HOOK_LOOKALIKES: [&str; 5] = ["onInit", "onStart", "onTick", "onPhysics", "onRender"];
 
@@ -993,7 +1008,14 @@ impl Extractor {
             Some(Macro::Inject) => self.inject_rules(n),
             Some(Macro::Attribute) => self.attribute_rules(n),
             Some(Macro::Boot) => self.boot(n),
-            _ => {}
+            _ => {
+                let symbol = self.checker.get_symbol_at_location_exported(callee);
+                if let Some(name) = self.api(symbol).filter(|name| NETWORK_MACROS.contains(name)) {
+                    let message =
+                        format!("{name} needs Crucible's network transform, which this compiler does not run yet.");
+                    self.report(n, Code::Setup, &message);
+                }
+            }
         }
     }
 
