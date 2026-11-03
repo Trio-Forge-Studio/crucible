@@ -1,6 +1,6 @@
 //! Accessors panic on a node of the wrong kind, as tsrs's do.
 
-use tsrs_ast::{Kind as TsKind, ModifierFlags, Node as TsNode, NodeFlags, SourceFile};
+use tsrs_ast::{Kind as TsKind, ModifierFlags, Node as TsNode, NodeFlags, SourceFile, SymbolFlags};
 use tsrs_core::P;
 
 use crate::facts::Span;
@@ -358,6 +358,31 @@ impl Node {
 
     pub fn parent(&self) -> Option<Node> {
         self.wrap_opt(self.n.parent())
+    }
+
+    /// The declaration of the value `name` as seen from this node, through the scopes the binder filled. `None` for a
+    /// global.
+    pub fn lookup(&self, name: &str) -> Option<Node> {
+        let mut scope = Some(self.n);
+        while let Some(n) = scope {
+            if let Some(symbol) = n.locals().and_then(|locals| locals.lookup(name))
+                && symbol.flags().intersects(SymbolFlags::Value | SymbolFlags::ExportValue | SymbolFlags::Alias)
+            {
+                return self.wrap_opt(symbol.value_declaration().or_else(|| symbol.declarations().first().copied()));
+            }
+            scope = n.parent();
+        }
+        None
+    }
+
+    /// The declaration an identifier refers to.
+    pub fn declaration(&self) -> Option<Node> {
+        self.lookup(self.n.text())
+    }
+
+    pub fn contains(&self, other: Node) -> bool {
+        let (outer, inner) = (self.span(), other.span());
+        outer.start <= inner.start && inner.end <= outer.end
     }
 
     /// A string or template literal's text is its cooked value.

@@ -208,11 +208,11 @@ impl Lower<'_> {
         }
     }
 
-    fn place_before(&mut self, place: Place, later: &[Stmt]) -> Place {
+    fn place_before(&mut self, place: Place, later: &[Stmt], read_after: &[Expr]) -> Place {
         match place {
             Place::Index(base, key) => {
-                let base = self.store_before(base, later);
-                let key = self.store_before(key, later);
+                let base = self.store_before(base, later, read_after);
+                let key = self.store_before(key, later, read_after);
                 Place::Index(base, key)
             }
             place => place,
@@ -246,7 +246,7 @@ impl Lower<'_> {
         match op {
             Op::Assign => {
                 let (value, block) = self.capture(|l| l.expr(source));
-                let place = self.place_before(place, &block);
+                let place = self.place_before(place, &block, std::slice::from_ref(&value));
                 self.current_block.extend(block);
                 let value = if used { self.push_temp_if_complex(value) } else { value };
                 self.current_block.push(Stmt::Assign(vec![place.expr()], vec![value.clone()]));
@@ -277,19 +277,23 @@ impl Lower<'_> {
                     return used.then_some(Expr::Nil);
                 };
                 let (value, block) = self.capture(|l| l.expr(source));
-                let place = self.place_before(place, &block);
-                let mut place = if used { self.simplify_place(place) } else { place };
-                let current = match &place {
-                    Place::Name(name) if !is_stable(name, &block) => Some(self.push_temp(name.clone())),
-                    _ => None,
-                };
-                self.current_block.extend(block);
                 let concat = operator == Op::Add && self.is_string_plus(target, source);
                 let (binop, value) = if concat {
                     (Some(BinOp::Concat), self.stringify(source, value))
                 } else {
                     (arithmetic(operator), value)
                 };
+                let read_after: &[Expr] = if binop.is_some() { std::slice::from_ref(&value) } else { &[] };
+                let place = self.place_before(place, &block, read_after);
+                let mut place = if used { self.simplify_place(place) } else { place };
+                let current = match &place {
+                    Place::Name(name) if !is_stable(name, &block) || self.call_may_assign(name, &block, read_after) => {
+                        Some(self.push_temp(name.clone()))
+                    }
+                    Place::Index(..) if !block.is_empty() => Some(self.push_temp(place.expr())),
+                    _ => None,
+                };
+                self.current_block.extend(block);
                 match (binop, current) {
                     (Some(binop), None) => self.current_block.push(Stmt::Compound(binop, place.expr(), value)),
                     (Some(binop), Some(current)) => {
@@ -717,7 +721,7 @@ impl Lower<'_> {
             } else {
                 let Property { key, value } = self.object_property(p);
                 self.current_block.extend(key.setup);
-                let key = self.store_before(key.value, &value.setup);
+                let key = self.store_before(key.value, &value.setup, std::slice::from_ref(&value.value));
                 self.current_block.extend(value.setup);
                 self.current_block.push(Stmt::Assign(vec![result.clone().index(key)], vec![value.value]));
             }
@@ -879,7 +883,7 @@ impl Lower<'_> {
                 let receiver = self.receiver(member.expression());
                 let key = self.expr(member.argument_expression());
                 let (args, block) = self.capture(|l| l.arguments(call));
-                let key = self.store_before(element_key(receiver, key), &block);
+                let key = self.store_before(element_key(receiver, key), &block, &[]);
                 self.current_block.extend(block);
                 (object.clone().index(key), args)
             }
