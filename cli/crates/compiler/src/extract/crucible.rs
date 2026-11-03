@@ -12,6 +12,7 @@ use tsrs_core::P;
 use tsrs_tsoptions as tsoptions;
 
 use super::{Extractor, types};
+use crate::declarations::{DeclarationKind, Side};
 use crate::facts::{Attribute, Check, Class, ClassKind, Crucible, Dependency, Literal, Site};
 use crate::macros::Macro;
 use crate::program::ConfigHost;
@@ -20,24 +21,26 @@ use crate::tree::{File, Position};
 
 const PACKAGE: &str = "@trioforge/crucible";
 const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "CrucibleObject"];
-/// `@trioforge/crucible/emit` exports a runtime `attribute` that is not the macro.
+/// `@trioforge/crucible/emit` exports a runtime `attribute` and runtime declaration functions that are not the macros.
 const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
     [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[Macro::Boot]), ("./client", &[Macro::Boot])];
-/// The declaration macros of Crucible's network and data transform. Their runtime functions raise an error, so a call
-/// the compiler cannot lower fails the compile instead.
-const NETWORK_MACROS: [&str; 11] = [
-    "toServer",
-    "toClient",
-    "askServer",
-    "receive",
-    "replicated",
-    "replicatedPerPlayer",
-    "profileStore",
-    "dataStore",
-    "profileMessage",
-    "config",
-    "playerConfig",
+const DECLARATION_MACROS: [Macro; 11] = [
+    Macro::ToServer,
+    Macro::ToClient,
+    Macro::AskServer,
+    Macro::Receive,
+    Macro::Replicated,
+    Macro::ReplicatedPerPlayer,
+    Macro::ProfileStore,
+    Macro::DataStore,
+    Macro::ProfileMessage,
+    Macro::Config,
+    Macro::PlayerConfig,
 ];
+
+fn is_declaration_macro(name: &str) -> bool {
+    DECLARATION_MACROS.iter().any(|m| m.name() == name)
+}
 /// Lifecycle names from other frameworks that a Crucible class may mean as a hook.
 const HOOK_LOOKALIKES: [&str; 5] = ["onInit", "onStart", "onTick", "onPhysics", "onRender"];
 
@@ -49,7 +52,6 @@ struct Package {
 /// What a Crucible diagnostic reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Code {
-    /// A rule, CRU001 to CRU016 or CRU023.
     Rule(u16),
     /// The project's packages do not let Crucible compute a type id.
     Setup,
@@ -73,15 +75,8 @@ struct Made {
     this_type: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Side {
-    Server,
-    Client,
-    Shared,
-}
-
 pub(super) struct Api {
-    program: &'static Program,
+    pub(super) program: &'static Program,
     exports: HashMap<P<Symbol>, &'static str>,
     macros: HashMap<P<Symbol>, Macro>,
     /// The protected instance methods Crucible's own classes declare, which are its lifecycle hooks.
@@ -98,6 +93,9 @@ pub(super) struct Api {
     made: Option<HashMap<P<Symbol>, Made>>,
     /// The declarations of `@trioforge/crucible/emit`.
     pub emit: Option<PathBuf>,
+    pub widths: HashSet<P<Symbol>>,
+    pub entries: HashMap<PathBuf, Side>,
+    pub entry_exports: HashMap<P<Symbol>, Side>,
 }
 
 impl Api {
@@ -118,6 +116,9 @@ impl Api {
             invalid_metadata: false,
             made: None,
             emit: None,
+            widths: HashSet::new(),
+            entries: HashMap::new(),
+            entry_exports: HashMap::new(),
         };
         let mut modules = Vec::new();
         for &file in program.source_files() {
@@ -131,6 +132,7 @@ impl Api {
                 types_condition(&owner.json["exports"]["./emit"], &mut types);
                 api.emit = types.first().map(|t| normalize(&owner.dir.join(t)));
             }
+            widths(c, file.as_node(), &mut api.widths);
             let Some(module) = file.as_node().symbol() else { continue };
             let exports = c.get_exports_of_module_exported(module);
             for &symbol in &exports {
@@ -145,9 +147,22 @@ impl Api {
                 if api.entry_module(&owner, entry).as_deref() != Some(module.as_str()) {
                     continue;
                 }
+                let side = match entry {
+                    "./server" => Some(Side::Server),
+                    "./client" => Some(Side::Client),
+                    _ => None,
+                };
+                if let Some(side) = side {
+                    api.entries.insert(normalize(&path), side);
+                }
                 for &symbol in &exports {
-                    if let Some(&m) = macros.iter().find(|m| m.name() == symbol.name()) {
-                        let target = unalias(c, symbol);
+                    let target = unalias(c, symbol);
+                    if let Some(side) = side
+                        && (side == Side::Client || !api.entry_exports.contains_key(&target))
+                    {
+                        api.entry_exports.insert(target, side);
+                    }
+                    if let Some(&m) = macros.iter().chain(&DECLARATION_MACROS).find(|m| m.name() == symbol.name()) {
                         api.macros.insert(target, m);
                     }
                 }
@@ -182,6 +197,10 @@ impl Api {
         self.package_of(file).is_some_and(|p| p.json["name"] == PACKAGE)
     }
 
+    pub fn exports_name(&self, name: &str) -> bool {
+        self.exports.values().any(|&n| n == name)
+    }
+
     fn name(&self, c: &mut Checker, symbol: Option<P<Symbol>>) -> Option<&'static str> {
         self.exports.get(&unalias(c, symbol?)).copied()
     }
@@ -203,6 +222,10 @@ impl Api {
         let name = c.get_resolved_signature_exported(call).declaration()?.name()?;
         let symbol = c.get_symbol_at_location_exported(name);
         self.macro_of(c, symbol)
+    }
+
+    pub fn package_name(&mut self, file: &Path) -> Option<String> {
+        self.package_of(file).and_then(|p| p.json["name"].as_str().map(str::to_owned))
     }
 
     fn package_of(&mut self, file: &Path) -> Option<Rc<Package>> {
@@ -312,7 +335,7 @@ impl Api {
     }
 
     /// Declarations of the language and the Roblox API, which every program shares.
-    fn is_library(&mut self, file: P<SourceFile>) -> bool {
+    pub(super) fn is_library(&mut self, file: P<SourceFile>) -> bool {
         let name = file.file_name().replace('\\', "/");
         if name.contains("/node_modules/@rbxts/") || self.program.is_source_file_default_library(file.path()) {
             return true;
@@ -323,7 +346,7 @@ impl Api {
     }
 
     /// The nearest folder named for a side in the path from the package of `source` to `file`'s folder.
-    fn side(&mut self, source: &Path, file: &Path) -> Option<Side> {
+    pub(super) fn side(&mut self, source: &Path, file: &Path) -> Option<Side> {
         let root = self.package_of(source).map(|p| p.dir.clone()).unwrap_or_default();
         let folder = file.parent()?;
         let relative = folder.strip_prefix(&root).unwrap_or(folder);
@@ -378,7 +401,20 @@ fn types_condition(value: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-fn unalias(c: &mut Checker, s: P<Symbol>) -> P<Symbol> {
+fn widths(c: &mut Checker, n: P<Node>, out: &mut HashSet<P<Symbol>>) {
+    if n.kind() == Kind::VariableDeclaration
+        && let Some(name) = n.name().filter(|name| name.kind() == Kind::Identifier && name.text() == "width")
+        && let Some(symbol) = c.get_symbol_at_location_exported(name)
+    {
+        out.insert(symbol);
+    }
+    n.for_each_child(&mut |child| {
+        widths(c, child, out);
+        false
+    });
+}
+
+pub(super) fn unalias(c: &mut Checker, s: P<Symbol>) -> P<Symbol> {
     if s.flags().intersects(SymbolFlags::Alias) { c.get_aliased_symbol(s) } else { s }
 }
 
@@ -386,7 +422,7 @@ fn target(t: P<Type>) -> P<Type> {
     if is_reference(t) { t.target().unwrap_or(t) } else { t }
 }
 
-fn is_reference(t: P<Type>) -> bool {
+pub(super) fn is_reference(t: P<Type>) -> bool {
     t.flags().intersects(TypeFlags::Object) && t.object_flags().intersects(ObjectFlags::Reference)
 }
 
@@ -399,7 +435,7 @@ fn is_concrete_class(d: P<Node>) -> bool {
 }
 
 /// A global script, or a `declare global` block in a module.
-fn is_global(declaration: P<Node>) -> bool {
+pub(super) fn is_global(declaration: P<Node>) -> bool {
     let Some(file) = tsrs_ast::get_source_file_of_node(declaration) else { return false };
     if !tsrs_ast::is_external_module(file) {
         return true;
@@ -468,7 +504,7 @@ fn dirname(path: &str) -> &str {
 }
 
 /// Whether a call calls `n`, through any parentheses.
-fn is_callee(mut n: P<Node>) -> bool {
+pub(super) fn is_callee(mut n: P<Node>) -> bool {
     while let Some(parent) = n.parent().filter(|p| p.kind() == Kind::ParenthesizedExpression) {
         n = parent;
     }
@@ -530,7 +566,7 @@ impl Extractor {
         self.facts.diagnostics.push(crate::Diagnostic { path: Some(path), line, column, code: number, message });
     }
 
-    fn api(&mut self, symbol: Option<P<Symbol>>) -> Option<&'static str> {
+    pub(super) fn api(&mut self, symbol: Option<P<Symbol>>) -> Option<&'static str> {
         self.crucible.name(&mut self.checker, symbol)
     }
 
@@ -572,7 +608,7 @@ impl Extractor {
         None
     }
 
-    fn kind_of(&mut self, t: P<Type>) -> Option<ClassKind> {
+    pub(super) fn kind_of(&mut self, t: P<Type>) -> Option<ClassKind> {
         if let Some(&kind) = self.crucible.kinds.get(&t) {
             return kind;
         }
@@ -581,12 +617,12 @@ impl Extractor {
         kind
     }
 
-    fn instance_type(&mut self, class: P<Node>) -> Option<P<Type>> {
+    pub(super) fn instance_type(&mut self, class: P<Node>) -> Option<P<Type>> {
         let symbol = self.checker.get_symbol_of_declaration_exported(class)?;
         Some(self.checker.get_declared_type_of_symbol_exported(symbol))
     }
 
-    fn is_library_declaration(&mut self, declaration: P<Node>) -> bool {
+    pub(super) fn is_library_declaration(&mut self, declaration: P<Node>) -> bool {
         tsrs_ast::get_source_file_of_node(declaration).is_some_and(|f| self.crucible.is_library(f))
     }
 
@@ -753,7 +789,7 @@ impl Extractor {
         Check::Invalid
     }
 
-    fn is_crucible_call(&mut self, n: P<Node>, m: Macro) -> bool {
+    pub(super) fn is_crucible_call(&mut self, n: P<Node>, m: Macro) -> bool {
         n.kind() == Kind::CallExpression && self.crucible.macro_at(&mut self.checker, n) == Some(m)
     }
 
@@ -1080,11 +1116,11 @@ impl Extractor {
 
     /// The names that can refer to a network or data macro in `file`: the macros' own, and the ones its imports give.
     fn macro_names(&mut self, file: P<SourceFile>) -> HashSet<&'static str> {
-        let mut names: HashSet<&'static str> = NETWORK_MACROS.into_iter().collect();
+        let mut names: HashSet<&'static str> = DECLARATION_MACROS.iter().map(|m| m.name()).collect();
         for &statement in file.as_node().statements() {
             for name in import_names(statement) {
                 let symbol = self.checker.get_symbol_at_location_exported(name);
-                if self.api(symbol).is_some_and(|m| NETWORK_MACROS.contains(&m)) {
+                if self.api(symbol).is_some_and(is_declaration_macro) {
                     names.insert(name.text());
                 }
             }
@@ -1101,18 +1137,24 @@ impl Extractor {
                 self.entry_import(n, literal);
             }
             Kind::ExternalModuleReference => self.entry_import(n, Some(n.as_external_module_reference().expression())),
-            Kind::CallExpression => self.crucible_call(n),
-            Kind::Identifier if names.contains(n.text()) => {
-                let parent = n.parent();
-                let specifier =
-                    parent.is_some_and(|p| matches!(p.kind(), Kind::ImportSpecifier | Kind::ExportSpecifier));
-                let access = parent.filter(|p| {
-                    p.kind() == Kind::PropertyAccessExpression && p.as_property_access_expression().name == n
-                });
-                if !specifier && !is_callee(access.unwrap_or(n)) {
-                    let symbol = self.checker.get_symbol_at_location_exported(n);
-                    self.macro_value(n, symbol);
+            Kind::CallExpression => self.crucible_call(n, file),
+            Kind::StringLiteral => self.side_entry_specifier(n, file),
+            Kind::BinaryExpression => self.process_receipt(n),
+            Kind::ModuleDeclaration => self.augmentation(n),
+            Kind::Identifier => {
+                if names.contains(n.text()) {
+                    let parent = n.parent();
+                    let specifier =
+                        parent.is_some_and(|p| matches!(p.kind(), Kind::ImportSpecifier | Kind::ExportSpecifier));
+                    let access = parent.filter(|p| {
+                        p.kind() == Kind::PropertyAccessExpression && p.as_property_access_expression().name == n
+                    });
+                    if !specifier && !is_callee(access.unwrap_or(n)) {
+                        let symbol = self.checker.get_symbol_at_location_exported(n);
+                        self.macro_value(n, symbol);
+                    }
                 }
+                self.side_entry_reference(n, file);
             }
             Kind::ElementAccessExpression if !is_callee(n) => {
                 let t = self.checker.get_type_at_location(n);
@@ -1156,7 +1198,7 @@ impl Extractor {
         }
     }
 
-    fn crucible_call(&mut self, n: P<Node>) {
+    fn crucible_call(&mut self, n: P<Node>, file: P<SourceFile>) {
         let callee = n.as_call_expression().expression;
         if callee.kind() == Kind::ImportKeyword {
             self.entry_import(n, n.arguments().first().copied());
@@ -1166,25 +1208,20 @@ impl Extractor {
             Some(Macro::Inject) => self.inject_rules(n),
             Some(Macro::Attribute) => self.attribute_rules(n),
             Some(Macro::Boot) => self.boot(n),
-            _ => {
-                let symbol = self.checker.get_symbol_at_location_exported(callee);
-                let name = self.api(symbol).or_else(|| {
-                    let name = self.checker.get_resolved_signature_exported(n).declaration()?.name()?;
-                    let symbol = self.checker.get_symbol_at_location_exported(name);
-                    self.api(symbol)
-                });
-                if let Some(name) = name.filter(|name| NETWORK_MACROS.contains(name)) {
-                    let message =
-                        format!("{name} needs Crucible's network transform, which this compiler does not run yet.");
-                    self.report(n, Code::Setup, &message);
+            Some(Macro::Receive) => self.receive(n, file),
+            Some(m) => {
+                if let Some(kind) = DeclarationKind::of(m) {
+                    self.declaration(n, kind, file);
                 }
             }
+            None => {}
         }
+        self.profile_store_call(n, file);
     }
 
     /// CRU023: a network or data macro anywhere but a call's callee, an import or an export.
     fn macro_value(&mut self, at: P<Node>, symbol: Option<P<Symbol>>) {
-        if let Some(name) = self.api(symbol).filter(|name| NETWORK_MACROS.contains(name)) {
+        if let Some(name) = self.api(symbol).filter(|name| is_declaration_macro(name)) {
             let message = format!("{name} is a declaration macro and cannot be used as a value.");
             self.report(at, Code::Rule(23), &message);
         }

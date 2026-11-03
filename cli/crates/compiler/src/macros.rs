@@ -1,5 +1,5 @@
 //! The macros the lowering expands inline. roblox-ts 3.0.0's call, constructor, identifier and property-call tables,
-//! plus Crucible's `attribute`, `inject` and `boot`. The extractor matches each by symbol identity, never by name alone.
+//! plus Crucible's macros. The extractor matches each by symbol identity, never by name alone.
 
 /// How a macro is found in source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -159,4 +159,15 @@ macros! {
     Attribute = Crucible "attribute",
     Inject = Crucible "inject",
     Boot = Crucible "boot",
+    ToServer = Crucible "toServer",
+    ToClient = Crucible "toClient",
+    AskServer = Crucible "askServer",
+    Receive = Crucible "receive",
+    Replicated = Crucible "replicated",
+    ReplicatedPerPlayer = Crucible "replicatedPerPlayer",
+    ProfileStore = Crucible "profileStore",
+    DataStore = Crucible "dataStore",
+    ProfileMessage = Crucible "profileMessage",
+    Config = Crucible "config",
+    PlayerConfig = Crucible "playerConfig",
 }

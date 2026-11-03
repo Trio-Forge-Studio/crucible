@@ -5,6 +5,7 @@ use std::fmt;
 use std::ops::BitOr;
 
 use crate::Diagnostic;
+use crate::declarations::DeclarationKind;
 use crate::macros::Macro;
 
 /// A node's source range in UTF-8 bytes, from the start of its first token to its end. Leading trivia is excluded.
@@ -33,7 +34,7 @@ pub struct Fact {
     /// How many values each step of an iterated `LuaTuple` iterator has. Absent where the tuple's length varies.
     pub step_length: Option<u32>,
     pub import: Option<Import>,
-    /// Set at a registered class, an `inject` call and a `boot` load glob.
+    /// Set at a registered class, an `inject`, declaration or `receive` call, and a `boot` load glob.
     pub crucible: Option<Box<Crucible>>,
     /// Where an imported module's instance is, set at an import's module specifier in a game.
     pub module: Option<Box<ModulePath>>,
@@ -142,6 +143,86 @@ pub enum Crucible {
     /// A `boot` load glob, as the instance path pattern the runtime matches, such as
     /// `crucible-path:ServerScriptService/TS/systems/**`.
     Load(Box<str>),
+    /// A declaration macro call, which lowers to the `@trioforge/crucible/emit` function of the same name.
+    Declaration(Declaration),
+    /// A `receive` call, which lowers to `receive(self, field, target, callback)`.
+    Receive { field: Box<str> },
+}
+
+/// `__crucible.<kind>(name, ...kept arguments, ...schemas, ...tail)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Declaration {
+    pub kind: DeclarationKind,
+    /// A message's payload, an ask's request and response, or a state's value. A profile store has the saved value
+    /// and then the replica its owner's client receives.
+    pub schemas: Vec<Schema>,
+    pub tail: Tail,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Tail {
+    None,
+    /// An ask's timeout in seconds, or `None` for the runtime's default.
+    Timeout(Option<f64>),
+    /// The paths of a profile store's `serverOnly` fields, each from the value's root.
+    ServerOnly(Vec<Vec<Box<str>>>),
+}
+
+/// A value's wire schema, which the runtime's `n` builders describe.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Schema {
+    Nil,
+    Bool,
+    F64,
+    F32,
+    U8,
+    U16,
+    U32,
+    String,
+    /// `unknown` in a payload, which the codec checks at run time.
+    Dynamic,
+    Vector3,
+    Color3,
+    CFrame,
+    Literal(Literal),
+    /// `Instances` class names, sorted by their bytes.
+    Instance(Vec<Box<str>>),
+    /// Sorted by the bytes of their names.
+    Object(Vec<Field>),
+    Array(Box<Schema>),
+    Tuple(Vec<Schema>),
+    Map(MapKey, Box<Schema>),
+    Union(Vec<Schema>),
+    /// One member of a union of objects: its discriminant property, one literal value of it, and the object without it.
+    Variant {
+        key: Box<str>,
+        value: Literal,
+        body: Box<Schema>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Field {
+    pub name: Box<str>,
+    pub value: Schema,
+    /// A `serverOnly` profile store field, which the replica leaves out.
+    pub server_only: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MapKey {
+    String,
+    U8,
+    U16,
+    U32,
+    /// A union of literals, numbers before strings, each group sorted.
+    Literals(Vec<KeyLiteral>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum KeyLiteral {
+    Number(f64),
+    String(Box<str>),
 }
 
 /// An instance path a module reaches another module by.

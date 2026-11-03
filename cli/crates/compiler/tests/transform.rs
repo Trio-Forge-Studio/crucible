@@ -2,200 +2,16 @@
 //! whose source TypeScript 7 rejects asserts the type error at the line its rule would report, because the compiler
 //! stops before the Crucible pass.
 
+mod support;
+
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Diagnostic, Facts, Failure, Literal, Module};
+use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Facts, Failure, Literal};
 use serde_json::{Value, json};
-
-fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-fn slashes(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
-static NEXT: AtomicUsize = AtomicUsize::new(0);
+use support::{Game, copy_declarations, has, lines, project, repo, slashes};
 
 const HEADER: &str = "import { Subsystem, CrucibleBehaviour, attribute, type All } from \"@trioforge/crucible\";\nimport { boot } from \"@trioforge/crucible/server\";\n";
 const POSITIVE: &str = include_str!("../../../../packages/crucible/transformer-src/tests/fixtures/game.ts");
-
-/// A game in a scratch folder with the Crucible package copied into its `node_modules`, as a consumer installs it.
-struct Game {
-    dir: PathBuf,
-}
-
-fn copy_declarations(from: &Path, to: &Path) {
-    for entry in std::fs::read_dir(from).expect("the package folder exists; run pnpm build first") {
-        let path = entry.unwrap().path();
-        let target = to.join(path.file_name().unwrap());
-        if path.is_dir() {
-            copy_declarations(&path, &target);
-        } else if path.to_string_lossy().ends_with(".d.ts") || path.file_name().unwrap() == "package.json" {
-            std::fs::create_dir_all(to).unwrap();
-            std::fs::copy(&path, &target).unwrap();
-        }
-    }
-}
-
-impl Game {
-    fn new() -> Game {
-        Game::under("client")
-    }
-
-    /// The game sits in a folder named `ancestor`, which side rules must ignore because it is above the package.
-    fn under(ancestor: &str) -> Game {
-        let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("transform").join(format!("{id}"));
-        let _ = std::fs::remove_dir_all(&scratch);
-        let dir = scratch.join(ancestor).join("game");
-        let installed = dir.join("node_modules/@trioforge/crucible");
-        let package = repo().join("packages/crucible");
-        for entry in ["out", "server", "client", "emit"] {
-            copy_declarations(&package.join(entry), &installed.join(entry));
-        }
-        std::fs::copy(package.join("package.json"), installed.join("package.json")).unwrap();
-        std::fs::create_dir_all(dir.join("src/server")).unwrap();
-        let game = Game { dir };
-        game.json("package.json", &json!({ "name": "fixture-game", "private": true }));
-        game.json("default.project.json", &project());
-        game.config(|_| {});
-        game
-    }
-
-    fn write(&self, path: &str, text: &str) -> &Game {
-        let file = self.dir.join(path);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, text).unwrap();
-        self
-    }
-
-    fn json(&self, path: &str, value: &Value) -> &Game {
-        self.write(path, &serde_json::to_string_pretty(value).unwrap())
-    }
-
-    fn remove(&self, path: &str) -> &Game {
-        std::fs::remove_file(self.dir.join(path)).unwrap();
-        self
-    }
-
-    /// Writes `tsconfig.json` from the standard game config after `edit` changes it.
-    fn config(&self, edit: impl FnOnce(&mut Value)) -> &Game {
-        let roots = repo().join("packages/crucible/node_modules");
-        let mut config = json!({
-            "extends": slashes(&repo().join("tsconfig.ts7.json")),
-            "compilerOptions": {
-                "rootDir": "src",
-                "outDir": "out",
-                "typeRoots": [slashes(&roots.join("@trioforge")), slashes(&roots.join("@rbxts"))],
-                "types": ["compiler-types", "types"],
-            },
-            "include": ["src"],
-        });
-        edit(&mut config);
-        self.json("tsconfig.json", &config)
-    }
-
-    fn main(&self, text: &str) -> &Game {
-        self.write("src/server/main.ts", text)
-    }
-
-    fn analyze(&self) -> Result<Facts, Vec<Diagnostic>> {
-        self.analyze_at("tsconfig.json")
-    }
-
-    fn analyze_at(&self, tsconfig: &str) -> Result<Facts, Vec<Diagnostic>> {
-        crucible_compiler::analyze(&self.dir.join(tsconfig))
-    }
-
-    fn facts(&self) -> Facts {
-        self.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)))
-    }
-
-    fn relative(&self, diagnostic: &Diagnostic) -> String {
-        let dir = format!("{}/", slashes(&self.dir));
-        let path = diagnostic.path.as_deref().unwrap_or("");
-        path.strip_prefix(&dir).unwrap_or(path).to_owned()
-    }
-
-    /// Each Crucible diagnostic as `CRU001@src/server/main.ts:3`, with `Crucible` for a setup error. Errors about
-    /// where the place holds a module are left out.
-    fn found(&self) -> Vec<String> {
-        self.found_at("tsconfig.json")
-    }
-
-    fn found_at(&self, tsconfig: &str) -> Vec<String> {
-        let facts = self.analyze_at(tsconfig).unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)));
-        facts
-            .diagnostics
-            .iter()
-            .filter(|d| d.code >= 90000)
-            .map(|d| format!("{}@{}:{}", code(d), self.relative(d), d.line))
-            .collect()
-    }
-
-    fn found_in(&self, file: &str) -> Vec<String> {
-        let suffix = format!("@{file}:");
-        self.found().into_iter().filter(|f| f.contains(&suffix)).collect()
-    }
-
-    /// The `file:line` of each type error, for sources that TypeScript 7 rejects.
-    fn type_errors(&self) -> Vec<String> {
-        match self.analyze() {
-            Ok(_) => Vec::new(),
-            Err(diagnostics) => diagnostics.iter().map(|d| format!("{}:{}", self.relative(d), d.line)).collect(),
-        }
-    }
-
-    fn compile(&self) -> Vec<Module> {
-        crucible_compiler::compile(&self.dir.join("tsconfig.json"))
-            .unwrap_or_else(|f| panic!("the game compiles:\n{f}"))
-    }
-
-    fn luau(&self, path: &str) -> String {
-        let modules = self.compile();
-        modules.into_iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} is emitted")).source
-    }
-}
-
-fn project() -> Value {
-    json!({
-        "name": "fixture",
-        "tree": {
-            "$className": "DataModel",
-            "ReplicatedStorage": {
-                "$className": "ReplicatedStorage",
-                "rbxts_include": {
-                    "$path": "include",
-                    "node_modules": {
-                        "$className": "Folder",
-                        "@rbxts": { "$path": "node_modules/@rbxts" },
-                        "@trioforge": { "$className": "Folder", "crucible": { "$path": "node_modules/@trioforge/crucible" } },
-                    },
-                },
-                "TS": { "$path": "out/shared" },
-            },
-            "ServerScriptService": { "$className": "ServerScriptService", "TS": { "$path": "out/server" } },
-            "StarterPlayer": {
-                "$className": "StarterPlayer",
-                "StarterPlayerScripts": { "$className": "StarterPlayerScripts", "TS": { "$path": "out/client" } },
-            },
-        },
-    })
-}
-
-fn code(d: &Diagnostic) -> String {
-    match d.code {
-        90000 => "Crucible".to_owned(),
-        code if code > 90000 => format!("CRU{:03}", code - 90000),
-        code => format!("TS{code}"),
-    }
-}
-
-fn lines(diagnostics: &[Diagnostic]) -> String {
-    diagnostics.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
-}
 
 fn line_count(text: &str) -> usize {
     text.trim_end().split('\n').count()
@@ -223,10 +39,6 @@ fn class<'a>(classes: &'a [Class], name: &str) -> &'a Class {
 
 fn id(name: &str) -> Box<str> {
     format!("fixture-game/server/main:{name}").into()
-}
-
-fn has(source: &str, part: &str) {
-    assert!(source.contains(part), "the output contains `{part}`:\n{source}");
 }
 
 #[test]
@@ -620,8 +432,12 @@ fn review_regressions_cover_alias_macros_abstract_only_imports_empty_files_and_c
     has(&luau, "\t\tx = {\n\t\t\tname = \"X\",");
     game.main(&format!("{header}const a = attribute; const bad = a(1);"));
     assert!(game.found().contains(&"CRU015@src/server/main.ts:2".to_owned()), "{:?}", game.found());
-    game.main("import { boot } from \"@trioforge/crucible/client\"; boot({load: [\"src/server/**/*.ts\"]});");
-    has(&game.luau("server/main.luau"), "crucible-path:ServerScriptService/TS/**/*");
+    game.remove("src/server/main.ts");
+    game.write(
+        "src/client/main.ts",
+        "import { boot } from \"@trioforge/crucible/client\"; boot({load: [\"src/server/**/*.ts\"]});",
+    );
+    has(&game.luau("client/main.luau"), "crucible-path:ServerScriptService/TS/**/*");
 }
 
 #[test]
@@ -1380,23 +1196,38 @@ fn heritage_chains_hundreds_deep_finish_the_rules_and_the_facts() {
 }
 
 #[test]
-fn network_and_data_macros_fail_the_compile_until_their_transform_lands() {
+fn network_and_data_macros_lower_to_their_emit_calls() {
     let game = Game::new();
     game.write(
         "src/shared/messages.ts",
-        "import { replicated, syncStatus, toServer } from \"@trioforge/crucible\";\nexport const Ping = toServer<{ a: string }>(\"X.Ping\");\nexport const Score = replicated<number>(\"Score\", 0);\nexport const status = () => syncStatus(Score);",
+        "import { replicated, syncStatus, toServer } from \"@trioforge/crucible\";
+export const Ping = toServer<{ a: string }>(\"X.Ping\");
+export const Score = replicated<number>(\"Score\", 0);
+export const status = () => syncStatus(Score);",
     );
-    game.main("import { config, dataStore, operationId } from \"@trioforge/crucible/server\";\nexport const Limit = config<number>(\"Limit\", 1);\nexport const Saves = dataStore<{ coins: number }>(\"Saves\", { defaults: { coins: 0 } });\nexport const plain = [1].map((n) => n);\nexport const id = operationId();");
-    let found: Vec<String> =
-        game.facts().diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
-    assert_eq!(
-        found,
-        [
-            "src/server/main.ts:2 Crucible: config needs Crucible's network transform, which this compiler does not run yet.",
-            "src/server/main.ts:3 Crucible: dataStore needs Crucible's network transform, which this compiler does not run yet.",
-            "src/shared/messages.ts:2 Crucible: toServer needs Crucible's network transform, which this compiler does not run yet.",
-            "src/shared/messages.ts:3 Crucible: replicated needs Crucible's network transform, which this compiler does not run yet.",
-        ]
+    game.main(
+        "import { config, dataStore, operationId } from \"@trioforge/crucible/server\";
+export const Limit = config<number>(\"Limit\", 1);
+export const Saves = dataStore<{ coins: number }>(\"Saves\", { defaults: { coins: 0 } });
+export const plain = [1].map((n) => n);
+export const id = operationId();",
+    );
+    assert_eq!(game.found(), Vec::<String>::new());
+    let shared = game.luau("shared/messages.luau");
+    has(
+        &shared,
+        "local Ping = __crucible.toServer(\"X.Ping\", __crucible.n.object({ { \"a\", __crucible.n.string } }))",
+    );
+    has(&shared, "local Score = __crucible.replicated(\"Score\", 0, __crucible.n.f64)");
+    let server = game.luau("server/main.luau");
+    has(&server, "local Limit = __crucible.config(\"Limit\", 1, __crucible.n.f64)");
+    has(
+        &server,
+        "local Saves = __crucible.dataStore(\"Saves\", {
+	defaults = {
+		coins = 0,
+	},
+}, __crucible.n.object({ { \"coins\", __crucible.n.f64 } }))",
     );
 }
 
@@ -1430,19 +1261,15 @@ fn network_and_data_macros_used_as_values_are_cru023_at_the_reference() {
 }
 
 #[test]
-fn a_parenthesized_network_macro_call_still_fails_the_compile() {
+fn a_parenthesized_network_macro_call_lowers_like_a_plain_one() {
     let game = Game::new();
     game.main(
-        "import * as S from \"@trioforge/crucible/server\";\nexport const Limit = (S.config)<number>(\"Limit\", 1);\n",
+        "import * as S from \"@trioforge/crucible/server\";
+export const Limit = (S.config)<number>(\"Limit\", 1);
+",
     );
-    let found: Vec<String> =
-        game.facts().diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
-    assert_eq!(
-        found,
-        [
-            "src/server/main.ts:2 Crucible: config needs Crucible's network transform, which this compiler does not run yet."
-        ]
-    );
+    assert_eq!(game.found(), Vec::<String>::new());
+    has(&game.luau("server/main.luau"), "local Limit = __crucible.config(\"Limit\", 1, __crucible.n.f64)");
 }
 
 #[test]

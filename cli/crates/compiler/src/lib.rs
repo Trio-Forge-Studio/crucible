@@ -1,3 +1,4 @@
+mod declarations;
 mod extract;
 mod facts;
 mod lower;
@@ -12,9 +13,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
+pub use declarations::DeclarationKind;
 pub use facts::{
-    Attribute, Callee, Check, Class, ClassKind, Constant, Crucible, Dependency, Fact, Facts, Falsy, FileFacts, Import,
-    Literal, ModulePath, Place, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
+    Attribute, Callee, Check, Class, ClassKind, Constant, Crucible, Declaration, Dependency, Fact, Facts, Falsy, Field,
+    FileFacts, Import, KeyLiteral, Literal, MapKey, ModulePath, Place, Reason, Receiver, RuntimeLib, Schema, Site,
+    Span, Tail, Unanswered,
 };
 pub use lower::Error;
 use lower::ImportBase;

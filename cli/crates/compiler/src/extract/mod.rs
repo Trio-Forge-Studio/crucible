@@ -4,10 +4,12 @@
 //! not sites yet.
 
 mod crucible;
+mod data;
+mod network;
 mod types;
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tsrs_ast::{Kind, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
 use tsrs_checker::{EmitResolver, Type};
@@ -59,6 +61,8 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         globals,
         crucible,
         game,
+        config_dir: PathBuf::from(&dir),
+        network: network::Program::default(),
         facts,
         text: "",
         path: String::new(),
@@ -162,6 +166,8 @@ struct Extractor {
     globals: types::Globals,
     crucible: crucible::Api,
     game: Option<Game>,
+    config_dir: PathBuf,
+    network: network::Program,
     facts: Facts,
     text: &'static str,
     path: String,

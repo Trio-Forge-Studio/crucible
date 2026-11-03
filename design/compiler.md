@@ -89,7 +89,7 @@ These counts come from the spike's collector. FD has 117,409 type-dependent site
 - **Classes and modules.** Classes, enums, `export =`, and `declare module` merging.
 - **Other syntax.** `satisfies` and try with throw.
 - **JSX for Vide.** 2,106 elements, of which only the 17 spread attributes need a fact.
-- **Crucible's transform.** Registration, `attribute()`, `inject<T>()`, `boot()`, the emit import, and the CRU lint rules.
+- **Crucible's transform.** Registration, `attribute()`, `inject<T>()`, `boot()`, `receive()`, the network, replicated, data and config declaration macros, the emit import, and the CRU lint rules.
 
 `async`, generators, and regex literals are compile errors, because neither codebase uses them. `const enum` compiles as a regular enum, which removes the checker lookup that import elision needed for 32 of 121 Crucible imports.
 
