@@ -29,6 +29,8 @@ pub struct Fact {
     pub constant: Option<Constant>,
     /// Whether a numeric `for` loop bound is definitely an integer.
     pub integer: Option<bool>,
+    /// How many values each step of an iterated `LuaTuple` iterator has. Absent where the tuple's length varies.
+    pub step_length: Option<u32>,
     pub import: Option<Import>,
     /// Set at a registered class and at an `inject` call.
     pub crucible: Option<Box<Crucible>>,

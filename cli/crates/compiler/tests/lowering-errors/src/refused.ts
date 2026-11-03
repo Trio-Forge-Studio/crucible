@@ -15,10 +15,10 @@ export function shadow() {
 	return table;
 }
 
-export function attempt() {
-	try {
-		counter += 1;
-	} catch {}
+export function whole(steps: IterableFunction<LuaTuple<number[]>>) {
+	for (const step of steps) {
+		print(step.size());
+	}
 }
 
 export function check(value: unknown) {

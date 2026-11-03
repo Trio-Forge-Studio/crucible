@@ -112,3 +112,23 @@ export function shadowedCondition() {
 	} while (--n > 0);
 	return passes;
 }
+
+function bounds(): LuaTuple<[number, number]> {
+	return $tuple(2, 5);
+}
+
+export function spanOf() {
+	let total = 0;
+	for (const bound of bounds()) total += bound;
+	return total;
+}
+
+export function wholeSteps(scores: Record<string, number>, spans: Array<[number, number]>) {
+	const parts = new Array<string>();
+	let count = 0;
+	for (const step of pairs(scores)) parts.push(`${step[0]}=${step[1]}`);
+	for (const _ of pairs(scores)) count += 1;
+	for (const [key, ...rest] of pairs(scores)) parts.push(`${key}:${rest.size()}`);
+	for (const [i, [low, high]] of ipairs(spans)) parts.push(`${i}:${low + high}`);
+	return `${count} ${parts.join(" ")}`;
+}

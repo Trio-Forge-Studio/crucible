@@ -65,14 +65,33 @@ pub(crate) fn lower(
     if l.errors.is_empty() { Ok(body) } else { Err(l.errors) }
 }
 
+/// What a `break`, `continue` or `return` can leave. `Try` is the function `pcall` runs a `try` or `catch` body in,
+/// and its `exits` are the ways out of that function, other than its end and a throw, that the code after the `pcall`
+/// repeats.
 #[derive(Clone, PartialEq)]
 enum Breakable {
     Loop { copy_back: Block },
     Switch,
+    Try { exits: Vec<Exit> },
 }
 
 impl Breakable {
     const LOOP: Breakable = Breakable::Loop { copy_back: Vec::new() };
+}
+
+/// A way out of a `try` or `catch` body's function, which returns its code first.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Exit {
+    /// A `return` with at most one value, which the function returns after the code.
+    Return = 1,
+    /// A `return` with several values, which the function returns in one `table.pack` after the code.
+    ReturnSeveral = 2,
+    Break = 3,
+    Continue = 4,
+}
+
+impl Exit {
+    const ALL: [Exit; 4] = [Exit::Return, Exit::ReturnSeveral, Exit::Break, Exit::Continue];
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -333,6 +352,7 @@ const EMITTED_GLOBALS: &[&str] = &[
     "rawget",
     "rawset",
     "rawequal",
+    "pcall",
     "bit32",
     "utf8",
     "math",

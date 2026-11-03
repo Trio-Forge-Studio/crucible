@@ -79,6 +79,8 @@ Every build compiles every file. A per-file output cache would cut the edit buil
 
 FD's runtime packages ship precompiled Luau that calls roblox-ts's `TS.import`. These include Flamework, janitor, log, message-templates, tether, serio, anvil, brigadier, and spline. The compiler keeps roblox-ts's `RuntimeLib` in `rbxts_include` for them. Those packages cost nothing at compile time beyond reading their declarations.
 
+Compiled code reaches `RuntimeLib` only through `TS.import` and `TS.Promise`. `throw` lowers to `error(value, 0)`, so a thrown string reaches `catch` without a position prefix. `try` lowers inline to `pcall`, not to roblox-ts's `TS.try`. The `finally` body then runs inline after the `pcall`, so its own `return`, `break` or throw replaces a pending one without a closure or exit codes of its own.
+
 ## Features in scope
 
 These counts come from the spike's collector. FD has 117,409 type-dependent sites, and Crucible has 5,520.
@@ -116,7 +118,7 @@ Each phase ends in a budget check and a test run that a reviewer can repeat.
 2. **Build the front end.** Add a compiler crate to the `cli` workspace that builds the tsrs program from a tsconfig, checks it, and fills the fact table, and writes nothing yet. Move the Rust pin to tsrs's version. The check is every site answered on Crucible's runtime and sample game in `cargo test`, and the whole run under 2.5 s and 250 MB on FD's TypeScript 7 copy.
 3. **Lower Crucible's runtime.** Implement the lowering for the features Crucible's runtime uses. The check is Crucible's Lune specs passing on the compiler's output.
 4. **Add the Crucible transform.** Port `transformer-src` into the compiler crates. The check is the sample game passing `pnpm check`, with the transformer tests ported to `cargo test` and passing.
-5. **Cover FD's feature set.** Add JSX, `export =`, merged declarations, `satisfies`, and try with throw. The check is FD's tests passing and every budget in the pass bar met on FD.
+5. **Cover FD's feature set.** Add JSX, `export =`, merged declarations, and `satisfies`. Try with throw landed in phase 3, because the runtime's data module throws. The check is FD's tests passing and every budget in the pass bar met on FD.
 6. **Move the stack.** Switch `crucible build` from `rbxtsc` to the in-process compiler. Remove `roblox-ts` and `typescript` from the template and the sample, delete `transformer-src`, and drop the physical `server`, `client`, and `emit` folders if `exports` resolution passes. The check is green CI on Crucible and FD.
 7. **Add a cache, only if needed.** If the full build misses its budget, or agents need a faster edit loop, key each file's output by its content and the declarations it imports. A changed merged declaration invalidates every file. The check is an edit build under 500 ms with FD's tests still passing.
 
