@@ -589,6 +589,8 @@ const addedBaseGame = () =>
 			"export class Carrier { g = new KInlineProp(); }",
 			"export interface IOnly { k: number }",
 			"export interface IUnion { k: number }",
+			"export interface IAwait { k: number }",
+			"export const makeAsync = async (): Promise<IAwait> => ({ k: 1 });",
 			"export const makeUnion = (): IUnion | undefined => undefined;",
 			"export class Frame { f: IOnly = { k: 1 }; }",
 			"export type Tree = { kids: Tree[]; leaf: number };",
@@ -607,7 +609,7 @@ const addedBaseGame = () =>
 		"src/shared/messages.ts":
 			imports +
 			[
-				'import { variable, makeAwaited, makeNonNull, makeElements, holder, ConstAlias, makeWrapped, Carrier, Frame, tree, KWith, makeUnion } from "./base";',
+				'import { variable, makeAwaited, makeNonNull, makeElements, holder, ConstAlias, makeWrapped, Carrier, Frame, tree, KWith, makeUnion, makeAsync } from "./base";',
 				'import { Holder, Pair, Mapped, Unwrap } from "./model";',
 				'export const A = toServer<Omit<typeof variable, "k">>("X.A");',
 				'export const B = toServer<Omit<Awaited<ReturnType<typeof makeAwaited>>, "k">>("X.B");',
@@ -622,10 +624,11 @@ const addedBaseGame = () =>
 				'export const K = toServer<Omit<Frame["f"], "k">>("X.K");',
 				'export const L = toServer<Omit<typeof tree, "kids">>("X.L");',
 				'export const M = toServer<Pair<KWith>>("X.M");',
+				'export const O = toServer<{ [P in Exclude<keyof Awaited<ReturnType<typeof makeAsync>>, "k">]: number }>("X.O");',
 				'export const N = toServer<{ [P in Exclude<keyof NonNullable<ReturnType<typeof makeUnion>>, "k">]: number }>("X.N");',
 			].join("\n"),
 		...Object.fromEntries(
-			[...addedBaseClasses, "IOnly", "IUnion"].map((name) => [
+			[...addedBaseClasses, "IOnly", "IUnion", "IAwait"].map((name) => [
 				`src/util/${name.toLowerCase()}.ts`,
 				addedBase("../shared/base", name),
 			]),
@@ -648,6 +651,7 @@ test("network augmentations that add a base to a class a payload reaches only th
 		"kwrapped",
 		"ionly",
 		"iunion",
+		"iawait",
 	].sort();
 	assert.deepEqual(flagged(game), expected);
 	assert.deepEqual(
