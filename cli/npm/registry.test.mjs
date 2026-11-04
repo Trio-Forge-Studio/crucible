@@ -15,8 +15,12 @@ test("preflight rejects live and unpublished versions", () => {
 
 test("partial staging skips identical published tarballs, stages the shim last, and reports stage failures", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "crucible-release-"));
+	const cwd = process.cwd();
 	try {
 		mkdirSync(join(directory, "package"));
+		mkdirSync(join(directory, "packages"));
+		// The publish job downloads the tarballs to `packages`, and npm reads `packages/<file>` as a GitHub repository.
+		process.chdir(directory);
 		const names = [
 			SHIM,
 			"@trioforge/crucible",
@@ -25,7 +29,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		const documents = {};
 		const manifests = new Map();
 		for (const [index, name] of names.entries()) {
-			const tarball = join(directory, `${index}.tgz`);
+			const tarball = join(directory, "packages", `${index}.tgz`);
 			writeFileSync(join(directory, "package/package.json"), JSON.stringify({ name, version: "1.2.3-beta.1" }));
 			execFileSync("tar", ["-czf", tarball, "-C", directory, "package"]);
 			manifests.set(tarball, name);
@@ -45,14 +49,15 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 			assert.deepEqual(args.slice(0, 2), ["stage", "publish"]);
 			assert.ok(args.includes("--provenance"));
 			assert.equal(args.at(-1), "next");
+			assert.ok(manifests.has(args[2]), `${args[2]} is not an absolute tarball path`);
 			published.push(manifests.get(args[2]));
 		};
 		await assert.rejects(
-			main("preflight", directory, async (name) => documents[name] ?? {}, publish),
+			main("preflight", "packages", async (name) => documents[name] ?? {}, publish),
 			/already used/,
 		);
 		assert.deepEqual(published, []);
-		await main("stage", directory, async (name) => documents[name] ?? {}, publish);
+		await main("stage", "packages", async (name) => documents[name] ?? {}, publish);
 		assert.equal(published.length, 3);
 		assert.equal(published.at(-1), SHIM);
 		assert.ok(!published.includes(names[2]));
@@ -60,7 +65,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		await assert.rejects(
 			main(
 				"stage",
-				directory,
+				"packages",
 				async (name) => documents[name] ?? {},
 				(args) => {
 					if (manifests.get(args[2]) === "@trioforge/crucible") throw new Error("E409 Conflict");
@@ -73,13 +78,13 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		assert.equal(published.at(-1), SHIM);
 		documents[names[2]].versions["1.2.3-beta.1"].dist.integrity = "different";
 		await assert.rejects(
-			main("stage", directory, async (name) => documents[name] ?? {}, publish),
+			main("stage", "packages", async (name) => documents[name] ?? {}, publish),
 			/artifact differs/,
 		);
 		await assert.rejects(
 			main(
 				"preflight",
-				directory,
+				"packages",
 				async () => {
 					throw new Error("registry unavailable");
 				},
@@ -88,6 +93,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 			/registry unavailable/,
 		);
 	} finally {
+		process.chdir(cwd);
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
