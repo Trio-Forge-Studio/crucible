@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const SHIM = "@trioforge/crucible-cli";
@@ -35,7 +35,7 @@ export async function main(
 	const packages = readdirSync(directory)
 		.filter((file) => file.endsWith(".tgz"))
 		.map((file) => {
-			const path = join(directory, file);
+			const path = resolve(directory, file);
 			const { name, version } = JSON.parse(
 				execFileSync("tar", ["-xOf", path, "package/package.json"], { encoding: "utf8" }),
 			);
