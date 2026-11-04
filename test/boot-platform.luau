@@ -78,14 +78,22 @@ return {
 			spec.has(err, "Invalid Crucible load pattern", "segment diagnostic")
 		end
 	end,
-	["side entries enforce the side and client BOOTED_ATTRIBUTE is set only on successful boot"] = function()
+	["side entries enforce the side and set BOOTED_ATTRIBUTE and one Debug record only on successful boot"] = function()
 		for _, client in { false, true } do
 			local p = platform(client)
+			local records = {}
+			p.graph.module("logging").Logging:addSink({
+				write = function(record)
+					table.insert(records, record)
+				end,
+			}, 0)
 			local entry = p.graph.module(if client then "client" else "server")
+			local marked = if client then p.attributes else p.services.ServerScriptService.attributes
 			spec.eq(type(entry.boot), "function", "export")
 			local ok = pcall(entry.boot, { load = { "untransformed" } })
 			spec.eq(ok, false, "failed load")
-			spec.eq(next(p.attributes), nil, "not booted")
+			spec.eq(next(marked), nil, "not booted")
+			spec.eq(#records, 0, "no boot record after a failed boot")
 			local network = p.graph.network
 			spec.eq(network.listening, false, "no remote listener after the failed load")
 			spec.eq(next(network.listeners), nil, "no player listener, so no peer")
@@ -100,10 +108,16 @@ return {
 					"no game messages, only sync's two framework messages"
 				)
 			end
-			if client then
-				spec.eq(entry.BOOTED_ATTRIBUTE, "CrucibleBooted", "constant")
-				spec.eq(p.attributes.CrucibleBooted, true, "local player ready")
-			end
+			spec.eq(entry.BOOTED_ATTRIBUTE, "CrucibleBooted", "constant")
+			spec.eq(marked.CrucibleBooted, true, if client then "local player ready" else "ServerScriptService ready")
+			spec.eq(#records, 1, "one boot record")
+			spec.eq(records[1].source, "Crucible.Boot", "record source")
+			spec.eq(records[1].level, 0, "Debug")
+			spec.eq(
+				records[1].message,
+				`Crucible booted on the {if client then "client" else "server"}`,
+				"record message"
+			)
 			spec.eq(#p.closed, if client then 0 else 1, "server-only BindToClose")
 			local wrong, err = pcall(p.graph.module, if client then "server" else "client")
 			spec.eq(wrong, false, "wrong side rejects")
@@ -115,7 +129,8 @@ return {
 			local ok, err = pcall(p.graph.module(if client then "client" else "server").boot, { load = {} })
 			spec.eq(ok, false, "a network commit failing after booted ran fails boot")
 			spec.has(err, "injected", "its cause")
-			spec.eq(p.attributes.CrucibleBooted, nil, "BOOTED_ATTRIBUTE undone")
+			local marked = if client then p.attributes else p.services.ServerScriptService.attributes
+			spec.eq(marked.CrucibleBooted, nil, "BOOTED_ATTRIBUTE undone")
 			spec.eq(p.graph.network.listening, false, "the session closed")
 		end
 	end,
