@@ -340,6 +340,26 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 				call(runtime("defineClass"), [f.createIdentifier(node.name.text), object(data)]),
 			);
 		};
+		// A Rojo project may map a folder's files one by one rather than the folder, as Rogen does before their
+		// outputs exist. Each such file names the instance of the folder that holds it.
+		const mappedByFiles = (resolver, folder, out) => {
+			const found = new Set();
+			for (const source of program.getSourceFiles()) {
+				const parts = path
+					.relative(folder, source.fileName)
+					.replace(/\.tsx?$/, "")
+					.split(path.sep);
+				const name = parts.at(-1).replace(/\.(server|client)$/, "");
+				if (source.isDeclarationFile || parts[0] === ".." || path.isAbsolute(parts[0]) || name === "index")
+					continue;
+				const rbx = resolver.getRbxPathFromFilePath(path.join(out, ...parts) + ".luau");
+				const tail = [...parts.slice(0, -1), name];
+				if (rbx?.length > tail.length && tail.every((part, at) => rbx.at(at - tail.length) === part))
+					found.add(rbx.slice(0, -tail.length).join("\0"));
+			}
+			if (found.size > 1) return null;
+			return found.size ? [...found][0].split("\0") : undefined;
+		};
 		const boot = (node) => {
 			let options = node.arguments[0];
 			while (
@@ -374,10 +394,10 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 						report(entry, "CRU006", "load entry must be a string literal.");
 						return entry;
 					}
-					const root = path.dirname(
+					const configFile =
 						program.getCompilerOptions().configFilePath ??
-							path.join(program.getCurrentDirectory(), "tsconfig.json"),
-					);
+						path.join(program.getCurrentDirectory(), "tsconfig.json");
+					const root = packageOf(configFile)?.dir ?? path.dirname(configFile);
 					let resolver;
 					try {
 						const compiler =
@@ -385,8 +405,10 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 								/roblox-ts[\\/]out[\\/]Project[\\/]functions[\\/]compileFiles\.js$/.test(file),
 							) ?? require.resolve("roblox-ts/package.json", { paths: [root, __dirname] });
 						const { RojoResolver } = createRequire(compiler)("@roblox-ts/rojo-resolver");
-						const rojoPath = config.rojo ?? RojoResolver.findRojoConfigFilePath(root).path;
-						resolver = rojoPath && RojoResolver.fromPath(path.resolve(root, rojoPath));
+						const rojoPath = config.rojo
+							? path.resolve(root, config.rojo)
+							: RojoResolver.findRojoConfigFilePath(path.dirname(configFile)).path;
+						resolver = rojoPath && RojoResolver.fromPath(rojoPath);
 					} catch {
 						report(entry, "CRU006", "Cannot load the running compiler's Rojo resolver or project mapping.");
 						return entry;
@@ -399,12 +421,18 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 					const suffix = entry.text.slice(prefix.length).replace(/\.tsx?$/, "");
 					const opts = program.getCompilerOptions();
 					const inputRoot = sourceRoot(opts, [program.getCommonSourceDirectory()]);
-					const relative = inputRoot && path.relative(inputRoot, path.resolve(root, prefix));
+					const folder = path.resolve(root, prefix);
+					const relative = inputRoot && path.relative(inputRoot, folder);
+					const inside = relative !== undefined && !relative.startsWith("..") && !path.isAbsolute(relative);
+					const out = inside && path.resolve(opts.outDir, relative);
 					const mapped =
-						relative !== undefined &&
-						!relative.startsWith("..") &&
-						!path.isAbsolute(relative) &&
-						resolver?.getRbxPathFromFilePath(path.resolve(opts.outDir, relative));
+						out &&
+						resolver &&
+						(resolver.getRbxPathFromFilePath(out) ?? mappedByFiles(resolver, folder, out));
+					if (mapped === null) {
+						report(entry, "CRU006", "load prefix maps to more than one Rojo folder.");
+						return entry;
+					}
 					if (!mapped) {
 						report(entry, "CRU006", "load prefix is outside the Rojo mapping.");
 						return entry;

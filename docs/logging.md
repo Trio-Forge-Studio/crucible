@@ -119,7 +119,7 @@ subscription.disconnect();
 
 Every record goes to each connected sink whose minimum is at or below the record's level, in the order the sinks were added. The call to `log.info` or another level method runs the sinks before it returns.
 
-Sinks receive only game records, from loggers that `getLogger` created. Crucible's own runtime diagnostics go to the Roblox output, never to sinks.
+Sinks receive game records, from loggers that `getLogger` created, and the one Debug record that `boot` writes from `Crucible.Boot` on each side. Crucible's own runtime diagnostics go to the Roblox output, never to sinks.
 
 These rules apply to a sink:
 

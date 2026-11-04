@@ -506,6 +506,126 @@ fn root_dirs_globs_map_and_a_missing_rojo_project_reports_cru006() {
     has(&luau, "crucible-path:ServerScriptService/TS/**/*");
 }
 
+fn per_file(output: &str) -> Value {
+    json!({ "$path": { "optional": output } })
+}
+
+const BOOT: &str = "import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});";
+
+#[test]
+fn a_load_prefix_mapped_file_by_file_resolves_to_the_folder_that_holds_them() {
+    let game = Game::new();
+    let mut tree = project();
+    tree["tree"]["ServerScriptService"]["TS"] = json!({
+        "$className": "Folder",
+        "main": per_file("out/server/main.luau"),
+        "a": per_file("out/server/a.luau"),
+        "sub": { "$className": "Folder", "b": per_file("out/server/sub/b.luau") },
+    });
+    game.json("default.project.json", &tree);
+    game.write("src/server/a.ts", "export const a = 1;");
+    game.write("src/server/sub/b.ts", "export const b = 2;");
+    game.write("src/server/index.ts", "export const index = 3;");
+    game.main(BOOT);
+    has(&game.luau("server/main.luau"), "crucible-path:ServerScriptService/TS/**");
+}
+
+#[test]
+fn a_file_by_file_load_prefix_ignores_server_and_client_suffixes_and_the_folder_mapping_still_wins() {
+    let game = Game::new();
+    let mut tree = project();
+    tree["tree"]["ServerScriptService"]["TS"] = json!({
+        "$className": "Folder",
+        "main": per_file("out/server/main.luau"),
+        "boot": per_file("out/server/boot.server.luau"),
+    });
+    game.json("default.project.json", &tree);
+    game.write("src/server/boot.server.ts", "export const boot = 1;");
+    game.main(BOOT);
+    has(&game.luau("server/main.luau"), "crucible-path:ServerScriptService/TS/**");
+
+    let whole = Game::new();
+    whole.main(BOOT);
+    has(&whole.luau("server/main.luau"), "crucible-path:ServerScriptService/TS/**");
+}
+
+#[test]
+fn files_of_a_load_prefix_under_different_instances_report_cru006() {
+    let game = Game::new();
+    let mut tree = project();
+    tree["tree"]["ServerScriptService"]["TS"] = json!({
+        "$className": "Folder",
+        "main": per_file("out/server/main.luau"),
+    });
+    tree["tree"]["ServerScriptService"]["Other"] =
+        json!({ "$className": "Folder", "a": per_file("out/server/a.luau") });
+    game.json("default.project.json", &tree);
+    game.write("src/server/a.ts", "export const a = 1;");
+    game.main(BOOT);
+    let facts = game.facts();
+    let messages: Vec<_> = facts.diagnostics.iter().filter(|d| d.code == 90006).map(|d| d.message.clone()).collect();
+    assert_eq!(messages, ["CRU006: load prefix maps to more than one Rojo folder."]);
+
+    let none = Game::new();
+    none.json("default.project.json", &tree);
+    none.write("src/server/a.ts", "export const a = 1;");
+    none.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/other/**\"]});");
+    let facts = none.facts();
+    let messages: Vec<_> = facts.diagnostics.iter().filter(|d| d.code == 90006).map(|d| d.message.clone()).collect();
+    assert_eq!(messages, ["CRU006: load prefix is outside the Rojo mapping."]);
+}
+
+/// Points a Rojo project in `gen/place` at the game's folders, leaving `include` where the compiler looks for it.
+fn up(value: &mut Value) {
+    if let Value::Object(map) = value {
+        for (key, entry) in map.iter_mut() {
+            match entry {
+                Value::String(path) if key == "$path" && path != "include" => *path = format!("../../{path}"),
+                other => up(other),
+            }
+        }
+    }
+}
+
+#[test]
+fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
+    let game = Game::new();
+    let mut tree = project();
+    up(&mut tree);
+    game.json("gen/place/default.project.json", &tree);
+    game.json(
+        "gen/place/tsconfig.json",
+        &json!({
+            "extends": "../../tsconfig.json",
+            "compilerOptions": { "rootDir": "../../src", "outDir": "../../out" },
+            "include": ["../../src"],
+        }),
+    );
+    let place = game.dir.join("gen/place/tsconfig.json");
+    let compile = |glob: &str| {
+        game.main(&format!("import {{ boot }} from \"@trioforge/crucible/server\"; boot({{load: [\"{glob}\"]}});"));
+        crucible_compiler::compile(&place)
+    };
+    let modules = compile("src/server/**").unwrap_or_else(|f| {
+        panic!(
+            "the place compiles:
+{f}"
+        )
+    });
+    let main = modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
+    has(&main.source, "crucible-path:ServerScriptService/TS/**");
+
+    game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"../../src/server/**\"]});");
+    let facts = game.analyze_at("gen/place/tsconfig.json").expect("the place type-checks");
+    assert!(
+        facts
+            .diagnostics
+            .iter()
+            .any(|d| d.code == 90006 && d.message == "CRU006: load prefix is outside the Rojo mapping."),
+        "a tsconfig-relative glob is outside the package root"
+    );
+}
+
 #[test]
 fn diagnostics_deduplicate_repeated_and_inherited_faults_across_files() {
     let game = Game::new();

@@ -13,6 +13,8 @@ if (!game.GetService("RunService").IsServer()) error("@trioforge/crucible/server
 
 let session: ServerSession | undefined;
 
+export const BOOTED_ATTRIBUTE = "CrucibleBooted";
+
 export { config, playerConfig, configReady, refreshConfigs } from "../configs";
 export type { Config, PlayerConfig } from "../configs";
 export { publish } from "./publish";
@@ -43,7 +45,19 @@ export function boot(options: BootOptions) {
 	const network = new ServerSession(networkPort());
 	session = network;
 	installServerSync((player, frame) => active().send(player, SyncFrameMessage, frame));
-	bootSide({ name: "server", renders: false, booted: () => {}, network }, options);
+	bootSide(
+		{
+			name: "server",
+			renders: false,
+			booted: () => {
+				const service = game.GetService("ServerScriptService");
+				service.SetAttribute(BOOTED_ATTRIBUTE, true);
+				return () => service.SetAttribute(BOOTED_ATTRIBUTE, undefined);
+			},
+			network,
+		},
+		options,
+	);
 }
 
 export namespace Network {
