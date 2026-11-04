@@ -58,6 +58,10 @@ let batch = new Array<ReactionNode>();
 let cursor = 0;
 /** The entry being processed, which an internal error stops. */
 let culprit: ReactionNode | undefined;
+/** The binding whose sink is running. The flush's one `pcall` stops it alone when the sink throws. */
+let sinking: BindingNode | undefined;
+let rounds = 0;
+let total = 0;
 /** Every effect or binding whose run count moved this flush. */
 let ran = new Array<ReactionNode>();
 /** A bound was reported, and no flush has finished within its bounds since. */
@@ -252,8 +256,9 @@ function runBinding(binding: BindingNode) {
 	}
 	if (rawequal(value, binding.value)) return;
 	binding.value = value;
-	const [ok, err] = pcall(binding.sink, binding.target, value);
-	if (!ok) fail(binding, tostring(err));
+	sinking = binding;
+	binding.sink(binding.target, value);
+	sinking = undefined;
 }
 
 /** A run's frame names its effect and its run lifetime. */
@@ -331,19 +336,9 @@ function inCreationOrder(list: readonly ReactionNode[]): boolean {
 	return true;
 }
 
+/** Goes on from `cursor`, so a run that a failed sink cut short resumes where it stopped. */
 function runRounds() {
-	let rounds = 0;
-	let total = 0;
-	while (queue.size() > 0) {
-		if (rounds === MAX_FLUSH_ROUNDS) {
-			reportBound(`${MAX_FLUSH_ROUNDS} rounds`);
-			return;
-		}
-		rounds += 1;
-		batch = queue;
-		queue = [];
-		cursor = 0;
-		if (!inCreationOrder(batch)) sortByCreation(batch);
+	for (;;) {
 		while (cursor < batch.size()) {
 			const effect = batch[cursor];
 			cursor += 1;
@@ -375,8 +370,22 @@ function runRounds() {
 		culprit = undefined;
 		batch = [];
 		cursor = 0;
+		if (queue.isEmpty()) break;
+		if (rounds === MAX_FLUSH_ROUNDS) {
+			reportBound(`${MAX_FLUSH_ROUNDS} rounds`);
+			return;
+		}
+		rounds += 1;
+		batch = queue;
+		queue = [];
+		if (!inCreationOrder(batch)) sortByCreation(batch);
 	}
 	boundReported = false;
+}
+
+function resumeAfterSink(binding: BindingNode, err: unknown) {
+	fail(binding, tostring(err));
+	runRounds();
 }
 
 function recover(err: unknown) {
@@ -400,7 +409,14 @@ export function flush() {
 	requested = false;
 	if (held || flushing) return;
 	flushing = true;
-	const [ok, err] = pcall(runRounds);
+	rounds = 0;
+	total = 0;
+	let [ok, err] = pcall(runRounds);
+	while (!ok && sinking !== undefined) {
+		const binding = sinking;
+		sinking = undefined;
+		[ok, err] = pcall(resumeAfterSink, binding, err);
+	}
 	if (!ok) recover(err);
 	for (const effect of ran) effect.runs = 0;
 	ran = [];
