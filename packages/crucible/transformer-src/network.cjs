@@ -135,12 +135,13 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 			report(at, code, `${node.arguments[0]?.text ?? kind} ${location}: ${reason}`);
 			return { kind: "nil" };
 		};
-		const inherited = new Set();
 		const checkSymbols = (symbols, location) => {
 			for (const symbol of symbols) {
 				if (!symbol) continue;
 				reached.add(symbol);
 				const decls = (symbol.declarations ?? []).filter((d) => !exempt(d.getSourceFile()));
+				for (const decl of decls)
+					if (ts.isEnumMember(decl)) checkSymbols([checker.getSymbolAtLocation(decl.parent.name)], location);
 				if (decls.some(global) || new Set(decls.map((d) => d.getSourceFile().fileName)).size > 1)
 					fail(
 						node,
@@ -148,24 +149,35 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 						`${symbol.name} must be declared in one imported module; incremental builds cannot see global declarations or merges.`,
 						"CRU010",
 					);
-				if (!inherited.has(symbol)) {
-					inherited.add(symbol);
-					for (const decl of decls)
-						if (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))
-							for (const clause of decl.heritageClauses ?? [])
-								if (clause.token === ts.SyntaxKind.ExtendsKeyword)
-									for (const base of clause.types) {
-										references(base, location);
-										mention(checker.getTypeAtLocation(base), location);
-									}
-				}
+				for (const decl of decls)
+					if (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))
+						for (const clause of decl.heritageClauses ?? [])
+							if (clause.token === ts.SyntaxKind.ExtendsKeyword)
+								for (const base of clause.types) {
+									references(base, location);
+									mention(checker.getTypeAtLocation(base), location);
+								}
 			}
 		};
+		const mentioned = new Set();
 		const mention = (type, location) => {
+			if (mentioned.has(type)) return;
+			mentioned.add(type);
 			checkSymbols([type.aliasSymbol, type.getSymbol()], location);
-			if (type.isIntersection()) for (const part of type.types) mention(part, location);
+			if (type.isUnionOrIntersection()) for (const part of type.types) mention(part, location);
+			if (type.objectFlags & ts.ObjectFlags.Reference)
+				for (const argument of checker.getTypeArguments(type)) mention(argument, location);
+			if (
+				type.objectFlags & ts.ObjectFlags.Anonymous &&
+				!type.getCallSignatures().length &&
+				!type.getConstructSignatures().length
+			)
+				for (const prop of checker.getPropertiesOfType(type)) mention(checker.getTypeOfSymbol(prop), location);
 		};
-		const declared = (type, location) => checkSymbols([type.aliasSymbol, type.getSymbol()], location);
+		const declared = (type, location) => {
+			checkSymbols([type.aliasSymbol, type.getSymbol()], location);
+			for (const argument of type.aliasTypeArguments ?? []) mention(argument, location);
+		};
 		const referenced = new Set();
 		const references = (syntax, location) => {
 			if (!syntax || referenced.has(syntax)) return;
@@ -175,13 +187,17 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 					checker.getSymbolAtLocation(ts.isTypeReferenceNode(syntax) ? syntax.typeName : syntax.expression),
 				);
 				checkSymbols([symbol], location);
-				for (const decl of symbol?.declarations ?? [])
-					if (ts.isTypeAliasDeclaration(decl) && !exempt(decl.getSourceFile()))
-						references(decl.type, location);
+				for (const decl of symbol?.declarations ?? []) {
+					if (exempt(decl.getSourceFile())) continue;
+					if (ts.isTypeAliasDeclaration(decl)) references(decl.type, location);
+					for (const parameter of (decl.typeParameters ?? []).slice(syntax.typeArguments?.length ?? 0))
+						references(parameter.default, location);
+				}
 			}
 			if (ts.isTypeQueryNode(syntax)) {
 				checkSymbols([unalias(checker.getSymbolAtLocation(syntax.exprName))], location);
 				const queried = checker.getTypeAtLocation(syntax.exprName);
+				mention(queried, location);
 				for (const signature of [...queried.getCallSignatures(), ...queried.getConstructSignatures()])
 					mention(checker.getReturnTypeOfSignature(signature), location);
 			}
@@ -226,7 +242,10 @@ function createNetwork({ ts, program, checker, api, kindOf, instanceType, modifi
 				fields: props.map((prop) => {
 					const at = prop.valueDeclaration ?? prop.declarations?.[0] ?? node;
 					for (const decl of prop.declarations ?? [])
-						if (ts.isInterfaceDeclaration(decl.parent))
+						if (
+							(ts.isInterfaceDeclaration(decl.parent) || ts.isClassDeclaration(decl.parent)) &&
+							decl.parent.name
+						)
 							reached.add(checker.getSymbolAtLocation(decl.parent.name));
 					references(at.type, `${location}.${prop.name}`);
 					if (prop.escapedName.toString().startsWith("__@"))

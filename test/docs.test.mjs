@@ -10,7 +10,7 @@ const sample = path.join(repo, "examples/sample-game").replaceAll("\\", "/");
 function codeBlocks() {
 	const files = new Map();
 	for (const name of fs.readdirSync(path.join(repo, "docs"))) {
-		if (!name.endsWith(".md")) continue;
+		if (!name.endsWith(".md") || name === "sample-game.md") continue;
 		const markdown = fs.readFileSync(path.join(repo, "docs", name), "utf8");
 		const blocks = [...markdown.matchAll(/^```(ts|typescript|tsx)\n([\s\S]*?)^```$/gm)];
 		blocks.forEach((block, index) =>
@@ -54,4 +54,55 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 		0,
 		ts.formatDiagnostics(diagnostics, { ...host, getNewLine: () => "\n", getCanonicalFileName: (file) => file }),
 	);
+});
+
+const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+const declared = (code, call) =>
+	[...code.matchAll(new RegExp(String.raw`\b${call}(?:<[^(]*>)?\("([^"]+)"`, "g"))].map((match) => match[1]);
+
+function sampleGuide() {
+	const markdown = read(path.join(repo, "docs/sample-game.md"));
+	const snippets = [...markdown.matchAll(/^`(src\/[^`]+\.ts)`\n\n```ts\n([\s\S]*?)^```$/gm)].map((match) => ({
+		file: match[1],
+		code: match[2],
+		source: read(path.join(repo, "examples/sample-game", match[1])),
+	}));
+	assert.equal(snippets.length, (markdown.match(/^```ts$/gm) ?? []).length, "every ts block names its file");
+	return snippets;
+}
+
+test("every sample guide snippet is its sample file, so the guide cannot drift from the code", () => {
+	const snippets = sampleGuide();
+	assert.deepEqual(
+		snippets.map(({ file }) => file),
+		[
+			"src/shared/messages.ts",
+			"src/shared/state.ts",
+			"src/shared/profile.ts",
+			"src/server/systems/event.ts",
+			"src/server/systems/wallet.ts",
+			"src/client/systems/hud.ts",
+		],
+	);
+	for (const { file, code, source } of snippets) assert.equal(code, source, `${file} differs from its sample file`);
+});
+
+test("the sample guide declares each store and message once, under the name the sample code uses", () => {
+	const snippets = sampleGuide();
+	const guide = snippets.map(({ code }) => code).join("\n");
+	assert.deepEqual(declared(guide, "profileStore"), ["Sample.Players"]);
+	assert.deepEqual(declared(guide, "toServer"), ["Coins.Collect"]);
+	assert.deepEqual(declared(guide, "toClient"), ["Coins.Collected"]);
+	assert.deepEqual(declared(guide, "replicated"), ["Coins.Total"]);
+	assert.deepEqual(declared(guide, "config"), ["GlobalEvent"]);
+	assert.match(snippets.find(({ file }) => file === "src/shared/profile.ts").code, /migrations: \[fromGold\]/);
+	for (const { file, code } of snippets) {
+		const imports = code.split("\n").filter((line) => line.startsWith("import "));
+		assert.equal(new Set(imports).size, imports.length, `${file} repeats an import line`);
+		if (file !== "src/shared/profile.ts")
+			assert.doesNotMatch(code, /profileStore\(/, `${file} redeclares the store`);
+	}
+	for (const { file, code } of snippets.filter(({ file }) => /\/(wallet|hud)\.ts$/.test(file))) {
+		assert.match(code, /from "\.\.\/\.\.\/shared\//, `${file} imports the shared declarations`);
+	}
 });

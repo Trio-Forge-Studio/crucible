@@ -479,6 +479,32 @@ return {
 			spec.eq(a.engine.logged(stored), 0, `never the stored {field}`)
 		end
 	end,
+	["rule 110 A18 an unreadable envelope never echoes a non-table envelope, a payload or a counter"] = function()
+		local cases = {
+			{ label = "a non-table envelope", stored = "ZZSECRETENVELOPE", reason = "not a table" },
+			{ label = "a string payload", fields = { payload = "ZZSECRETPAYLOAD" }, reason = "bad payload" },
+			{ label = "schemaVersion", fields = { schemaVersion = "ZZSECRETVERSION" }, reason = "bad schemaVersion" },
+			{ label = "epoch", fields = { epoch = "ZZSECRETEPOCH" }, reason = "bad epoch" },
+			{ label = "seenFloor", fields = { seenFloor = "ZZSECRETFLOOR" }, reason = "bad seenFloor" },
+		}
+		for _, case in cases do
+			local backend, a = D2.world(1, { version = { node = recordNode() } })
+			if case.stored then
+				backend:seed("FD.Players", "4120", case.stored)
+			else
+				local fields = table.clone(case.fields)
+				fields.payload = fields.payload or { coins = 3, gems = 4 }
+				D2.seed(backend, nil, fields)
+			end
+			local player = DM.begin(a)
+			backend:advance(1)
+			spec.eq(a.kicked(player), a.limits.LOAD_FAILED_MESSAGE, `{case.label} fails the load`)
+			local messages = DM.logged(a, "record is unreadable: ")
+			spec.eq(#messages, 1, `{case.label}: one diagnostic`)
+			spec.has(messages[1], `record is unreadable: {case.reason}`, `{case.label}: naming the field`)
+			spec.eq(a.engine.logged("ZZSECRET"), 0, `{case.label}: never the stored value`)
+		end
+	end,
 	["rule 110 a failed admission of a record at the current version names no migration"] = function()
 		local shape =
 			{ node = recordNode(), migrations = {

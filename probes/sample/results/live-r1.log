@@ -1,0 +1,15 @@
+2026-11-03T23:23:41.132Z,33.132122,4318,6,Info [FLog::CreatorOutput] S1|9bc22c3c-0bb7-42f7-860e-700b9b9e43d5|server|marker
+2026-11-03T23:23:41.193Z,33.193935,26b8,6,Info [FLog::CreatorOutput] S1|9bc22c3c-0bb7-42f7-860e-700b9b9e43d5|client|marker
+2026-11-03T23:23:41.322Z,33.322849,2fb0,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 2
+2026-11-03T23:23:41.359Z,33.359863,29fc,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 2   Total: 2   Last: +2
+2026-11-03T23:23:41.533Z,33.533405,2fb0,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 2
+2026-11-03T23:23:41.577Z,33.577198,3830,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 4   Total: 4   Last: +2
+2026-11-03T23:23:41.751Z,33.751080,26b8,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 2
+2026-11-03T23:23:41.792Z,33.792603,29fc,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 6   Total: 6   Last: +2
+2026-11-03T23:23:46.578Z,38.578827,403c,6,Info [FLog::CreatorOutput] S2 controller shutdown
+2026-11-03T23:23:46.992Z,38.992004,4318,6,Info [FLog::CreatorOutput] S2 store shutdown
+--- faults
+2026-11-03T23:23:14.353Z,6.353218,08e8,6,Info [FLog::PluginManagementFetch] Fetching plugin permissions for permission type HttpService
+2026-11-03T23:23:39.988Z,31.988707,3f74,12 [DFLog::HttpTraceError] HttpResponse(#196 0x2aa08c5d9f8) time:693.2ms (net:693.2ms timeInRetryQueue:0.0ms)status:404 Not Found bodySize:88 url:{ "https://gamepersistence.roblox.com/v2/persistence/10774131158/datastores/objects/object?datastore=Sample.Players&objectKey=global%2F1113069837" } ip:128.116.13.3 external:0 numberOfTimesRetried:0
+2026-11-03T23:23:46.578Z,38.578827,403c,6,Warning [FLog::CloseDataModel] Drain: waiting on shutdown participant DataStoreService
+2026-11-03T23:23:46.995Z,38.995983,3830,6,Warning [FLog::CloseDataModel] Drain: completed DataStoreService

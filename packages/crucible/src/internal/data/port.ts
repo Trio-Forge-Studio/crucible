@@ -1,3 +1,5 @@
+import type { Marketplace } from "./receipts";
+
 /** @internal A stored value with the platform data UpdateAsync clears unless the transform returns it (rule 41). */
 export interface StoredValue {
 	readonly value: unknown;
@@ -37,7 +39,14 @@ export interface DataPort {
 		readonly present: (player: Player) => boolean;
 		readonly byUserId: (userId: number) => Player | undefined;
 		readonly kick: (player: Player, message: string) => void;
+		/** The players present now; DataRuntime loads them at activation (rule 104). */
+		readonly all: () => readonly Player[];
+		/** PlayerAdded and PlayerRemoving; each returns its disconnect (rules 104, 107). */
+		readonly onAdded: (listener: (player: Player) => void) => () => void;
+		readonly onRemoving: (listener: (player: Player) => void) => () => void;
 	};
+	/** MarketplaceService, whose ProcessReceipt DataRuntime sets when a grant exists (rule 57). */
+	readonly marketplace: () => Marketplace;
 }
 
 let port: DataPort | undefined;
@@ -175,6 +184,16 @@ export function createRobloxDataPort(): DataPort {
 			present: (player) => player.Parent === players,
 			byUserId: (userId) => players.GetPlayerByUserId(userId),
 			kick: (player, message) => player.Kick(message),
+			all: () => players.GetPlayers(),
+			onAdded: (listener) => {
+				const connection = players.PlayerAdded.Connect(listener);
+				return () => connection.Disconnect();
+			},
+			onRemoving: (listener) => {
+				const connection = players.PlayerRemoving.Connect(listener);
+				return () => connection.Disconnect();
+			},
 		},
+		marketplace: () => game.GetService("MarketplaceService") as unknown as Marketplace,
 	};
 }

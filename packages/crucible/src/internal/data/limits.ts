@@ -111,6 +111,24 @@ export const STORE_NAME_MAX_BYTES = 50;
 export const MAX_DATA_DECLARATIONS = 256;
 /** @internal A generic store's key is 1 to this many bytes (rule 86). */
 export const KEY_MAX_BYTES = 50;
+/** @internal Profile stores per realm (rule 3). */
+export const MAX_PROFILE_STORES = 4;
+/** @internal Networking's name limit, for profile message names (rule 2). */
+export const MESSAGE_NAME_MAX_BYTES = 64;
+/** @internal A field view's name is this, the store name, ".", and the field (rules 2, 125, 134). */
+export const VIEW_NAME_PREFIX = "Crucible.Data.";
+/** @internal The lifecycle view's name is this and the store name: at most 14 + 50 = 64 bytes (rules 2, 125, 134). */
+export const LIVE_NAME_PREFIX = "Crucible.Live.";
+/** @internal Networking's MESSAGE_NAME_MAX_BYTES (rules 2, 134). */
+export const VIEW_NAME_MAX_BYTES = 64;
+/** @internal Every profile store's views together: a third of each frame limit, divided per store at the seal (127). */
+export const OWNER_VIEWS_MAX_BYTES = 65_536;
+/** @internal */
+export const OWNER_VIEWS_MAX_ENTRIES = 4_000;
+/** @internal */
+export const OWNER_VIEWS_MAX_VISITS = 16_000;
+/** @internal The handle members, reserved as template keys (rules 116, 130). */
+export const RESERVED_HANDLE_NAMES: readonly string[] = ["set", "update", "insert", "remove"];
 
 /** @internal Persist admission (rules 14, 76). */
 export const PERSIST_DEPTH = 28;

@@ -38,4 +38,21 @@ export type {
 	u32,
 } from "./network";
 
-export type { Json, JsonRecord, Migration } from "./data";
+export { profileStore, serverOnly, replicatedPaths } from "./data";
+export type {
+	ProfileStore,
+	ProfileOptions,
+	ServerOnly,
+	ProfileData,
+	ClientData,
+	Profile,
+	ClientProfile,
+	DataHandle,
+	ReadHandle,
+	WriteHandle,
+	ArrayWrites,
+	ReservedName,
+	Json,
+	JsonRecord,
+	Migration,
+} from "./data";

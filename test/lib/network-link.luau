@@ -37,6 +37,8 @@ end
 function link.new(options)
 	local self = setmetatable({
 		globals = options and options.globals,
+		data = options and options.data,
+		configs = options and options.configs,
 		now = 0,
 		sequence = 0,
 		timers = {},
@@ -483,6 +485,8 @@ function link:realm(side: string, name: string)
 		end,
 	}
 	realm.port = if side == "server" then serverPort(self, realm) else clientPort(self, realm)
+	local configPort = if side == "server" and self.configs then self.configs(realm) else nil
+	local dataPort = if side == "server" and self.data then self.data(realm) else nil
 	realm.graph = spec.runtime({
 		game = game,
 		task = self.task,
@@ -491,6 +495,7 @@ function link:realm(side: string, name: string)
 		Color3 = roblox.Color3,
 		CFrame = roblox.CFrame,
 		pairs = self.globals and self.globals.pairs or pairs,
+		Enum = self.globals and self.globals.Enum,
 		require = function(required)
 			assert(required == module, "only the Game module loads")
 			if realm.required == nil then
@@ -501,7 +506,7 @@ function link:realm(side: string, name: string)
 			end
 			return realm.required
 		end,
-	}, engine.loggingPort, nil, realm.port)
+	}, engine.loggingPort, configPort, realm.port, dataPort)
 	-- Boot reads the engine port through roblox-port; patching the module table before boot loads swaps in the fake.
 	realm.graph.module("internal/roblox-port").robloxPort = function()
 		return engine.port
@@ -600,6 +605,9 @@ function link:join(name: string, setup, options)
 	client.tamper = options.tamper
 	client.player = roblox.Instance.new("Player")
 	client.player.Name = name
+	if options.userId then
+		client.player.UserId = options.userId
+	end
 	table.insert(self.clients, client)
 	self.present[client.player] = client
 	if self.server.added then
