@@ -1,5 +1,6 @@
 import { cleanup, source } from "@rbxts/vide";
-import { untracked, watch, type Readable } from "../reactive";
+import { untracked, type Readable } from "../reactive";
+import { createWatchFrom } from "../internal/reactive/flush";
 import { createRootScope } from "../internal/reactive/ownership";
 
 const NO_OWNER = "useReadable() needs a Vide owner: call it inside a component or root()";
@@ -14,8 +15,21 @@ export function useReadable<T>(readable: Readable<T>): () => T {
 	// Vide's cleanup is the only public test for an owner, and registering first leaves nothing to undo.
 	const [owned] = pcall(cleanup, () => dispose?.());
 	if (!owned) error(NO_OWNER, 2);
-	const value = source(untracked(readable));
+	const initial = untracked(readable);
+	const value = source(initial);
+	let latest = initial;
+	const write = (): undefined => {
+		value(latest);
+		return undefined;
+	};
 	// A root, so a component mounted from inside a Crucible run or callback does not end with it.
-	dispose = createRootScope(() => watch(readable, (current) => value(current)));
+	dispose = createRootScope(() =>
+		createWatchFrom(readable, initial, (current) => {
+			latest = current;
+			// Vide runs its effects inside the write. Across gsub's C call a yield in one throws where it yields, so
+			// Vide's own error path pops its scope stack. Without it the runner cancels the yielded worker mid-effect.
+			"x".gsub("x", write);
+		}),
+	);
 	return value;
 }

@@ -252,6 +252,80 @@ return {
 		spec.eq(read(), -1, "the stopped watch makes no further update")
 		spec.eq(observers(coins), 0, "and holds no subscription")
 	end,
+	["a getter is read once at the call"] = function()
+		local r = world()
+		local coins = r.api.state(1)
+		local reads = 0
+		local read, seen = mount(r, function()
+			return r.useReadable(function()
+				reads += 1
+				return coins()
+			end)
+		end)
+		spec.eq(reads, 1, "one read at the call")
+		r.flush()
+		spec.eq(reads, 2, "and one when the watch first runs")
+		spec.eq(read(), 1, "the value")
+		spec.list(seen, { 1 }, "an unchanged value made no update")
+	end,
+	["a getter that builds a new table updates Vide on the first flush"] = function()
+		local r = world()
+		local coins = r.api.state(1)
+		local _, seen = mount(r, function()
+			return r.useReadable(function()
+				return { coins() }
+			end)
+		end)
+		r.flush()
+		spec.eq(#seen, 2, "the first flush's table is a new value")
+		r.flush()
+		spec.eq(#seen, 2, "no update while nothing it reads changes")
+	end,
+	["a Vide effect that yields on an update stops that binding's watch and leaves Vide's scopes balanced"] = function()
+		local r = world()
+		local scopes = r.graph.package("@rbxts/vide/src/graph").scopes
+		local coins = r.api.state(1)
+		local gems = r.api.state(1)
+		local read, other
+		r.vide.root(function()
+			read = r.useReadable(coins)
+			other = r.useReadable(gems)
+			r.vide.effect(function()
+				if read() == 2 then
+					coroutine.yield()
+				end
+			end)
+		end)
+		coins:set(2)
+		r.flush()
+		spec.eq(scopes.n, 0, "Vide's scope stack is empty again")
+		spec.eq(r.logged("attempt to yield"), 1, "the yield is reported once")
+		spec.eq(pcall(r.useReadable, coins), false, "useReadable outside an owner still throws")
+		coins:set(3)
+		gems:set(2)
+		r.flush()
+		spec.eq(read(), 2, "the stopped watch makes no further update")
+		spec.eq(other(), 2, "another binding still updates")
+	end,
+	["in Vide's strict mode a yielding Vide effect stops the watch the same way"] = function()
+		local r = world()
+		r.vide.strict = true
+		local scopes = r.graph.package("@rbxts/vide/src/graph").scopes
+		local coins = r.api.state(1)
+		r.vide.root(function()
+			local read = r.useReadable(coins)
+			r.vide.effect(function()
+				if read() == 2 then
+					coroutine.yield()
+				end
+			end)
+		end)
+		coins:set(2)
+		r.flush()
+		spec.eq(scopes.n, 0, "Vide's scope stack is empty again")
+		spec.eq(r.logged("attempt to yield"), 1, "the yield is reported once")
+		spec.eq(observers(coins), 0, "the watch stopped")
+	end,
 	["a replicated declaration updates its client binding after each applied frame"] = function()
 		local w = World.new({
 			declare = function(r)
