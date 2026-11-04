@@ -25,7 +25,10 @@ return function(client)
 		}
 	end
 	function p.node(name, kind, children)
-		local n = { Name = name, ClassName = kind or "Folder", children = children or {} }
+		local n = { Name = name, ClassName = kind or "Folder", children = children or {}, attributes = {} }
+		function n:SetAttribute(attribute, value)
+			self.attributes[attribute] = value
+		end
 		function n:GetChildren()
 			return self.children
 		end

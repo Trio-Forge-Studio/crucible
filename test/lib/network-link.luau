@@ -462,6 +462,9 @@ function link:realm(side: string, name: string)
 			GetChildren = function()
 				return { module }
 			end,
+			SetAttribute = function(_, key, value)
+				realm.attributes[key] = value
+			end,
 		},
 		RunService = {
 			IsServer = function()
