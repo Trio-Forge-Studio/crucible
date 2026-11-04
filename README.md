@@ -24,6 +24,6 @@ Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to
 
 The sample server imports `@trioforge/crucible` and `@trioforge/crucible/server`. The sample client imports the root and `@trioforge/crucible/client`. Both scripts store the imported placeholders as attributes so the specs can assert their values.
 
-The root stays shared-safe. Requiring it must never load server or client code. The package keeps physical subpath folders because roblox-ts 3.0.0 does not resolve an exports-only remap. The Rojo project maps the package under `ReplicatedStorage.rbxts_include.node_modules.@trioforge`.
+The root stays shared-safe. Requiring it must never load server or client code. The package keeps physical subpath folders because roblox-ts 3.0.0 does not resolve an exports-only remap. The Rojo project maps the package's `out` folder under `ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible`.
 
 The sample replicates the package's files to prove resolution. Subpath names do not enforce client access restrictions. The Lune loader runs the compiled imports with a small engine adapter, not a Roblox game simulation.

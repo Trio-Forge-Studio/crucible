@@ -123,13 +123,28 @@ export function createEffect(body: () => unknown) {
 	createIn(owner, body);
 }
 
-/** @internal */
-export function createWatch<T>(source: () => T, onChange: (value: T, previous: T) => void) {
+function watchOwner(): Lifetime {
 	guardPure("create effects");
 	const owner = resolveOwner();
 	if (owner === undefined) error(NO_OWNER, 0);
-	let previous = readUntracked(source);
-	if (owner.ended) return;
+	return owner;
+}
+
+/** @internal */
+export function createWatch<T>(source: () => T, onChange: (value: T, previous: T) => void) {
+	const owner = watchOwner();
+	const baseline = readUntracked(source);
+	if (!owner.ended) watchFrom(owner, source, baseline, onChange);
+}
+
+/** @internal A watch whose baseline the caller already read untracked, so `source` is not read again for it. */
+export function createWatchFrom<T>(source: () => T, baseline: T, onChange: (value: T, previous: T) => void) {
+	const owner = watchOwner();
+	if (!owner.ended) watchFrom(owner, source, baseline, onChange);
+}
+
+function watchFrom<T>(owner: Lifetime, source: () => T, baseline: T, onChange: (value: T, previous: T) => void) {
+	let previous = baseline;
 	createIn(owner, () => {
 		const value = source();
 		if (rawequal(value, previous)) return;

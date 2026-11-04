@@ -16,4 +16,28 @@ return {
 		client.place:Destroy()
 		h.place:Destroy()
 	end,
+	["no side entry loads Vide, and the vide subpath resolves it"] = function()
+		local function videLoaded(h): boolean
+			local vide = h.place:GetService("ReplicatedStorage").rbxts_include.node_modules["@rbxts"].vide
+			for module in h.loaded do
+				if module == vide or module:IsDescendantOf(vide) then
+					return true
+				end
+			end
+			return false
+		end
+		local server = loadPlace()
+		server.import(server.crucible)
+		server.import(server.crucible.server)
+		server.import(server.crucible.emit)
+		assert(not videLoaded(server), "the root, server and emit entries never load Vide")
+		local client = loadPlace(true)
+		client.import(client.crucible)
+		client.import(client.crucible.client)
+		assert(not videLoaded(client), "the client entry never loads Vide")
+		assert(type(client.import(client.crucible.vide).useReadable) == "function", "the vide subpath resolves")
+		assert(videLoaded(client), "the vide subpath loads Vide")
+		client.place:Destroy()
+		server.place:Destroy()
+	end,
 }

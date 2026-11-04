@@ -22,7 +22,7 @@ use crate::facts::{
 };
 use crate::macros::Macro;
 use crate::program::Checked;
-use crate::project::{Game, absolute};
+use crate::project::{Game, absolute, installed_module};
 use crucible::Code;
 
 pub(crate) fn extract(checked: Checked) -> Facts {
@@ -826,9 +826,10 @@ impl Extractor {
         }
     }
 
-    /// Where a kept import's module is in a game, from the importing script.
+    /// Where a kept import's module is in a game, from the importing script. In a package, only an import of another
+    /// installed package needs one; relative imports lower from their specifier.
     fn module_path(&mut self, specifier: P<Node>) {
-        if self.game.is_none() {
+        if self.game.is_none() && specifier.text().starts_with('.') {
             return;
         }
         self.site();
@@ -838,7 +839,13 @@ impl Extractor {
             .and_then(|s| s.declarations().first().copied())
             .and_then(tsrs_ast::get_source_file_of_node)
             .map(|f| f.file_name().replace('\\', "/"));
-        let Some(game) = &self.game else { return };
+        let Some(game) = &self.game else {
+            if let Some(path) = target.as_deref().and_then(installed_module) {
+                let span = self.span(specifier);
+                self.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));
+            }
+            return;
+        };
         let Some(target) = target else {
             return self.report(specifier, Code::Place, "the module this names has no source file");
         };

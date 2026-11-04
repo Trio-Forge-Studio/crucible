@@ -2,12 +2,17 @@
 -- a TS table whose `import` resolves sibling paths, which is all the compiled package uses.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
+local roblox = require("@lune/roblox")
 local task = require("@lune/task")
 local networkPort = require("./network-port")
 
 type Node = { path: string, Parent: Node }
 
 local ROOT = "packages/crucible/out"
+-- Where `TS.getModule` finds a package, such as @rbxts/vide for the vide subpath. Its modules see a `game` with
+-- only the services Vide reads, Lune's `Instance`, `Enum` and `Color3`, and a `require` that takes a child node or a
+-- `./` path.
+local PACKAGES = "packages/crucible/node_modules"
 
 local nodes: { [string]: Node } = {}
 
@@ -23,6 +28,9 @@ local function node(path: string): Node
 		__index = function(self, key)
 			if key == "Parent" then
 				return node(string.match(self.path, "^(.*)/[^/]+$") or ".")
+			end
+			if type(key) == "string" and string.sub(self.path, 1, #PACKAGES + 1) == PACKAGES .. "/" then
+				return node(`{self.path}/{key}`)
 			end
 			return nil
 		end,
@@ -71,6 +79,23 @@ local function Promise()
 	return promise
 end
 
+-- Vide connects to RunService.Heartbeat and lists ReflectionService's classes when it loads.
+local PACKAGE_SERVICE = {
+	Heartbeat = {
+		Connect = function()
+			return { Disconnect = function() end }
+		end,
+	},
+	GetClasses = function()
+		return {}
+	end,
+}
+local PACKAGE_GAME = {
+	GetService = function()
+		return PACKAGE_SERVICE
+	end,
+}
+
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
 -- that builds a runtime starts clean. Each graph gets its own network port: the given one, or the default fake.
 local function graph(defaults, loggingPort, configPort, network, dataPort)
@@ -82,6 +107,9 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 			return if key == "Promise" then Promise() else nil
 		end,
 	})
+	function TS.getModule(_caller: Node, scope: string, name: string): Node
+		return node(`{PACKAGES}/{scope}/{name}`)
+	end
 	function TS.import(_caller: Node, base: Node, ...: string)
 		local path = base.path
 		for _, name in { ... } do
@@ -102,6 +130,20 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 			end
 			for key, value in globals or {} do
 				env[key] = value
+			end
+			if string.sub(path, 1, #PACKAGES + 1) == PACKAGES .. "/" then
+				env.game = PACKAGE_GAME
+				env.Instance = roblox.Instance
+				env.Enum = roblox.Enum
+				env.Color3 = roblox.Color3
+				env.require = function(target: Node | string)
+					if type(target) == "string" then
+						local relative =
+							assert(string.match(target, "^%./(.+)$"), `unsupported require {target} from {path}`)
+						return load(`{node(path).Parent.path}/{relative}`)
+					end
+					return load(target.path)
+				end
 			end
 			local source = fs.readFile(fileOf(path))
 			if optimization then
@@ -129,6 +171,10 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 		network = network,
 		module = function(relative: string, globals: { [string]: any }?): any
 			return load(if relative == "" then ROOT else ROOT .. "/" .. relative, globals)
+		end,
+		-- A module of an installed package, the same instance the runtime's imports of it get.
+		package = function(relative: string): any
+			return load(`{PACKAGES}/{relative}`)
 		end,
 	}
 end

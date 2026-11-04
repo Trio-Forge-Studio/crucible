@@ -21,6 +21,10 @@
 			"types": "./out/client/index.d.ts",
 			"default": "./out/client/init.luau"
 		},
+		"./vide": {
+			"types": "./out/vide/index.d.ts",
+			"default": "./out/vide/init.luau"
+		},
 		"./transformer": "./transformer/index.js"
 	},
 	"scripts": {
@@ -31,10 +35,17 @@
 	"devDependencies": {
 		"@rbxts/compiler-types": "3.0.0-types.0",
 		"@rbxts/types": "1.0.959",
+		"@rbxts/vide": "0.6.1",
 		"@trioforge/compiler-types": "workspace:*"
 	},
 	"peerDependencies": {
-		"typescript": "5.5.3"
+		"typescript": "5.5.3",
+		"@rbxts/vide": "^0.6.1"
+	},
+	"peerDependenciesMeta": {
+		"@rbxts/vide": {
+			"optional": true
+		}
 	},
 	"files": [
 		"out",
@@ -42,6 +53,7 @@
 		"server",
 		"client",
 		"emit",
+		"vide",
 		"LICENSE"
 	],
 	"repository": {

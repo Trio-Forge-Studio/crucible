@@ -474,6 +474,16 @@ export function createScope(setup: () => void): () => void {
 	guardPure("create scopes");
 	const parent = resolveOwner();
 	if (parent?.ended) return () => {};
+	return startScope(parent, setup);
+}
+
+/** @internal A scope that only its dispose ends, whatever owner is current. */
+export function createRootScope(setup: () => void): () => void {
+	guardPure("create scopes");
+	return startScope(undefined, setup);
+}
+
+function startScope(parent: Lifetime | undefined, setup: () => void): () => void {
 	const scope = newLifetime(Role.Scope, parent, parent?.owner);
 	if (parent !== undefined) adopt(parent, scope);
 	let failed = false;

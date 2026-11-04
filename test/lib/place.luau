@@ -24,7 +24,11 @@ return function(client: boolean?)
 	e.port.clock = os.clock
 	e.port.wait = task.wait
 	local runService = {
-		Heartbeat = {},
+		Heartbeat = {
+			Connect = function()
+				return { Disconnect = function() end }
+			end,
+		},
 		IsRunning = function()
 			return false
 		end,
@@ -36,6 +40,12 @@ return function(client: boolean?)
 		end,
 		IsServer = function()
 			return client ~= true
+		end,
+	}
+	-- Vide lists the engine's classes when it loads.
+	local reflectionService = {
+		GetClasses = function()
+			return {}
 		end,
 	}
 	local game = {
@@ -52,12 +62,26 @@ return function(client: boolean?)
 					},
 				}
 			end
+			if name == "ReflectionService" then
+				return reflectionService
+			end
 			return if name == "RunService" then runService else place:GetService(name)
 		end,
 	}
 	local realm = {}
 	local loaded = {}
-	local function load(module)
+	local load
+	-- A package such as Vide requires its siblings by `./name`.
+	local function requireFrom(script)
+		return function(target)
+			if type(target) == "string" then
+				local name = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
+				target = assert(script.Parent:FindFirstChild(name), `{script:GetFullName()} has no sibling {name}`)
+			end
+			return load(target)
+		end
+	end
+	function load(module)
 		if module.Name == "roblox-port" and module.Parent.Name == "internal" then
 			return {
 				robloxPort = function()
@@ -72,8 +96,11 @@ return function(client: boolean?)
 					_G = realm,
 					game = game,
 					script = module,
-					require = load,
+					require = requireFrom(module),
 					task = task,
+					Instance = roblox.Instance,
+					Enum = roblox.Enum,
+					Color3 = roblox.Color3,
 					print = function(...)
 						local values = {}
 						for _, value in { ... } do
