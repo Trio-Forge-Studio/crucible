@@ -296,4 +296,33 @@ return {
 		spec.eq(stored(w, ANN).payload.pickups, ANN_PICKUPS, "the committed counter")
 		w.place:Destroy()
 	end,
+
+	["compiled sample a press the engine already consumed pays nothing"] = function()
+		local w = newWorld({ [ANN] = { 12, ANN_PICKUPS } })
+		local ann = connect(w, "Ann", ANN)
+		w:press(ann, E, true)
+		w:settle()
+		spec.eq(w:hud(ann), "Coins: 12   Total: 12   Last: +0", "the consumed press paid nothing")
+		saved(w, ann.player)
+		spec.eq(stored(w, ANN).payload.coins, 12, "the committed coins")
+		spec.eq(stored(w, ANN).payload.pickups, ANN_PICKUPS, "the committed counter")
+		w:press(ann, E)
+		w:settle()
+		spec.eq(w:hud(ann), "Coins: 13   Total: 13   Last: +1", "the same key unconsumed pays")
+		w.place:Destroy()
+	end,
+
+	["compiled sample a profile saved before the migration without the old field starts at zero coins"] = function()
+		local w = World.new()
+		w.backend:seed(STORE, tostring(ANN), DM.envelope({ schemaVersion = 0, payload = {} }))
+		w:bootServer()
+		w:settle()
+		local ann = connect(w, "Ann", ANN)
+		spec.eq(w:hud(ann), "Coins: 0   Total: 0   Last: +0", "a missing gold field became zero coins")
+		w:press(ann, E)
+		w:settle()
+		saved(w, ann.player)
+		spec.eq(stored(w, ANN).payload.coins, 1, "zero coins plus the press")
+		w.place:Destroy()
+	end,
 }

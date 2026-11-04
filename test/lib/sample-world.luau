@@ -237,10 +237,10 @@ function World:connect(name: string, userId: number)
 	return client
 end
 
--- Presses `key` in the client's UserInputService.
-function World:press(client, key)
+-- Presses `key` in the client's UserInputService. `processed` is the engine's flag for input a UI element already took.
+function World:press(client, key, processed: boolean?)
 	for _, listener in table.clone(client.inputs.listeners) do
-		listener({ KeyCode = key }, false)
+		listener({ KeyCode = key }, processed == true)
 	end
 	self.link:flush()
 end

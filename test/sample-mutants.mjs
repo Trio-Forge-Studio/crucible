@@ -198,6 +198,20 @@ const mutants = [
 		lune,
 	],
 	[
+		"sample migration fallback for a missing old field changed",
+		"examples/sample-game/src/shared/profile.ts",
+		'typeIs(old.gold, "number") ? old.gold : 0',
+		'typeIs(old.gold, "number") ? old.gold : 5',
+		lune,
+	],
+	[
+		"sample consumed input guard removed",
+		"examples/sample-game/src/client/systems/hud.ts",
+		"if (!processed && input.KeyCode === Enum.KeyCode.E)",
+		"if (input.KeyCode === Enum.KeyCode.E)",
+		lune,
+	],
+	[
 		"sample press key changed",
 		"examples/sample-game/src/client/systems/hud.ts",
 		"Enum.KeyCode.E",
