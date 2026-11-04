@@ -265,4 +265,31 @@ return {
 		spec.eq(ann.d.Solo(), 7, "the last value is kept")
 		w:finish()
 	end,
+	["52 58 the Heartbeat that announces a retirement settles, so the next with nothing written examines no peer"] = function()
+		local w = World.new({
+			declare = function(r)
+				return { Solo = r.emit.replicatedPerPlayer("Solo.Value", 0, r.n.f64) }
+			end,
+			serve = function(s, d, world)
+				s.service("SoloService", function(self)
+					world.service = self
+					s.entry.publish(d.Solo, function()
+						return 7
+					end)
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		w:heartbeat()
+		w:heartbeat()
+		spec.eq(w:sync().spent, 0, "a settled Heartbeat with nothing written examines none")
+		w.server.life.fault(w.server.state(w.service), CALLBACK, "publisher faulted")
+		w.link:flush()
+		w:heartbeat()
+		assert(w:sync().spent > 0, "the retirement is examined")
+		spec.eq(ann.api.syncStatus(ann.d.Solo), "failed", "and announced")
+		w:heartbeat()
+		spec.eq(w:sync().spent, 0, "the next, with nothing written, examines none")
+		w:finish()
+	end,
 }

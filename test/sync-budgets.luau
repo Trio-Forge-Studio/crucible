@@ -97,6 +97,107 @@ local function numbers(count: number)
 	return out
 end
 
+-- Rule 70's byte bound: eight peers each get one 131,072-byte update frame, so the Heartbeat's frames total exactly
+-- SYNC_HEARTBEAT_BYTES (1,048,576). `extra` lengthens the last peer's frame by that many bytes.
+local PEER_FRAME = 131072
+local FRAME_TAIL = 32713
+local function byteLimitWorld(extra: number)
+	local long = string.rep("a", 49152)
+	local w = World.new({
+		declare = function(r)
+			local n = r.n
+			local record = n.object({ { "a", n.string }, { "b", n.string }, { "c", n.string }, { "count", n.f64 } })
+			return { View = r.emit.replicatedPerPlayer("Data.View", nil, n.union({ n["nil"], record })) }
+		end,
+		serve = function(s, d, world)
+			world.count = s.api.state(0)
+			s.service("ViewService", function()
+				s.entry.publish(d.View, function(player)
+					local tail = FRAME_TAIL + (if player.Name == "P8" then extra else 0)
+					return { a = long, b = long, c = string.rep("c", tail), count = world.count() }
+				end)
+			end)
+		end,
+	})
+	local clients = {}
+	for i = 1, 8 do
+		clients[i] = w:join(`P{i}`)
+	end
+	return w, clients
+end
+
+-- Rule 49 counts one admission visit per value node and per table key touched. A row `{ junk = true }` of an object with
+-- `absent` optional fields costs 1 for its node, 1 for the scan step that stops at its undeclared key and 1 lookup for
+-- each declared field: 2 + absent. An array of `rows` such rows costs 1 for its node, 1 per key scanned and the rows.
+local function rowDescriptor(n, absent: number)
+	local fields = {}
+	for i = 1, absent do
+		table.insert(fields, { string.format("f%02d", i), n.union({ n["nil"], n.f64 }) })
+	end
+	return n.object(fields)
+end
+
+local function junkRows(rows: number)
+	local out = table.create(rows)
+	for i = 1, rows do
+		out[i] = { junk = true }
+	end
+	return out
+end
+
+-- A world with one published array of rows under rule 49's count; returns whether `set` took `rows` rows.
+local function admitRows(rows: number, absent: number)
+	local w = World.new({
+		declare = function(r)
+			local n = r.n
+			return { Rows = r.emit.replicated("Job.Rows", {}, n.array(rowDescriptor(n, absent))) }
+		end,
+		serve = function(s, d, world)
+			s.service("RowsService", function()
+				world.rows = s.entry.publish(d.Rows)
+			end)
+		end,
+	})
+	local ok, err = pcall(function()
+		w.rows:set(junkRows(rows))
+	end)
+	return w, ok, err
+end
+
+-- Rule 70's per-peer count for a rebuilt, equal value: one visit for a declaration considered, then rule 49's count
+-- for the value, then rule 61's: one for the array's node pair and two per row (the index and the row's node pair).
+-- Each of three per-player views holds `rows` rows of `absent` optional fields behind a nil union (one more node).
+local function peerWorld(rows: number, absent: number, publics: number)
+	return World.new({
+		declare = function(r)
+			local n = r.n
+			local view = n.union({ n["nil"], n.array(rowDescriptor(n, absent)) })
+			local d = {}
+			for i = 1, 3 do
+				d[i] = r.emit.replicatedPerPlayer(`Data.V{i}`, nil, view)
+			end
+			for i = 1, publics do
+				d[3 + i] = r.emit.replicated(`Job.P{i}`, 0, n.f64)
+			end
+			return d
+		end,
+		serve = function(s, d, world)
+			world.bump = s.api.state(0)
+			s.service("ViewsService", function()
+				for i = 1, 3 do
+					s.entry.publish(d[i], function()
+						world.bump()
+						return junkRows(rows)
+					end)
+				end
+				for i = 1, publics do
+					s.entry.publish(d[3 + i])
+				end
+			end)
+		end,
+	})
+end
+
 return {
 	["66 69 a frame over SYNC_FRAME_BYTES fails only that peer, sends the failed frame and nothing partial"] = function()
 		local options = projected(blobs)
@@ -490,5 +591,113 @@ return {
 		spec.eq(#frames[2].frame.values, 130, "the update carries all 130 values")
 		spec.eq(ann.d[130](), 130, "and the client applied them")
 		spec.eq(w:finish(), 2, "frameCost matched the encoder on both frames")
+	end,
+	["69 frameCost counts 127 and 128 values at the one-byte and two-byte list-length boundary, as networking's encoder does"] = function()
+		local w = World.new({
+			declare = function(r)
+				local d = {}
+				for i = 1, 128 do
+					d[i] = r.emit.replicated(string.format("Wide.D%03d", i), 0, r.n.f64)
+				end
+				return d
+			end,
+			serve = function(s, d, world)
+				s.service("WideService", function()
+					world.pubs = {}
+					for i, declaration in d do
+						world.pubs[i] = s.entry.publish(declaration)
+					end
+				end)
+			end,
+		})
+		local ann = w:join("Ann")
+		for i = 2, 128 do
+			w.pubs[i]:set(i)
+		end
+		w:heartbeat()
+		for i = 1, 128 do
+			w.pubs[i]:set(i + 1000)
+		end
+		w:heartbeat()
+		local frames = w:frames(ann)
+		spec.eq(#frames, 3, "a snapshot and two updates")
+		spec.eq(#frames[1].frame.values, 128, "the snapshot carries all 128 values")
+		spec.eq(#frames[2].frame.values, 127, "the first update changed 127 of them")
+		spec.eq(#frames[3].frame.values, 128, "the second changed all 128")
+		-- Every entry is a 10-byte key and a 9-byte number, so one more entry adds 19 bytes, and the list length 128
+		-- needs a second varuint byte where 127 needs one.
+		spec.eq(frames[3].bytes - frames[2].bytes, 19 + 1, "the 128th entry and the second length byte")
+		spec.eq(w:finish(), 3, "frameCost matched the encoder on all three frames")
+	end,
+	["58 70 a Heartbeat that stopped for the byte budget completes the next one, and the one after examines no peer"] = function()
+		local w, clients = byteLimitWorld(1)
+		w.count:set(1)
+		w:heartbeat()
+		spec.eq(#w:frames(clients[8]), 1, "the eighth peer's frame waited for the byte budget")
+		w:heartbeat()
+		spec.eq(#w:frames(clients[8]), 2, "the next Heartbeat sent it")
+		assert(w:sync().spent > 0, "and examined the peers")
+		w:heartbeat()
+		spec.eq(w:sync().spent, 0, "a Heartbeat that completed every peer settles, so the next examines none")
+		w:finish()
+	end,
+	["70 a Heartbeat whose frames total exactly SYNC_HEARTBEAT_BYTES sends every one, and one byte more defers the last"] = function()
+		local w, clients = byteLimitWorld(0)
+		w.count:set(1)
+		w:heartbeat()
+		for i = 1, 8 do
+			local frames = w:frames(clients[i])
+			spec.eq(#frames, 2, `P{i} got its update`)
+			spec.eq(frames[2].bytes, PEER_FRAME, `P{i}'s update is 131,072 bytes`)
+		end
+		w:finish()
+		local over, others = byteLimitWorld(1)
+		over.count:set(1)
+		over:heartbeat()
+		for i = 1, 7 do
+			spec.eq(#over:frames(others[i]), 2, `P{i} got its update`)
+		end
+		spec.eq(#over:frames(others[8]), 1, "1,048,577 bytes pass the budget, so the eighth waits")
+		over:heartbeat()
+		local frames = over:frames(others[8])
+		spec.eq(#frames, 2, "and goes next Heartbeat")
+		spec.eq(frames[2].bytes, PEER_FRAME + 1, "as a frame one byte longer")
+		over:finish()
+	end,
+	["49 R1 an array whose admission visits total exactly SYNC_ADMISSION_VISITS is admitted, and one more visit refuses it"] = function()
+		-- 1 + 5647 * (3 + 14) = 96,000 and 1 + 6000 * (3 + 13) = 96,001, both inside every codec budget.
+		local w, ok = admitRows(5647, 14)
+		spec.eq(ok, true, "96,000 admission visits are admitted")
+		spec.eq(#w.server.d.Rows(), 5647, "the server holds the value")
+		local ann = w:join("Ann")
+		spec.eq(#ann.d.Rows(), 5647, "and the snapshot delivered it")
+		w:finish()
+		local over, refused, err = admitRows(6000, 13)
+		spec.eq(refused, false, "96,001 admission visits are refused")
+		spec.has(err, "Job.Rows", "naming the declaration")
+		spec.has(err, "over SYNC_ADMISSION_VISITS", "at the admission budget")
+		spec.eq(#over.server.d.Rows(), 0, "the server keeps its last value")
+		over:finish()
+	end,
+	["70 a peer examination spending exactly SYNC_PEER_VISITS completes, and one more visit fails the peer"] = function()
+		-- Per view: 1 considered + (1 union + 1 array + 3799 keys + 3799 * (2 + 18)) admission + (1 + 2 * 3799) comparison,
+		-- which is 87,381; three views and one public declaration considered make 262,144.
+		local w = peerWorld(3799, 18, 1)
+		local ann = w:join("Ann")
+		w.bump:set(1)
+		w:heartbeat()
+		spec.eq(w:sync().spent, 262144, "the Heartbeat spent exactly SYNC_PEER_VISITS")
+		spec.eq(w:logged("examination over SYNC_PEER_VISITS"), 0, "and the peer was not failed")
+		spec.eq(ann.api.syncStatus(ann.d[1]), "ready", "its views stay ready")
+		spec.eq(#w:frames(ann), 1, "nothing changed, so no update")
+		w:finish()
+		local over = peerWorld(3799, 18, 2)
+		local bea = over:join("Bea")
+		over.bump:set(1)
+		over:heartbeat()
+		spec.eq(over:logged("examination over SYNC_PEER_VISITS after 262144 visits"), 1, "262,145 visits fail the peer")
+		spec.list(kinds(over, bea), { "snapshot", "failed" }, "with only the failed frame after the snapshot")
+		spec.eq(kicked(over, "Bea"), 1, "and kick it")
+		over:finish()
 	end,
 }
