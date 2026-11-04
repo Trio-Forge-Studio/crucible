@@ -478,4 +478,30 @@ return {
 		r.flush()
 		spec.list(order, { "first 1", "second 1" }, "sorted by creation, not by enqueue")
 	end,
+	["rule 33 a round runs in creation order whether it was enqueued in order or out of order at the end"] = function()
+		local r = realm()
+		local states = {}
+		local order = {}
+		r.root(function()
+			for i = 1, 4 do
+				states[i] = r.api.state(0)
+				r.api.effect(function()
+					table.insert(order, `{i} {states[i]()}`)
+				end)
+			end
+		end)
+		r.flush()
+		table.clear(order)
+		for _, i in { 1, 2, 3, 4 } do
+			states[i]:set(1)
+		end
+		r.flush()
+		spec.list(order, { "1 1", "2 1", "3 1", "4 1" }, "enqueued in order")
+		table.clear(order)
+		for _, i in { 1, 2, 4, 3 } do
+			states[i]:set(2)
+		end
+		r.flush()
+		spec.list(order, { "1 2", "2 2", "3 2", "4 2" }, "the last two enqueued out of order")
+	end,
 }

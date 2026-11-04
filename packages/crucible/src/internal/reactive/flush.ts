@@ -3,9 +3,12 @@ import type { EnginePort } from "../port";
 import { CallResult } from "../runner";
 import { FrameKind, type Completion } from "./context";
 import {
+	CacheKind,
+	createComputedNode,
 	createdBefore,
 	dependenciesMoved,
 	guardPure,
+	link,
 	Mark,
 	markEffect,
 	NodeKind,
@@ -15,7 +18,11 @@ import {
 	rewire,
 	staleAfterRun,
 	useScheduler,
+	validate,
 	nextId,
+	type Reaction,
+	type Source,
+	type StateNode,
 } from "./graph";
 import { MAX_EFFECT_RUNS_PER_FLUSH, MAX_FLUSH_ROUNDS, MAX_RUNS_PER_EFFECT } from "./limits";
 import {
@@ -31,8 +38,10 @@ import {
 	Role,
 	runBody,
 	useDescribe,
+	type BindingNode,
 	type EffectNode,
 	type Lifetime,
+	type ReactionNode,
 } from "./ownership";
 
 /** @internal What the flush asks of the engine. */
@@ -43,14 +52,14 @@ let port: ReactivePort | undefined;
 let held = true;
 let requested = false;
 let flushing = false;
-let queue = new Array<EffectNode>();
+let queue = new Array<ReactionNode>();
 /** The entries one round took from the queue, and the index of the first one not yet reached. */
-let batch = new Array<EffectNode>();
+let batch = new Array<ReactionNode>();
 let cursor = 0;
 /** The entry being processed, which an internal error stops. */
-let culprit: EffectNode | undefined;
-/** Every effect whose run count moved this flush. */
-let ran = new Array<EffectNode>();
+let culprit: ReactionNode | undefined;
+/** Every effect or binding whose run count moved this flush. */
+let ran = new Array<ReactionNode>();
 /** A bound was reported, and no flush has finished within its bounds since. */
 let boundReported = false;
 
@@ -78,22 +87,30 @@ function request() {
 	if (!ok) requested = false;
 }
 
-function enqueue(effect: EffectNode) {
+function enqueue(effect: ReactionNode) {
 	if (effect.queued || effect.stopped) return;
 	effect.queued = true;
 	queue.push(effect);
 	request();
 }
 
-useScheduler((effect) => enqueue(effect as EffectNode));
+useScheduler(enqueue as (reaction: Reaction) => void);
 
 function report(level: "warning" | "error", message: string) {
 	pcall(runtimeDiagnostic, level, message);
 }
 
-function fail(effect: EffectNode, reason: string) {
-	retire(effect);
-	report("error", `Crucible: effect at ${effect.origin} (${ownerLabel(effect.parent.owner)}) stopped: ${reason}`);
+function originOfReaction(reaction: ReactionNode): string {
+	return reaction.kind === NodeKind.Effect ? reaction.origin : originOf(reaction.sink);
+}
+
+function fail(reaction: ReactionNode, reason: string) {
+	retire(reaction);
+	const what = reaction.kind === NodeKind.Effect ? "effect" : "binding";
+	report(
+		"error",
+		`Crucible: ${what} at ${originOfReaction(reaction)} (${ownerLabel(reaction.parent?.owner)}) stopped: ${reason}`,
+	);
 }
 
 function createIn(owner: Lifetime, body: () => unknown) {
@@ -154,6 +171,91 @@ function watchFrom<T>(owner: Lifetime, source: () => T, baseline: T, onChange: (
 	});
 }
 
+function bindIn<T>(
+	parent: Lifetime | undefined,
+	readable: () => T,
+	baseline: T,
+	sink: (target: never, value: T) => void,
+	target: unknown,
+): BindingNode {
+	const read = readable as unknown as StateNode;
+	const direct = typeIs(read, "table") && read.kind === NodeKind.State;
+	const source: Source = direct ? read : createComputedNode(readable);
+	const binding: BindingNode = {
+		kind: NodeKind.Binding,
+		id: nextId(),
+		source,
+		seen: source.version,
+		mark: direct ? Mark.Clean : Mark.Dirty,
+		stopped: false,
+		queued: false,
+		parent,
+		prev: undefined,
+		next: undefined,
+		linked: false,
+		runs: 0,
+		sink: sink as (target: unknown, value: unknown) => void,
+		target,
+		value: baseline,
+	};
+	link(binding, source);
+	if (parent !== undefined) adopt(parent, binding);
+	if (!direct) enqueue(binding);
+	return binding;
+}
+
+/**
+ * @internal
+ * Binds `readable` under the current owner and returns the binding, or nothing when the owner has ended. On each flush
+ * where its value is not `rawequal` to the last one, the flush calls `sink(target, value)` on its own thread, so
+ * `sink` must not yield. Nothing runs at creation: the caller reads `baseline` untracked just before and applies it.
+ * A state is read as it is. Any other readable is read through a computed, so a throw or a yield in it is cached as a
+ * computed's would be, and the binding stops with a diagnostic as a watch does. So does a throw in `sink`.
+ */
+export function createBinding<T>(
+	readable: () => T,
+	baseline: T,
+	sink: (target: never, value: T) => void,
+	target: unknown,
+): BindingNode | undefined {
+	guardPure("create bindings");
+	const owner = resolveOwner();
+	if (owner === undefined) error(NO_OWNER, 0);
+	if (owner.ended) return undefined;
+	return bindIn(owner, readable, baseline, sink, target);
+}
+
+/** @internal `createBinding` with no owner: only `retire` ends it. */
+export function createRootBinding<T>(
+	readable: () => T,
+	baseline: T,
+	sink: (target: never, value: T) => void,
+	target: unknown,
+): BindingNode {
+	guardPure("create bindings");
+	return bindIn(undefined, readable, baseline, sink, target);
+}
+
+function runBinding(binding: BindingNode) {
+	const source = binding.source;
+	if (source.kind === NodeKind.Computed) validate(source);
+	binding.seen = source.version;
+	let value: unknown;
+	if (source.kind === NodeKind.State) value = source.value;
+	else {
+		const cache = source.cache;
+		if (cache.kind === CacheKind.Error) {
+			fail(binding, cache.message);
+			return;
+		}
+		value = cache.kind === CacheKind.Value ? cache.value : undefined;
+	}
+	if (rawequal(value, binding.value)) return;
+	binding.value = value;
+	const [ok, err] = pcall(binding.sink, binding.target, value);
+	if (!ok) fail(binding, tostring(err));
+}
+
 /** A run's frame names its effect and its run lifetime. */
 function complete(completion: Completion) {
 	const frame = completion.frame!;
@@ -186,7 +288,7 @@ function runOnce(effect: EffectNode) {
 }
 
 function carry() {
-	const rest = new Array<EffectNode>();
+	const rest = new Array<ReactionNode>();
 	for (let i = cursor; i < batch.size(); i++) rest.push(batch[i]);
 	for (const effect of queue) rest.push(effect);
 	queue = rest;
@@ -200,11 +302,33 @@ function reportBound(bound: string) {
 	const busiest = [...ran];
 	busiest.sort((a, b) => a.runs > b.runs);
 	const origins = new Array<string>();
-	for (let i = 0; i < math.min(3, busiest.size()); i++) origins.push(`${busiest[i].origin} (${busiest[i].runs})`);
+	for (let i = 0; i < math.min(3, busiest.size()); i++)
+		origins.push(`${originOfReaction(busiest[i])} (${busiest[i].runs})`);
 	report(
 		"warning",
 		`Crucible: the reactive flush reached ${bound}; the rest waits for the next flush. Most runs: ${origins.join(", ")}`,
 	);
+}
+
+const sortIds = new Array<number>();
+const sortNodes = new Map<number, ReactionNode>();
+
+/** Ids are unique, so sorting them as numbers gives `createdBefore`'s order without a Luau call per comparison. */
+function sortByCreation(list: ReactionNode[]) {
+	for (let i = 0; i < list.size(); i++) {
+		const node = list[i];
+		sortIds[i] = node.id;
+		sortNodes.set(node.id, node);
+	}
+	sortIds.sort();
+	for (let i = 0; i < list.size(); i++) list[i] = sortNodes.get(sortIds[i])!;
+	sortIds.clear();
+	sortNodes.clear();
+}
+
+function inCreationOrder(list: readonly ReactionNode[]): boolean {
+	for (let i = 1; i < list.size(); i++) if (createdBefore(list[i], list[i - 1])) return false;
+	return true;
 }
 
 function runRounds() {
@@ -219,7 +343,7 @@ function runRounds() {
 		batch = queue;
 		queue = [];
 		cursor = 0;
-		batch.sort(createdBefore);
+		if (!inCreationOrder(batch)) sortByCreation(batch);
 		while (cursor < batch.size()) {
 			const effect = batch[cursor];
 			cursor += 1;
@@ -245,7 +369,8 @@ function runRounds() {
 			effect.runs += 1;
 			total += 1;
 			if (effect.runs === 1) ran.push(effect);
-			runOnce(effect);
+			if (effect.kind === NodeKind.Binding) runBinding(effect);
+			else runOnce(effect);
 		}
 		culprit = undefined;
 		batch = [];
@@ -266,7 +391,7 @@ function recover(err: unknown) {
 			stopFailure = `; stopping it failed: ${tostring(stopErr)}`;
 		}
 	}
-	const where = blamed === undefined ? "" : ` while processing the effect at ${blamed.origin}`;
+	const where = blamed === undefined ? "" : ` while processing the effect at ${originOfReaction(blamed)}`;
 	report("error", `Crucible: internal error; the reactive flush recovered${where}: ${tostring(err)}${stopFailure}`);
 }
 

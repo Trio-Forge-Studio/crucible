@@ -1,7 +1,6 @@
--- Times `useReadable` against a hand-written Vide source, and against the Crucible `watch` it runs on with no Vide
--- at all. Each measurement makes `COUNT` bindings under one Vide root, each read by one Vide effect, the way a
--- component binds a property. The watch-only subject makes `COUNT` root scopes, each with one watch that stores
--- the value.
+-- Times `useReadable` against a hand-written Vide source, and against the Crucible binding node it runs on with no
+-- Vide at all. Each measurement makes `COUNT` bindings under one Vide root, each read by one Vide effect, the way a
+-- component binds a property. The binding-only subject makes `COUNT` root bindings, each with a sink that counts.
 --
 --   create   makes the root and its bindings, then destroys the root. The baseline makes a Vide source from the
 --            state's value; the bridge calls `useReadable(state)`.
@@ -29,7 +28,9 @@ local r = realm()
 local vide = r.graph.package("@rbxts/vide/src")
 vide.strict = false
 local useReadable = r.graph.module("vide").useReadable
-local state, scope, watch = r.api.state, r.api.scope, r.api.watch
+local state = r.api.state
+local createRootBinding = r.reactive.createRootBinding
+local retire = r.graph.module("internal/reactive/ownership").retire
 
 local seen = 0
 local function bind(read)
@@ -72,36 +73,34 @@ local function bridgeCreate()
 	return os.clock() - start
 end
 
-local function watched(sources, store)
-	local disposes = table.create(COUNT)
-	for i = 1, COUNT do
-		disposes[i] = scope(function()
-			watch(sources[i], store)
-		end)
-	end
-	return function()
-		for i = 1, COUNT do
-			disposes[i]()
-		end
-	end
-end
-
 local function count()
 	seen += 1
 end
 
-local function watchCreate()
+local function bound(sources)
+	local bindings = table.create(COUNT)
+	for i = 1, COUNT do
+		bindings[i] = createRootBinding(sources[i], sources[i](), count, nil)
+	end
+	return function()
+		for i = 1, COUNT do
+			retire(bindings[i])
+		end
+	end
+end
+
+local function bindingCreate()
 	local sources = states(COUNT)
 	local start = os.clock()
-	local dispose = watched(sources, count)
+	local dispose = bound(sources)
 	r.flush()
 	dispose()
 	return os.clock() - start
 end
 
-local function watchUpdate()
+local function bindingUpdate()
 	local sources = states(COUNT)
-	local dispose = watched(sources, count)
+	local dispose = bound(sources)
 	r.flush()
 	seen = 0
 	local start = os.clock()
@@ -110,22 +109,22 @@ local function watchUpdate()
 	end
 	r.flush()
 	local elapsed = os.clock() - start
-	assert(seen == COUNT, `watch update: {seen} of {COUNT} watches ran`)
+	assert(seen == COUNT, `binding update: {seen} of {COUNT} sinks ran`)
 	dispose()
 	return elapsed
 end
 
-local function watchShared()
+local function bindingShared()
 	local shared = state(0)
 	local sources = table.create(COUNT, shared)
-	local dispose = watched(sources, count)
+	local dispose = bound(sources)
 	r.flush()
 	seen = 0
 	local start = os.clock()
 	shared:set(1)
 	r.flush()
 	local elapsed = os.clock() - start
-	assert(seen == COUNT, `watch shared: {seen} of {COUNT} watches ran`)
+	assert(seen == COUNT, `binding shared: {seen} of {COUNT} sinks ran`)
 	dispose()
 	return elapsed
 end
@@ -243,14 +242,14 @@ end
 print(`{_VERSION}, optimization level {OPTIMIZATION}, {COUNT} bindings, {runs} runs; median (min to max)`)
 for _, case in
 	{
-		{ "create and destroy", baselineCreate, watchCreate, bridgeCreate },
-		{ "update, one state each", baselineUpdate, watchUpdate, bridgeUpdate },
-		{ "update, one shared state", baselineShared, watchShared, bridgeShared },
+		{ "create and destroy", baselineCreate, bindingCreate, bridgeCreate },
+		{ "update, one state each", baselineUpdate, bindingUpdate, bridgeUpdate },
+		{ "update, one shared state", baselineShared, bindingShared, bridgeShared },
 	}
 do
 	local samples = measure({ case[2], case[3], case[4] })
 	print(`\n{case[1]}`)
 	row("Vide only", samples[1])
-	row("watch only", samples[2])
+	row("binding only", samples[2])
 	row("bridge", samples[3])
 end

@@ -77,7 +77,7 @@ return {
 		r.flush()
 		spec.list(seen, { 0, 3 }, "no update for a value that came back")
 	end,
-	["destroying the Vide owner ends the watch"] = function()
+	["destroying the Vide owner ends the binding"] = function()
 		local r = world()
 		local coins = r.api.state(1)
 		local reads = 0
@@ -88,9 +88,9 @@ return {
 			end)
 		end)
 		r.flush()
-		spec.eq(observers(coins), 1, "the watch subscribes to the state")
+		spec.eq(observers(coins), 1, "the binding subscribes to the state")
 		destroy()
-		spec.eq(observers(coins), 0, "no watch is left on the state")
+		spec.eq(observers(coins), 0, "no binding is left on the state")
 		local before = reads
 		coins:set(2)
 		r.flush()
@@ -98,7 +98,7 @@ return {
 		spec.eq(read(), 1, "the Vide source keeps its last value")
 		spec.list(seen, { 1 }, "no Vide update after the unmount")
 	end,
-	["a component unmounted by its parent ends its watch"] = function()
+	["a component unmounted by its parent ends its binding"] = function()
 		local r = world()
 		local open = r.api.state(true)
 		local coins = r.api.state(1)
@@ -112,12 +112,12 @@ return {
 		end)
 		spec.eq(inner(), 1, "the inner component mounted")
 		r.flush()
-		spec.eq(observers(coins), 1, "the inner watch runs")
+		spec.eq(observers(coins), 1, "the inner binding runs")
 		open:set(false)
 		r.flush()
 		spec.eq(observers(coins), 0, "hiding the component ended its watch")
 	end,
-	["a component mounted by a Crucible update keeps its watch past the next update"] = function()
+	["a component mounted by a Crucible update keeps its binding past the next update"] = function()
 		local r = world()
 		local open = r.api.state(false)
 		local coins = r.api.state(1)
@@ -134,12 +134,12 @@ return {
 		spec.eq(inner(), 1, "the update mounted the inner component")
 		coins:set(2)
 		r.flush()
-		spec.eq(inner(), 2, "its watch saw a later write")
+		spec.eq(inner(), 2, "its binding saw a later write")
 		coins:set(3)
 		r.flush()
 		spec.eq(inner(), 3, "and the one after")
 	end,
-	["the call is untracked and its watch outlives the Crucible owner around it"] = function()
+	["the call is untracked and its binding outlives the Crucible owner around it"] = function()
 		local r = world()
 		local coins = r.api.state(1)
 		local rerun = r.api.state(0)
@@ -175,7 +175,7 @@ return {
 		spec.eq(#r.engine.deferred, 0, "no flush was requested")
 		coins:set(2)
 		r.flush()
-		spec.eq(observers(coins), 0, "no watch was made")
+		spec.eq(observers(coins), 0, "no binding was made")
 	end,
 	["a computed source updates on the flush and an equal result does not reach Vide"] = function()
 		local r = world()
@@ -210,9 +210,9 @@ return {
 		spec.eq(ok, false, "the root failed")
 		spec.has(err, "no value yet", "with the source's error")
 		r.flush()
-		spec.eq(observers(broken), 0, "no watch was made")
+		spec.eq(observers(broken), 0, "no binding was made")
 	end,
-	["a source that throws on a flush stops its watch, reported once, and the value stays"] = function()
+	["a source that throws on a flush stops its binding, reported once, and the value stays"] = function()
 		local r = world()
 		local coins = r.api.state(1)
 		local read = mount(r, function()
@@ -229,10 +229,10 @@ return {
 		spec.eq(r.logged("negative coins"), 1, "the failure is reported once")
 		coins:set(5)
 		r.flush()
-		spec.eq(read(), 1, "the stopped watch makes no update")
+		spec.eq(read(), 1, "the stopped binding makes no update")
 		spec.eq(observers(coins), 0, "and holds no subscription")
 	end,
-	["a Vide effect that throws on an update stops that binding's watch, reported once"] = function()
+	["a Vide effect that throws on an update stops that binding, reported once"] = function()
 		local r = world()
 		local coins = r.api.state(1)
 		local read
@@ -249,7 +249,7 @@ return {
 		spec.eq(r.logged("cannot show negative coins"), 1, "the failure is reported once")
 		coins:set(5)
 		r.flush()
-		spec.eq(read(), -1, "the stopped watch makes no further update")
+		spec.eq(read(), -1, "the stopped binding makes no further update")
 		spec.eq(observers(coins), 0, "and holds no subscription")
 	end,
 	["a getter is read once at the call"] = function()
@@ -264,9 +264,50 @@ return {
 		end)
 		spec.eq(reads, 1, "one read at the call")
 		r.flush()
-		spec.eq(reads, 2, "and one when the watch first runs")
+		spec.eq(reads, 2, "and one when the binding first runs")
 		spec.eq(read(), 1, "the value")
 		spec.list(seen, { 1 }, "an unchanged value made no update")
+	end,
+	["a getter runs as a computed, so a write inside it stops the binding, reported once"] = function()
+		local r = world()
+		local coins = r.api.state(1)
+		local log = r.api.state(0)
+		local read = mount(r, function()
+			return r.useReadable(function()
+				if coins() > 1 then
+					log:set(coins())
+				end
+				return coins()
+			end)
+		end)
+		coins:set(2)
+		r.flush()
+		spec.eq(r.logged("computed must not write state"), 1, "the write threw, reported once")
+		spec.eq(r.api.untracked(log), 0, "and wrote nothing")
+		coins:set(3)
+		r.flush()
+		spec.eq(read(), 1, "the stopped binding makes no update")
+	end,
+	["a Vide effect that runs on an update has no Crucible owner"] = function()
+		local r = world()
+		local coins = r.api.state(1)
+		local made, err, rooted
+		r.root(function()
+			r.vide.root(function()
+				local read = r.useReadable(coins)
+				r.vide.effect(function()
+					if read() == 2 then
+						made, err = pcall(r.api.effect, function() end)
+						rooted = r.api.scope(function() end)
+					end
+				end)
+			end)
+		end)
+		coins:set(2)
+		r.flush()
+		spec.eq(made, false, "effect() threw")
+		spec.has(err, "needs an owner", "with the no-owner error")
+		spec.eq(type(rooted), "function", "scope() made a root")
 	end,
 	["a getter that builds a new table updates Vide on the first flush"] = function()
 		local r = world()
@@ -281,7 +322,7 @@ return {
 		r.flush()
 		spec.eq(#seen, 2, "no update while nothing it reads changes")
 	end,
-	["a Vide effect that yields on an update stops that binding's watch and leaves Vide's scopes balanced"] = function()
+	["a Vide effect that yields on an update stops that binding and leaves Vide's scopes balanced"] = function()
 		local r = world()
 		local scopes = r.graph.package("@rbxts/vide/src/graph").scopes
 		local coins = r.api.state(1)
@@ -304,10 +345,10 @@ return {
 		coins:set(3)
 		gems:set(2)
 		r.flush()
-		spec.eq(read(), 2, "the stopped watch makes no further update")
+		spec.eq(read(), 2, "the stopped binding makes no further update")
 		spec.eq(other(), 2, "another binding still updates")
 	end,
-	["in Vide's strict mode a yielding Vide effect stops the watch the same way"] = function()
+	["in Vide's strict mode a yielding Vide effect stops the binding the same way"] = function()
 		local r = world()
 		r.vide.strict = true
 		local scopes = r.graph.package("@rbxts/vide/src/graph").scopes
@@ -324,7 +365,7 @@ return {
 		r.flush()
 		spec.eq(scopes.n, 0, "Vide's scope stack is empty again")
 		spec.eq(r.logged("attempt to yield"), 1, "the yield is reported once")
-		spec.eq(observers(coins), 0, "the watch stopped")
+		spec.eq(observers(coins), 0, "the binding stopped")
 	end,
 	["a replicated declaration updates its client binding after each applied frame"] = function()
 		local w = World.new({

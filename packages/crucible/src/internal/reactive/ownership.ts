@@ -4,7 +4,15 @@ import type { ClassRecord } from "../registry";
 import { call, CallResult } from "../runner";
 import type { ObjectState } from "../state";
 import { boundary, discard, FrameKind, pop, push, top, type Completion, type Frame } from "./context";
-import { finishOpen, guardPure, NodeKind, originOf, releaseEdges, type EffectFields } from "./graph";
+import {
+	finishOpen,
+	guardPure,
+	NodeKind,
+	originOf,
+	releaseEdges,
+	type BindingFields,
+	type EffectFields,
+} from "./graph";
 import { OWNER_CHILDREN_WARNING } from "./limits";
 
 /** @internal */
@@ -91,7 +99,26 @@ export interface EffectNode extends EffectFields, Linked {
 	runs: number;
 }
 
-type Owned = Lifetime | EffectNode;
+/**
+ * @internal
+ * Calls `sink(target, value)` on the flush where its source's value is not `rawequal` to the last one it passed. No
+ * worker, run lifetime or cleanups: it runs on the flush's thread and ends with its parent, or by `retire`.
+ */
+export interface BindingNode extends BindingFields, Linked {
+	/** None for a root binding, which only `retire` ends. */
+	readonly parent?: Lifetime;
+	readonly sink: (target: unknown, value: unknown) => void;
+	readonly target: unknown;
+	/** The value last passed to `sink`, or the caller's baseline. */
+	value: unknown;
+	/** Runs in the current flush. */
+	runs: number;
+}
+
+/** @internal */
+export type ReactionNode = EffectNode | BindingNode;
+
+type Owned = Lifetime | ReactionNode;
 
 /** @internal */
 export const NO_OWNER = "effect() needs an owner: create it in a Subsystem or behaviour, or inside scope()";
@@ -225,11 +252,11 @@ export function endInterval(s: ObjectState) {
 	endLifetime(lifetime);
 }
 
-/** @internal Detaches an effect from the graph for good. No diagnostic: an ending is not a failure. */
-function halt(effect: EffectNode) {
-	if (effect.stopped) return;
-	effect.stopped = true;
-	releaseEdges(effect);
+/** @internal Detaches a reaction from the graph for good. No diagnostic: an ending is not a failure. */
+function halt(reaction: ReactionNode) {
+	if (reaction.stopped) return;
+	reaction.stopped = true;
+	releaseEdges(reaction);
 }
 
 function latch(root: Lifetime) {
@@ -243,10 +270,13 @@ function latch(root: Lifetime) {
 		lifetime.ended = true;
 		let child = lifetime.head;
 		while (child !== undefined) {
-			if (child.kind === NodeKind.Effect) {
+			if (child.kind === NodeKind.Lifetime) {
+				if (!child.ended) pending.push(child);
+			} else {
 				halt(child);
-				if (child.run !== undefined && !child.run.ended) pending.push(child.run);
-			} else if (!child.ended) pending.push(child);
+				if (child.kind === NodeKind.Effect && child.run !== undefined && !child.run.ended)
+					pending.push(child.run);
+			}
 			child = child.next;
 		}
 	}
@@ -285,8 +315,8 @@ function finish(lifetime: Lifetime) {
 	let child = lifetime.tail;
 	while (child !== undefined) {
 		const previous: Owned | undefined = child.prev;
-		if (child.kind === NodeKind.Effect) retire(child);
-		else finish(child);
+		if (child.kind === NodeKind.Lifetime) finish(child);
+		else retire(child);
 		child = previous;
 	}
 	const releases = lifetime.releases;
@@ -295,16 +325,18 @@ function finish(lifetime: Lifetime) {
 	leave(lifetime);
 }
 
-/** @internal Stops an effect for good: detached, its current run ended, unlinked from its owner. */
-export function retire(effect: EffectNode) {
-	halt(effect);
-	const run = effect.run;
-	effect.run = undefined;
-	if (run !== undefined) {
-		latch(run);
-		finish(run);
+/** @internal Stops a reaction for good: detached, an effect's current run ended, unlinked from its owner. */
+export function retire(reaction: ReactionNode) {
+	halt(reaction);
+	if (reaction.kind === NodeKind.Effect) {
+		const run = reaction.run;
+		reaction.run = undefined;
+		if (run !== undefined) {
+			latch(run);
+			finish(run);
+		}
 	}
-	leave(effect);
+	leave(reaction);
 }
 
 function releaseLabel(kind: Release, value: unknown): string {
