@@ -20,6 +20,7 @@ import {
 	useScheduler,
 	validate,
 	nextId,
+	type ComputedNode,
 	type Reaction,
 	type Source,
 	type StateNode,
@@ -27,6 +28,7 @@ import {
 import { MAX_EFFECT_RUNS_PER_FLUSH, MAX_FLUSH_ROUNDS, MAX_RUNS_PER_EFFECT } from "./limits";
 import {
 	adopt,
+	adoptBinding,
 	endLifetime,
 	hold,
 	newLifetime,
@@ -62,8 +64,8 @@ let culprit: ReactionNode | undefined;
 let sinking: BindingNode | undefined;
 let rounds = 0;
 let total = 0;
-/** Every effect or binding whose run count moved this flush. */
-let ran = new Array<ReactionNode>();
+/** Runs this flush, for every effect or binding that ran. */
+const runs = new Map<ReactionNode, number>();
 /** A bound was reported, and no flush has finished within its bounds since. */
 let boundReported = false;
 
@@ -92,8 +94,6 @@ function request() {
 }
 
 function enqueue(effect: ReactionNode) {
-	if (effect.queued || effect.stopped) return;
-	effect.queued = true;
 	queue.push(effect);
 	request();
 }
@@ -123,13 +123,10 @@ function createIn(owner: Lifetime, body: () => unknown) {
 		id: nextId(),
 		dependencies: [],
 		mark: Mark.Dirty,
-		stopped: false,
-		queued: false,
 		parent: owner,
 		linked: false,
 		body,
 		origin: originOf(body),
-		runs: 0,
 	};
 	adopt(owner, effect);
 	enqueue(effect);
@@ -189,21 +186,14 @@ function bindIn<T>(
 		kind: NodeKind.Binding,
 		id: nextId(),
 		source,
-		seen: source.version,
 		mark: direct ? Mark.Clean : Mark.Dirty,
-		stopped: false,
-		queued: false,
 		parent,
-		prev: undefined,
-		next: undefined,
-		linked: false,
-		runs: 0,
 		sink: sink as (target: unknown, value: unknown) => void,
 		target,
 		value: baseline,
 	};
 	link(binding, source);
-	if (parent !== undefined) adopt(parent, binding);
+	if (parent !== undefined) adoptBinding(parent, binding);
 	if (!direct) enqueue(binding);
 	return binding;
 }
@@ -240,10 +230,17 @@ export function createRootBinding<T>(
 	return bindIn(undefined, readable, baseline, sink, target);
 }
 
+/** A Check binding's source is a computed. It moved when its cached value is no longer the one last passed. */
+function bindingMoved(binding: BindingNode): boolean {
+	const source = binding.source as ComputedNode;
+	validate(source);
+	const cache = source.cache;
+	return cache.kind !== CacheKind.Value || !rawequal(cache.value, binding.value);
+}
+
 function runBinding(binding: BindingNode) {
 	const source = binding.source;
 	if (source.kind === NodeKind.Computed) validate(source);
-	binding.seen = source.version;
 	let value: unknown;
 	if (source.kind === NodeKind.State) value = source.value;
 	else {
@@ -276,7 +273,7 @@ function complete(completion: Completion) {
 		return;
 	}
 	if (value !== undefined) hold(run, Release.Call, value);
-	if (effect.stopped) return;
+	if (effect.mark === Mark.Stopped) return;
 	const reads = frame.deps!;
 	rewire(effect, effect.dependencies, reads);
 	effect.dependencies = reads;
@@ -304,11 +301,12 @@ function carry() {
 function reportBound(bound: string) {
 	if (boundReported) return;
 	boundReported = true;
-	const busiest = [...ran];
-	busiest.sort((a, b) => a.runs > b.runs);
+	const busiest = new Array<[reaction: ReactionNode, count: number]>();
+	for (const entry of runs) busiest.push(entry);
+	busiest.sort((a, b) => a[1] > b[1]);
 	const origins = new Array<string>();
 	for (let i = 0; i < math.min(3, busiest.size()); i++)
-		origins.push(`${originOfReaction(busiest[i])} (${busiest[i].runs})`);
+		origins.push(`${originOfReaction(busiest[i][0])} (${busiest[i][1]})`);
 	report(
 		"warning",
 		`Crucible: the reactive flush reached ${bound}; the rest waits for the next flush. Most runs: ${origins.join(", ")}`,
@@ -343,27 +341,29 @@ function runRounds() {
 			const effect = batch[cursor];
 			cursor += 1;
 			culprit = effect;
-			effect.queued = false;
 			const mark = effect.mark;
-			if (effect.stopped || mark === Mark.Clean) continue;
+			if (mark === Mark.Stopped || mark === Mark.Clean) continue;
 			effect.mark = Mark.Clean;
-			if (mark === Mark.Check && !dependenciesMoved(effect)) continue;
+			if (mark === Mark.Check) {
+				const moved = effect.kind === NodeKind.Binding ? bindingMoved(effect) : dependenciesMoved(effect);
+				if (!moved) continue;
+			}
 			if (total === MAX_EFFECT_RUNS_PER_FLUSH) {
-				effect.mark = Mark.Dirty;
-				effect.queued = true;
+				// Validation can drain lifecycle work that stops this reaction.
+				if ((effect.mark as Mark) !== Mark.Stopped) effect.mark = Mark.Dirty;
 				cursor -= 1;
 				culprit = undefined;
 				carry();
 				reportBound(`${MAX_EFFECT_RUNS_PER_FLUSH} effect runs`);
 				return;
 			}
-			if (effect.runs === MAX_RUNS_PER_EFFECT) {
+			const count = runs.get(effect) ?? 0;
+			if (count === MAX_RUNS_PER_EFFECT) {
 				fail(effect, `ran ${MAX_RUNS_PER_EFFECT} times in one flush`);
 				continue;
 			}
-			effect.runs += 1;
+			runs.set(effect, count + 1);
 			total += 1;
-			if (effect.runs === 1) ran.push(effect);
 			if (effect.kind === NodeKind.Binding) runBinding(effect);
 			else runOnce(effect);
 		}
@@ -395,8 +395,7 @@ function recover(err: unknown) {
 	if (blamed !== undefined) {
 		const [ok, stopErr] = pcall(retire, blamed);
 		if (!ok) {
-			blamed.stopped = true;
-			blamed.queued = false;
+			blamed.mark = Mark.Stopped;
 			stopFailure = `; stopping it failed: ${tostring(stopErr)}`;
 		}
 	}
@@ -418,8 +417,7 @@ export function flush() {
 		[ok, err] = pcall(resumeAfterSink, binding, err);
 	}
 	if (!ok) recover(err);
-	for (const effect of ran) effect.runs = 0;
-	ran = [];
+	runs.clear();
 	batch = [];
 	cursor = 0;
 	culprit = undefined;

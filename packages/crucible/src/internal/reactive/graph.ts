@@ -17,6 +17,8 @@ export const enum Mark {
 	Check,
 	/** A direct dependency changed: recompute, or rerun an effect. */
 	Dirty,
+	/** A reaction that stopped for good. Above every other mark, so no write raises it again. */
+	Stopped,
 }
 
 /** @internal */
@@ -83,24 +85,21 @@ export interface ComputedNode extends SourceFields, ObserverFields {
 	cycle?: string;
 }
 
-/** @internal The graph's view of an effect. The flush owns the rest of it. */
-export interface EffectFields extends ObserverFields {
-	readonly kind: NodeKind.Effect;
-	stopped: boolean;
-	queued: boolean;
-}
-
 /**
  * @internal
- * The graph's view of a binding: an observer of one source, fixed at creation, so it is its own single edge. The
- * flush owns the rest of it.
+ * The graph's view of an effect. The flush owns the rest of it. A reaction joins the queue when a raise lifts it
+ * from Clean, and the flush sets it Clean as it takes it, so a raise while it waits does not queue it twice.
  */
-export interface BindingFields extends Edge {
+export interface EffectFields extends ObserverFields {
+	readonly kind: NodeKind.Effect;
+}
+
+/** @internal The graph's view of a binding: an observer of one source, fixed at creation. The flush owns the rest. */
+export interface BindingFields {
 	readonly kind: NodeKind.Binding;
 	readonly id: number;
+	readonly source: Source;
 	mark: Mark;
-	stopped: boolean;
-	queued: boolean;
 }
 
 /** @internal */
@@ -131,7 +130,7 @@ export function currentEpoch(): number {
 
 let schedule: (reaction: Reaction) => void = () => {};
 
-/** @internal The flush registers how a marked effect or binding is queued. */
+/** @internal The flush registers how an effect or binding raised from Clean is queued. */
 export function useScheduler(scheduler: (reaction: Reaction) => void) {
 	schedule = scheduler;
 }
@@ -252,8 +251,9 @@ function raise(source: Source, level: Mark) {
 		if (o.mark >= level) continue;
 		const wasClean = o.mark === Mark.Clean;
 		o.mark = level;
-		if (o.kind !== NodeKind.Computed) schedule(o);
-		else if (wasClean) unmarked.push(o);
+		if (!wasClean) continue;
+		if (o.kind === NodeKind.Computed) unmarked.push(o);
+		else schedule(o);
 	}
 }
 
@@ -486,11 +486,12 @@ export function staleAfterRun(effect: EffectFields): Mark {
 	return level;
 }
 
-/** @internal Raises an effect's mark and queues it. */
+/** @internal Raises an effect's mark, and queues it when it was Clean. */
 export function markEffect(effect: EffectFields, level: Mark) {
-	if (effect.mark >= level) return;
+	const mark = effect.mark;
+	if (mark >= level) return;
 	effect.mark = level;
-	schedule(effect);
+	if (mark === Mark.Clean) schedule(effect);
 }
 
 function moved(edge: Edge): boolean {
@@ -499,9 +500,8 @@ function moved(edge: Edge): boolean {
 	return source.version !== edge.seen;
 }
 
-/** @internal Pulls a reaction's computed dependencies current in read order. True when any of them moved. */
-export function dependenciesMoved(reaction: Reaction): boolean {
-	if (reaction.kind === NodeKind.Binding) return moved(reaction);
-	for (const edge of reaction.dependencies) if (moved(edge)) return true;
+/** @internal Pulls an effect's computed dependencies current in read order. True when any of them moved. */
+export function dependenciesMoved(effect: EffectFields): boolean {
+	for (const edge of effect.dependencies) if (moved(edge)) return true;
 	return false;
 }
