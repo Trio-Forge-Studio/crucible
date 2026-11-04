@@ -1,0 +1,4 @@
+{
+	"main": "../../out/util/random/init.luau",
+	"types": "../../out/util/random/index.d.ts"
+}

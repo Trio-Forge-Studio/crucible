@@ -26,4 +26,6 @@ The sample server imports `@trioforge/crucible` and `@trioforge/crucible/server`
 
 The root stays shared-safe. Requiring it must never load server or client code. The package keeps physical subpath folders because roblox-ts 3.0.0 does not resolve an exports-only remap. The Rojo project maps the package's `out` folder under `ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible`.
 
+Two shared-safe subpaths carry the code of the retired `@trioforge/random` and `@trioforge/spline` packages. `@trioforge/crucible/util/random` exports the seeded `Rng`, and `@trioforge/crucible/maths/spline` exports the Catmull-Rom, cubic Bezier and uniform B-spline curves. Neither has dependencies, and no other entry loads them. `npx crucible docs random` and `npx crucible docs spline` print their guides.
+
 The sample replicates the package's files to prove resolution. Subpath names do not enforce client access restrictions. The Lune loader runs the compiled imports with a small engine adapter, not a Roblox game simulation.

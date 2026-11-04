@@ -25,6 +25,14 @@
 			"types": "./out/vide/index.d.ts",
 			"default": "./out/vide/init.luau"
 		},
+		"./util/random": {
+			"types": "./out/util/random/index.d.ts",
+			"default": "./out/util/random/init.luau"
+		},
+		"./maths/spline": {
+			"types": "./out/maths/spline/index.d.ts",
+			"default": "./out/maths/spline/init.luau"
+		},
 		"./testing": {
 			"types": "./out/testing/index.d.ts",
 			"default": "./out/testing/init.luau"
@@ -58,6 +66,8 @@
 		"client",
 		"emit",
 		"vide",
+		"util",
+		"maths",
 		"testing",
 		"LICENSE"
 	],

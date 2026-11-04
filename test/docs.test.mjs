@@ -33,6 +33,11 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 		[...files.keys()].some((file) => file.includes("/vide-block-") && file.endsWith(".tsx")),
 		"the vide guide has tsx blocks",
 	);
+	for (const guide of ["random", "spline"])
+		assert.ok(
+			[...files.keys()].some((file) => file.includes(`/${guide}-block-`)),
+			`the ${guide} guide has ts blocks`,
+		);
 	const config = ts.getParsedCommandLineOfConfigFile(
 		`${sample}/tsconfig.json`,
 		{},

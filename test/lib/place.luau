@@ -101,6 +101,8 @@ return function(client: boolean?)
 					Instance = roblox.Instance,
 					Enum = roblox.Enum,
 					Color3 = roblox.Color3,
+					Vector2 = roblox.Vector2,
+					Vector3 = roblox.Vector3,
 					print = function(...)
 						local values = {}
 						for _, value in { ... } do

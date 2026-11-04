@@ -40,6 +40,49 @@ return {
 		client.place:Destroy()
 		server.place:Destroy()
 	end,
+	["no side entry loads the random or spline subpath, and each resolves alone"] = function()
+		local function loadedUnder(h, folder): { string }
+			local names = {}
+			for module in h.loaded do
+				if module:IsDescendantOf(folder) then
+					table.insert(names, module.Name)
+				end
+			end
+			table.sort(names)
+			return names
+		end
+		local function subpathLoaded(h): boolean
+			return #loadedUnder(h, h.crucible.util) > 0 or #loadedUnder(h, h.crucible.maths) > 0
+		end
+		local server = loadPlace()
+		server.import(server.crucible)
+		server.import(server.crucible.server)
+		server.import(server.crucible.emit)
+		assert(not subpathLoaded(server), "the root, server and emit entries never load them")
+		local client = loadPlace(true)
+		client.import(client.crucible)
+		client.import(client.crucible.client)
+		client.import(client.crucible.vide)
+		assert(not subpathLoaded(client), "the client and vide entries never load them")
+		client.place:Destroy()
+		server.place:Destroy()
+
+		local random = loadPlace()
+		local Rng = random.import(random.crucible.util.random).Rng
+		assert(Rng.new(42):uint32() == 1768527656, "the random subpath resolves and draws its recorded stream")
+		assert(#loadedUnder(random, random.crucible.maths) == 0, "random does not load spline")
+		assert(random.loaded[random.crucible.server] == nil, "random does not load the server")
+		random.place:Destroy()
+
+		local spline = loadPlace()
+		local exports = spline.import(spline.crucible.maths.spline)
+		for _, name in { "catmullRom", "cubicBezier", "uniformBSpline" } do
+			assert(type(exports[name]) == "function", `the spline subpath exports {name}`)
+		end
+		assert(#loadedUnder(spline, spline.crucible.util) == 0, "spline does not load random")
+		assert(spline.loaded[spline.crucible.server] == nil, "spline does not load the server")
+		spline.place:Destroy()
+	end,
 	["no entry but the testing subpath loads it, and the subpath resolves"] = function()
 		local function testingLoaded(h): boolean
 			for module in h.loaded do

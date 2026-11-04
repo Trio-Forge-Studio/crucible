@@ -559,9 +559,19 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 					specifier &&
 					ts.isStringLiteral(specifier) &&
 					specifier.text.startsWith("@trioforge/crucible/") &&
-					!["@trioforge/crucible/server", "@trioforge/crucible/client"].includes(specifier.text)
+					![
+						"@trioforge/crucible/server",
+						"@trioforge/crucible/client",
+						"@trioforge/crucible/vide",
+						"@trioforge/crucible/util/random",
+						"@trioforge/crucible/maths/spline",
+					].includes(specifier.text)
 				)
-					report(node, "CRU004", "Import only the root, server or client Crucible entries.");
+					report(
+						node,
+						"CRU004",
+						"Import only the root, server, client, vide, util/random or maths/spline Crucible entries.",
+					);
 			}
 			if (ts.isClassExpression(node) || ts.isClassDeclaration(node)) {
 				const type = instanceType(node);

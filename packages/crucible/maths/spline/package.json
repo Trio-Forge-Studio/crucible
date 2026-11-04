@@ -1,0 +1,4 @@
+{
+	"main": "../../out/maths/spline/init.luau",
+	"types": "../../out/maths/spline/index.d.ts"
+}
