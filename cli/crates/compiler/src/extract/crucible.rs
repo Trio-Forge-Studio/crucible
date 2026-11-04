@@ -16,7 +16,7 @@ use crate::declarations::{DeclarationKind, Side};
 use crate::facts::{Attribute, Check, Class, ClassKind, Crucible, Dependency, Literal, Site};
 use crate::macros::Macro;
 use crate::program::ConfigHost;
-use crate::project::normalize;
+use crate::project::{Game as Place, RbxPath, normalize};
 use crate::tree::{File, Position};
 
 const PACKAGE: &str = "@trioforge/crucible";
@@ -1430,7 +1430,7 @@ impl Extractor {
         }
     }
 
-    /// A load glob, relative to the tsconfig's folder, as the instance path pattern of the modules it matches.
+    /// A load glob, relative to the package root, as the instance path pattern of the modules it matches.
     fn load_glob(&self, glob: &str) -> Result<String, &'static str> {
         let Some(game) = &self.game else {
             return Err("Cannot load the running compiler's Rojo resolver or project mapping.");
@@ -1441,10 +1441,51 @@ impl Extractor {
         };
         let rest = glob.get(prefix.len()..).unwrap_or("");
         let suffix = rest.strip_suffix(".tsx").or_else(|| rest.strip_suffix(".ts")).unwrap_or(rest);
-        let mapped = game
-            .out_folder(&game.dir.join(&prefix))
-            .and_then(|out| game.rojo.rbx_path(&out))
-            .ok_or("load prefix is outside the Rojo mapping.")?;
+        let folder = game.package.join(&prefix);
+        let by_folder = game.out_folder(&folder).and_then(|out| game.rojo.rbx_path(&out));
+        let mapped = match by_folder {
+            Some(mapped) => mapped,
+            None => match self.folder_by_files(game, &folder) {
+                Ok(Some(mapped)) => mapped,
+                Ok(None) => return Err("load prefix is outside the Rojo mapping."),
+                Err(()) => return Err("load prefix maps to more than one Rojo folder."),
+            },
+        };
         Ok(format!("crucible-path:{}/{suffix}", mapped.join("/")))
+    }
+
+    /// A Rojo project may map a folder's files one by one, as Rogen does before their outputs exist. Each such file
+    /// names the instance of the folder that holds it. `Err` when the files disagree.
+    fn folder_by_files(&self, game: &Place, folder: &Path) -> Result<Option<RbxPath>, ()> {
+        let folder = normalize(folder);
+        let mut found: Vec<RbxPath> = Vec::new();
+        for &file in self.crucible.program.source_files() {
+            if file.is_declaration_file() {
+                continue;
+            }
+            let source = normalize(Path::new(file.file_name()));
+            let Ok(relative) = source.strip_prefix(&folder) else { continue };
+            let mut parts: Vec<String> =
+                relative.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+            let Some(last) = parts.pop() else { continue };
+            let stem = last.strip_suffix(".tsx").or_else(|| last.strip_suffix(".ts")).unwrap_or(&last);
+            let name = stem.strip_suffix(".server").or_else(|| stem.strip_suffix(".client")).unwrap_or(stem);
+            if name == "index" {
+                continue;
+            }
+            parts.push(name.to_owned());
+            let Some(rbx) = game.out_path(&source).and_then(|out| game.rojo.rbx_path(&out)) else { continue };
+            if rbx.len() > parts.len() && rbx.ends_with(&parts) {
+                let candidate = rbx[..rbx.len() - parts.len()].to_vec();
+                if !found.contains(&candidate) {
+                    found.push(candidate);
+                }
+            }
+        }
+        match found.len() {
+            0 => Ok(None),
+            1 => Ok(found.pop()),
+            _ => Err(()),
+        }
     }
 }

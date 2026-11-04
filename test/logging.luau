@@ -308,11 +308,12 @@ return {
 		for index, level in { "game debug", "game info", "game warn", "deliberate game error" } do
 			spec.has(sample.server.engine.gameLogs[index].message, `S2 {level}`, "sample level before boot")
 		end
-		spec.has(
+		spec.eq(
 			sample.server.engine.gameLogs[5].message,
-			"coin multiplier",
-			"boot's own record is the fifth, so only four came before it"
+			"Crucible booted on the server",
+			"Crucible's boot record is the fifth, so only four came before it"
 		)
+		spec.has(sample.server.engine.gameLogs[6].message, "coin multiplier", "the sample's boot record follows")
 		sample.place:Destroy()
 	end,
 	["L12 failed rendering drops the record and recovers"] = function()

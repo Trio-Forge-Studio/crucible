@@ -1568,3 +1568,94 @@ export class PlainNested extends Mixin(Mixin(PlainOrigin)) {}
 		[],
 	);
 });
+
+test("load resolves a folder that the Rojo project maps file by file, as Rogen does before outputs exist", () => {
+	const loaded = path.join(game, "src/server/loaded");
+	fs.mkdirSync(path.join(loaded, "deep"), { recursive: true });
+	write(path.join(loaded, "AlphaService.ts"), "export const alpha = 1;");
+	write(path.join(loaded, "deep/BetaService.ts"), "export const beta = 1;");
+	const project = JSON.parse(fs.readFileSync(path.join(game, "default.project.json"), "utf8"));
+	const file = (name) => ({ $path: { optional: `out/server/loaded/${name}.luau` } });
+	const perFile = path.join(game, "per-file.project.json");
+	const text =
+		'import { boot } from "@trioforge/crucible/server"; boot({load: ["src/server/loaded/**/*Service.ts"]});';
+	try {
+		project.tree.ServerScriptService.TS = {
+			$className: "Folder",
+			loaded: {
+				$className: "Folder",
+				AlphaService: file("AlphaService"),
+				deep: { $className: "Folder", BetaService: file("deep/BetaService") },
+			},
+		};
+		write(perFile, project);
+		const resolved = run(text, {}, { rojo: perFile });
+		assert.deepEqual(
+			resolved.diagnostics.map((d) => d.messageText),
+			[],
+		);
+		assert.match(resolved.output, /"crucible-path:ServerScriptService\/TS\/loaded\/\*\*\/\*Service"/);
+		project.tree.ServerScriptService.Elsewhere = {
+			$className: "Folder",
+			deep: project.tree.ServerScriptService.TS.loaded.deep,
+		};
+		delete project.tree.ServerScriptService.TS.loaded.deep;
+		write(perFile, project);
+		assert.deepEqual(
+			run(text, {}, { rojo: perFile }).diagnostics.map((d) => d.messageText),
+			["CRU006: load prefix maps to more than one Rojo folder."],
+		);
+	} finally {
+		fs.rmSync(loaded, { recursive: true, force: true });
+		fs.rmSync(perFile, { force: true });
+	}
+});
+
+test("a generated tsconfig without a package.json resolves load globs and the rojo option from the package root", () => {
+	const generated = path.join(game, "build/typescript/game");
+	fs.mkdirSync(generated, { recursive: true });
+	const configFile = path.join(generated, "tsconfig.json");
+	write(configFile, {
+		extends: "../../../tsconfig.json",
+		compilerOptions: {
+			typeRoots: ["node_modules/@rbxts", "../../../node_modules/@rbxts", "../../../node_modules/@trioforge"],
+		},
+	});
+	const gameConfig = path.join(game, "tsconfig.json");
+	const original = fs.readFileSync(gameConfig, "utf8");
+	const withRojo = JSON.parse(original);
+	withRojo.compilerOptions.plugins[0].rojo = "default.project.json";
+	write(gameConfig, withRojo);
+	const compile = (glob) => {
+		write(main, `import { boot } from "@trioforge/crucible/server"; boot({load: ["${glob}"]});`);
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+		return spawnSync(
+			process.execPath,
+			[
+				path.join(repo, "node_modules/roblox-ts/out/CLI/cli.js"),
+				"-p",
+				configFile,
+				"--rojo",
+				"default.project.json",
+				"--includePath",
+				"include",
+			],
+			{ cwd: game, encoding: "utf8" },
+		);
+	};
+	try {
+		const fromRoot = compile("src/server/**");
+		assert.equal(fromRoot.status, 0, fromRoot.stdout + fromRoot.stderr);
+		assert.match(
+			fs.readFileSync(path.join(game, "out/server/main.luau"), "utf8"),
+			/"crucible-path:ServerScriptService\/TS\/\*\*"/,
+		);
+		const fromConfig = compile("../../../src/server/**");
+		assert.notEqual(fromConfig.status, 0);
+		assert.match(fromConfig.stdout + fromConfig.stderr, /CRU006: load prefix is outside the Rojo mapping/);
+	} finally {
+		write(gameConfig, original);
+		fs.rmSync(path.join(game, "build"), { recursive: true, force: true });
+		fs.rmSync(path.join(game, "out"), { recursive: true, force: true });
+	}
+});

@@ -16,6 +16,9 @@ import { Hook, Kind, Want, type ObjectState } from "./state";
 import { holdBarrier, releaseBarrier, useReactivePort } from "./reactive/flush";
 import { endInterval } from "./reactive/ownership";
 import { rollbackDeclarations, sealDeclarations } from "./sync/declarations";
+import { Logging } from "../logging";
+
+const log = Logging.getLogger("Crucible.Boot");
 
 /** @internal */
 export const BOOT_CLASSES = [Subsystem, CrucibleBehaviour];
@@ -319,7 +322,10 @@ export function boot(side: Side, options: BootOptions) {
 		if (side.name === "server") sealDeclarations();
 		ignite(robloxPort(), side, options);
 	});
-	if (ok) return;
+	if (ok) {
+		log.debug("Crucible booted on the {side}", { side: side.name });
+		return;
+	}
 	side.network.close();
 	rollbackDeclarations();
 	error(err, 0);
