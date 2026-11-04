@@ -14,7 +14,7 @@ export interface Claim {
 
 /** @internal */
 export interface ClaimSession {
-	readonly side: "server" | "client";
+	readonly side: () => "server" | "client";
 	readonly retired: (claim: Claim) => void;
 }
 
@@ -45,7 +45,7 @@ export function claim(owner: object, field: string, target: unknown, callback: u
 	if (record.kind !== Kind.Subsystem)
 		error(`${label}: receive() must initialize a readonly field of a Subsystem; behaviours do not receive`);
 	if (frozen) error(`${label}: receive() after the network commit`);
-	const side = session?.side ?? error(`${label}: receive() before the network session opened`);
+	const side = (session ?? error(`${label}: receive() before the network session opened`)).side();
 	if (!typeIs(callback, "function")) error(`${label}: receive() needs a callback`);
 	if (target === ClientReady) {
 		if (side !== "server") error(`${label}: ClientReady is received in a server Subsystem.`);

@@ -40,4 +40,27 @@ return {
 		client.place:Destroy()
 		server.place:Destroy()
 	end,
+	["no entry but the testing subpath loads it, and the subpath resolves"] = function()
+		local function testingLoaded(h): boolean
+			for module in h.loaded do
+				if module.Name == "testing" and module.Parent == h.crucible then
+					return true
+				end
+			end
+			return false
+		end
+		local server = loadPlace()
+		server.import(server.crucible)
+		server.import(server.crucible.server)
+		server.import(server.crucible.emit)
+		assert(not testingLoaded(server), "the root, server and emit entries never load testing")
+		local client = loadPlace(true)
+		client.import(client.crucible)
+		client.import(client.crucible.client)
+		assert(not testingLoaded(client), "the client entry never loads testing")
+		assert(type(client.import(client.crucible.testing).subsystem) == "function", "the testing subpath resolves")
+		assert(testingLoaded(client), "the testing subpath loads testing")
+		client.place:Destroy()
+		server.place:Destroy()
+	end,
 }

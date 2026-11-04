@@ -25,6 +25,10 @@
 			"types": "./out/vide/index.d.ts",
 			"default": "./out/vide/init.luau"
 		},
+		"./testing": {
+			"types": "./out/testing/index.d.ts",
+			"default": "./out/testing/init.luau"
+		},
 		"./transformer": "./transformer/index.js"
 	},
 	"scripts": {
@@ -54,6 +58,7 @@
 		"client",
 		"emit",
 		"vide",
+		"testing",
 		"LICENSE"
 	],
 	"repository": {
