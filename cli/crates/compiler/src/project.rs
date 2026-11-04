@@ -164,8 +164,9 @@ impl Rojo {
 /// modules reach each other relatively and get the runtime library from `_G[script]`.
 pub(crate) struct Game {
     pub rojo: Rojo,
-    /// The folder the tsconfig is in, which `boot` globs and `include` are relative to.
-    pub dir: PathBuf,
+    /// The package root `boot` globs are relative to: the nearest folder at or above `dir` with a `package.json`, or
+    /// `dir`.
+    pub package: PathBuf,
     root: PathBuf,
     out_dir: PathBuf,
     packages: Vec<Installed>,
@@ -186,10 +187,11 @@ impl Game {
         let Some(runtime_lib) = rojo.rbx_path(&dir.join("include/RuntimeLib.luau")) else {
             return Err("the Rojo project maps no folder for include, where roblox-ts's runtime library is".to_owned());
         };
-        let packages = packages(&package_dir(dir).unwrap_or(dir).join("node_modules"));
+        let package = package_dir(dir).unwrap_or(dir);
+        let packages = packages(&package.join("node_modules"));
         Ok(Some(Game {
             rojo,
-            dir: dir.to_path_buf(),
+            package: package.to_path_buf(),
             root: root.to_path_buf(),
             out_dir: normalize(out_dir),
             packages,
