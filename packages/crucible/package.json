@@ -29,6 +29,10 @@
 			"types": "./out/util/random/index.d.ts",
 			"default": "./out/util/random/init.luau"
 		},
+		"./maths/spline": {
+			"types": "./out/maths/spline/index.d.ts",
+			"default": "./out/maths/spline/init.luau"
+		},
 		"./transformer": "./transformer/index.js"
 	},
 	"scripts": {
@@ -59,6 +63,7 @@
 		"emit",
 		"vide",
 		"util",
+		"maths",
 		"LICENSE"
 	],
 	"repository": {
