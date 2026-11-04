@@ -1192,9 +1192,13 @@ impl Extractor {
         if let Some(specifier) = specifier
             && specifier.kind() == Kind::StringLiteral
             && let Some(entry) = specifier.text().strip_prefix("@trioforge/crucible/")
-            && !matches!(entry, "server" | "client")
+            && !matches!(entry, "server" | "client" | "util/random" | "maths/spline")
         {
-            self.report(n, Code::Rule(4), "Import only the root, server or client Crucible entries.");
+            self.report(
+                n,
+                Code::Rule(4),
+                "Import only the root, server, client, util/random or maths/spline Crucible entries.",
+            );
         }
     }
 

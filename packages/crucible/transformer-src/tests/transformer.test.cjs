@@ -16,7 +16,7 @@ const game = path.join(scratch, "client/game");
 const installed = path.join(game, "node_modules/@trioforge/crucible");
 fs.mkdirSync(path.join(game, "src/server"), { recursive: true });
 fs.mkdirSync(installed, { recursive: true });
-for (const entry of ["out", "server", "client", "emit", "package.json"])
+for (const entry of ["out", "server", "client", "emit", "util", "maths", "package.json"])
 	fs.cpSync(path.join(packageRoot, entry), path.join(installed, entry), { recursive: true });
 fs.mkdirSync(path.join(game, "node_modules/@rbxts"), { recursive: true });
 for (const name of ["types", "compiler-types"])
@@ -74,11 +74,21 @@ test("fixture uses every real package declaration and physical side entry byte f
 			fs.readFileSync(path.join(installed, "out", name), "utf8"),
 			fs.readFileSync(path.join(packageRoot, "out", name), "utf8"),
 		);
-	for (const side of ["server", "client", "emit"])
+	for (const side of ["server", "client", "emit", "util/random", "maths/spline"])
 		assert.equal(
 			fs.readFileSync(path.join(installed, side, "package.json"), "utf8"),
 			fs.readFileSync(path.join(packageRoot, side, "package.json"), "utf8"),
 		);
+});
+
+test("the random and spline subpaths are importable in a game", () => {
+	const { diagnostics } = run(
+		'import { Rng } from "@trioforge/crucible/util/random";\nimport { catmullRom } from "@trioforge/crucible/maths/spline";\nexport const draw = new Rng("x").uint32();\nexport const curve = catmullRom([new Vector3(0, 0, 0), new Vector3(1, 1, 1)]);\n',
+	);
+	assert.deepEqual(
+		diagnostics.map((d) => d.messageText),
+		[],
+	);
 });
 
 test("real emit literal declaration accepts boolean string and number literals", () => {

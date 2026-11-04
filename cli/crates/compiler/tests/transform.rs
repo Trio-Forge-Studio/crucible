@@ -48,7 +48,7 @@ fn the_fixture_installs_the_real_package_declarations_byte_for_byte() {
     let package = repo().join("packages/crucible");
     let read = |p: &Path| std::fs::read(p).unwrap();
     assert_eq!(read(&installed.join("package.json")), read(&package.join("package.json")));
-    for side in ["server", "client", "emit"] {
+    for side in ["server", "client", "emit", "util/random", "maths/spline"] {
         assert_eq!(read(&installed.join(side).join("package.json")), read(&package.join(side).join("package.json")));
     }
     let mut declarations = Vec::new();
@@ -77,6 +77,15 @@ fn the_emit_literal_declaration_accepts_boolean_string_and_number_literals() {
     let facts = game.analyze().unwrap_or_else(|d| panic!("the literals type-check:\n{}", lines(&d)));
     let found: Vec<i32> = facts.diagnostics.iter().map(|d| d.code).collect();
     assert_eq!(found, [90004], "importing emit is CRU004, and nothing else is reported");
+}
+
+#[test]
+fn the_random_and_spline_subpaths_are_importable_in_a_game() {
+    let game = Game::new();
+    game.main("import { Rng } from \"@trioforge/crucible/util/random\";\nimport { catmullRom } from \"@trioforge/crucible/maths/spline\";\nexport const draw = new Rng(\"x\").uint32();\nexport const curve = catmullRom([new Vector3(0, 0, 0), new Vector3(1, 1, 1)]);\n");
+    let facts = game.analyze().unwrap_or_else(|d| panic!("the subpaths type-check:\n{}", lines(&d)));
+    let found: Vec<i32> = facts.diagnostics.iter().map(|d| d.code).collect();
+    assert!(found.is_empty(), "importing the subpaths reports nothing: {found:?}");
 }
 
 #[test]

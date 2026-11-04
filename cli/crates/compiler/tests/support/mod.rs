@@ -46,7 +46,7 @@ impl Game {
         let dir = scratch.join(ancestor).join("game");
         let installed = dir.join("node_modules/@trioforge/crucible");
         let package = repo().join("packages/crucible");
-        for entry in ["out", "server", "client", "emit"] {
+        for entry in ["out", "server", "client", "emit", "util", "maths"] {
             copy_declarations(&package.join(entry), &installed.join(entry));
         }
         std::fs::copy(package.join("package.json"), installed.join("package.json")).unwrap();
