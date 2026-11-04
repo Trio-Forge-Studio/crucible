@@ -748,6 +748,15 @@ const mutants = [
 	[
 		"93",
 		"guard",
+		"join bumps the roster only for the first player",
+		R,
+		"\twrite(roster, (roster.value as number) + 1);\n",
+		"\tif (roster.value === 0) write(roster, 1);\n",
+		`${REACTIVE}93 96 an effect created before the first join follows leave and rejoin`,
+	],
+	[
+		"93",
+		"guard",
 		"an absent player's config read untracked",
 		R,
 		"\t\treadState(roster);\n\t\treturn declaration.fallback;",

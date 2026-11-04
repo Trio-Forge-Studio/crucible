@@ -612,6 +612,19 @@ return {
 		w:finish()
 	end,
 
+	["13 a data handoff inside a computed throws and hands nothing off"] = function()
+		local w, _, player, data = loaded()
+		local c = w.server.api.computed(function()
+			data:handoff(player)
+			return 1
+		end)
+		throws(function()
+			c()
+		end, "computed", "the computed's handoff")
+		spec.eq(data:loaded(player), true, "still loaded: nothing handed off")
+		w:finish()
+	end,
+
 	["115 the root is cached across a resume, inert for an absent player, and per player on the server"] = function()
 		local w, ann, player, data = loaded()
 		local root = data(player)
