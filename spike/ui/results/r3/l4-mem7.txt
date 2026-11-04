@@ -1,0 +1,15 @@
+Lune 0.11.0+740, optimization level 2, 7 interleaved runs; median (min to max)
+trunk: C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/trunk
+base:  C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/base
+head:  C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/l4
+
+4. Memory per mounted element with 2 reactive props (10000 mounted, heap settled before and after)
+  nothing mounted (noise floor)      -                -10.55  (-70.89 to 29.46) bytes an element
+  Instances alone, no reactivity     -                391.03  (347.48 to 410.08) bytes an element
+  mounted, Instances included        trunk B         2149.35  (1417.07 to 2202.57) bytes an element
+  mounted, Instances included        base B          1533.92  (1522.35 to 1543.01) bytes an element
+  mounted, Instances included        head B          1045.76  (1000.16 to 1091.48) bytes an element
+  mounted, Instances included        Vide            1378.50  (1278.72 to 1959.97) bytes an element
+  mounted, Instances included        trunk B/Vide       1.55  (0.72 to 1.72) paired ratio
+  mounted, Instances included        base B/Vide        1.11  (0.79 to 1.20) paired ratio
+  mounted, Instances included        head B/Vide        0.77  (0.53 to 0.85) paired ratio

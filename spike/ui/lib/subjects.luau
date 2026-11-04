@@ -5,15 +5,16 @@ local VideUI = require("./vide-ui")
 
 local subjects = {}
 
-subjects.names = { "trunk B", "head B", "Vide" }
-subjects.roots = { trunk = "", head = "" }
+subjects.names = { "trunk B", "base B", "head B", "Vide" }
+subjects.roots = { trunk = "", base = "", head = "" }
 
 function subjects.make(name: string)
 	if name == "Vide" then
 		return VideUI(runtime.vide())
 	end
 	local trunk = name == "trunk B"
-	local r = runtime.crucible({ root = if trunk then subjects.roots.trunk else subjects.roots.head, patch = trunk })
+	local root = if trunk then subjects.roots.trunk elseif name == "base B" then subjects.roots.base else subjects.roots.head
+	local r = runtime.crucible({ root = root, patch = trunk })
 	local ui = CrucibleUI(r, if trunk then "B" else "H")
 	ui.realm = r
 	return ui

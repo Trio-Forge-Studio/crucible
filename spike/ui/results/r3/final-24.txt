@@ -1,0 +1,31 @@
+Lune 0.11.0+740, optimization level 2, 31 interleaved runs; median (min to max)
+trunk: C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/trunk
+base:  C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/base
+head:  C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/head
+
+2. Update 1000 bound props
+  1000 separate states               trunk B            4.37  (3.92 to 7.95) µs a prop
+  1000 separate states               base B             3.14  (2.71 to 7.39) µs a prop
+  1000 separate states               head B             2.38  (2.09 to 3.58) µs a prop
+  1000 separate states               Vide               2.66  (2.43 to 5.52) µs a prop
+  1000 bindings on one state         trunk B            3.24  (3.00 to 6.72) µs a prop
+  1000 bindings on one state         base B             2.62  (2.31 to 4.00) µs a prop
+  1000 bindings on one state         head B             1.61  (1.38 to 3.84) µs a prop
+  1000 bindings on one state         Vide               2.30  (1.93 to 3.25) µs a prop
+  1000 separate states               trunk B/Vide       1.67  (0.85 to 2.55) paired ratio
+  1000 bindings on one state         trunk B/Vide       1.52  (1.04 to 2.92) paired ratio
+  1000 separate states               base B/Vide        1.12  (0.58 to 2.12) paired ratio
+  1000 bindings on one state         base B/Vide        1.19  (0.80 to 1.89) paired ratio
+  1000 separate states               head B/Vide        0.88  (0.57 to 1.38) paired ratio
+  1000 bindings on one state         head B/Vide        0.73  (0.48 to 1.84) paired ratio
+
+4. Memory per mounted element with 2 reactive props (10000 mounted, heap settled before and after)
+  nothing mounted (noise floor)      -                  6.40  (-87.66 to 62.58) bytes an element
+  Instances alone, no reactivity     -                382.69  (324.99 to 425.90) bytes an element
+  mounted, Instances included        trunk B         2140.49  (2107.74 to 2201.51) bytes an element
+  mounted, Instances included        base B          1524.67  (1496.69 to 1570.64) bytes an element
+  mounted, Instances included        head B          1026.00  (991.00 to 1138.10) bytes an element
+  mounted, Instances included        Vide            1335.84  (1255.17 to 1989.56) bytes an element
+  mounted, Instances included        trunk B/Vide       1.61  (1.06 to 1.72) paired ratio
+  mounted, Instances included        base B/Vide        1.13  (0.77 to 1.23) paired ratio
+  mounted, Instances included        head B/Vide        0.77  (0.51 to 0.87) paired ratio

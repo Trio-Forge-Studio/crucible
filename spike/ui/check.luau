@@ -12,7 +12,8 @@ local CrucibleUI = require("./lib/crucible-ui")
 local Binding = require("./lib/binding")
 
 subjects.roots.trunk = assert(process.args[1], "the trunk runtime's out folder")
-subjects.roots.head = assert(process.args[2], "the head runtime's out folder")
+subjects.roots.base = assert(process.args[2], "the base runtime's out folder")
+subjects.roots.head = assert(process.args[3], "the head runtime's out folder")
 
 local failures = 0
 local function eq(actual, expected, label: string)

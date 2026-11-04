@@ -1,0 +1,3 @@
+separate: write 2.15 + flush 3.27 = 5.42 | Vide 3.84
+one:      write 1.00 + flush 4.06 = 5.07 | Vide 3.50
+fake write 0.74, called 0.82, pcall'd 0.95 (µs a prop)

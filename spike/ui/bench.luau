@@ -13,10 +13,11 @@ local gc = require("./lib/gc")
 
 local N = 1000
 subjects.roots.trunk = assert(process.args[1], "the trunk runtime's out folder")
-subjects.roots.head = assert(process.args[2], "the head runtime's out folder")
-local RUNS = tonumber(process.args[3]) or 15
+subjects.roots.base = assert(process.args[2], "the base runtime's out folder")
+subjects.roots.head = assert(process.args[3], "the head runtime's out folder")
+local RUNS = tonumber(process.args[4]) or 15
 assert(RUNS >= 7, "at least 7 runs")
-local SECTIONS = process.args[4] or "123456"
+local SECTIONS = process.args[5] or "1234567"
 local function section(n: number): boolean
 	return string.find(SECTIONS, tostring(n), 1, true) ~= nil
 end
@@ -71,7 +72,7 @@ local function interleave(names: { string }, sample: (string) -> { number })
 end
 
 print(`{_VERSION}, optimization level {runtime.OPTIMIZATION}, {RUNS} interleaved runs; median (min to max)`)
-print(`trunk: {subjects.roots.trunk}\nhead:  {subjects.roots.head}`)
+print(`trunk: {subjects.roots.trunk}\nbase:  {subjects.roots.base}\nhead:  {subjects.roots.head}`)
 
 if section(1) then
 	print(`\n1. Mount and unmount {N} elements, 3 fixed and 2 reactive props each`)
@@ -148,7 +149,7 @@ if section(2) then
 		end
 		row(label, `{name}/Vide`, ratios, 1, "paired ratio")
 	end
-	for _, name in { "trunk B", "head B" } do
+	for _, name in { "trunk B", "base B", "head B" } do
 		paired(1, `{N} separate states`, name)
 		paired(2, `{N} bindings on one state`, name)
 	end
@@ -278,6 +279,13 @@ if section(4) then
 	for _, name in names do
 		row(if uis[name] then "mounted, Instances included" else name, if uis[name] then name else "-", results[name][1], 1 / MEMORY_N, "bytes an element")
 	end
+	for _, name in { "trunk B", "base B", "head B" } do
+		local ratios = {}
+		for i, value in results[name][1] do
+			table.insert(ratios, value / results.Vide[1][i])
+		end
+		row("mounted, Instances included", `{name}/Vide`, ratios, 1, "paired ratio")
+	end
 end
 
 if section(5) then
@@ -285,12 +293,12 @@ if section(5) then
 	-- read by one Vide effect the way a component binds a property.
 	print(`\n5. useReadable, {N} bindings, each read by one Vide effect`)
 	local bridges = {}
-	for _, side in { "trunk", "head" } do
+	for _, side in { "trunk", "base", "head" } do
 		local vide = runtime.vide()
 		local r = runtime.crucible({ root = subjects.roots[side], vide = vide })
 		bridges[`{side} bridge`] = { r = r, vide = vide, useReadable = r.module("vide").useReadable }
 	end
-	local names = { "trunk bridge", "head bridge" }
+	local names = { "trunk bridge", "base bridge", "head bridge" }
 	local seen = 0
 	local results = interleave(names, function(name)
 		local b = bridges[name]
@@ -348,7 +356,7 @@ if section(6) then
 	local WINDOW = 64
 	print(`\n6. Heap growth per state write, one observer, {WINDOW} writes a window`)
 	local realms = {}
-	for _, side in { "trunk", "head" } do
+	for _, side in { "trunk", "base", "head" } do
 		local r = runtime.crucible({ root = subjects.roots[side] })
 		local s = r.api.state(0)
 		r.api.scope(function()
@@ -359,7 +367,7 @@ if section(6) then
 		r.flush()
 		realms[side] = { r = r, s = s }
 	end
-	local names = { "trunk", "head" }
+	local names = { "trunk", "base", "head" }
 	local value = 0.5
 	local results = interleave(names, function(side)
 		local s = realms[side].s
@@ -375,5 +383,165 @@ if section(6) then
 	end)
 	for _, name in names do
 		row("write", name, results[name][1], 1 / WINDOW, "bytes a write")
+	end
+end
+
+if section(7) then
+	-- Plain effect reruns at the three Crucible points. "separate" gives each effect its own state, "shared" puts
+	-- every effect on one state, and "cleanup" also returns a cleanup that the next run releases.
+	local COUNT = 10 * N
+	print(`\n7. Effect reruns, {COUNT} effects, one flush`)
+	local cases = { "separate", "shared", "cleanup" }
+	local realms = {}
+	for _, side in { "trunk", "base", "head" } do
+		for _, case in cases do
+			local r = runtime.crucible({ root = subjects.roots[side] })
+			local api = r.api
+			local shared = api.state(0)
+			local states = table.create(COUNT)
+			local counts = { ran = 0, released = 0 }
+			local function cleanup()
+				counts.released += 1
+			end
+			api.scope(function()
+				for i = 1, COUNT do
+					local s = if case == "shared" then shared else api.state(0)
+					states[i] = s
+					if case == "cleanup" then
+						api.effect(function()
+							s()
+							counts.ran += 1
+							return cleanup
+						end)
+					else
+						api.effect(function()
+							s()
+							counts.ran += 1
+						end)
+					end
+				end
+			end)
+			r.flush()
+			realms[`{side} {case}`] = { r = r, states = states, shared = shared, counts = counts }
+		end
+	end
+	local value = 0.5
+	for _, case in cases do
+		local names = { `trunk {case}`, `base {case}`, `head {case}` }
+		local results = interleave(names, function(name)
+			local realm = realms[name]
+			value += 1
+			collect()
+			realm.counts.ran, realm.counts.released = 0, 0
+			local start = os.clock()
+			if case == "shared" then
+				realm.shared:set(value)
+			else
+				for i = 1, COUNT do
+					realm.states[i]:set(value)
+				end
+			end
+			realm.r.flush()
+			local elapsed = os.clock() - start
+			assert(realm.counts.ran == COUNT, `{name}: {realm.counts.ran} of {COUNT} effects ran`)
+			assert(case ~= "cleanup" or realm.counts.released == COUNT, `{name}: {realm.counts.released} cleanups`)
+			return { elapsed }
+		end)
+		for _, name in names do
+			row("rerun", name, results[name][1], 1e6 / COUNT, "µs an effect")
+		end
+		for _, name in { `base {case}`, `head {case}` } do
+			local ratios = {}
+			for i, v in results[name][1] do
+				table.insert(ratios, v / results[`trunk {case}`][1][i])
+			end
+			row("rerun", `{name}/trunk`, ratios, 1, "paired ratio")
+		end
+	end
+end
+
+if section(8) then
+	-- Link and unlink cost on one shared state at the three Crucible points. "mount, dispose" creates COUNT effects on
+	-- the state, flushes, and ends their scope (newest first). "oldest first" ends one scope per effect in creation
+	-- order. "rewire" flips every effect between two shared states, so each rerun unlinks one and links the other.
+	local COUNT = 10 * N
+	print(`\n8. Link and unlink, {COUNT} effects on shared states`)
+	local names = { "trunk", "base", "head" }
+	local realms = {}
+	for _, side in names do
+		local r = runtime.crucible({ root = subjects.roots[side] })
+		local api = r.api
+		local flag, a, b = api.state(false), api.state(0), api.state(0)
+		local ran = { n = 0 }
+		api.scope(function()
+			for _ = 1, COUNT do
+				api.effect(function()
+					ran.n += 1
+					if flag() then
+						b()
+					else
+						a()
+					end
+				end)
+			end
+		end)
+		r.flush()
+		realms[side] = { r = r, flag = flag, ran = ran }
+	end
+	local results = interleave(names, function(side)
+		local realm = realms[side]
+		local r = runtime.crucible({ root = subjects.roots[side] })
+		local api = r.api
+		local shared = api.state(0)
+		collect()
+		local start = os.clock()
+		local dispose = api.scope(function()
+			for _ = 1, COUNT do
+				api.effect(function()
+					shared()
+				end)
+			end
+		end)
+		r.flush()
+		dispose()
+		r.flush()
+		local mounted = os.clock() - start
+		local disposers = table.create(N)
+		for i = 1, N do
+			disposers[i] = api.scope(function()
+				api.effect(function()
+					shared()
+				end)
+			end)
+		end
+		r.flush()
+		collect()
+		start = os.clock()
+		for i = 1, N do
+			disposers[i]()
+		end
+		r.flush()
+		local oldest = os.clock() - start
+		assert(next(shared.observers) == nil, `{side}: observers left`)
+		collect()
+		realm.ran.n = 0
+		start = os.clock()
+		realm.flag:set(not realm.flag())
+		realm.r.flush()
+		local rewire = os.clock() - start
+		assert(realm.ran.n == COUNT, `{side} rewire: {realm.ran.n} of {COUNT} effects ran`)
+		return { mounted, oldest, rewire }
+	end)
+	for q, label in { "mount, dispose", "oldest first", "rewire" } do
+		for _, name in names do
+			row(label, name, results[name][q], 1e6 / (if q == 2 then N else COUNT), "µs an effect")
+		end
+		for _, name in { "base", "head" } do
+			local ratios = {}
+			for i, v in results[name][q] do
+				table.insert(ratios, v / results.trunk[q][i])
+			end
+			row(label, `{name}/trunk`, ratios, 1, "paired ratio")
+		end
 	end
 end

@@ -1,5 +1,45 @@
 # UI renderer spike
 
+## Round 3: trunk, the reactive-bind branch and the reactive-bind-gap branch
+
+Round 3 measures `perf/reactive-bind-gap`, one round on the three limiters round 2 named. The harness now loads three built runtimes. Trunk B is the spike's binding on a patched trunk flush, at `origin/main` b008889. Base B is the binding node at `perf/reactive-bind` a122961. Head B is the binding node at `perf/reactive-bind-gap` bed2ebb. Sections 7 and 8 are new: plain effect reruns, and link and unlink on shared states.
+
+Build each runtime with `rbxtsc --type package` from a clean `out` (delete `tsconfig.tsbuildinfo` too, or the build skips unchanged files), copy each `out` aside, then run from the repository root:
+
+```sh
+lune run spike/ui/check <trunk out> <base out> <head out>
+lune run spike/ui/bench <trunk out> <base out> <head out> 15 [sections]
+pwsh spike/ui/pinned-r3.ps1 -TrunkOut <trunk> -BaseOut <base> -HeadOut <head> -Sections 24 -Runs 31   # High priority, one core
+pwsh spike/ui/ab.ps1 -Subjects "l3a=<out>,l4=<out>" -Runs 31   # lever A/B: min of 5 per run, paired to Vide
+```
+
+The round 2 commands below take two runtimes and no longer match `bench.luau`.
+
+Other sessions, a Roblox client and Discord kept the machine busy, so the gate uses per-run ratios to Vide. `ab.luau` decided each lever: per run it times each subject's update 5 times and keeps the fastest, which cuts preemption spikes. Its A/A noise floor was about ±0.03 at 21 runs and ±0.02 at 41.
+
+| Row (1,000 elements) | Trunk B | Base B | Head B | Vide | Head ÷ Vide |
+| --- | --- | --- | --- | --- | --- |
+| Update, separate states, µs a prop | 4.37 | 3.14 | 2.38 | 2.66 | 0.88 paired |
+| Update, one shared state, µs a prop | 3.24 | 2.62 | 1.61 | 2.30 | 0.73 paired |
+| Memory, bytes an element, Instance included | 2,140 | 1,525 | 1,026 | 1,336 | 0.77 paired |
+| Mount, µs an element | 9.04 | 9.27 | 9.17 | 14.60 | |
+| Unmount, µs an element | 2.63 | 2.37 | 1.11 | 1.78 | |
+| For reverse, ms | 6.10 | 4.88 | 3.71 | 3.78 | |
+| Bridge update, µs a binding | 47.1 | 13.3 | 11.3 | | |
+
+Update and memory rows are medians of 31 runs (`results/r3/final-24.txt`), the rest of 15 (`final-rest.txt`). Effect reruns at 31 runs (`final-7.txt`), as a ratio to trunk, base then head: separate states 0.89 and 0.85, one shared state 0.83 and 0.84, with a cleanup 0.88 and 0.90.
+
+### Levers
+
+| Lever | Row it targets | Before → after (ab.luau, paired to Vide) |
+| --- | --- | --- |
+| Observers in link order (array, not Set) | one state | 1.20 → 1.07 |
+| One `pcall` per flush that resumes after a failing sink | both updates | separate 1.20 → 1.14 and 1.26 → 1.12; one 1.13 → 1.02 and 1.04 → 0.99 |
+| Fold `queued` and `stopped` into the mark (3a) | bookkeeping | no measurable change (1.163, between A/A 1.147 and 1.168) |
+| Eight-field binding (3a, run counts in a map, bindings in an owner array, no `seen`) | memory, both updates | separate 1.08 → 0.91, one 1.02 → 0.77, memory 1.13 → 0.77 |
+
+Padding the eight-field binding back to a 16-slot hash (`ab-l3a-l4-l4pad.txt`) undoes nearly all of its separate-state gain (0.89 → 1.02) and half its one-state gain (0.74 → 0.87). The table's size, not the dropped bookkeeping, limited the update rows.
+
 ## Round 2: trunk against the reactive-bind branch
 
 Round 2 measures whether `perf/reactive-bind` closes the gap the first round found. It reruns this harness against two built runtimes. Trunk B is the spike's binding on a patched trunk flush, at `origin/main` 23bf3ea. Head B is the runtime's own binding node, built from the branch at fbfe74d, with one shared sink per property name, as a compiler would emit it.

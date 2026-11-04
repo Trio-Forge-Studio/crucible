@@ -1,0 +1,5 @@
+41 runs, min of 5 each; µs a prop, then the median paired ratio to Vide
+l2       separate 4.48 (1.147)   one 3.35 (0.987)
+l3a      separate 3.88 (1.163)   one 3.01 (0.967)
+l2b      separate 4.57 (1.168)   one 3.25 (0.943)
+Vide     separate 3.54 (1.000)   one 3.52 (1.000)

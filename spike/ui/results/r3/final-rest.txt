@@ -1,0 +1,79 @@
+Lune 0.11.0+740, optimization level 2, 15 interleaved runs; median (min to max)
+trunk: C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/trunk
+base:  C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/base
+head:  C:/Users/Admin/AppData/Local/Temp/claude/a1abe83183c5ad82/6525449b-962a-4ca6-9ee6-47f71cae292f/scratchpad/rt/head
+
+1. Mount and unmount 1000 elements, 3 fixed and 2 reactive props each
+  mount                              trunk B            9.04  (7.79 to 10.39) µs an element
+  mount                              base B             9.27  (8.14 to 12.67) µs an element
+  mount                              head B             9.17  (7.46 to 11.23) µs an element
+  mount                              Vide              14.60  (12.86 to 18.68) µs an element
+  unmount                            trunk B            2.63  (1.90 to 6.29) µs an element
+  unmount                            base B             2.37  (1.67 to 3.69) µs an element
+  unmount                            head B             1.11  (0.93 to 2.42) µs an element
+  unmount                            Vide               1.78  (1.53 to 2.13) µs an element
+
+3. Keyed For of 1000 rows, 2 reactive props a row (one list change, flushed)
+  reverse                            trunk B            6.10  (5.53 to 9.88) ms
+  reverse                            base B             4.88  (3.86 to 6.81) ms
+  reverse                            head B             3.71  (3.47 to 5.50) ms
+  reverse                            Vide               3.78  (3.31 to 5.91) ms
+  insert 100 in the middle           trunk B            6.96  (5.79 to 13.43) ms
+  insert 100 in the middle           base B             5.80  (5.02 to 12.69) ms
+  insert 100 in the middle           head B             5.96  (4.73 to 7.06) ms
+  insert 100 in the middle           Vide               6.19  (5.29 to 12.87) ms
+  remove 100 from the middle         trunk B            8.29  (3.44 to 11.24) ms
+  remove 100 from the middle         base B             6.66  (2.74 to 8.29) ms
+  remove 100 from the middle         head B             6.01  (2.73 to 7.77) ms
+  remove 100 from the middle         Vide               8.20  (5.63 to 9.83) ms
+  swap two rows                      trunk B            1.95  (0.99 to 3.11) ms
+  swap two rows                      base B             1.91  (0.97 to 2.55) ms
+  swap two rows                      head B             2.32  (0.93 to 3.07) ms
+  swap two rows                      Vide               0.94  (0.40 to 1.27) ms
+
+5. useReadable, 1000 bindings, each read by one Vide effect
+  create, first flush, destroy       trunk bridge      76.80  (48.62 to 92.80) µs a binding
+  create, first flush, destroy       base bridge       29.25  (13.40 to 32.07) µs a binding
+  create, first flush, destroy       head bridge       27.06  (15.30 to 29.37) µs a binding
+  update                             trunk bridge      47.05  (26.97 to 52.14) µs a binding
+  update                             base bridge       13.34  (5.41 to 15.23) µs a binding
+  update                             head bridge       11.31  (4.89 to 13.47) µs a binding
+
+6. Heap growth per state write, one observer, 64 writes a window
+  write                              trunk            128.25  (-668.00 to 128.25) bytes a write
+  write                              base               0.25  (0.25 to 0.25) bytes a write
+  write                              head               0.25  (0.25 to 0.25) bytes a write
+
+7. Effect reruns, 10000 effects, one flush
+  rerun                              trunk separate     23.44  (17.31 to 43.27) µs an effect
+  rerun                              base separate     20.83  (15.02 to 40.11) µs an effect
+  rerun                              head separate     23.84  (18.43 to 40.68) µs an effect
+  rerun                              base separate/trunk      0.87  (0.47 to 1.95) paired ratio
+  rerun                              head separate/trunk      0.98  (0.43 to 2.02) paired ratio
+  rerun                              trunk shared      19.48  (18.13 to 38.81) µs an effect
+  rerun                              base shared       17.14  (15.88 to 27.54) µs an effect
+  rerun                              head shared       17.03  (16.12 to 32.69) µs an effect
+  rerun                              base shared/trunk      0.88  (0.49 to 1.16) paired ratio
+  rerun                              head shared/trunk      0.86  (0.80 to 1.70) paired ratio
+  rerun                              trunk cleanup     38.67  (29.18 to 49.14) µs an effect
+  rerun                              base cleanup      35.39  (23.07 to 40.23) µs an effect
+  rerun                              head cleanup      34.50  (23.21 to 39.76) µs an effect
+  rerun                              base cleanup/trunk      0.89  (0.62 to 1.05) paired ratio
+  rerun                              head cleanup/trunk      0.84  (0.62 to 1.17) paired ratio
+
+8. Link and unlink, 10000 effects on shared states
+  mount, dispose                     trunk            240.41  (181.61 to 265.84) µs an effect
+  mount, dispose                     base             240.72  (162.80 to 280.14) µs an effect
+  mount, dispose                     head              36.45  (27.34 to 44.29) µs an effect
+  mount, dispose                     base/trunk         1.00  (0.78 to 1.52) paired ratio
+  mount, dispose                     head/trunk         0.15  (0.11 to 0.21) paired ratio
+  oldest first                       trunk              8.23  (3.00 to 13.97) µs an effect
+  oldest first                       base               7.55  (3.44 to 9.14) µs an effect
+  oldest first                       head               9.29  (5.15 to 14.47) µs an effect
+  oldest first                       base/trunk         0.92  (0.41 to 2.04) paired ratio
+  oldest first                       head/trunk         1.22  (0.45 to 4.83) paired ratio
+  rewire                             trunk            273.65  (201.90 to 576.48) µs an effect
+  rewire                             base             251.74  (173.88 to 317.45) µs an effect
+  rewire                             head              61.00  (41.02 to 102.97) µs an effect
+  rewire                             base/trunk         1.01  (0.37 to 1.15) paired ratio
+  rewire                             head/trunk         0.23  (0.11 to 0.51) paired ratio
