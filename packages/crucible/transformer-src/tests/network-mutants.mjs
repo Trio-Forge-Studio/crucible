@@ -479,7 +479,7 @@ const mutations = [
 	],
 	[
 		"F1 intersection bases reach every part",
-		"if (type.isIntersection()) for (const part of type.types) mention(part, location);",
+		"if (type.isUnionOrIntersection()) for (const part of type.types) mention(part, location);",
 		"",
 		"network augmentations that add a base to a class reached through a typeof query",
 	],
@@ -497,14 +497,14 @@ const mutations = [
 	],
 	[
 		"F2 every declaration of a merged symbol contributes heritage",
-		"for (const decl of decls)\n\t\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
-		"for (const decl of decls.slice(0, 1))\n\t\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
+		"for (const decl of decls)\n\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
+		"for (const decl of decls.slice(0, 1))\n\t\t\t\t\tif (ts.isInterfaceDeclaration(decl) || ts.isClassDeclaration(decl))",
 		"network augmentations that add a base to any base of a multi-base",
 	],
 	[
 		"F2 heritage cycle guard",
-		"if (!inherited.has(symbol)) {",
-		"if (true) {",
+		"if (mentioned.has(type)) return;",
+		"",
 		"network augmentations of a type in a heritage cycle",
 	],
 	[
@@ -607,6 +607,85 @@ const mutations = [
 		"network augmentations of a class a payload reaches only through a function return",
 	],
 	[
+		"T6 reached unions are followed",
+		"if (type.isUnionOrIntersection()) for (const part of type.types) mention(part, location);",
+		"if (type.isIntersection()) for (const part of type.types) mention(part, location);",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 type arguments of reached references are followed",
+		"if (type.objectFlags & ts.ObjectFlags.Reference)",
+		"if (false)",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 properties of anonymous object types are followed",
+		"type.objectFlags & ts.ObjectFlags.Anonymous &&",
+		"false &&",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 typeof queries mention the queried type",
+		"mention(queried, location);",
+		"void 0;",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 construct signatures of typeof queries are followed",
+		"...queried.getCallSignatures(), ...queried.getConstructSignatures()",
+		"...queried.getCallSignatures()",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 type parameter defaults are followed",
+		"references(parameter.default, location);",
+		"void 0;",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 only unfilled type parameter defaults are followed",
+		".slice(syntax.typeArguments?.length ?? 0)",
+		"",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 alias type arguments are mentioned",
+		"for (const argument of type.aliasTypeArguments ?? []) mention(argument, location);",
+		"void 0;",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 class properties reach their class",
+		"(ts.isInterfaceDeclaration(decl.parent) || ts.isClassDeclaration(decl.parent)) &&",
+		"ts.isInterfaceDeclaration(decl.parent) &&",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 a type is mentioned once",
+		"if (mentioned.has(type)) return;",
+		"",
+		"network augmentations that add a base to a class a payload reaches only through a flattened type",
+	],
+	[
+		"T6 enum members reach their enum",
+		"if (ts.isEnumMember(decl)) checkSymbols([checker.getSymbolAtLocation(decl.parent.name)], location);",
+		"void 0;",
+		"network augmentations of an enum a payload reaches only through a union",
+	],
+	[
+		"M4 optional properties reach their interface",
+		"(ts.isInterfaceDeclaration(decl.parent) || ts.isClassDeclaration(decl.parent)) &&",
+		"!(prop.flags & ts.SymbolFlags.Optional) && (ts.isInterfaceDeclaration(decl.parent) || ts.isClassDeclaration(decl.parent)) &&",
+		"network augmentations that add only optional properties to an all-optional interface",
+	],
+	[
+		"M9 a package.json that cannot be read keeps the metadata hint",
+		'} catch {\n\t\t\t\tstartupFault = "Cannot read package metadata. Check the project\'s package.json files.";',
+		'} catch (error) {\n\t\t\t\tif (!(error instanceof SyntaxError)) throw error;\n\t\t\t\tstartupFault = "Cannot read package metadata. Check the project\'s package.json files.";',
+		"network package.json that is a directory",
+		"index.cjs",
+	],
+	[
 		"rule 1 askServer type argument count",
 		"askServer: { ...message, typeArguments: 2, arguments: 2 }",
 		"askServer: { ...message, typeArguments: 1, arguments: 2 }",
@@ -623,7 +702,9 @@ for (const [name, before, , , file = "network.cjs"] of mutations)
 if (process.argv.includes("--validate")) process.exit(0);
 fs.rmSync(scratch, { recursive: true, force: true });
 const receipts = [];
-for (const [name, before, after, test, file = "network.cjs", suite = "network.test.cjs"] of mutations) {
+const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice(7);
+const selected = only ? mutations.filter(([name]) => new RegExp(only).test(name)) : mutations;
+for (const [name, before, after, test, file = "network.cjs", suite = "network.test.cjs"] of selected) {
 	const root = path.join(scratch, String(receipts.length));
 	const copy = path.join(root, "transformer-src");
 	fs.mkdirSync(root, { recursive: true });
@@ -658,4 +739,4 @@ for (const [name, before, after, test, file = "network.cjs", suite = "network.te
 	}
 }
 fs.writeFileSync(path.join(scratch, "receipts.json"), JSON.stringify(receipts, null, 2));
-console.log(`${receipts.length}/${mutations.length} killed; scratch sources restored.`);
+console.log(`${receipts.length}/${selected.length} killed; scratch sources restored.`);

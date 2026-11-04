@@ -1,7 +1,7 @@
 import { runtimeDiagnostic } from "../diagnostics";
 import type { EnginePort } from "../port";
 import { CallResult } from "../runner";
-import { FrameKind, pop, push, type Completion, type Frame } from "./context";
+import { FrameKind, type Completion } from "./context";
 import {
 	createdBefore,
 	dependenciesMoved,
@@ -154,19 +154,11 @@ function watchFrom<T>(owner: Lifetime, source: () => T, baseline: T, onChange: (
 	});
 }
 
-interface Run {
-	readonly effect: EffectNode;
-	readonly frame: Frame;
-}
-
-function runEffectBody(run: Run) {
-	push(run.frame);
-	const result = run.effect.body();
-	pop(run.frame);
-	return result;
-}
-
-function complete(effect: EffectNode, run: Lifetime, frame: Frame, completion: Completion) {
+/** A run's frame names its effect and its run lifetime. */
+function complete(completion: Completion) {
+	const frame = completion.frame!;
+	const effect = frame.observer as EffectNode;
+	const run = frame.lifetime!;
 	const value = completion.value;
 	let failure: string | undefined;
 	if (completion.result !== CallResult.Ok) failure = tostring(value);
@@ -190,8 +182,7 @@ function runOnce(effect: EffectNode) {
 	if (previous !== undefined) endLifetime(previous);
 	const run = newLifetime(Role.Run, effect.parent, effect.parent.owner, effect);
 	effect.run = run;
-	const frame = observerFrame(FrameKind.Run, effect, run);
-	runBody(run, runEffectBody, { effect, frame }, (completion) => complete(effect, run, frame, completion));
+	runBody(observerFrame(FrameKind.Run, effect, run), effect.body, undefined, complete);
 }
 
 function carry() {

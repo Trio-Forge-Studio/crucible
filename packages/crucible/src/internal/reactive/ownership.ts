@@ -1,10 +1,10 @@
 import { runtimeDiagnostic } from "../diagnostics";
-import { current, enabling, hasEnded } from "../lifecycle";
+import { closeScope, current, drain, enabling, hasEnded, openScope } from "../lifecycle";
 import type { ClassRecord } from "../registry";
-import { CallResult } from "../runner";
+import { call, CallResult } from "../runner";
 import type { ObjectState } from "../state";
-import { boundary, FrameKind, pop, push, top, type Completion, type Frame } from "./context";
-import { contained, finishOpen, guardPure, NodeKind, originOf, releaseEdges, type EffectFields } from "./graph";
+import { boundary, discard, FrameKind, pop, push, top, type Completion, type Frame } from "./context";
+import { finishOpen, guardPure, NodeKind, originOf, releaseEdges, type EffectFields } from "./graph";
 import { OWNER_CHILDREN_WARNING } from "./limits";
 
 /** @internal */
@@ -19,16 +19,20 @@ export const enum Role {
 	Scope,
 }
 
-/** @internal How a lifetime releases one owned value. `own` decides it once, when the value is owned. */
+/**
+ * @internal
+ * How a lifetime releases one owned value. `own` decides it once, when the value is owned. The engine's kinds come
+ * last, so `kind >= Release.Disconnect` is a release that runs no Luau.
+ */
 export const enum Release {
 	Call,
-	Disconnect,
-	DestroyInstance,
-	Cancel,
 	/** A table's `destroy()`. */
 	DestroyMethod,
 	/** A table's `Destroy()`. */
 	DestroyUpperMethod,
+	Disconnect,
+	DestroyInstance,
+	Cancel,
 }
 
 interface Destroyable {
@@ -229,6 +233,10 @@ function halt(effect: EffectNode) {
 }
 
 function latch(root: Lifetime) {
+	if (root.head === undefined) {
+		root.ended = true;
+		return;
+	}
 	const pending = [root];
 	while (pending.size() > 0) {
 		const lifetime = pending.pop()!;
@@ -282,7 +290,7 @@ function finish(lifetime: Lifetime) {
 		child = previous;
 	}
 	const releases = lifetime.releases;
-	for (let i = releases.size() - 2; i >= 0; i -= 2) releaseValue(lifetime, releases[i] as Release, releases[i + 1]);
+	runReleases(lifetime, releases, releases.size() - 2);
 	releases.clear();
 	leave(lifetime);
 }
@@ -297,22 +305,6 @@ export function retire(effect: EffectNode) {
 		finish(run);
 	}
 	leave(effect);
-}
-
-interface ReleaseJob {
-	readonly lifetime: Lifetime;
-	readonly kind: Release;
-	readonly value: unknown;
-}
-
-function releaseBody(job: ReleaseJob) {
-	const frame = { kind: FrameKind.Owning, lifetime: job.lifetime };
-	push(frame);
-	const value = job.value;
-	if (job.kind === Release.Call) (value as () => void)();
-	else if (job.kind === Release.DestroyMethod) (value as Destroyable).destroy();
-	else (value as UpperDestroyable).Destroy();
-	pop(frame);
 }
 
 function releaseLabel(kind: Release, value: unknown): string {
@@ -335,12 +327,6 @@ function reportRelease(lifetime: Lifetime, kind: Release, value: unknown, err: u
 	);
 }
 
-function runRelease(lifetime: Lifetime, kind: Release, value: unknown) {
-	contained(lifetime.owner, releaseBody, { lifetime, kind, value }, (completion) => {
-		if (completion.result !== CallResult.Ok) reportRelease(lifetime, kind, value, completion.value);
-	});
-}
-
 function disconnect(connection: RBXScriptConnection) {
 	connection.Disconnect();
 }
@@ -350,22 +336,102 @@ function destroyInstance(instance: Instance) {
 }
 
 /**
- * Releases one value now, as its ended lifetime: a throw is reported and nobody is faulted. A function or a
- * `destroy()` runs in its own boundary, which cancels and reports a yield and, inside a drain, applies its lifecycle
- * requests after the current step. `Disconnect`, `Destroy` and `task.cancel` run no Luau on this thread and cannot
- * yield, so a `pcall` is their boundary.
+ * `Disconnect`, `Destroy` and `task.cancel` run no Luau on this thread and cannot yield, so a `pcall` is their
+ * boundary. A throw is reported and nobody is faulted.
  */
-function releaseValue(lifetime: Lifetime, kind: Release, value: unknown) {
+function releaseEngine(lifetime: Lifetime, kind: Release, value: unknown) {
 	let engine: (value: never) => void;
 	if (kind === Release.Disconnect) engine = disconnect;
 	else if (kind === Release.DestroyInstance) engine = destroyInstance;
-	else if (kind === Release.Cancel) engine = task.cancel;
-	else {
-		runRelease(lifetime, kind, value);
-		return;
-	}
+	else engine = task.cancel;
 	const [ok, err] = pcall(engine, value as never);
 	if (!ok) pcall(reportRelease, lifetime, kind, value, err);
+}
+
+/** A lifetime's releases that run code, newest first, on one worker until one fails or yields. Its own frame. */
+interface Batch extends Frame {
+	readonly kind: FrameKind.Owning;
+	readonly lifetime: Lifetime;
+	readonly releases: readonly unknown[];
+	/** The index of the release running now. */
+	at: number;
+	/** That release's lifecycle scope is open. */
+	scoped: boolean;
+	worker?: thread;
+}
+
+/**
+ * Runs `batch` from `batch.at` down on the running worker, as its ended lifetime. A release that runs code opens its
+ * own lifecycle scope, as `within` would. One that leaves requests for a drain outside any other scope stops the
+ * batch with `true`, so the caller drains before the next release, as that release's own `within` would have.
+ */
+function releaseBatch(batch: Batch): boolean {
+	batch.worker = coroutine.running();
+	const lifetime = batch.lifetime;
+	const releases = batch.releases;
+	push(batch);
+	for (let i = batch.at; i >= 0; i -= 2) {
+		batch.at = i;
+		const kind = releases[i] as Release;
+		const value = releases[i + 1];
+		if (kind >= Release.Disconnect) {
+			releaseEngine(lifetime, kind, value);
+			continue;
+		}
+		batch.scoped = true;
+		openScope();
+		if (kind === Release.Call) (value as () => void)();
+		else if (kind === Release.DestroyMethod) (value as Destroyable).destroy();
+		else (value as UpperDestroyable).Destroy();
+		batch.scoped = false;
+		if (closeScope()) {
+			pop(batch);
+			return true;
+		}
+	}
+	pop(batch);
+	return false;
+}
+
+/** The release at `batch.at` threw or yielded, and its worker is gone: finish what it left open and report it. */
+function failRelease(batch: Batch, result: CallResult, value: unknown) {
+	finishOpen({ frame: undefined, result, value, open: discard(batch.worker, false), after: undefined });
+	const at = batch.at;
+	reportRelease(batch.lifetime, batch.releases[at] as Release, batch.releases[at + 1], value);
+	if (!batch.scoped) return;
+	batch.scoped = false;
+	if (closeScope()) drain();
+}
+
+/**
+ * Releases `releases` from index `from` down, as their ended lifetime. Engine values before the first function or
+ * `destroy()` release here. From there one worker runs the rest as a batch. A release that throws or yields loses
+ * that worker: it is cancelled and reported, and the batch goes on from the next release on a fresh one. Each
+ * release's requests still apply when it returns, before the next one runs.
+ */
+function runReleases(lifetime: Lifetime, releases: readonly unknown[], from: number) {
+	let batch: Batch | undefined;
+	let i = from;
+	while (i >= 0) {
+		const kind = releases[i] as Release;
+		if (kind >= Release.Disconnect) {
+			releaseEngine(lifetime, kind, releases[i + 1]);
+			i -= 2;
+			continue;
+		}
+		if (batch === undefined) batch = { kind: FrameKind.Owning, lifetime, releases, at: i, scoped: false };
+		else batch.at = i;
+		const [result, value] = call(releaseBatch, batch, undefined, lifetime.owner);
+		if (result !== CallResult.Ok) failRelease(batch, result, value);
+		else if (value === true) drain();
+		i = batch.at - 2;
+	}
+}
+
+/** Releases one value now, as its ended lifetime: a throw or a yield is reported and nobody is faulted. */
+function releaseValue(lifetime: Lifetime, kind: Release, value: unknown) {
+	if (kind >= Release.Disconnect) releaseEngine(lifetime, kind, value);
+	else runReleases(lifetime, [kind, value], 0);
 }
 
 /** @internal */
@@ -378,40 +444,29 @@ export function hold(lifetime: Lifetime, kind: Release, value: unknown) {
 
 /**
  * @internal
- * Runs a lifetime's own body in a boundary. While it runs, endings that reach it wait; at completion `after` runs,
- * then those endings.
+ * Runs a lifetime's own body in a boundary, under `frame`, whose lifetime it is. While it runs, endings that reach
+ * it wait; at completion `after` runs, then those endings.
  */
-export function runBody<A>(
-	lifetime: Lifetime,
-	body: (arg: A) => unknown,
-	arg: A,
-	after: (completion: Completion) => void,
-) {
+export function runBody<A>(frame: Frame, body: (arg: A) => unknown, arg: A, after: (completion: Completion) => void) {
+	const lifetime = frame.lifetime!;
 	bodies.push(lifetime);
-	boundary(lifetime.owner, body, arg, (completion) => {
-		const index = bodies.indexOf(lifetime);
-		if (index >= 0) bodies.remove(index);
-		const [ok, err] = pcall(() => {
-			finishOpen(completion);
-			after(completion);
-		});
-		const deferred = lifetime.deferred;
-		lifetime.deferred = undefined;
-		if (deferred !== undefined) for (const ending of deferred) finish(ending);
-		if (!ok) error(err, 0);
-	});
+	boundary(lifetime.owner, frame, body, arg, completeBody, after);
 }
 
-interface Setup {
-	readonly scope: Lifetime;
-	readonly setup: () => void;
+function settleBody(completion: Completion) {
+	finishOpen(completion);
+	completion.after!(completion);
 }
 
-function setupBody(job: Setup) {
-	const frame = { kind: FrameKind.Owning, lifetime: job.scope };
-	push(frame);
-	job.setup();
-	pop(frame);
+function completeBody(completion: Completion) {
+	const lifetime = completion.frame!.lifetime!;
+	const index = bodies.indexOf(lifetime);
+	if (index >= 0) bodies.remove(index);
+	const [ok, err] = pcall(settleBody, completion);
+	const deferred = lifetime.deferred;
+	lifetime.deferred = undefined;
+	if (deferred !== undefined) for (const ending of deferred) finish(ending);
+	if (!ok) error(err, 0);
 }
 
 /** @internal */
@@ -433,7 +488,7 @@ function openScope(parent: Lifetime | undefined, setup: () => void): () => void 
 	if (parent !== undefined) adopt(parent, scope);
 	let failed = false;
 	let failure: unknown;
-	runBody(scope, setupBody, { scope, setup }, (completion) => {
+	runBody({ kind: FrameKind.Owning, lifetime: scope }, setup, undefined, (completion) => {
 		if (completion.result === CallResult.Ok) return;
 		failed = true;
 		failure = completion.value;
