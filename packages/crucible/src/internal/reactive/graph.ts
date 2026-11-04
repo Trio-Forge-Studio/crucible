@@ -102,7 +102,7 @@ export interface BindingFields extends Edge {
 
 /** @internal */
 export type Source = StateNode | ComputedNode;
-/** @internal What the flush queues and runs. */
+/** @internal */
 export type Reaction = EffectFields | BindingFields;
 /** @internal */
 export type Observer = ComputedNode | Reaction;
@@ -416,7 +416,7 @@ function detach(root: ComputedNode) {
 	}
 }
 
-/** @internal Registers `observer` on `source`, attaching a computed source that had no observers. */
+/** @internal */
 export function link(observer: Observer, source: Source) {
 	const first = source.observers.size() === 0;
 	source.observers.add(observer);

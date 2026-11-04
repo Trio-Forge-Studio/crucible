@@ -115,7 +115,7 @@ export interface BindingNode extends BindingFields, Linked {
 	runs: number;
 }
 
-/** @internal What the flush queues. */
+/** @internal */
 export type ReactionNode = EffectNode | BindingNode;
 
 type Owned = Lifetime | ReactionNode;
