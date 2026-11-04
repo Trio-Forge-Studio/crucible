@@ -87,7 +87,7 @@ export class Scoreboard extends CrucibleBehaviour<"Scoreboard", ScreenGui> {
 
 ## Cost
 
-Each binding is one Crucible `watch` plus one Vide source, and nothing is shared between bindings of the same readable. In Lune at optimization level 2, with 1,000 bindings, a binding costs 80 to 90 µs to create, flush once and destroy, and 43 to 46 µs per update. A bare Crucible `watch` costs about 65 µs and 35 to 39 µs of that. A Vide source written directly costs about 6 µs and 3 µs. Measure again with `lune run bench-vide` after `pnpm build`.
+Each binding is one Crucible `watch` plus one Vide source, and nothing is shared between bindings of the same readable. In Lune at optimization level 2, with 1,000 bindings, a binding costs 75 to 90 µs to create, flush once and destroy, and 40 to 50 µs per update. A bare Crucible `watch` costs about 65 µs and 35 to 39 µs of that. A Vide source written directly costs about 6 µs and 2 to 3 µs. Measure again with `lune run bench-vide` after `pnpm build`.
 
 ## Migrate from vide-charm
 
