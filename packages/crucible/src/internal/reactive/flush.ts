@@ -207,6 +207,11 @@ function reportBound(bound: string) {
 	);
 }
 
+function inCreationOrder(list: readonly EffectNode[]): boolean {
+	for (let i = 1; i < list.size(); i++) if (createdBefore(list[i], list[i - 1])) return false;
+	return true;
+}
+
 function runRounds() {
 	let rounds = 0;
 	let total = 0;
@@ -219,7 +224,7 @@ function runRounds() {
 		batch = queue;
 		queue = [];
 		cursor = 0;
-		batch.sort(createdBefore);
+		if (!inCreationOrder(batch)) batch.sort(createdBefore);
 		while (cursor < batch.size()) {
 			const effect = batch[cursor];
 			cursor += 1;
