@@ -25,6 +25,10 @@
 			"types": "./out/vide/index.d.ts",
 			"default": "./out/vide/init.luau"
 		},
+		"./util/random": {
+			"types": "./out/util/random/index.d.ts",
+			"default": "./out/util/random/init.luau"
+		},
 		"./transformer": "./transformer/index.js"
 	},
 	"scripts": {
@@ -54,6 +58,7 @@
 		"client",
 		"emit",
 		"vide",
+		"util",
 		"LICENSE"
 	],
 	"repository": {

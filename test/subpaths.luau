@@ -40,4 +40,37 @@ return {
 		client.place:Destroy()
 		server.place:Destroy()
 	end,
+	["no side entry loads the random subpath, and it resolves alone"] = function()
+		local function loadedUnder(h, folder): { string }
+			local names = {}
+			for module in h.loaded do
+				if module:IsDescendantOf(folder) then
+					table.insert(names, module.Name)
+				end
+			end
+			table.sort(names)
+			return names
+		end
+		local function subpathLoaded(h): boolean
+			return #loadedUnder(h, h.crucible.util) > 0
+		end
+		local server = loadPlace()
+		server.import(server.crucible)
+		server.import(server.crucible.server)
+		server.import(server.crucible.emit)
+		assert(not subpathLoaded(server), "the root, server and emit entries never load it")
+		local client = loadPlace(true)
+		client.import(client.crucible)
+		client.import(client.crucible.client)
+		client.import(client.crucible.vide)
+		assert(not subpathLoaded(client), "the client and vide entries never load it")
+		client.place:Destroy()
+		server.place:Destroy()
+
+		local random = loadPlace()
+		local Rng = random.import(random.crucible.util.random).Rng
+		assert(Rng.new(42):uint32() == 1768527656, "the random subpath resolves and draws its recorded stream")
+		assert(random.loaded[random.crucible.server] == nil, "random does not load the server")
+		random.place:Destroy()
+	end,
 }
