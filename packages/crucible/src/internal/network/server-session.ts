@@ -33,7 +33,7 @@ export class ServerSession extends Session {
 
 	open() {
 		this.stage = Stage.Open;
-		openClaims({ side: "server", retired: (claim) => this.retired(claim) });
+		openClaims({ side: () => "server", retired: (claim) => this.retired(claim) });
 		this.port.create((player, ...args) => this.receive(player, argumentCount(args), args[0], args[1]));
 		this.connections.push(this.port.onPlayerAdded((player) => this.add(player)));
 		this.connections.push(

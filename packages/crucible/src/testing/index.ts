@@ -44,7 +44,8 @@ function construct<T, A extends unknown[]>(klass: new (...args: A) => T, state: 
 export function subsystem<T extends Subsystem, A extends unknown[]>(klass: new (...args: A) => T, ...args: A): T {
 	const record = recordFor(klass);
 	if (record.kind !== Kind.Subsystem) error(`${record.id} is a behaviour; build it with behaviour()`, 0);
-	openClaims({ side: game.GetService("RunService").IsClient() ? "client" : "server", retired: () => {} });
+	// A spec's RunService double only needs IsClient when the class has a receive() field.
+	openClaims({ side: () => (game.GetService("RunService").IsClient() ? "client" : "server"), retired: () => {} });
 	const [ok, result] = pcall(construct<T, A>, klass, track(record), args);
 	closeClaims(false);
 	if (!ok) error(result, 0);

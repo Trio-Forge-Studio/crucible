@@ -179,6 +179,19 @@ return {
 		end, "not a message")
 		h.place:Destroy()
 	end,
+	["only a receive field asks RunService for the realm"] = function()
+		local h = world()
+		h.runService.IsClient = nil
+		spec.eq(
+			h.testing.subsystem(h.Controller, { ready = true }).store.ready,
+			true,
+			"a class with no receive field builds"
+		)
+		fails("a class with a receive field", function()
+			h.testing.subsystem(h.Wallet)
+		end, "IsClient")
+		h.place:Destroy()
+	end,
 	["a receiving Subsystem cannot be built twice in one module graph"] = function()
 		local h = world()
 		local Listens = subsystemClass(h, "Listens", function(self)

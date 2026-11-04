@@ -26,7 +26,7 @@ controller:start()
 controller:onShutdown()
 ```
 
-Each call builds a new object. `receive()` fields register while the class builds, in the realm `RunService:IsClient()` reports. `subsystem` throws for a behaviour class, naming it.
+Each call builds a new object. `receive()` fields register while the class builds, in the realm `RunService:IsClient()` reports. The entry asks `RunService` only when a `receive()` field registers, so a spec that replaces `RunService` with a double needs `IsClient` only for a class that receives. `subsystem` throws for a behaviour class, naming it.
 
 ## Build a behaviour
 
