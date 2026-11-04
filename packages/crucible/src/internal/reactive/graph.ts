@@ -7,6 +7,7 @@ export const enum NodeKind {
 	Computed,
 	Effect,
 	Lifetime,
+	Binding,
 }
 
 /** @internal How far an observer is from trusting what it last read. */
@@ -86,10 +87,25 @@ export interface EffectFields extends ObserverFields {
 	queued: boolean;
 }
 
+/**
+ * @internal
+ * The graph's view of a binding: an observer of one source, fixed at creation, so it is its own single edge. The
+ * flush owns the rest of it.
+ */
+export interface BindingFields extends Edge {
+	readonly kind: NodeKind.Binding;
+	readonly id: number;
+	mark: Mark;
+	stopped: boolean;
+	queued: boolean;
+}
+
 /** @internal */
 export type Source = StateNode | ComputedNode;
+/** @internal What the flush queues and runs. */
+export type Reaction = EffectFields | BindingFields;
 /** @internal */
-export type Observer = ComputedNode | EffectFields;
+export type Observer = ComputedNode | Reaction;
 
 let ids = 0;
 /** @internal Creation order, shared by every node and effect in the realm. */
@@ -110,10 +126,10 @@ export function currentEpoch(): number {
 	return epoch;
 }
 
-let schedule: (effect: EffectFields) => void = () => {};
+let schedule: (reaction: Reaction) => void = () => {};
 
-/** @internal The flush registers how a marked effect is queued. */
-export function useScheduler(scheduler: (effect: EffectFields) => void) {
+/** @internal The flush registers how a marked effect or binding is queued. */
+export function useScheduler(scheduler: (reaction: Reaction) => void) {
 	schedule = scheduler;
 }
 
@@ -233,7 +249,7 @@ function raise(source: Source, level: Mark) {
 		if (o.mark >= level) continue;
 		const wasClean = o.mark === Mark.Clean;
 		o.mark = level;
-		if (o.kind === NodeKind.Effect) schedule(o);
+		if (o.kind !== NodeKind.Computed) schedule(o);
 		else if (wasClean) unmarked.push(o);
 	}
 }
@@ -400,7 +416,8 @@ function detach(root: ComputedNode) {
 	}
 }
 
-function link(observer: Observer, source: Source) {
+/** @internal Registers `observer` on `source`, attaching a computed source that had no observers. */
+export function link(observer: Observer, source: Source) {
 	const first = source.observers.size() === 0;
 	source.observers.add(observer);
 	if (first && source.kind === NodeKind.Computed) attach(source);
@@ -433,8 +450,12 @@ export function rewire(observer: Observer, previous: readonly Edge[], following:
 	for (const edge of previous) if (!keep.has(edge.source)) unlink(observer, edge.source);
 }
 
-/** @internal Leaves every source. Used when an effect stops. */
-export function releaseEdges(observer: EffectFields) {
+/** @internal Leaves every source. Used when an effect or a binding stops. */
+export function releaseEdges(observer: Reaction) {
+	if (observer.kind === NodeKind.Binding) {
+		unlink(observer, observer.source);
+		return;
+	}
 	for (const edge of observer.dependencies) unlink(observer, edge.source);
 	observer.dependencies = [];
 }
@@ -457,12 +478,15 @@ export function markEffect(effect: EffectFields, level: Mark) {
 	schedule(effect);
 }
 
-/** @internal Pulls an effect's computed dependencies current in read order. True when any of them moved. */
-export function dependenciesMoved(effect: EffectFields): boolean {
-	for (const edge of effect.dependencies) {
-		const source = edge.source;
-		if (source.kind === NodeKind.Computed) validate(source);
-		if (source.version !== edge.seen) return true;
-	}
+function moved(edge: Edge): boolean {
+	const source = edge.source;
+	if (source.kind === NodeKind.Computed) validate(source);
+	return source.version !== edge.seen;
+}
+
+/** @internal Pulls a reaction's computed dependencies current in read order. True when any of them moved. */
+export function dependenciesMoved(reaction: Reaction): boolean {
+	if (reaction.kind === NodeKind.Binding) return moved(reaction);
+	for (const edge of reaction.dependencies) if (moved(edge)) return true;
 	return false;
 }
