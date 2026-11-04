@@ -702,7 +702,9 @@ for (const [name, before, , , file = "network.cjs"] of mutations)
 if (process.argv.includes("--validate")) process.exit(0);
 fs.rmSync(scratch, { recursive: true, force: true });
 const receipts = [];
-for (const [name, before, after, test, file = "network.cjs", suite = "network.test.cjs"] of mutations) {
+const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice(7);
+const selected = only ? mutations.filter(([name]) => new RegExp(only).test(name)) : mutations;
+for (const [name, before, after, test, file = "network.cjs", suite = "network.test.cjs"] of selected) {
 	const root = path.join(scratch, String(receipts.length));
 	const copy = path.join(root, "transformer-src");
 	fs.mkdirSync(root, { recursive: true });
@@ -737,4 +739,4 @@ for (const [name, before, after, test, file = "network.cjs", suite = "network.te
 	}
 }
 fs.writeFileSync(path.join(scratch, "receipts.json"), JSON.stringify(receipts, null, 2));
-console.log(`${receipts.length}/${mutations.length} killed; scratch sources restored.`);
+console.log(`${receipts.length}/${selected.length} killed; scratch sources restored.`);

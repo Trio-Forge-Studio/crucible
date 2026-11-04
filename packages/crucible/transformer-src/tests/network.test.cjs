@@ -590,6 +590,13 @@ const addedBaseGame = () =>
 			"export interface IOnly { k: number }",
 			"export interface IUnion { k: number }",
 			"export interface IAwait { k: number }",
+			"export interface IBox { k: number }",
+			"export interface IVar { k: number }",
+			"export const ivar: IVar = { k: 1 };",
+			"export interface ICt { k: number }",
+			"export const ICtor: new () => ICt = class { k = 1; };",
+			"export interface IDef { k: number }",
+			"export const makeBox = () => ({ v: { k: 1 } as IBox });",
 			"export const makeAsync = async (): Promise<IAwait> => ({ k: 1 });",
 			"export const makeUnion = (): IUnion | undefined => undefined;",
 			"export class Frame { f: IOnly = { k: 1 }; }",
@@ -598,8 +605,9 @@ const addedBaseGame = () =>
 			"export const unreached = new KUnreached();",
 		].join("\n"),
 		"src/shared/model.ts": [
-			"import { KDefault, KSpare, KMapped, mapped } from './base';",
+			"import { KDefault, KSpare, KMapped, IDef, mapped } from './base';",
 			"export interface Holder<T = KDefault> { v: Omit<T, 'k'> }",
+			"export interface HolderI<T = IDef> { v: { [P in Exclude<keyof T, 'k'>]: number } }",
 			"export interface Pair<T = KSpare> { v: Omit<T, 'k'> }",
 			"export type Flat<T> = { [P in keyof T]: T[P] };",
 			"export type Mapped = Flat<typeof mapped>;",
@@ -609,8 +617,8 @@ const addedBaseGame = () =>
 		"src/shared/messages.ts":
 			imports +
 			[
-				'import { variable, makeAwaited, makeNonNull, makeElements, holder, ConstAlias, makeWrapped, Carrier, Frame, tree, KWith, makeUnion, makeAsync } from "./base";',
-				'import { Holder, Pair, Mapped, Unwrap } from "./model";',
+				'import { variable, makeAwaited, makeNonNull, makeElements, holder, ConstAlias, makeWrapped, Carrier, Frame, tree, KWith, makeUnion, makeAsync, makeBox, ivar, ICtor } from "./base";',
+				'import { Holder, HolderI, Pair, Mapped, Unwrap } from "./model";',
 				'export const A = toServer<Omit<typeof variable, "k">>("X.A");',
 				'export const B = toServer<Omit<Awaited<ReturnType<typeof makeAwaited>>, "k">>("X.B");',
 				'export const C = toServer<Omit<NonNullable<ReturnType<typeof makeNonNull>>, "k">>("X.C");',
@@ -625,10 +633,14 @@ const addedBaseGame = () =>
 				'export const L = toServer<Omit<typeof tree, "kids">>("X.L");',
 				'export const M = toServer<Pair<KWith>>("X.M");',
 				'export const O = toServer<{ [P in Exclude<keyof Awaited<ReturnType<typeof makeAsync>>, "k">]: number }>("X.O");',
+				'export const P = toServer<{ [P in Exclude<keyof ReturnType<typeof makeBox>["v"], "k">]: number }>("X.P");',
+				'export const Q = toServer<{ [P in Exclude<keyof typeof ivar, "k">]: number }>("X.Q");',
+				'export const R = toServer<{ [P in Exclude<keyof InstanceType<typeof ICtor>, "k">]: number }>("X.R");',
+				'export const S = toServer<HolderI>("X.S");',
 				'export const N = toServer<{ [P in Exclude<keyof NonNullable<ReturnType<typeof makeUnion>>, "k">]: number }>("X.N");',
 			].join("\n"),
 		...Object.fromEntries(
-			[...addedBaseClasses, "IOnly", "IUnion", "IAwait"].map((name) => [
+			[...addedBaseClasses, "IOnly", "IUnion", "IAwait", "IBox", "IVar", "ICt", "IDef"].map((name) => [
 				`src/util/${name.toLowerCase()}.ts`,
 				addedBase("../shared/base", name),
 			]),
@@ -652,6 +664,10 @@ test("network augmentations that add a base to a class a payload reaches only th
 		"ionly",
 		"iunion",
 		"iawait",
+		"ibox",
+		"ivar",
+		"ict",
+		"idef",
 	].sort();
 	assert.deepEqual(flagged(game), expected);
 	assert.deepEqual(
