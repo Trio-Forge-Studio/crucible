@@ -116,7 +116,7 @@ const mutants = [
 		"pair",
 		[10],
 		GRAPH,
-		[["			source.observers.add(node);\n			if (first", "			if (first"]],
+		[["			source.observers.push(node);\n			if (first", "			if (first"]],
 	],
 	["stale run not requeued", "pair", [10], FLUSH, [["	markEffect(effect, staleAfterRun(effect));\n", ""]]],
 	[

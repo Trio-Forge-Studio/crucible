@@ -30,8 +30,11 @@ interface SourceFields {
 	/** Creation order in the realm. Flush rounds run effects in ascending id. */
 	readonly id: number;
 	version: number;
-	/** Attached observers only: effects, and computeds that have observers themselves. */
-	readonly observers: Set<Observer>;
+	/**
+	 * Attached observers only: reactions, and computeds that have observers themselves. In link order, which is
+	 * mostly creation order, so a write's round usually needs no sort.
+	 */
+	readonly observers: Observer[];
 }
 
 interface ObserverFields {
@@ -196,7 +199,7 @@ export function readUntracked<T>(read: () => T, pure?: string): T {
 
 /** @internal */
 export function createStateNode(value: unknown): StateNode {
-	return { kind: NodeKind.State, id: nextId(), version: 0, observers: new Set(), value };
+	return { kind: NodeKind.State, id: nextId(), version: 0, observers: [], value };
 }
 
 /** @internal */
@@ -267,7 +270,7 @@ export function createComputedNode(read: () => unknown): ComputedNode {
 		kind: NodeKind.Computed,
 		id: nextId(),
 		version: 0,
-		observers: new Set(),
+		observers: [],
 		dependencies: [],
 		mark: Mark.Dirty,
 		read,
@@ -297,7 +300,7 @@ function cycle(node: ComputedNode): never {
 export function validate(node: ComputedNode) {
 	if (node.evaluating) cycle(node);
 	if (node.cache.kind === CacheKind.Empty) return evaluate(node);
-	if (node.observers.size() === 0) {
+	if (node.observers.isEmpty()) {
 		if (node.mark === Mark.Clean && node.validatedAt === epoch) return;
 		if (node.mark === Mark.Clean) node.mark = Mark.Check;
 	}
@@ -370,7 +373,7 @@ function settle(node: ComputedNode, frame: Frame, result: unknown, thrownFailure
 		for (const edge of node.dependencies)
 			if (!frame.reads!.has(edge.source)) kept.push({ source: edge.source, seen: edge.source.version });
 	}
-	if (node.observers.size() > 0) rewire(node, node.dependencies, kept);
+	if (!node.observers.isEmpty()) rewire(node, node.dependencies, kept);
 	node.dependencies = kept;
 	const cache = node.cache;
 	if (failure !== undefined) {
@@ -394,8 +397,8 @@ function attach(root: ComputedNode) {
 		if (node.mark === Mark.Clean && node.validatedAt !== epoch) node.mark = Mark.Check;
 		for (const edge of node.dependencies) {
 			const source = edge.source;
-			const first = source.observers.size() === 0;
-			source.observers.add(node);
+			const first = source.observers.isEmpty();
+			source.observers.push(node);
 			if (first && source.kind === NodeKind.Computed) pending.push(source);
 		}
 	}
@@ -409,24 +412,36 @@ function detach(root: ComputedNode) {
 		if (node.mark === Mark.Clean) node.validatedAt = epoch;
 		for (const edge of node.dependencies) {
 			const source = edge.source;
-			if (!source.observers.has(node)) continue;
-			source.observers.delete(node);
-			if (source.kind === NodeKind.Computed && source.observers.size() === 0) pending.push(source);
+			if (!removeObserver(source, node)) continue;
+			if (source.kind === NodeKind.Computed && source.observers.isEmpty()) pending.push(source);
 		}
 	}
 }
 
-/** @internal */
+/** Removes `observer` keeping the rest in order. Endings run newest first, so the last entry is the usual match. */
+function removeObserver(source: Source, observer: Observer): boolean {
+	const observers = source.observers;
+	const last = observers.size() - 1;
+	if (last >= 0 && observers[last] === observer) {
+		observers.pop();
+		return true;
+	}
+	const index = observers.indexOf(observer);
+	if (index < 0) return false;
+	observers.remove(index);
+	return true;
+}
+
+/** @internal Registers an observer that is not yet registered on `source`. */
 export function link(observer: Observer, source: Source) {
-	const first = source.observers.size() === 0;
-	source.observers.add(observer);
+	const first = source.observers.isEmpty();
+	source.observers.push(observer);
 	if (first && source.kind === NodeKind.Computed) attach(source);
 }
 
 function unlink(observer: Observer, source: Source) {
-	if (!source.observers.has(observer)) return;
-	source.observers.delete(observer);
-	if (source.kind === NodeKind.Computed && source.observers.size() === 0) detach(source);
+	if (!removeObserver(source, observer)) return;
+	if (source.kind === NodeKind.Computed && source.observers.isEmpty()) detach(source);
 }
 
 /** A rerun that read the same sources in the same order keeps every registration. */
