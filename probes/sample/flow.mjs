@@ -8,13 +8,15 @@ local label = screen and screen:FindFirstChild("Coins")
 return label and label.Text or "missing"
 `;
 
+export const markerPattern = (runId) => new RegExp(`S1\\|${runId}\\|client\\|marker`);
+
 // Drives an owned play test: prints a marker from each side, waits for the HUD, then presses E and reads the HUD.
 // `ctx.luau(datamodel, code)` and `ctx.call(tool, args)` talk to the session the caller proved is its own.
 export async function playFlow(ctx, { runId, presses, expectedGain }) {
 	const hud = async () => parseHud(await ctx.luau("Client", HUD_CODE));
 	await ctx.luau("Server", `print("S1|${runId}|server|marker")`);
 	await ctx.luau("Client", `print("S1|${runId}|client|marker")`);
-	if (!(await ctx.waitFor(new RegExp(`S1|${runId}|client|marker`), 30000))) throw Error("Client marker missing");
+	if (!(await ctx.waitFor(markerPattern(runId), 30000))) throw Error("Client marker missing");
 	const readings = [];
 	const record = (step, reading) => readings.push({ at: new Date().toISOString(), step, ...reading });
 	const loaded = Date.now() + 90000;

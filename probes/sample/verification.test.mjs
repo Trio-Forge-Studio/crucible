@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
 import { checkFlow, markerLines, parseHud } from "./evidence.mjs";
 import { chunks, parseRbxmx, steps } from "./rbxmx.mjs";
 
@@ -94,4 +96,17 @@ test("a Rojo model parses into nodes and emits creation steps for each descendan
 	assert.match(chunk, /\[=\[\n/);
 	assert.match(chunk, /Enum\.RunContext:FromValue\(1\)/);
 	assert.equal(chunks(list, 1).length, 2);
+});
+
+test("the client marker wait matches only the exact marker of its own run", async () => {
+	const { markerPattern } = await import("./flow.mjs");
+	const own = "Info [FLog::CreatorOutput] S1|run-a|client|marker";
+	assert.ok(markerPattern("run-a").test(own));
+	assert.equal(markerPattern("run-a").test("S1|run-a|server|marker"), false);
+	assert.equal(markerPattern("run-a").test("S1|run-b|client|marker"), false);
+	assert.equal(markerPattern("run-a").test("Sample.Hud client marker S1"), false);
+	const recorded = fs.readFileSync(path.join(import.meta.dirname, "results/live-r1.log"), "utf8");
+	const runId = /S1\|([0-9a-f-]+)\|server\|marker/.exec(recorded)[1];
+	assert.ok(markerPattern(runId).test(recorded));
+	assert.equal(markerPattern(runId).test(recorded.replace("|client|marker", "|server|marker")), false);
 });
