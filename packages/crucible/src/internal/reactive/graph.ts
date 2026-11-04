@@ -1,5 +1,4 @@
 import { CallResult, YIELDED } from "../runner";
-import type { ObjectState } from "../state";
 import { boundary, FrameKind, inBody, pop, push, top, type Completion, type Frame } from "./context";
 
 /** @internal */
@@ -331,7 +330,7 @@ function evaluateInline(evaluation: Evaluation) {
 function evaluate(node: ComputedNode) {
 	const evaluation = { node, frame: observerFrame(FrameKind.Pure, node) };
 	if (inBody()) evaluateInline(evaluation);
-	else contained(undefined, evaluateInline, evaluation, () => {});
+	else boundary(undefined, undefined, evaluateInline, evaluation, finishOpen);
 }
 
 /** @internal Finishes every computed a body left open: its evaluation failed with the body's error. */
@@ -341,19 +340,6 @@ export function finishOpen(completion: Completion) {
 	const failure = { reason: completion.result === CallResult.Yielded ? YIELDED : message, message };
 	for (const frame of completion.open)
 		if (frame.kind === FrameKind.Pure) settle(frame.observer as ComputedNode, frame, undefined, failure);
-}
-
-/** @internal `boundary` for graph bodies: computeds left open are finished before `complete` runs. */
-export function contained<A>(
-	owner: ObjectState | undefined,
-	body: (arg: A) => unknown,
-	arg: A,
-	complete: (completion: Completion) => void,
-) {
-	boundary(owner, body, arg, (completion) => {
-		finishOpen(completion);
-		complete(completion);
-	});
 }
 
 function settle(node: ComputedNode, frame: Frame, result: unknown, thrownFailure: Failure | undefined) {
@@ -428,8 +414,17 @@ function unlink(observer: Observer, source: Source) {
 	if (source.kind === NodeKind.Computed && source.observers.size() === 0) detach(source);
 }
 
+/** A rerun that read the same sources in the same order keeps every registration. */
+function sameSources(previous: readonly Edge[], following: readonly Edge[]): boolean {
+	const size = previous.size();
+	if (following.size() !== size) return false;
+	for (let i = 0; i < size; i++) if (previous[i].source !== following[i].source) return false;
+	return true;
+}
+
 /** @internal Moves an attached observer's registrations from `previous` to `following`. */
 export function rewire(observer: Observer, previous: readonly Edge[], following: readonly Edge[]) {
+	if (sameSources(previous, following)) return;
 	const had = new Set<Source>();
 	for (const edge of previous) had.add(edge.source);
 	const keep = new Set<Source>();

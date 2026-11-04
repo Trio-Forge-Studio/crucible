@@ -158,45 +158,40 @@ const mutants = [
 				"export function push(frame: Frame) {\n	const thread = anyThread;",
 			],
 			[
-				"export function pop(frame: Frame) {\n	const thread = coroutine.running();",
-				"export function pop(frame: Frame) {\n	const thread = anyThread;",
+				"export function pop(frame: Frame) {\n	const stack = stacks.get(coroutine.running());",
+				"export function pop(frame: Frame) {\n	const stack = stacks.get(anyThread);",
+			],
+			[
+				"		const stack = stacks.get(worker);\n		if (stack === undefined || stack.size() > 0) stacks.set(worker, [frame]);",
+				"		const stack = stacks.get(anyThread);\n		if (stack === undefined || stack.size() > 0) stacks.set(anyThread, [frame]);",
 			],
 		],
 	],
-	[
-		"open frames never finished",
-		"pair",
-		[13],
-		CONTEXT,
-		[["const open = job.worker === undefined ? [] : discard(job.worker);", "const open: Frame[] = [];"]],
-	],
-	[
-		"completion error swallowed",
-		"guard",
-		[13, 35],
-		CONTEXT,
-		[["	if (result !== CallResult.Ok) error(value, 0);\n", ""]],
-	],
+	["open frames never finished", "pair", [13], CONTEXT, [["	return open ?? NONE_OPEN;", "	return NONE_OPEN;"]]],
+	["completion error swallowed", "guard", [13, 35], CONTEXT, [["	if (!ok) error(err, 0);\n", ""]]],
 	[
 		"deferred endings dropped",
 		"pair",
 		[13, 25],
 		OWNERSHIP,
-		[["		if (deferred !== undefined) for (const ending of deferred) finish(ending);\n", ""]],
+		[["	if (deferred !== undefined) for (const ending of deferred) finish(ending);\n", ""]],
 	],
 	[
 		"running body never leaves the stack",
 		"pair",
 		[13, 25],
 		OWNERSHIP,
-		[["		if (index >= 0) bodies.remove(index);\n", ""]],
+		[["	if (index >= 0) bodies.remove(index);\n", ""]],
 	],
 	[
-		"boundary outside within",
+		"boundary outside a lifecycle scope",
 		"pair",
 		[16, 32],
 		CONTEXT,
-		[["within(owner, undefined, Hook.Callback, outer, job, owner)", "call(outer, job, owner, owner)"]],
+		[
+			["	openScope();\n	const [result, value] = call(inner,", "	const [result, value] = call(inner,"],
+			["	if (closeScope()) drain();\n	if (!ok)", "	if (!ok)"],
+		],
 	],
 	[
 		"equal computeds do not skip a run",
@@ -439,8 +434,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"	for (let i = releases.size() - 2; i >= 0; i -= 2) releaseValue(lifetime, releases[i] as Release, releases[i + 1]);",
-				"	for (let i = 0; i < releases.size(); i += 2) releaseValue(lifetime, releases[i] as Release, releases[i + 1]);",
+				"	runReleases(lifetime, releases, releases.size() - 2);",
+				"	const reversed = new Array<defined>();\n	for (let i = releases.size() - 2; i >= 0; i -= 2) reversed.push(releases[i] as defined, releases[i + 1] as defined);\n	runReleases(lifetime, reversed, reversed.size() - 2);",
 			],
 		],
 	],
@@ -451,8 +446,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"		if (completion.result !== CallResult.Ok) reportRelease(lifetime, kind, value, completion.value);",
-				"		if (false as boolean) reportRelease(lifetime, kind, value, completion.value);",
+				"	reportRelease(batch.lifetime, batch.releases[at] as Release",
+				"	if (false as boolean) reportRelease(batch.lifetime, batch.releases[at] as Release",
 			],
 		],
 	],
@@ -735,8 +730,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				"		if (completion.result !== CallResult.Ok) reportRelease(lifetime, kind, value, completion.value);",
-				"		reportRelease(lifetime, kind, value, completion.value);",
+				"		if (result !== CallResult.Ok) failRelease(batch, result, value);\n		else if (value === true) drain();",
+				"		failRelease(batch, result, value);\n		if (value === true) drain();",
 			],
 		],
 	],
@@ -807,9 +802,84 @@ const mutants = [
 		"swap",
 		[28],
 		OWNERSHIP,
-		[["	else if (job.kind === Release.DestroyMethod)", "	else if (job.kind === Release.DestroyUpperMethod)"]],
+		[["		else if (kind === Release.DestroyMethod)", "		else if (kind === Release.DestroyUpperMethod)"]],
 	],
 	["nil cleanup appended", "guard", [28], OWNERSHIP, [["	if (release === undefined) return;\n", ""]]],
+	[
+		"batch never drains between releases",
+		"pair",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				"		if (closeScope()) {\n			pop(batch);\n			return true;\n		}",
+				"		closeScope();",
+			],
+		],
+	],
+	[
+		"fresh worker after a failure runs without the frame",
+		"pair",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				"	batch.worker = coroutine.running();\n	const lifetime = batch.lifetime;",
+				"	const first = batch.worker === undefined;\n	batch.worker = coroutine.running();\n	const lifetime = batch.lifetime;",
+			],
+			["	push(batch);\n	for", "	if (first) push(batch);\n	for"],
+		],
+	],
+	[
+		"failure blamed on the next release",
+		"swap",
+		[28],
+		OWNERSHIP,
+		[
+			[
+				"	const at = batch.at;\n	reportRelease(",
+				"	const at = math.max(batch.at - 2, 0);\n	reportRelease(",
+			],
+		],
+	],
+	[
+		"release after a failure skipped",
+		"guard",
+		[28],
+		OWNERSHIP,
+		[["		i = batch.at - 2;", "		i = batch.at - 4;"]],
+	],
+	[
+		"failed release leaves its evaluations open",
+		"pair",
+		[13, 28],
+		OWNERSHIP,
+		[
+			[
+				"	finishOpen({ frame: undefined, result, value, open: discard(batch.worker, false), after: undefined });",
+				"	discard(batch.worker, false);",
+			],
+		],
+	],
+	[
+		"failed release never closes its scope",
+		"pair",
+		[13, 28],
+		OWNERSHIP,
+		[["	batch.scoped = false;\n	if (closeScope()) drain();\n}", "}"]],
+	],
+	[
+		"returned worker keeps its frames",
+		"pair",
+		[12, 21],
+		CONTEXT,
+		[
+			[
+				"	if (returned) stack.clear();\n	else stacks.delete(worker);",
+				"	if (!returned) stacks.delete(worker);",
+			],
+		],
+	],
 ];
 
 function run(command, args, timeout = 300000) {
