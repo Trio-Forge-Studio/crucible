@@ -6,6 +6,10 @@ const FAKE_RBXTSC: &str = r#"
 const fs = require("node:fs");
 fs.appendFileSync("rbxtsc.log", JSON.stringify({ args: process.argv.slice(2), stale: fs.existsSync("out/stale") }) + "\n");
 console.log("\x1b[90mrbxtsc progress\x1b[39m");
+// roblox-ts removes every out file without a source before it compiles.
+for (const name of fs.existsSync("out") ? fs.readdirSync("out") : []) {
+	if (!["main.server.luau", "tsconfig.tsbuildinfo"].includes(name)) fs.rmSync(`out/${name}`, { recursive: true });
+}
 if (process.env.FAKE_RBXTSC_EXIT) {
 	console.error("\x1b[96msrc/main.server.ts\x1b[0m:\x1b[93m1\x1b[0m:\x1b[93m1\x1b[0m - \x1b[91merror\x1b[0m\x1b[90m TS1005: \x1b[0mfake failure");
 	process.exit(Number(process.env.FAKE_RBXTSC_EXIT));
@@ -51,6 +55,15 @@ impl Game {
             .args(args)
             .current_dir(self.dir.path())
             .env_remove("FAKE_RBXTSC_EXIT")
+            .output()
+            .unwrap()
+    }
+
+    fn fail(&self) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_crucible"))
+            .arg("build")
+            .current_dir(self.dir.path())
+            .env("FAKE_RBXTSC_EXIT", "3")
             .output()
             .unwrap()
     }
@@ -143,12 +156,7 @@ fn usage_errors_exit_2_before_compiling() {
 #[test]
 fn roblox_ts_failure_keeps_its_diagnostics_and_builds_nothing() {
     let game = Game::new(None);
-    let out = Command::new(env!("CARGO_BIN_EXE_crucible"))
-        .arg("build")
-        .current_dir(game.dir.path())
-        .env("FAKE_RBXTSC_EXIT", "3")
-        .output()
-        .unwrap();
+    let out = game.fail();
     assert_eq!(code(&out), 1);
     let stderr = text(&out.stderr);
     assert!(stderr.contains("src/main.server.ts:1:1 - error TS1005: fake failure"), "{stderr}");
@@ -156,7 +164,6 @@ fn roblox_ts_failure_keeps_its_diagnostics_and_builds_nothing() {
     assert!(!stderr.contains('\x1b'), "redirected stderr carries no colour: {stderr:?}");
     assert!(out.stdout.is_empty());
     assert!(!game.dir.path().join("build").exists());
-    assert!(!game.dir.path().join("out/transformer.sha256").exists());
 }
 
 #[test]
@@ -201,6 +208,32 @@ fn transformer_change_compiles_from_clean() {
     fs::write(transformer.join("lib/macro.cjs"), "b").unwrap();
     assert_eq!(code(&game.build(&[])), 0);
     assert_eq!(game.compiles()[5]["stale"], false, "a nested content edit invalidates");
+}
+
+#[test]
+fn failed_build_keeps_the_transformer_receipt() {
+    let game = Game::new(None);
+    let stale = game.dir.path().join("out/stale");
+    let changed = |out: &Output| text(&out.stderr).contains("transformer changed");
+    assert_eq!(code(&game.build(&[])), 0);
+    for (round, broken) in [true, true, false].into_iter().enumerate() {
+        fs::write(&stale, "").unwrap();
+        let out = if broken { game.fail() } else { game.build(&[]) };
+        assert_eq!(code(&out), if broken { 1 } else { 0 }, "{}", text(&out.stderr));
+        assert!(!changed(&out), "round {round}: {}", text(&out.stderr));
+        assert_eq!(game.compiles()[round + 1]["stale"], true, "round {round} keeps out");
+    }
+    let transformer = game.dir.path().join("node_modules/@trioforge/crucible/transformer");
+    fs::write(transformer.join("index.js"), "module.exports = 2;").unwrap();
+    fs::write(&stale, "").unwrap();
+    let out = game.fail();
+    assert!(changed(&out), "a changed transformer still compiles from clean: {}", text(&out.stderr));
+    assert_eq!(game.compiles()[4]["stale"], false);
+    fs::write(&stale, "").unwrap();
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(!changed(&out), "the failed build recorded the new transformer: {}", text(&out.stderr));
+    assert_eq!(game.compiles()[5]["stale"], true);
 }
 
 #[test]
