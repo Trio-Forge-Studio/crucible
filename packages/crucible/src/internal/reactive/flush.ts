@@ -20,6 +20,7 @@ import {
 	useScheduler,
 	validate,
 	nextId,
+	type Reaction,
 	type Source,
 	type StateNode,
 } from "./graph";
@@ -93,7 +94,7 @@ function enqueue(effect: ReactionNode) {
 	request();
 }
 
-useScheduler((reaction) => enqueue(reaction as ReactionNode));
+useScheduler(enqueue as (reaction: Reaction) => void);
 
 function report(level: "warning" | "error", message: string) {
 	pcall(runtimeDiagnostic, level, message);
@@ -309,6 +310,22 @@ function reportBound(bound: string) {
 	);
 }
 
+const sortIds = new Array<number>();
+const sortNodes = new Map<number, ReactionNode>();
+
+/** Ids are unique, so sorting them as numbers gives `createdBefore`'s order without a Luau call per comparison. */
+function sortByCreation(list: ReactionNode[]) {
+	for (let i = 0; i < list.size(); i++) {
+		const node = list[i];
+		sortIds[i] = node.id;
+		sortNodes.set(node.id, node);
+	}
+	sortIds.sort();
+	for (let i = 0; i < list.size(); i++) list[i] = sortNodes.get(sortIds[i])!;
+	sortIds.clear();
+	sortNodes.clear();
+}
+
 function inCreationOrder(list: readonly ReactionNode[]): boolean {
 	for (let i = 1; i < list.size(); i++) if (createdBefore(list[i], list[i - 1])) return false;
 	return true;
@@ -326,7 +343,7 @@ function runRounds() {
 		batch = queue;
 		queue = [];
 		cursor = 0;
-		if (!inCreationOrder(batch)) batch.sort(createdBefore);
+		if (!inCreationOrder(batch)) sortByCreation(batch);
 		while (cursor < batch.size()) {
 			const effect = batch[cursor];
 			cursor += 1;
