@@ -803,6 +803,7 @@ test("T2 exact-line diagnostics and reviewer bypasses", () => {
 	const prefix = 'import { Subsystem, CrucibleBehaviour, inject, type All } from "@trioforge/crucible";\n';
 	const cases = [
 		["CRU004", 'import "@trioforge/crucible/emit";'],
+		["CRU004", 'import "@trioforge/crucible/testing";'],
 		["CRU004", 'import "@trioforge/crucible/internal/foo";'],
 		["CRU005", "export const bad = inject<number>();"],
 		["CRU005", "export function make<T>() { return inject<T>(); }"],

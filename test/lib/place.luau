@@ -133,6 +133,7 @@ return function(client: boolean?)
 		messages = messages,
 		closers = closers,
 		attributes = attributes,
+		runService = runService,
 		load = load,
 		import = function(module)
 			return runtime.import(include.RuntimeLib, module)

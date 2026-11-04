@@ -702,6 +702,7 @@ fn exact_line_diagnostics_and_reviewer_bypasses() {
     let prefix = "import { Subsystem, CrucibleBehaviour, inject, type All } from \"@trioforge/crucible\";\n";
     let cases = [
         ("CRU004", "import \"@trioforge/crucible/emit\";"),
+        ("CRU004", "import \"@trioforge/crucible/testing\";"),
         ("CRU004", "export type Emit = typeof import(\"@trioforge/crucible/emit\");"),
         ("CRU005", "export class Concrete extends Subsystem {}\nexport const bad = inject<typeof Concrete>();"),
         ("CRU005", "export class Concrete extends Subsystem {}\nexport const bad = inject<All<typeof Concrete>>();"),

@@ -61,7 +61,7 @@ export class ClientSession extends Session {
 
 	open() {
 		this.stage = Stage.Open;
-		openClaims({ side: "client", retired: () => {} });
+		openClaims({ side: () => "client", retired: () => {} });
 		const where = `ReplicatedStorage.${L.REMOTE_NAME}`;
 		const found = this.port.discover(L.CLIENT_DISCOVERY_TIMEOUT_SECONDS, (...args) =>
 			this.receive(argumentCount(args), args[0], args[1]),
