@@ -225,26 +225,24 @@ export function update(node: StateNode, change: (current: unknown) => unknown) {
 	);
 }
 
-function markObservers(source: Source) {
-	const pending = new Array<Observer>();
-	const levels = new Array<Mark>();
+/** Computeds a write turned from clean, whose observers still need a Check mark. Shared by every write. */
+const unmarked = new Array<ComputedNode>();
+
+function raise(source: Source, level: Mark) {
 	for (const o of source.observers) {
-		pending.push(o);
-		levels.push(Mark.Dirty);
-	}
-	while (pending.size() > 0) {
-		const o = pending.pop()!;
-		const level = levels.pop()!;
 		if (o.mark >= level) continue;
 		const wasClean = o.mark === Mark.Clean;
 		o.mark = level;
 		if (o.kind === NodeKind.Effect) schedule(o);
-		else if (wasClean)
-			for (const p of o.observers) {
-				pending.push(p);
-				levels.push(Mark.Check);
-			}
+		else if (wasClean) unmarked.push(o);
 	}
+}
+
+function markObservers(source: Source) {
+	// A scheduler that flushes at once would write again from inside this call, so each call keeps its own part.
+	const base = unmarked.size();
+	raise(source, Mark.Dirty);
+	while (unmarked.size() > base) raise(unmarked.pop()!, Mark.Check);
 }
 
 /** @internal */
