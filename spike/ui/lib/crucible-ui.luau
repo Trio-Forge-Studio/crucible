@@ -1,7 +1,9 @@
 -- The Luau a Crucible JSX lowering would emit, written by hand, plus the `Show` and keyed `For` it would call.
 -- `variant` picks how a reactive prop is lowered:
 --   "A": an initial read, then one general `effect` per prop.
---   "B": one `bind` node per prop (lib/binding.luau).
+--   "B": one `bind` node per prop (lib/binding.luau), on a patched trunk flush.
+--   "H": one binding node per prop from the runtime's own `createBinding`, with one shared sink per property name,
+--        as a compiler would emit it. The caller reads the initial value and writes it, then binds.
 -- Fixed props are assigned at creation. Components are plain functions that run once in their caller's owner. The
 -- root Instance of a mount, a `Show` branch or a `For` row is owned with `own`; Instances under it go with it.
 local fake = require("./instance")
@@ -21,7 +23,22 @@ return function(r, variant: string)
 		ownership.newLifetime, ownership.adopt, ownership.endLifetime, ownership.runBody, ownership.resolveOwner
 
 	local bind
-	if variant == "A" then
+	if variant == "H" then
+		local createBinding = r.flushModule.createBinding
+		local sinks = {}
+		function bind(instance, property: string, source)
+			local value = source()
+			instance[property] = value
+			local sink = sinks[property]
+			if sink == nil then
+				sink = function(target, next)
+					target[property] = next
+				end
+				sinks[property] = sink
+			end
+			createBinding(source, value, sink, instance)
+		end
+	elseif variant == "A" then
 		function bind(instance, property: string, read)
 			instance[property] = read()
 			effect(function()

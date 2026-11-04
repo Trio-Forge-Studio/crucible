@@ -1,0 +1,35 @@
+Lune 0.11.0+740, optimization level 2, 15 interleaved runs; median (min to max)
+trunk: C:/Users/Admin/AppData/Local/Temp/claude/c005149b716d0137/25d1a022-0d86-4efd-84a1-9c515e87c78a/scratchpad/trunk/packages/crucible/out
+head:  C:/Users/Admin/AppData/Local/Temp/claude/c005149b716d0137/25d1a022-0d86-4efd-84a1-9c515e87c78a/scratchpad/head-out
+
+1. Mount and unmount 1000 elements, 3 fixed and 2 reactive props each
+  mount                              trunk B           13.20  (9.71 to 28.54) µs an element
+  mount                              head B            14.97  (8.49 to 24.38) µs an element
+  mount                              Vide              23.62  (16.01 to 38.36) µs an element
+  unmount                            trunk B            6.36  (2.55 to 10.60) µs an element
+  unmount                            head B             4.42  (2.08 to 8.62) µs an element
+  unmount                            Vide               4.13  (2.10 to 9.41) µs an element
+
+3. Keyed For of 1000 rows, 2 reactive props a row (one list change, flushed)
+  reverse                            trunk B           11.55  (7.34 to 26.57) ms
+  reverse                            head B            10.20  (4.79 to 18.76) ms
+  reverse                            Vide               6.89  (3.78 to 15.84) ms
+  insert 100 in the middle           trunk B            7.51  (5.24 to 23.17) ms
+  insert 100 in the middle           head B             5.72  (4.68 to 13.55) ms
+  insert 100 in the middle           Vide               6.58  (4.84 to 16.27) ms
+  remove 100 from the middle         trunk B            3.26  (2.66 to 4.84) ms
+  remove 100 from the middle         head B             2.85  (2.39 to 6.79) ms
+  remove 100 from the middle         Vide               3.19  (2.64 to 4.39) ms
+  swap two rows                      trunk B            0.90  (0.73 to 1.74) ms
+  swap two rows                      head B             0.88  (0.77 to 1.84) ms
+  swap two rows                      Vide               0.42  (0.31 to 0.60) ms
+
+5. useReadable, 1000 bindings, each read by one Vide effect
+  create, first flush, destroy       trunk bridge      61.35  (42.96 to 223.67) µs a binding
+  create, first flush, destroy       head bridge       27.26  (11.37 to 62.68) µs a binding
+  update                             trunk bridge      42.22  (22.87 to 98.84) µs a binding
+  update                             head bridge       10.45  (7.09 to 25.15) µs a binding
+
+6. Heap growth per state write, one observer, 64 writes a window
+  write                              trunk            128.25  (128.25 to 128.25) bytes a write
+  write                              head               0.25  (0.25 to 0.25) bytes a write

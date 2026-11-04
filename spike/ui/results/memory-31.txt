@@ -1,0 +1,10 @@
+Lune 0.11.0+740, optimization level 2, 31 interleaved runs; median (min to max)
+trunk: C:/Users/Admin/AppData/Local/Temp/claude/c005149b716d0137/25d1a022-0d86-4efd-84a1-9c515e87c78a/scratchpad/trunk/packages/crucible/out
+head:  C:/Users/Admin/AppData/Local/Temp/claude/c005149b716d0137/25d1a022-0d86-4efd-84a1-9c515e87c78a/scratchpad/head-out
+
+4. Memory per mounted element with 2 reactive props (10000 mounted, heap settled before and after)
+  nothing mounted (noise floor)      -                 33.44  (-93.49 to 91.54) bytes an element
+  Instances alone, no reactivity     -                371.50  (310.49 to 425.01) bytes an element
+  mounted, Instances included        trunk B         2149.17  (1174.37 to 2198.86) bytes an element
+  mounted, Instances included        head B          1537.20  (1493.40 to 1610.62) bytes an element
+  mounted, Instances included        Vide            1364.87  (1264.26 to 1988.15) bytes an element

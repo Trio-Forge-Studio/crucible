@@ -1,13 +1,18 @@
--- Checks that the three variants render, update and clean up the same way before any of them is timed, plus the
--- binding guarantees variant B keeps. Run from the repository root after `pnpm build`:
+-- Checks that trunk B, head B and Vide render, update and clean up the same way before any of them is timed, plus
+-- the guarantees the spike's binding keeps on a trunk runtime. Head's binding node has its own Lune specs in
+-- test/reactive-bind.luau. Build both runtimes first, then from the repository root:
 --
---   lune run spike/ui/check
+--   lune run spike/ui/check <trunk out> <head out>
+local process = require("@lune/process")
 local subjects = require("./lib/subjects")
 local lists = require("./lib/lists")
 local fake = require("./lib/instance")
 local runtime = require("./lib/runtime")
 local CrucibleUI = require("./lib/crucible-ui")
 local Binding = require("./lib/binding")
+
+subjects.roots.trunk = assert(process.args[1], "the trunk runtime's out folder")
+subjects.roots.head = assert(process.args[2], "the head runtime's out folder")
 
 local failures = 0
 local function eq(actual, expected, label: string)
@@ -138,9 +143,9 @@ for _, name in subjects.names do
 	end
 end
 
-print("Crucible B binding guarantees")
+print("trunk B binding guarantees")
 do
-	local r = runtime.crucible()
+	local r = runtime.crucible({ root = subjects.roots.trunk, patch = true })
 	local ui = CrucibleUI(r, "B")
 	local binding = Binding(r)
 	local api = r.api

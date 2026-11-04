@@ -1,0 +1,15 @@
+Lune 0.11.0+740, optimization level 2, 31 interleaved runs; median (min to max)
+trunk: C:/Users/Admin/AppData/Local/Temp/claude/c005149b716d0137/25d1a022-0d86-4efd-84a1-9c515e87c78a/scratchpad/trunk/packages/crucible/out
+head:  C:/Users/Admin/AppData/Local/Temp/claude/c005149b716d0137/25d1a022-0d86-4efd-84a1-9c515e87c78a/scratchpad/head-out
+
+2. Update 1000 bound props
+  1000 separate states               trunk B            4.13  (3.56 to 8.65) µs a prop
+  1000 separate states               head B             3.20  (2.56 to 5.31) µs a prop
+  1000 separate states               Vide               2.51  (2.32 to 13.94) µs a prop
+  1000 bindings on one state         trunk B            3.31  (2.84 to 5.87) µs a prop
+  1000 bindings on one state         head B             2.59  (2.23 to 5.10) µs a prop
+  1000 bindings on one state         Vide               2.06  (1.77 to 4.34) µs a prop
+  1000 separate states               trunk B/Vide       1.67  (0.62 to 2.86) paired ratio
+  1000 bindings on one state         trunk B/Vide       1.58  (0.81 to 3.13) paired ratio
+  1000 separate states               head B/Vide        1.24  (0.25 to 1.74) paired ratio
+  1000 bindings on one state         head B/Vide        1.24  (0.68 to 2.48) paired ratio

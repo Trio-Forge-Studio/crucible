@@ -1,16 +1,16 @@
--- Loads a fresh Crucible reactive core and a fresh Vide, both compiled at one optimization level and both seeing
--- the fake Instance. Run from the repository root after `pnpm build`.
+-- Loads a fresh Crucible reactive core from a built runtime folder and a fresh Vide, both compiled at one
+-- optimization level and both seeing the fake Instance.
 --
--- The compiled flush gets one edit on load: `runRounds` sends a node marked `binding` to `runBinding` instead of
--- `runOnce`. That is the single branch variant B needs in the runtime; everything else B uses is already exported.
--- The edit is inert for nodes without the mark, so variant A runs on the same patched flush.
+-- With `patch`, the compiled flush gets one edit on load: `runRounds` sends a node marked `binding` to `runBinding`
+-- instead of `runOnce`. That is the branch the spike's variant B (lib/binding.luau) needs in a trunk runtime. A
+-- runtime with its own binding node loads unpatched. With `vide`, the runtime's import of `@rbxts/vide` gets that
+-- Vide, so the bridge and the bench share one graph.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local task = require("@lune/task")
 local Engine = require("../../../test/lib/engine")
 local fake = require("./instance")
 
-local ROOT = "packages/crucible/out"
 local VIDE = "spike/ui/vendor/vide"
 local OPTIMIZATION = 2
 
@@ -41,7 +41,9 @@ end
 
 type Node = { path: string, Parent: Node }
 
-local function crucible(engine)
+local VIDE_PACKAGE = table.freeze({ path = "@rbxts/vide/src" })
+
+local function crucible(engine, root: string, patch: boolean, videLib)
 	local nodes: { [string]: Node } = {}
 	local function node(path: string): Node
 		local existing = nodes[path]
@@ -62,7 +64,13 @@ local function crucible(engine)
 	local loaded = {}
 	local load
 	local TS = {}
+	function TS.getModule()
+		return { src = VIDE_PACKAGE }
+	end
 	function TS.import(_caller, base: Node, ...: string)
+		if base == VIDE_PACKAGE then
+			return assert(videLib, "this runtime was loaded without Vide")
+		end
 		local path = base.path
 		for _, name in { ... } do
 			path ..= "/" .. name
@@ -78,7 +86,7 @@ local function crucible(engine)
 		if loaded[path] == nil then
 			local file = if fs.isFile(path .. ".luau") then path .. ".luau" else path .. "/init.luau"
 			local source = fs.readFile(file)
-			if string.match(path, "/internal/reactive/flush$") then
+			if patch and string.match(path, "/internal/reactive/flush$") then
 				source = patchFlush(source)
 			end
 			local env = { script = node(path), _G = G, task = task, typeof = fake.typeof }
@@ -90,7 +98,7 @@ local function crucible(engine)
 		return loaded[path]
 	end
 	return function(relative: string)
-		return load(ROOT .. "/" .. relative)
+		return load(root .. "/" .. relative)
 	end
 end
 
@@ -172,10 +180,11 @@ end
 
 local runtime = {}
 
--- A fresh Crucible realm: the reactive API, the internal modules a compiled UI calls, and its flush.
-function runtime.crucible()
+-- A fresh Crucible realm loaded from `options.root`: the reactive API, the internal modules a compiled UI calls,
+-- and its flush.
+function runtime.crucible(options: { root: string, patch: boolean?, vide: any? })
 	local engine = Engine.new()
-	local module = crucible(engine)
+	local module = crucible(engine, options.root, options.patch == true, options.vide)
 	local r = {
 		engine = engine,
 		api = module("reactive"),
@@ -185,6 +194,7 @@ function runtime.crucible()
 		context = module("internal/reactive/context"),
 		runner = module("internal/runner"),
 		diagnostics = module("internal/diagnostics"),
+		module = module,
 	}
 	r.flushModule.useReactivePort(engine.port)
 	r.flushModule.releaseBarrier()

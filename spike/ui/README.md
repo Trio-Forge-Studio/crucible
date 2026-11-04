@@ -1,5 +1,45 @@
 # UI renderer spike
 
+## Round 2: trunk against the reactive-bind branch
+
+Round 2 measures whether `perf/reactive-bind` closes the gap the first round found. It reruns this harness against two built runtimes. Trunk B is the spike's binding on a patched trunk flush, at `origin/main` 23bf3ea. Head B is the runtime's own binding node, built from the branch at fbfe74d, with one shared sink per property name, as a compiler would emit it.
+
+Build trunk in a second worktree and the branch here, then run from the repository root:
+
+```sh
+lune run spike/ui/check <trunk out> <head out>
+lune run spike/ui/bench <trunk out> <head out> 15        # every section; a fourth argument such as 24 picks some
+pwsh spike/ui/pinned.ps1 -TrunkOut <trunk out> -HeadOut <head out> -Sections 2 -Runs 31   # High priority, one core
+```
+
+Each run of `bench` times every subject once, in an order that rotates by run. Section 2 also prints each run's head-to-Vide ratio, which cancels drift the subjects share. `profile.luau` splits head B's update into its write, flush, order check, numeric sort and property write. `variants.luau` compared the flush variants that were tried. Every run is in `results/`.
+
+Other sessions kept 30% to 85% of the machine's 16 logical cores busy through every run, so absolute times swing by up to 2× between runs. The update rows were therefore rerun at High priority on one core, and the gate uses the paired ratios. Memory does not depend on CPU time.
+
+| Row (1,000 elements) | Trunk B | Head B | Vide | Head ÷ Vide |
+| --- | --- | --- | --- | --- |
+| Mount, µs an element | 13.2 | 15.0 | 23.6 | 0.63 |
+| Unmount, µs an element | 6.4 | 4.4 | 4.1 | 1.07 |
+| Update, separate states, µs a prop | 4.13 | 3.20 | 2.51 | 1.24 paired (1.20 in the repeat) |
+| Update, one shared state, µs a prop | 3.31 | 2.59 | 2.06 | 1.24 paired (1.51 in the repeat) |
+| For reverse, ms | 11.6 | 10.2 | 6.9 | 1.48 |
+| Memory, bytes an element, Instance included | 2,149 | 1,537 | 1,365 | 1.13 |
+| Bridge create, first flush and destroy, µs a binding | 61 | 27 | | |
+| Bridge update, µs a binding | 42 | 10 | | |
+| Heap growth per state write, bytes | 128 | 0.25 | | |
+
+Update rows are medians of 31 pinned runs (`pinned-updates-a.txt`), memory of 31 runs, and the rest of 15 pinned runs. Across all seven timed runs, head over Vide ranged from 1.08 to 1.78 on separate states and from 1.03 to 1.65 on one state. Memory ranged from 1.10 to 1.17 over three runs. `.lune/bench-vide` on the branch puts the bridge at 8.9 to 11.3 µs to create and 4.9 to 5.2 µs an update.
+
+### What limits head B
+
+- The write no longer allocates. Trunk's `markObservers` built two arrays a write, 128 bytes. Head grows the heap by 0.25 bytes a write.
+- A round already in creation order no longer sorts. A state's observers live in a `Set`, which iterates in hash order, so one write to a shared state still fills an out-of-order round. Head sorts it by numeric id, which `profile.luau` puts at 0.65 µs a prop under load, against 0.86 for the comparator sort on a quiet machine.
+- Every sink call runs under `pcall`, which costs about 0.25 µs a prop over a bare property write (0.73 against 0.49 under load). Vide calls its effect directly at the write.
+- The flush's per-entry bookkeeping (`queued`, `mark`, the per-effect run count) is the rest of the update gap.
+- A binding is a table with 15 named fields, so Luau gives it a 16-slot hash, about 570 bytes. Head spends 583 bytes a reactive prop and Vide 497. Fewer than 9 fields would halve the table, and the fields the flush and ownership share with effects already exceed that.
+
+## Round 1
+
 A measurement spike, not a library. Should Crucible lower JSX to Instance code on its own reactive graph, or keep Vide? This folder holds hand-written Luau for what a lowering would emit, in two variants, and the same UI written the Vide way. All three run on one fake Instance in Lune.
 
 Run from the repository root after `pnpm build`:

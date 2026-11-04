@@ -1,0 +1,16 @@
+Lune 0.11.0+740, optimization level 2, 1000 bindings, 15 runs; median (min to max)
+
+create and destroy
+  Vide only      3.755 ms (2.911 to 5.469),   3755 ns a binding
+  binding only   2.224 ms (1.718 to 3.892),   2224 ns a binding
+  bridge         8.906 ms (7.834 to 12.354),   8906 ns a binding
+
+update, one state each
+  Vide only      1.784 ms (1.636 to 3.516),   1784 ns a binding
+  binding only   2.033 ms (1.834 to 4.410),   2033 ns a binding
+  bridge         4.906 ms (4.580 to 8.315),   4906 ns a binding
+
+update, one shared state
+  Vide only      1.432 ms (1.287 to 1.999),   1432 ns a binding
+  binding only   1.821 ms (1.638 to 3.239),   1821 ns a binding
+  bridge         4.584 ms (4.269 to 9.955),   4584 ns a binding
