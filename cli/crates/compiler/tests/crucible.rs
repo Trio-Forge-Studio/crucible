@@ -139,11 +139,17 @@ fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
         paths,
         [
             "client/main.client.luau",
+            "client/systems/hud.luau",
             "client/systems/renderer.luau",
             "server/main.server.luau",
             "server/systems/controller.luau",
+            "server/systems/event.luau",
             "server/systems/member.luau",
             "server/systems/store.luau",
+            "server/systems/wallet.luau",
+            "shared/messages.luau",
+            "shared/profile.luau",
+            "shared/state.luau",
         ]
     );
     let source = |path: &str| &modules.iter().find(|m| m.path == path).unwrap().source;

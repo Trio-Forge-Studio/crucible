@@ -1,0 +1,14 @@
+2026-11-03T23:25:13.929Z,32.929245,3330,6,Info [FLog::CreatorOutput] S1|ba9c007e-eb39-4681-94f5-cbe400fef201|server|marker
+2026-11-03T23:25:13.987Z,32.987843,167c,6,Info [FLog::CreatorOutput] S1|ba9c007e-eb39-4681-94f5-cbe400fef201|client|marker
+2026-11-03T23:25:14.101Z,33.101955,31bc,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 2
+2026-11-03T23:25:14.139Z,33.139053,1458,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 8   Total: 8   Last: +2
+2026-11-03T23:25:14.343Z,33.343014,3a98,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 2
+2026-11-03T23:25:14.376Z,33.376251,31bc,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 10   Total: 10   Last: +2
+2026-11-03T23:25:14.528Z,33.528946,1458,6,Info [FLog::CreatorOutput] Info: [Sample.Wallet] Hezaerd collected 2
+2026-11-03T23:25:14.563Z,33.563229,3324,6,Info [FLog::CreatorOutput] Info: [Sample.Hud] hud Coins: 12   Total: 12   Last: +2
+2026-11-03T23:25:16.752Z,35.752014,31bc,6,Info [FLog::CreatorOutput] S2 controller shutdown
+2026-11-03T23:25:17.204Z,36.204418,31bc,6,Info [FLog::CreatorOutput] S2 store shutdown
+--- faults
+2026-11-03T23:24:47.002Z,6.002094,0d48,6,Info [FLog::PluginManagementFetch] Fetching plugin permissions for permission type HttpService
+2026-11-03T23:25:16.751Z,35.751003,31bc,6,Warning [FLog::CloseDataModel] Drain: waiting on shutdown participant DataStoreService
+2026-11-03T23:25:17.412Z,36.412613,31bc,6,Warning [FLog::CloseDataModel] Drain: completed DataStoreService

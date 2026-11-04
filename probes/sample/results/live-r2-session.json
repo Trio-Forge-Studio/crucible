@@ -1,0 +1,56 @@
+{
+	"label": "live-r2",
+	"runId": "ba9c007e-eb39-4681-94f5-cbe400fef201",
+	"placeId": 101113691364993,
+	"universeId": 10774131158,
+	"errors": [],
+	"freePhysicalMemoryKB": 8272900,
+	"launchedAt": "2026-11-03T23:24:39.645Z",
+	"pid": 5380,
+	"nativeLog": "0.745.0.7451137_20261103T232440Z_Studio_88471_last.log",
+	"candidates": [
+		{
+			"id": "1c3726c1-84c3-4ea0-b0b4-5aa01cd06a2e",
+			"name": null
+		}
+	],
+	"candidateError": "Error: {\"content\":[{\"type\":\"text\",\"text\":\"Network action ExecuteLuau.loadCode sent to DMN_ID_EDIT failed - Target is not reachable (ExecuteLuau.loadCode, DMN_ID_EDIT). No OnInvoke handler responded for this action. Sender: DMN_ID_STANDALONE.\"}],\"isError\":true}",
+	"studioId": "1c3726c1-84c3-4ea0-b0b4-5aa01cd06a2e",
+	"version": "0.745.0.7451137 placeId=101113691364993 gameId=10774131158",
+	"insert": "moved 6 chunks",
+	"configApplied": true,
+	"screenshot": "D:\\worktrees\\crucible\\t3-eada22b5\\probes\\sample\\results\\live-r2-client.png",
+	"readings": [
+		{
+			"at": "2026-11-03T23:25:13.218Z",
+			"step": "loaded",
+			"coins": 6,
+			"total": 6,
+			"last": 0
+		},
+		{
+			"at": "2026-11-03T23:25:13.438Z",
+			"step": "press-1",
+			"coins": 8,
+			"total": 8,
+			"last": 2
+		},
+		{
+			"at": "2026-11-03T23:25:13.641Z",
+			"step": "press-2",
+			"coins": 10,
+			"total": 10,
+			"last": 2
+		},
+		{
+			"at": "2026-11-03T23:25:13.858Z",
+			"step": "press-3",
+			"coins": 12,
+			"total": 12,
+			"last": 2
+		}
+	],
+	"flow": [],
+	"closeMethod": "Stop-Process",
+	"processRemaining": false
+}

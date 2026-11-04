@@ -1,0 +1,46 @@
+{
+	"label": "memory-r2",
+	"runId": "7a801216-0916-446e-a4f6-431cf695c710",
+	"pid": 13472,
+	"place": "D:\\worktrees\\crucible\\t3-eada22b5\\build\\sample-probe\\s0-memory-r2-12784-433f3cc3-446a-4501-8925-17bb1c86bee1.rbxl",
+	"launchedAt": "2026-11-03T23:26:12.910Z",
+	"freePhysicalMemoryKB": 8767424,
+	"driverPid": 12784,
+	"studioId": "a91bc6a6-6a7d-4f93-867d-39832c8d5e5b",
+	"version": "0.745.0.7451137",
+	"nativeLog": "0.745.0.7451137_20261103T232612Z_Studio_7C890_last.log",
+	"screenshot": "D:\\worktrees\\crucible\\t3-eada22b5\\probes\\sample\\results\\memory-r2-client.png",
+	"flow": [],
+	"readings": [
+		{
+			"at": "2026-11-03T23:26:36.169Z",
+			"step": "loaded",
+			"coins": 0,
+			"total": 0,
+			"last": 0
+		},
+		{
+			"at": "2026-11-03T23:26:36.380Z",
+			"step": "press-1",
+			"coins": 1,
+			"total": 1,
+			"last": 1
+		},
+		{
+			"at": "2026-11-03T23:26:36.597Z",
+			"step": "press-2",
+			"coins": 2,
+			"total": 2,
+			"last": 1
+		},
+		{
+			"at": "2026-11-03T23:26:36.813Z",
+			"step": "press-3",
+			"coins": 3,
+			"total": 3,
+			"last": 1
+		}
+	],
+	"closeMethod": "Stop-Process",
+	"processRemaining": false
+}

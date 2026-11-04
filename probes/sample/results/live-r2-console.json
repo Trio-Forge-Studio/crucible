@@ -1,0 +1,9 @@
+{
+	"content": [
+		{
+			"type": "text",
+			"text": "[Sample.Server] S2 game debug server\n[Sample.Server] S2 game info server\n[Sample.Server] S2 game warn server\n[Sample.Server] S2 deliberate game error server\n\nServerScriptService.TS.main:15\n\nStack Begin\nScript 'ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible.out.internal.log-output', Line 66\nStack End\nS2 store awake\nS2 controller awake\nS2 controller start\nS2 server booted\n[Sample.Wallet] coin multiplier 1\n[Sample.Wallet] coin multiplier 2\n[Sample.Client] S2 game debug client\n[Sample.Client] S2 game info client\n[Sample.Client] S2 game warn client\n[Sample.Client] S2 deliberate game error client\n\nPlayers.Hezaerd.PlayerScripts.TS.main:17\n\nStack Begin\nScript 'ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible.out.internal.log-output', Line 66\nStack End\nS2 renderer awake\nS2 renderer start\nS2 client booted\n[Sample.Hud] hud Coins: 0   Total: 0   Last: +0\n[Sample.Hud] hud Coins: 0   Total: 0   Last: +0\nS2 render 1\nS2 render 2\nS2 render 3\n[Sample.Hud] hud Coins: 6   Total: 6   Last: +0\nS2 render 4\nS2 render 5\nS1|ba9c007e-eb39-4681-94f5-cbe400fef201|server|marker\nS1|ba9c007e-eb39-4681-94f5-cbe400fef201|client|marker\n[Sample.Wallet] Hezaerd collected 2\n[Sample.Hud] hud Coins: 8   Total: 8   Last: +2\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\nContentId: rbxassetid://203785492 failed due to: Asset type does not match requested type\n[Sample.Wallet] Hezaerd collected 2\n[Sample.Hud] hud Coins: 10   Total: 10   Last: +2\n[Sample.Wallet] Hezaerd collected 2\n[Sample.Hud] hud Coins: 12   Total: 12   Last: +2\nS2 controller shutdown\nS2 store shutdown"
+		}
+	],
+	"isError": false
+}
