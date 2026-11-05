@@ -3,9 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const ansi = new RegExp(String.fromCharCode(27) + String.raw`\[[0-9;]*m`, "g");
 
@@ -76,7 +74,12 @@ function build(name, files) {
 		"junction",
 	);
 	fs.mkdirSync(path.join(game, "node_modules/@rbxts"));
-	for (const types of ["compiler-types", "types"])
+	fs.symlinkSync(
+		path.join(repo, "packages/compiler-types"),
+		path.join(game, "node_modules/@trioforge/compiler-types"),
+		"junction",
+	);
+	for (const types of ["types"])
 		fs.symlinkSync(
 			fs.realpathSync(path.join(repo, "packages/crucible/node_modules/@rbxts", types)),
 			path.join(game, "node_modules/@rbxts", types),
@@ -107,19 +110,18 @@ function build(name, files) {
 		},
 	});
 	write("tsconfig.json", {
-		extends: path.join(repo, "tsconfig.rbxts.json"),
+		extends: path.join(repo, "tsconfig.json"),
 		compilerOptions: {
 			rootDir: "src",
 			outDir: "out",
 			declaration: false,
-			typeRoots: ["node_modules/@rbxts", "node_modules/@trioforge"],
-			types: ["compiler-types", "types"],
-			plugins: [{ transform: "@trioforge/crucible/transformer" }],
+
+			types: ["@trioforge/compiler-types", "@rbxts/types"],
 		},
 		include: ["src"],
 	});
 	for (const [file, text] of Object.entries(files)) write(file, text);
-	const result = spawnSync(process.execPath, [require.resolve("roblox-ts/out/CLI/cli.js"), "-p", game], {
+	const result = spawnSync(process.execPath, [path.join(repo, "test/lib/compile.mjs"), game], {
 		cwd: game,
 		encoding: "utf8",
 	});
@@ -139,12 +141,12 @@ try {
 	const files = { ...accepted };
 	for (const [file, [text]] of Object.entries(rejected)) files[file] = text;
 	const bad = build("rejected", files);
-	assert.equal(bad.status, 1, `the rbxtsc build rejects every wrong line\n${bad.output}`);
+	assert.equal(bad.status, 1, `the Crucible compiler build rejects every wrong line\n${bad.output}`);
 	assert.equal(bad.output.match(/ error TS/g)?.length, Object.keys(rejected).length, bad.output);
 	for (const [file, [, code, message]] of Object.entries(rejected)) {
-		const at = bad.output.indexOf(`${file}:`);
+		const at = bad.output.indexOf(`${file}(`);
 		assert.ok(at >= 0, `${file} fails the build\n${bad.output}`);
-		const reported = bad.output.slice(at).replace(/^\S+ - /, "");
+		const reported = bad.output.slice(at).replace(/^.*?\): /, "");
 		assert.ok(reported.startsWith(`error TS${code}: ${message}`), `${file}\n${bad.output}`);
 	}
 	console.log(

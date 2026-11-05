@@ -55,9 +55,7 @@ impl Game {
         let dir = scratch.join(ancestor).join("game");
         let installed = dir.join("node_modules/@trioforge/crucible");
         let package = repo().join("packages/crucible");
-        for entry in ["out"] {
-            copy_declarations(&package.join(entry), &installed.join(entry));
-        }
+        copy_declarations(&package.join("out"), &installed.join("out"));
         copy_declarations(&package.join("node_modules/@rbxts/vide"), &dir.join("node_modules/@rbxts/vide"));
         std::fs::copy(package.join("package.json"), installed.join("package.json")).unwrap();
         std::fs::create_dir_all(dir.join("src/server")).unwrap();

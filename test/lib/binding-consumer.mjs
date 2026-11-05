@@ -66,7 +66,7 @@ export function lookup(instance: Instance): LockerZone | undefined { return Lock
 							$className: "Folder",
 							"@trioforge": {
 								$className: "Folder",
-								crucible: { $path: path.join(repo, "packages/crucible/out") },
+								crucible: { $path: "node_modules/@trioforge/crucible" },
 							},
 						},
 					},

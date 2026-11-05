@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
-import ts from "typescript";
+import { typecheck } from "./lib/typecheck.mjs";
 
 // Data rule 8's type cases (probes/types P1 to P18 and N1 to N30) over the real runtime package's declarations, as a
 // game sees them. Every negative line carries `@ts-expect-error`, which TypeScript reports when the line compiles, so
@@ -234,33 +234,8 @@ test("rule 8 P1 to P18 and N1 to N30 type-check against the runtime package's de
 		[`${dir}/positive.ts`, positive],
 		[`${dir}/negative.ts`, negative],
 	]);
-	const config = ts.getParsedCommandLineOfConfigFile(
-		`${sample}/tsconfig.json`,
-		{},
-		{
-			...ts.sys,
-			onUnRecoverableConfigFileDiagnostic: (diagnostic) =>
-				assert.fail(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
-		},
-	);
-	const options = { ...config.options, noEmit: true, incremental: false, tsBuildInfoFile: undefined, plugins: [] };
-	const host = ts.createCompilerHost(options);
-	const { fileExists, readFile, getSourceFile } = host;
-	host.fileExists = (file) => files.has(file) || fileExists(file);
-	const { directoryExists } = host;
-	host.directoryExists = (folder) => folder.replaceAll("\\", "/") === dir || (directoryExists?.(folder) ?? false);
-	host.readFile = (file) => files.get(file) ?? readFile(file);
-	host.getSourceFile = (file, language, ...rest) =>
-		files.has(file) ? ts.createSourceFile(file, files.get(file), language) : getSourceFile(file, language, ...rest);
-	const program = ts.createProgram([...files.keys()], options, host);
-	const diagnostics = [...files.keys()].flatMap((file) =>
-		ts.getPreEmitDiagnostics(program, program.getSourceFile(file)),
-	);
-	assert.equal(
-		diagnostics.length,
-		0,
-		ts.formatDiagnostics(diagnostics, { ...host, getNewLine: () => "\n", getCanonicalFileName: (file) => file }),
-	);
+	const result = typecheck(files);
+	assert.equal(result.status, 0, result.output);
 	const directives = negative.match(/@ts-expect-error N\d+/g) ?? [];
 	assert.equal(directives.length, 33, "every negative case is present");
 });
