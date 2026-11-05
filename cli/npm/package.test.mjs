@@ -180,7 +180,15 @@ test(
 		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
 		const listing = run("npm", ["ls", "--all", "--json"], game);
 		assert.equal(listing.status, 0, listing.stderr);
-		assert.doesNotMatch(listing.stdout, /"(?:roblox-ts|typescript)"\s*:/);
+		const pending = [JSON.parse(listing.stdout)];
+		while (pending.length > 0) {
+			for (const [name, dependency] of Object.entries(pending.pop().dependencies ?? {})) {
+				if (["roblox-ts", "typescript"].includes(name)) {
+					assert.deepEqual(dependency, {}, `${name} must not be installed`);
+				}
+				pending.push(dependency);
+			}
+		}
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);
