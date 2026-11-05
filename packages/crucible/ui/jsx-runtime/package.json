@@ -1,4 +1,0 @@
-{
-	"main": "../../out/ui/jsx-runtime.luau",
-	"types": "../../out/ui/jsx-runtime.d.ts"
-}
