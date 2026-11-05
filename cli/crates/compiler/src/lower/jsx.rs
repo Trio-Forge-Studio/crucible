@@ -95,7 +95,7 @@ impl Lower<'_> {
         }
     }
 
-    fn ui(&mut self, name: &'static str) -> Expr {
+    pub(super) fn ui(&mut self, name: &'static str) -> Expr {
         self.uses_ui = true;
         Expr::global("__ui").field(name)
     }
@@ -120,11 +120,14 @@ impl Lower<'_> {
         };
         let new = Expr::global("Instance.new").call(vec![Expr::String(Cow::Owned(class.to_owned()))]);
         let instance = self.push_temp(new);
+        let mut group = None;
         for attribute in &element.attributes {
             if let Attribute::Named { node, .. } = attribute
                 && let Some(Prop::Class(style)) = self.fact(*node).and_then(|f| f.prop.as_ref())
+                && let Some(interaction) = self.class_style(*node, &instance, style.style())
+                && !style.style().groups().is_empty()
             {
-                self.fixed_style(&instance, style.style());
+                group = Some((style.style().groups().clone(), interaction));
             }
         }
         for attribute in element.attributes {
@@ -164,6 +167,8 @@ impl Lower<'_> {
                 self.current_block.push(statement);
             }
         }
+        let grouped = group.is_some();
+        self.groups.extend(group);
         for child in element.children {
             match child {
                 Child::Text(_) => self.error(n, "text in an intrinsic element is not supported; set its Text"),
@@ -177,6 +182,9 @@ impl Lower<'_> {
                     self.current_block.push(Stmt::Call(append));
                 }
             }
+        }
+        if grouped {
+            self.groups.pop();
         }
         instance
     }

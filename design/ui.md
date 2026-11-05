@@ -68,20 +68,20 @@ The binding is a node kind in the reactive graph, not an effect with flags. The 
 The compiler resolves each class token to a rule. An element's style groups those rules by target:
 
 ```
-Value   = typed write, such as Size(X, Offset) or TextColor3(Rgb)
-Rule    = { variant: Variant, value: Value }
-          -- Target is derived from Value.
-Target  = Prop(name) | Modifier(kind, prop)
-          -- kind: UICorner, UIPadding, UIStroke, UIListLayout, UIGradient, size and aspect constraints
-Variant = Base | Hover | Press | Focus | Disabled | Breakpoint(name) | Orientation(name)
-        | Input(Touch | Mouse | Gamepad) | Dark | Group(name, Variant)
-Style   = Map<Target, ordered list of (Variant, Value)>
+Value     = typed write, such as Size(X, Offset) or TextColor3(Rgb)
+Rule      = { conditions: sorted list of Condition, value: Value, token }
+            -- Target is derived from Value. No conditions is a base rule.
+Target    = Prop(name) | Modifier(kind, prop)
+            -- kind: UICorner, UIPadding, UIStroke, UIListLayout, UIGradient, size and aspect constraints
+Condition = State(Hover | Press | Focus) | Group(name?, Hover | Press | Focus) | Breakpoint(name, min width)
+          | Orientation(Portrait | Landscape) | Input(Touch | Mouse | Gamepad) | Dark
+Style     = Map<Target, ordered list of Rule>, and the element's group names
 ```
 
 Emission follows from the shape.
 
-- A target with only a `Base` entry is a fixed value. It becomes an assignment, or a modifier child created with the element.
-- A target with variant entries becomes one binding. The binding picks the last entry whose variant is active, the same precedence a later class has over an earlier one.
+- A target with only base rules is a fixed value. It becomes an assignment, or a modifier child created with the element.
+- A target with a conditional rule after its last base rule becomes one binding. The binding picks the last rule whose conditions all hold, the same precedence a later class has over an earlier one, and falls back to the base rule.
 - A `className` whose type is a union of literals, such as `open ? "bg-slate-600" : "bg-slate-800"`, compiles every member. The element binds to the condition and switches between precompiled styles.
 - A `className` passed to a component reaches the intrinsic element as a precompiled `Style`. When a component merges its own classes with the caller's, the runtime merges two style tables and parses nothing.
 - A `className` of type `string`, or a token the theme does not define, is a compile error at the token's location.
@@ -96,7 +96,7 @@ Anvil's Vide imports are `effect` (11 files), `source` (10), `untrack` (9), `rea
 
 ### One environment state drives variants
 
-`hover:`, `active:`, and `focus:` read the same interaction state that the press and focus primitives keep, so a styled button and a headless press agree on what is pressed. Breakpoints, orientation, input mode, and `dark:` read one client-wide environment state. Anvil's `installAnvil` adapter supplies the input device today. In Crucible, a client subsystem keeps the environment, and a game has no install call.
+`hover:`, `active:`, and `focus:` read `interaction(instance)`, one memoized hover, press and focus state per GuiObject, which the press and focus primitives will share, so a styled button and a headless press agree on what is pressed. Breakpoints, orientation, input mode, and `dark:` read `environment`, one client-wide state in the `ui` entry. Anvil's `installAnvil` adapter supplies the input device today. In Crucible, the environment starts itself on its first read, and a game has no install call.
 
 ## Two JSX lowerings
 
@@ -115,7 +115,7 @@ Each phase ends in a check that a reviewer can repeat.
 
 1. **Fix the reactive core's write and flush cost, and add the binding node.** A state write allocates nothing, a flush skips its sort when the batch is already in creation order, and the binding node joins the graph. The Vide bridge moves onto the binding. The check is `pnpm check`, new Lune specs for the binding, and the spike's benchmark rerun against trunk and Vide. If the gate in [Goal and pass bar](#goal-and-pass-bar) fails, stop and decide again before phase 2.
 2. **Add JSX to the compiler.** Add both lowerings, the `ui` entry with `bind`, `Show`, `For`, and mounting, and the JSX types for intrinsic elements. The check is Lune specs that mount, update, and unmount trees on the sample game built by the compiler, and FD's Vide JSX compiling unchanged.
-3. **Add classes.** Add the theme file, fixed classes, and modifiers first, then variants and the environment subsystem. The check is compiler tests that pin each class to the properties and children it emits, and a compile error for each bad input listed above.
+3. **Add classes.** Add the theme file, fixed classes, and modifiers first, then variants and the environment. The check is compiler tests that pin each class to the properties and children it emits, and a compile error for each bad input listed above.
 4. **Move Anvil in.** Port the primitives and Anvil's Lune specs into `@trioforge/crucible/ui`, and add context, `batch`, and `read` to the reactive core. The check is every ported spec passing, then archiving the Anvil repository and deprecating `@trioforge/anvil`.
 5. **Move FD's screens.** FD switches its UI one screen at a time once it builds with the Crucible compiler. A Studio smoke run checks hover, gamepad selection, and breakpoints on the first screen. When no screen imports Vide, delete the Vide lowering, `@trioforge/crucible/vide`, and the optional `@rbxts/vide` peer dependency.
 
@@ -131,9 +131,15 @@ These are settled.
 - **Opt-in.** A file gets the compiled lowering with `jsx: "react-jsx"` and `jsxImportSource: "@trioforge/crucible/ui"`, or the `@jsxImportSource` pragma. TypeScript 5 and 7 both read the JSX types from `@trioforge/crucible/ui/jsx-runtime`, so the editor checks each prop against `T | Readable<T>` and each event against its handler. A file with `jsx: "react"` and a `jsxFactory` gets the Vide lowering. Any other setting is a compile error.
 - **Tests.** Phase 2's Lune specs run in the compiler's ignored tests, on a fixture game in `cli/crates/compiler/tests/jsx/ui` and the compiler-built runtime. The sample game that `pnpm check` builds uses no Crucible UI JSX.
 
-- **Theme ownership.** `theme.toml` beside the invoked tsconfig is the game's complete theme. No defaults, overlays, or upward search. `spacing` is pixels per step, `[color]` holds flat colors or one level of shades, `[text]` holds TextSize values from 1 to 100, and `[radius]` holds whole-pixel radii. Unknown sections fail. Breakpoints wait for variants.
+- **Theme ownership.** `theme.toml` beside the invoked tsconfig is the game's complete theme. No defaults, overlays, or upward search. `spacing` is pixels per step, `[color]` holds flat colors or one level of shades, `[text]` holds TextSize values from 1 to 100, `[radius]` holds whole-pixel radii, and `[breakpoint]` holds minimum viewport widths in whole pixels, mobile first. Unknown sections fail. A breakpoint named like a built-in variant or starting with `group` fails.
 - **Fixed className.** GuiObject intrinsics accept `className?: string`. The compiler requires a literal, a template without substitutions, or a const name or readonly property of a const with one string-literal type. Calls, mutable names, reactive strings, unions, and component forwarding wait for later work. Typed writes derive their targets. One private style owns the ordered rules for each target. Later tokens win, and explicit properties own their properties regardless of attribute order.
-- **Units.** Spacing steps produce whole-pixel offsets. Size fractions and full keywords use Roblox scale. A single Size axis preserves the other axis. A `UIScale` can scale the subtree without runtime work per class.
+- **Variant syntax.** A token is `variant:...:utility`. Variants stack in any order and all must hold. A variant repeated in one token, or two that can never hold together, such as `portrait:landscape:` or two input modes, fails with CRU028. `disabled:` waits for the primitives that know what disabled means.
+- **Precedence.** For each target, the last rule whose conditions all hold wins, and explicit JSX properties still own their properties. A conditional rule that a later rule on the same target always overrides is a CRU028 error at its token, because source order would otherwise drop it silently. A later rule overrides when each of its conditions follows from the earlier rule's, and a wider breakpoint implies a narrower one. Base rules keep overriding each other freely.
+- **Groups.** `group` and `group/<name>` mark an element. `group-hover:` reads the nearest enclosing element with a bare `group`, and `group-hover/<name>:` the nearest with `group/<name>`, as in Tailwind, so an inner group never shadows a named outer one. The search is lexical, through the intrinsic elements whose children hold the element in the same JSX, including inline `Show` and `For` callbacks. A component boundary ends it, and cross-component groups wait for class forwarding.
+- **Dark.** `dark:` reads `environment.dark`, a state that starts false and that the game sets, for example from a settings toggle. Crucible reads no device preference for it.
+- **Environment.** The environment lives in the `ui` entry and starts lazily: the first read of the viewport, orientation, or input mode connects to the camera and `UserInputService` for the session. It is not a registered `Subsystem`, because the `ui` entry may load after `boot` seals the registry, and specs mount UI without booting.
+- **Modifiers under variants.** A modifier that only conditional rules create is configured with its element and parented while one of its rules holds, so `hover:rounded` leaves no default UICorner behind.
+- **Units.** Spacing steps produce whole-pixel offsets. Size fractions and full keywords use Roblox scale. A single Size axis preserves the other axis, and `Instance.new` starts a GuiObject at a zero Size, so a lone height class renders 0 px wide (TRI-130). A `UIScale` can scale the subtree without runtime work per class.
 
 ## Open questions
 

@@ -19,3 +19,8 @@ lg = 18
 DEFAULT = 4
 md = 6
 lg = 8
+
+[breakpoint]
+sm = 640
+md = 768
+lg = 1024

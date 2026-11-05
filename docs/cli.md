@@ -70,14 +70,30 @@ Run `npm run check` to lint, check formatting, compile, and build `build/start.r
 
 ## crucible docs
 
-Prints a guide as Markdown. Read the guide for a module before you write code that uses it.
+Prints a guide as Markdown, or opens it in a reader at a terminal. Read the guide for a module before you write code that uses it.
 
 ```console
 npx crucible docs
 npx crucible docs logging
+npx crucible docs logging --plain
 ```
 
-Without a topic, `crucible docs` prints one line per topic with its name and summary. With a topic, it prints that guide to stdout. An unknown topic exits 2 and lists the valid topics on stderr. The guides are compiled into the binary, so `crucible docs` needs no network.
+When stdin or stdout is not a terminal, `crucible docs` prints Markdown. Without a topic, it prints one line per topic with its name and summary. With a topic, it prints that guide to stdout. `--plain` and `TERM=dumb` print the same bytes at a terminal. An unknown topic exits 2 and lists the valid topics on stderr. The guides are compiled into the binary, so `crucible docs` needs no network.
+
+When stdin and stdout are both a terminal, `crucible docs` opens a reader instead. Without a topic, it opens on the list of topics. With a topic, it opens that guide. The reader highlights code, draws tables and Mermaid diagrams, and shows the topic, section, and main keys on the bottom line. A terminal at least 90 columns wide also shows the topics in a sidebar. Click a topic or a link to open it. A link to another guide opens in the reader, and a web link opens in the browser. Quitting restores the terminal.
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓`, `j` `k`, mouse wheel | Scroll. |
+| `PageUp` `PageDown` `Space` | Scroll a page. |
+| `g` `G`, `Home` `End` | Go to the top or the bottom. |
+| `Tab`, `Shift+Tab` | Focus the next or previous link. |
+| `Enter` | Follow the focused link. |
+| `Backspace`, `Alt+←` | Go back. |
+| `Alt+→` | Go forward. |
+| `Ctrl+K`, `/` | Search every guide. Type to filter, `↑` `↓` to choose, `Enter` to open the section, and `Esc` to close. |
+| `?` | Show the keys. |
+| `q`, `Esc`, `Ctrl+C` | Quit. |
 
 ## crucible oc
 

@@ -18,11 +18,14 @@ pub enum Command {
     Build(crate::build::Args),
     /// Create a game and install its dependencies.
     Create(crate::create::Args),
-    /// Print a Crucible guide as Markdown. Without a topic, list the topics.
+    /// Read a Crucible guide. Without a topic, list the topics. Prints Markdown unless both stdin and stdout are a terminal.
     Docs {
-        /// The topic to print.
+        /// The topic to open or print.
         #[arg(value_parser = topics())]
         topic: Option<String>,
+        /// Print the Markdown even at a terminal.
+        #[arg(long)]
+        plain: bool,
     },
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
