@@ -26,7 +26,7 @@ impl Extractor {
     }
 
     fn constant_name(&mut self, n: P<Node>) -> bool {
-        if !matches!(n.kind(), Kind::Identifier | Kind::PropertyAccessExpression) {
+        if !dotted_name(n) {
             return false;
         }
         let Some(mut symbol) = self.checker.get_symbol_at_location_exported(n) else { return false };
@@ -167,6 +167,14 @@ fn class_value(attribute: P<Node>) -> Option<P<Node>> {
         .as_jsx_attribute()
         .initializer
         .and_then(|v| if v.kind() == Kind::JsxExpression { v.as_jsx_expression().expression } else { Some(v) })
+}
+
+fn dotted_name(n: P<Node>) -> bool {
+    match n.kind() {
+        Kind::Identifier => true,
+        Kind::PropertyAccessExpression if !tsrs_ast::is_optional_chain(n) => dotted_name(n.expression().unwrap()),
+        _ => false,
+    }
 }
 
 fn decode_literal(raw: &str, jsx: bool) -> (String, Vec<u32>) {

@@ -173,3 +173,11 @@ fn each_modifier_kind_conflicts_with_an_authored_direct_child() {
         assert_eq!(g.found_columns(), [format!("CRU031@src/client/view.tsx:1:{column}")]);
     }
 }
+
+#[test]
+fn a_constant_export_does_not_allow_a_call_in_its_receiver() {
+    let g = game();
+    g.write("src/client/names.ts", "export const card = 'flex';");
+    g.write("src/client/view.tsx", "import * as names from './names';\ndeclare function getNames(): typeof names;\nexport const view = <frame className={getNames().card} />;");
+    assert_eq!(g.found_columns(), ["CRU029@src/client/view.tsx:3:39"]);
+}
