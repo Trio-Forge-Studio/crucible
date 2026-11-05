@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 use tsrs_ast::{Kind, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
 use tsrs_checker::{EmitResolver, Type};
 use tsrs_compiler::CheckerHandle;
-use tsrs_core::{P, jsnum};
+use tsrs_core::{JsxEmit, P, jsnum};
 
 use crate::Diagnostic;
 use crate::facts::{
-    Callee, Fact, Facts, Falsy, FileFacts, Import, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
+    Callee, Fact, Facts, Falsy, FileFacts, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
 };
 use crate::macros::Macro;
 use crate::program::Checked;
@@ -31,6 +31,7 @@ pub(crate) fn extract(checked: Checked) -> Facts {
     let dir = checked.config_dir();
     let Checked { program, mut checker, host } = checked;
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
+    let jsx_react = program.options().jsx == JsxEmit::REACT;
     let globals = types::Globals::new(&mut checker);
     let crucible = crucible::Api::new(program, &mut checker, host);
     let mut facts = Facts::default();
@@ -70,6 +71,8 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         pending: Vec::new(),
         modules: Vec::new(),
         reported: HashSet::new(),
+        jsx_react,
+        jsx: None,
     };
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
@@ -175,6 +178,8 @@ struct Extractor {
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
     reported: HashSet<(String, u32, Code)>,
+    jsx_react: bool,
+    jsx: Option<Jsx>,
 }
 
 impl Extractor {
@@ -196,7 +201,7 @@ impl Extractor {
             let kept = match &module.kept {
                 Kept::Always => true,
                 Kept::AnyOf(bindings) => {
-                    bindings.iter().any(|b| self.table.facts.get(b).is_some_and(|f| f.import == Some(Import::Keep)))
+                    bindings.iter().any(|b| self.table.facts.get(b).and_then(|f| f.import).is_some_and(Import::kept))
                 }
             };
             if kept {
@@ -211,7 +216,7 @@ impl Extractor {
         self.facts.unanswered[first..].sort_by_key(|u| (u.span, u.site));
         let mut facts: Vec<(Span, Fact)> = table.facts.into_iter().collect();
         facts.sort_unstable_by_key(|(span, _)| *span);
-        self.facts.files.push(FileFacts { path: std::mem::take(&mut self.path), facts });
+        self.facts.files.push(FileFacts { path: std::mem::take(&mut self.path), facts, jsx: self.jsx.take() });
     }
 
     fn span(&self, n: P<Node>) -> Span {
@@ -283,6 +288,9 @@ impl Extractor {
                 }
             }
             Kind::JsxSpreadAttribute => self.object_spread(n.as_jsx_spread_attribute().expression),
+            Kind::JsxElement | Kind::JsxSelfClosingElement | Kind::JsxFragment if self.jsx.is_none() => {
+                self.jsx = Some(self.jsx_lowering(n));
+            }
             Kind::ReturnStatement => {
                 if let Some(expression) = n.expression() {
                     self.call_or_return(expression);
@@ -769,7 +777,9 @@ impl Extractor {
             self.site();
             let span = self.span(name);
             if self.resolver.is_referenced_alias_declaration(&mut self.checker, declaration) {
-                self.table.store(span, Site::Import, |f| &mut f.import, Import::Keep);
+                let whole = declaration == clause && self.exports_equals(n.as_import_declaration().module_specifier);
+                let import = if whole { Import::KeepModule } else { Import::Keep };
+                self.table.store(span, Site::Import, |f| &mut f.import, import);
                 continue;
             }
             let alias = self.checker.get_symbol_of_declaration_exported(declaration);
@@ -782,6 +792,27 @@ impl Extractor {
                 }
                 _ => self.table.store(span, Site::Import, |f| &mut f.import, Import::Elide),
             }
+        }
+    }
+
+    fn exports_equals(&mut self, specifier: P<Node>) -> bool {
+        let module = self.checker.resolve_external_module_name_exported(specifier, None);
+        module
+            .and_then(|m| m.exports())
+            .is_some_and(|e| e.lookup(tsrs_ast::INTERNAL_SYMBOL_NAME_EXPORT_EQUALS).is_some())
+    }
+
+    fn jsx_lowering(&mut self, n: P<Node>) -> Jsx {
+        if !self.jsx_react {
+            return Jsx::Unsupported;
+        }
+        let name = |entity: P<Node>| tsrs_ast::entity_name_to_string(entity, None).into_boxed_str();
+        match self.resolver.get_jsx_factory_entity(&mut self.checker, n) {
+            Some(factory) => Jsx::Factory {
+                factory: name(factory),
+                fragment: self.resolver.get_jsx_fragment_factory_entity(&mut self.checker, n).map(name),
+            },
+            None => Jsx::Unsupported,
         }
     }
 

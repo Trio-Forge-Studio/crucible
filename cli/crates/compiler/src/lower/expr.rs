@@ -94,7 +94,7 @@ impl Lower<'_> {
             Kind::VoidExpression => self.unsupported(n, "void"),
             Kind::BigIntLiteral => self.unsupported(n, "a bigint literal"),
             Kind::SpreadElement => self.unsupported(n, "a spread here"),
-            Kind::JsxElement | Kind::JsxSelfClosingElement | Kind::JsxFragment => self.unsupported(n, "JSX"),
+            Kind::JsxElement | Kind::JsxSelfClosingElement | Kind::JsxFragment => self.jsx(n),
             _ => {
                 let what = format!("the expression {}", n.kind_name());
                 self.unsupported(n, &what)
@@ -709,20 +709,7 @@ impl Lower<'_> {
         let result = self.push_temp(Expr::Table(fields));
         for &p in &properties[head_end..] {
             if p.kind() == Kind::SpreadAssignment {
-                let source = p.expression();
-                let falsy = self.falsy(source);
-                let value = self.expr(source);
-                let value = self.push_temp_if_complex(value);
-                let (k, v) = (self.temp(), self.temp());
-                let assign =
-                    Stmt::Assign(vec![result.clone().index(Expr::Name(k.clone()))], vec![Expr::Name(v.clone())]);
-                let merge = Stmt::GenericFor(vec![k, v], vec![value.clone()], vec![assign]);
-                if falsy.is_empty() {
-                    self.current_block.push(merge);
-                } else {
-                    let test = self.truthy_check(value, falsy);
-                    self.current_block.push(Stmt::If(test, vec![merge], None));
-                }
+                self.merge_spread(&result, p.expression());
             } else {
                 let Property { key, value } = self.object_property(p);
                 self.current_block.extend(key.setup);
@@ -732,6 +719,22 @@ impl Lower<'_> {
             }
         }
         result
+    }
+
+    /// Copies each field of `source` into `result`, unless `source` is falsy, as an object spread does.
+    pub(super) fn merge_spread(&mut self, result: &Expr, source: Node) {
+        let falsy = self.falsy(source);
+        let value = self.expr(source);
+        let value = self.push_temp_if_complex(value);
+        let (k, v) = (self.temp(), self.temp());
+        let assign = Stmt::Assign(vec![result.clone().index(Expr::Name(k.clone()))], vec![Expr::Name(v.clone())]);
+        let merge = Stmt::GenericFor(vec![k, v], vec![value.clone()], vec![assign]);
+        if falsy.is_empty() {
+            self.current_block.push(merge);
+        } else {
+            let test = self.truthy_check(value, falsy);
+            self.current_block.push(Stmt::If(test, vec![merge], None));
+        }
     }
 
     fn object_property(&mut self, p: Node) -> Property {

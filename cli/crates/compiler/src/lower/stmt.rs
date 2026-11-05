@@ -940,13 +940,12 @@ impl Lower<'_> {
         Expr::global("TS.import").call(args)
     }
 
-    fn import_kept(&mut self, name: Node) -> bool {
+    fn import_fact(&mut self, name: Node) -> Import {
         match self.fact(name).and_then(|f| f.import) {
-            Some(Import::Keep) => true,
-            Some(Import::Elide) => false,
+            Some(import) => import,
             None => {
                 self.error(name, "the type facts do not say whether this import is a value");
-                false
+                Import::Elide
             }
         }
     }
@@ -987,8 +986,14 @@ impl Lower<'_> {
                 }
             }
         }
-        let kept: Vec<(Node, Option<&'static str>)> =
-            bindings.into_iter().filter(|(n, _)| self.import_kept(*n)).collect();
+        let kept: Vec<(Node, Option<&'static str>)> = bindings
+            .into_iter()
+            .filter_map(|(n, key)| match self.import_fact(n) {
+                Import::Keep => Some((n, key)),
+                Import::KeepModule => Some((n, None)),
+                Import::Elide => None,
+            })
+            .collect();
         if kept.is_empty() {
             return;
         }
@@ -1022,7 +1027,7 @@ impl Lower<'_> {
                 continue;
             }
             let Some(name) = e.name() else { continue };
-            if self.import_kept(name) {
+            if self.import_fact(name).kept() {
                 let local = e.property_name().unwrap_or(name);
                 kept.push((name.text(), local.text()));
             }
