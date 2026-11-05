@@ -24,25 +24,6 @@ pub(crate) struct Rojo {
     is_game: bool,
 }
 
-/// Rojo's default project file in `dir`, else the first other project file there.
-pub(crate) fn find_project(dir: &Path) -> Option<PathBuf> {
-    let default = dir.join(PROJECT_FILE);
-    if default.is_file() {
-        return Some(default);
-    }
-    let mut candidates: Vec<PathBuf> = std::fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            let name = p.file_name().and_then(|n| n.to_str());
-            name.and_then(|n| n.strip_suffix(".project.json")).is_some_and(|stem| !stem.is_empty())
-        })
-        .collect();
-    candidates.sort();
-    candidates.into_iter().next()
-}
-
 impl Rojo {
     pub fn load(project: &Path) -> Result<Rojo, String> {
         let mut rojo = Rojo { partitions: Vec::new(), files: HashMap::new(), is_game: false };
@@ -160,8 +141,7 @@ impl Rojo {
     }
 }
 
-/// A program whose folder holds a Rojo project with a `DataModel` root. Without one the program is a package: its
-/// modules reach each other relatively and get the runtime library from `_G[script]`.
+/// A program compiled for a place, which its Rojo project lays out.
 pub(crate) struct Game {
     pub rojo: Rojo,
     /// The package root `boot` globs are relative to: the nearest folder at or above `dir` with a `package.json`, or
@@ -174,29 +154,39 @@ pub(crate) struct Game {
 }
 
 impl Game {
-    /// `Ok(None)` when the folder holds no project file or the project is not a place.
-    pub fn load(dir: &Path, root: &Path, out_dir: Option<&Path>) -> Result<Option<Game>, String> {
-        let Some(project_file) = find_project(dir) else { return Ok(None) };
-        let rojo = Rojo::load(&project_file)?;
+    /// `dir` is the tsconfig's folder, where the package root search starts.
+    pub fn load(
+        project: &Path,
+        include: &Path,
+        dir: &Path,
+        root: &Path,
+        out_dir: Option<&Path>,
+    ) -> Result<Game, String> {
+        let absolute = |path: &Path| std::path::absolute(path).map(|p| normalize(&p)).map_err(|e| e.to_string());
+        let rojo = Rojo::load(&absolute(project)?)?;
         if !rojo.is_game() {
-            return Ok(None);
+            return Err(format!("{} has no DataModel root, so it is not a place", project.display()));
         }
         let Some(out_dir) = out_dir else {
             return Err("a game needs an outDir in its tsconfig, which its Rojo project maps".to_owned());
         };
-        let Some(runtime_lib) = rojo.rbx_path(&dir.join("include/RuntimeLib.luau")) else {
-            return Err("the Rojo project maps no folder for include, where roblox-ts's runtime library is".to_owned());
+        let Some(runtime_lib) = rojo.rbx_path(&absolute(include)?.join(crate::include::RUNTIME_LIB)) else {
+            return Err(format!(
+                "{} maps no folder for {}, where roblox-ts's runtime library goes",
+                project.display(),
+                include.display()
+            ));
         };
         let package = package_dir(dir).unwrap_or(dir);
         let packages = packages(&package.join("node_modules"));
-        Ok(Some(Game {
+        Ok(Game {
             rojo,
             package: package.to_path_buf(),
             root: root.to_path_buf(),
             out_dir: normalize(out_dir),
             packages,
             runtime_lib,
-        }))
+        })
     }
 
     /// Where the output of a source file under the source root goes.

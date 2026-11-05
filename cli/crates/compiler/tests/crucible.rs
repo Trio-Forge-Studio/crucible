@@ -1,13 +1,21 @@
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{Attribute, Check, Class, ClassKind, Crucible, Dependency, Fact, Facts, Falsy, Receiver, Span};
+use crucible_compiler::{
+    Attribute, Check, Class, ClassKind, Crucible, Dependency, Fact, Facts, Falsy, Receiver, Span, Target,
+};
 
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-fn analyze(tsconfig: &str) -> Facts {
-    crucible_compiler::analyze(&repo().join(tsconfig)).unwrap_or_else(|diagnostics| {
+/// The sample game's Rojo project and include folder.
+fn sample() -> (PathBuf, PathBuf) {
+    let dir = repo().join("examples/sample-game");
+    (dir.join("default.project.json"), dir.join("include"))
+}
+
+fn analyze(tsconfig: &str, target: Target<'_>) -> Facts {
+    crucible_compiler::analyze(&repo().join(tsconfig), target).unwrap_or_else(|diagnostics| {
         let listed: Vec<String> = diagnostics.iter().map(ToString::to_string).collect();
         panic!("{tsconfig} checks without diagnostics:\n{}", listed.join("\n"))
     })
@@ -63,7 +71,7 @@ fn class(facts: &Facts, file: &str) -> Class {
 
 #[test]
 fn runtime_checks_and_every_site_is_answered() {
-    let facts = analyze("packages/crucible/tsconfig.ts7.json");
+    let facts = analyze("packages/crucible/tsconfig.ts7.json", Target::Package);
     assert_complete(&facts, "packages/crucible/src");
     let array = Fact { receiver: Some(Receiver::Array), falsy: Some(Falsy::NONE), ..Fact::default() };
     for (file, context) in [
@@ -81,7 +89,8 @@ fn sample_game_checks_and_every_site_is_answered() {
         repo().join("packages/crucible/out/index.d.ts").is_file(),
         "packages/crucible/out exists; run pnpm build first"
     );
-    let facts = analyze("examples/sample-game/tsconfig.ts7.json");
+    let (project, include) = sample();
+    let facts = analyze("examples/sample-game/tsconfig.json", Target::Game { project: &project, include: &include });
     assert_complete(&facts, "examples/sample-game/src");
 
     let id = |module: &str| format!("@trioforge/crucible-sample-game/{module}").into_boxed_str();
@@ -106,8 +115,9 @@ fn sample_game_checks_and_every_site_is_answered() {
 
 #[test]
 fn the_runtime_lowers_to_one_module_per_source_file() {
-    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"))
-        .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"));
+    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"), Target::Package)
+        .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"))
+        .modules;
     let src = repo().join("packages/crucible/src").to_string_lossy().replace('\\', "/");
     let mut files = Vec::new();
     sources(&repo().join("packages/crucible/src"), &mut files);
@@ -136,8 +146,11 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
 
 #[test]
 fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
-    let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.ts7.json"))
-        .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"));
+    let (project, include) = sample();
+    let target = Target::Game { project: &project, include: &include };
+    let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
+        .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))
+        .modules;
     let mut paths: Vec<&str> = modules.iter().map(|m| m.path.as_str()).collect();
     paths.sort_unstable();
     assert_eq!(

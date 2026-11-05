@@ -188,9 +188,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/crucible
     devDependencies:
-      '@rbxts/compiler-types':
-        specifier: 3.0.0-types.0
-        version: 3.0.0-types.0
       '@rbxts/types':
         specifier: 1.0.959
         version: 1.0.959

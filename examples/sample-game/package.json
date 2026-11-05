@@ -8,7 +8,6 @@
 		"@trioforge/crucible": "workspace:*"
 	},
 	"devDependencies": {
-		"@rbxts/compiler-types": "3.0.0-types.0",
 		"@rbxts/types": "1.0.959",
 		"@rbxts/vide": "0.6.1",
 		"@trioforge/compiler-types": "workspace:*"

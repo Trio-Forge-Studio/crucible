@@ -8,7 +8,7 @@ mod support;
 
 use std::collections::{BTreeSet, HashMap};
 
-use crucible_compiler::{Crucible, Declaration, Facts, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
+use crucible_compiler::{Crucible, Declaration, Facts, Field, KeyLiteral, Literal, MapKey, Schema, Tail, Target};
 use serde_json::json;
 use support::{Game, has, lines, project, repo};
 
@@ -3083,8 +3083,9 @@ export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, v
 fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let scratch = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("declarations");
     let _ = std::fs::remove_dir_all(&scratch);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"))
-        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"));
+    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"), Target::Package)
+        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
+        .modules;
     crucible_compiler::write(&scratch.join("runtime"), &runtime).expect("the runtime is written");
     let game = fresh();
     game.write(

@@ -9,13 +9,13 @@ const repo = path.resolve(import.meta.dirname, "..");
 const tsrs = path.join(path.dirname(createRequire(import.meta.url).resolve("tsrs/package.json")), "bin/tsrs");
 const slash = (file) => file.replaceAll("\\", "/");
 
-function check(project, ...options) {
+function check(config, ...options) {
 	const result = spawnSync(
 		process.execPath,
-		[tsrs, "-p", path.join(repo, project, "tsconfig.ts7.json"), "--pretty", "false", "--listFiles", ...options],
+		[tsrs, "-p", path.join(repo, config), "--pretty", "false", "--listFiles", ...options],
 		{ encoding: "utf8" },
 	);
-	assert.equal(result.error, undefined, `tsrs runs on ${project}`);
+	assert.equal(result.error, undefined, `tsrs runs on ${config}`);
 	const lines = result.stdout.split(/\r?\n/).filter(Boolean);
 	return {
 		status: result.status,
@@ -25,13 +25,13 @@ function check(project, ...options) {
 	};
 }
 
-for (const [project, sources, imported] of [
-	["packages/crucible", "packages/crucible/src/", undefined],
-	["examples/sample-game", "examples/sample-game/src/", "packages/crucible/out/index.d.ts"],
+for (const [config, sources, imported] of [
+	["packages/crucible/tsconfig.ts7.json", "packages/crucible/src/", undefined],
+	["examples/sample-game/tsconfig.json", "examples/sample-game/src/", "packages/crucible/out/index.d.ts"],
 ]) {
-	test(`${project} type-checks under TypeScript 7 with @trioforge/compiler-types`, () => {
+	test(`${config} type-checks under TypeScript 7 with @trioforge/compiler-types`, () => {
 		if (imported) assert.ok(fs.existsSync(path.join(repo, imported)), `${imported} exists; run pnpm build first`);
-		const result = check(project);
+		const result = check(config);
 		assert.deepEqual(result.errors, [], result.output);
 		assert.equal(result.status, 0, result.output);
 		const prefix = (relative) => slash(path.join(repo, relative));
@@ -49,7 +49,7 @@ for (const [project, sources, imported] of [
 }
 
 test("@rbxts/compiler-types fails the same check with TS2802", () => {
-	const result = check("packages/crucible", "--types", "@rbxts/compiler-types,@rbxts/types");
+	const result = check("packages/crucible/tsconfig.ts7.json", "--types", "@rbxts/compiler-types,@rbxts/types");
 	assert.notEqual(result.status, 0, "the upstream types fail under TypeScript 7");
 	assert.ok(
 		result.errors.some((line) => line.includes("error TS2802")),

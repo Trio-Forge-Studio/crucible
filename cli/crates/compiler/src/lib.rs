@@ -3,6 +3,7 @@ mod declarations;
 mod entities;
 mod extract;
 mod facts;
+mod include;
 mod lower;
 pub mod luau;
 mod macros;
@@ -13,7 +14,7 @@ mod write;
 
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use declarations::DeclarationKind;
 pub use facts::{
@@ -21,6 +22,7 @@ pub use facts::{
     Falsy, Field, FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Prop, Reason, Receiver,
     RuntimeLib, Schema, Site, Span, Tail, Unanswered,
 };
+pub use include::write_include;
 pub use lower::Error;
 use lower::ImportBase;
 pub use macros::{Macro, MacroKind};
@@ -53,14 +55,31 @@ impl fmt::Display for Diagnostic {
     }
 }
 
+/// What a tsconfig compiles into. Relative paths resolve against the current folder, as the tsconfig's path does.
+#[derive(Clone, Copy, Debug)]
+pub enum Target<'a> {
+    /// A library. Its modules reach each other relatively and take the runtime library from `_G[script]`.
+    Package,
+    /// A place. `project` is a Rojo project with a `DataModel` root that maps the output, and `include` is the folder
+    /// it maps for the runtime library, which `write_include` fills.
+    Game { project: &'a Path, include: &'a Path },
+}
+
 /// Builds the program for `tsconfig`, checks every file with one checker, and returns the fact table of every source
 /// file it compiles. Any diagnostic stops the build before facts are extracted.
-pub fn analyze(tsconfig: &Path) -> Result<Facts, Vec<Diagnostic>> {
+pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Facts, Vec<Diagnostic>> {
     let checked = program::check(tsconfig)?;
-    Ok(extract::extract(checked))
+    Ok(extract::extract(checked, target))
 }
 
 #[derive(Clone, Debug)]
+pub struct Compiled {
+    /// The tsconfig's `outDir`, or the source root when it sets none. Each module's path is relative to it.
+    pub out_dir: PathBuf,
+    pub modules: Vec<Module>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Module {
     /// The output path relative to the output directory, with forward slashes. An `index` source is its
     /// folder's `init.luau`.
@@ -88,12 +107,13 @@ impl fmt::Display for Failure {
 }
 
 /// Any diagnostic, Crucible rule or lowering error fails the whole compile, and no module is returned.
-pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
+pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
     let files = checked.files();
     let paths: Vec<String> = files.iter().map(|f| f.path()).collect();
     let root = checked.source_root();
-    let facts = extract::extract(checked);
+    let out_dir = PathBuf::from(checked.out_dir().unwrap_or_else(|| root.clone()));
+    let facts = extract::extract(checked, target);
     if !facts.diagnostics.is_empty() {
         return Err(Failure::Crucible(facts.diagnostics));
     }
@@ -122,5 +142,5 @@ pub fn compile(tsconfig: &Path) -> Result<Vec<Module>, Failure> {
             Err(e) => errors.extend(e),
         }
     }
-    if errors.is_empty() { Ok(modules) } else { Err(Failure::Lower(errors)) }
+    if errors.is_empty() { Ok(Compiled { out_dir, modules }) } else { Err(Failure::Lower(errors)) }
 }

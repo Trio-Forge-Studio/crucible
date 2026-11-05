@@ -1,17 +1,27 @@
 //! Checks a project and prints a summary of its fact table.
 //!
-//! `cargo run --release -p crucible-compiler --example facts -- <tsconfig>`
+//! `cargo run --release -p crucible-compiler --example facts -- <tsconfig> [<project> <include>]`
+//!
+//! With a Rojo project and an include folder it analyzes a game, and without them a package.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
+use crucible_compiler::Target;
+
 fn main() -> ExitCode {
-    let Some(tsconfig) = std::env::args_os().nth(1) else {
-        eprintln!("usage: facts <tsconfig>");
-        return ExitCode::from(2);
+    let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let (tsconfig, target) = match &args[..] {
+        [tsconfig] => (tsconfig, Target::Package),
+        [tsconfig, project, include] => (tsconfig, Target::Game { project, include }),
+        _ => {
+            eprintln!("usage: facts <tsconfig> [<project> <include>]");
+            return ExitCode::from(2);
+        }
     };
     let start = Instant::now();
-    let facts = match crucible_compiler::analyze(tsconfig.as_ref()) {
+    let facts = match crucible_compiler::analyze(tsconfig, target) {
         Ok(facts) => facts,
         Err(diagnostics) => {
             for d in &diagnostics {

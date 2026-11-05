@@ -1,13 +1,8 @@
 {
-	"extends": "../../tsconfig.rbxts.json",
+	"extends": "../../tsconfig.ts7.json",
 	"compilerOptions": {
-		"typeRoots": ["node_modules/@rbxts", "node_modules/@trioforge"],
-		"types": ["compiler-types", "types"],
 		"rootDir": "src",
-		"outDir": "out",
-		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo",
-		"declaration": false,
-		"plugins": [{ "transform": "@trioforge/crucible/transformer" }]
+		"outDir": "out"
 	},
 	"include": ["src"]
 }

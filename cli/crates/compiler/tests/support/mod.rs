@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crucible_compiler::{Diagnostic, Facts, Module};
+use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, Module, Target};
 use serde_json::{Value, json};
 
 pub fn repo() -> PathBuf {
@@ -108,8 +108,22 @@ impl Game {
         self.analyze_at("tsconfig.json")
     }
 
+    pub fn project(&self) -> PathBuf {
+        self.dir.join("default.project.json")
+    }
+
+    pub fn include(&self) -> PathBuf {
+        self.dir.join("include")
+    }
+
     pub fn analyze_at(&self, tsconfig: &str) -> Result<Facts, Vec<Diagnostic>> {
-        crucible_compiler::analyze(&self.dir.join(tsconfig))
+        let (project, include) = (self.project(), self.include());
+        crucible_compiler::analyze(&self.dir.join(tsconfig), target(&project, &include))
+    }
+
+    pub fn try_compile(&self) -> Result<Compiled, Failure> {
+        let (project, include) = (self.project(), self.include());
+        crucible_compiler::compile(&self.dir.join("tsconfig.json"), target(&project, &include))
     }
 
     pub fn facts(&self) -> Facts {
@@ -156,14 +170,18 @@ impl Game {
     }
 
     pub fn compile(&self) -> Vec<Module> {
-        crucible_compiler::compile(&self.dir.join("tsconfig.json"))
-            .unwrap_or_else(|f| panic!("the game compiles:\n{f}"))
+        self.try_compile().unwrap_or_else(|f| panic!("the game compiles:\n{f}")).modules
     }
 
     pub fn luau(&self, path: &str) -> String {
         let modules = self.compile();
         modules.into_iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} is emitted")).source
     }
+}
+
+/// A game's project and include folder, or a package once a test removes the project.
+pub fn target<'a>(project: &'a Path, include: &'a Path) -> Target<'a> {
+    if project.is_file() { Target::Game { project, include } } else { Target::Package }
 }
 
 pub fn project() -> Value {

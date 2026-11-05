@@ -3,7 +3,7 @@ mod support;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use crucible_compiler::{Failure, Module};
+use crucible_compiler::{Failure, Module, Target};
 use support::{Game, has, repo};
 
 fn fixture(name: &str) -> PathBuf {
@@ -11,8 +11,9 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 static VIDE: LazyLock<Vec<Module>> = LazyLock::new(|| {
-    crucible_compiler::compile(&fixture("vide/tsconfig.json"))
+    crucible_compiler::compile(&fixture("vide/tsconfig.json"), Target::Package)
         .unwrap_or_else(|failure| panic!("the Vide fixtures compile (run pnpm build first):\n{failure}"))
+        .modules
 });
 
 fn vide(path: &str) -> &'static str {
@@ -88,7 +89,7 @@ fn jsx_needs_the_react_setting_and_a_factory() {
     let game = Game::new();
     game.config(|c| c["compilerOptions"]["jsx"] = "preserve".into());
     game.write("src/client/view.tsx", "declare global {\n\tnamespace JSX {\n\t\tinterface IntrinsicElements {\n\t\t\tframe: {};\n\t\t}\n\t}\n}\nexport const view = <frame />;\n");
-    let Err(Failure::Lower(errors)) = crucible_compiler::compile(&game.dir.join("tsconfig.json")) else {
+    let Err(Failure::Lower(errors)) = game.try_compile() else {
         panic!("JSX without a factory fails the compile");
     };
     let found: Vec<String> = errors.iter().map(|e| format!("{}:{} {}", e.line, e.column, e.message)).collect();
@@ -189,7 +190,7 @@ fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
         "src/client/mixed.tsx",
         "import type { Readable } from \"@trioforge/crucible\";\nexport const mixed = (text: string | Readable<string>) => [\n\t<textlabel Text={text} />,\n\t<textlabel {...{ Text: \"x\" }} />,\n];\n",
     );
-    let Err(Failure::Lower(errors)) = crucible_compiler::compile(&game.dir.join("tsconfig.json")) else {
+    let Err(Failure::Lower(errors)) = game.try_compile() else {
         panic!("the refused props fail the compile");
     };
     let mut found: Vec<String> = errors
@@ -211,8 +212,9 @@ fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
 fn the_compiled_lowering_mounts_updates_and_unmounts_on_the_compiler_built_runtime() {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jsx-ui");
     let _ = std::fs::remove_dir_all(&root);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"))
-        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"));
+    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"), Target::Package)
+        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
+        .modules;
     let installed = root.join("ReplicatedStorage/rbxts_include/node_modules/@trioforge/crucible/out");
     crucible_compiler::write(&installed, &runtime).expect("the runtime is written");
     let client: Vec<Module> =
