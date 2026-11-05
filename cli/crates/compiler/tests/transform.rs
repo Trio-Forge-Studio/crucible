@@ -1457,3 +1457,30 @@ fn instance_classes_list_in_the_order_typescript_5_first_makes_their_types() {
     );
     assert_eq!(instance("Aliased"), ["Sparkles", "Fire"], "the alias made its members where the class used it");
 }
+
+#[test]
+fn exports_only_consumers_compile_public_entries_and_reject_reserved_entries() {
+    let game = Game::new();
+    let entries = ["", "/server", "/vide", "/ui", "/util/random", "/maths/spline"];
+    let mut source = String::new();
+    for (index, entry) in entries.iter().enumerate() {
+        source.push_str(&format!(
+            "import * as e{index} from \"@trioforge/crucible{entry}\"; export const use{index} = e{index};\n"
+        ));
+    }
+    game.main(&source);
+    game.write(
+        "src/client/imports.ts",
+        "import * as client from \"@trioforge/crucible/client\"; export const use = client;",
+    );
+    let modules = game.compile();
+    assert!(modules.iter().any(|m| m.path == "server/main.luau"));
+    assert!(modules.iter().any(|m| m.path == "client/imports.luau"));
+    for entry in ["emit", "testing", "ui/jsx-runtime"] {
+        let reserved = Game::new();
+        reserved.main(&format!("import * as entry from \"@trioforge/crucible/{entry}\"; export const use = entry;"));
+        let facts = reserved.facts();
+        let codes: Vec<i32> = facts.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(codes, [90004], "{entry} resolves its types but is compiler-owned");
+    }
+}
