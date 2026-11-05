@@ -76,6 +76,41 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 });
 
 const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+
+const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
+const sorted = (codes) => [...new Set(codes)].sort();
+
+test("the diagnostics guide lists every CRU code the transformer and the compiler report, in order", () => {
+	const transformerDir = path.join(repo, "packages/crucible/transformer-src");
+	const transformer = sorted(
+		fs
+			.readdirSync(transformerDir)
+			.filter((name) => name.endsWith(".cjs"))
+			.flatMap((name) => [...read(path.join(transformerDir, name)).matchAll(/"(CRU\d{3})"/g)].map((m) => m[1])),
+	);
+	const compilerDir = path.join(repo, "cli/crates/compiler/src");
+	const compiler = sorted(
+		fs
+			.readdirSync(compilerDir, { recursive: true })
+			.filter((name) => name.endsWith(".rs"))
+			.flatMap((name) => {
+				const code = read(path.join(compilerDir, name));
+				return [
+					...code.matchAll(/Code::Rule\((\d+)\)/g),
+					...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
+				].map((m) => cru(m[1]));
+			}),
+	);
+	const headings = [...read(path.join(repo, "docs/diagnostics.md")).matchAll(/^## (CRU\d{3})$/gm)].map((m) => m[1]);
+	assert.ok(transformer.length > 0 && compiler.length > 0, "found CRU codes in both rule sources");
+	assert.deepEqual(compiler, transformer, "the compiler and the transformer report different CRU codes");
+	assert.deepEqual(headings, sorted(headings), "docs/diagnostics.md lists its CRU headings out of order or twice");
+	assert.deepEqual(
+		headings,
+		transformer,
+		"docs/diagnostics.md headings differ from the CRU codes the transformer and the compiler report",
+	);
+});
 const declared = (code, call) =>
 	[...code.matchAll(new RegExp(String.raw`\b${call}(?:<[^(]*>)?\("([^"]+)"`, "g"))].map((match) => match[1]);
 
