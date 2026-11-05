@@ -218,6 +218,11 @@ impl Lower<'_> {
     fn constructor_macro(&mut self, m: Macro, n: Node) -> Expr {
         let args: Vec<Node> = n.arguments().iter().collect();
         let value = match m {
+            Macro::Promise => {
+                self.uses_ts = true;
+                let args = self.arguments(n);
+                Expr::global("TS.Promise").field("new").call(args)
+            }
             Macro::NewArray => {
                 if args.is_empty() {
                     Expr::Table(Vec::new())
@@ -350,7 +355,12 @@ impl Lower<'_> {
     fn expand_method_macro(&mut self, m: Macro, n: Node, object: Expr, usage: Usage) -> Option<Expr> {
         let statement = usage == Usage::Statement;
         let arg_nodes: Vec<Node> = n.arguments().iter().collect();
-        let (args, block) = self.capture(|l| l.ordered(arg_nodes.iter().copied(), |l, a| l.expr(a)));
+        let (args, block) = self.capture(|l| {
+            l.ordered(arg_nodes.iter().copied(), |l, a| {
+                let value = l.expr(a);
+                if value.is_multi() { Expr::Paren(Box::new(value)) } else { value }
+            })
+        });
         let read_after: &[Expr] = if reads_object_after_arguments(m) { &args } else { &[] };
         let object = self.store_before(object, &block, read_after);
         self.current_block.extend(block);
