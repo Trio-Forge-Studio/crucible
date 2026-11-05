@@ -77,7 +77,7 @@ A required attribute that is missing, or any attribute of the wrong type, keeps 
 | Hook | Subsystem | Behaviour | Runs | May yield |
 | --- | --- | --- | --- | --- |
 | constructor | Yes | Yes | Once, with its dependencies | No |
-| `awake` | Yes | Yes | Once, after its batch's constructors | No |
+| `awake` | Yes | Yes | Once, after the constructors of its wave | No |
 | `onEnable` | No | Yes | Each time it is enabled | No |
 | `start` | Yes | Yes | Once, the first time it is enabled | Yes |
 | `fixedUpdate(dt)` | Yes | Yes | At a fixed rate while enabled, after `start` returns | No |
@@ -94,19 +94,17 @@ A Subsystem has no `onEnable`, `onDisable` or `onDestroy`, so Crucible never cal
 
 ### Construction and the first batch
 
-Crucible constructs new objects in batches. A batch runs each phase for every object before the next phase begins:
+Crucible constructs new objects in batches. A batch runs these steps in order:
 
-1. Every constructor.
-2. Every `awake`.
+1. Every constructor of the wave.
+2. Every `awake` of the wave.
 3. Every `onEnable`, for behaviours.
 4. Every `start`.
 5. Frame hooks, from the next frame.
 
-Objects that code creates during an `awake` join the same batch. They are constructed and awake before any object of the batch is enabled.
+The first wave is the batch's objects. Objects that code creates during an `awake` form the next wave, which runs steps 1 and 2 again. Step 3 begins once a wave creates nothing more. So every object of a batch is awake before any is enabled, and enabled before any starts. The first batch on each side holds every Subsystem and every behaviour for the instances that are tagged at boot. Its Subsystems come first in each phase.
 
-So every object of a batch is awake before any is enabled, and enabled before any starts. The first batch on each side holds every Subsystem and every behaviour for the instances that are tagged at boot. Its Subsystems come first in each phase.
-
-Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed before its own constructor runs, and awake before its own `awake` runs. Crucible walks Subsystems in registration order and places each one's dependencies just before it. Registration order is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. A dependency registered after its dependent therefore also moves ahead of every Subsystem registered between the two. Do not rely on the order of Subsystems that do not depend on each other. The order between behaviours of different tags is not defined.
+Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed before its own constructor runs, and awake before its own `awake` runs. Crucible walks Subsystems in registration order and visits each one's dependencies before it. Registration order is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. The walk can move a dependency ahead of Subsystems that do not depend on it, so do not rely on the order of Subsystems that do not depend on each other. The order between behaviours of different tags is not defined.
 
 A behaviour tagged after boot gets its own batch, with the same phases.
 
