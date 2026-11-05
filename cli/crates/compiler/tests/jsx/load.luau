@@ -1,6 +1,7 @@
 -- Loads compiled modules in Lune as roblox-ts's runtime library would. A module's `script` is a node named by its
 -- path, `TS.import` follows nodes to files, and `TS.getModule` finds a package's folder in `packages`. Every module
--- sees `globals`, and a package module may also `require` a node or a `./` path. Each graph loads its modules once.
+-- sees `globals`, and may `require` a node, a `./` path, or the RuntimeLib node a game requires. Each graph loads
+-- its modules once.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 
@@ -15,12 +16,18 @@ end
 
 return function(packages: { [string]: string }, globals: { [string]: any })
 	local nodes = {}
-	local function node(path: string)
+	local node
+	local function waitForChild(self, name: string)
+		return node(`{self.path}/{name}`)
+	end
+	function node(path: string)
 		if nodes[path] == nil then
 			nodes[path] = setmetatable({ path = path }, {
 				__index = function(self, key)
 					if key == "Parent" then
 						return node(string.match(self.path, "^(.*)/[^/]+$") or "")
+					elseif key == "WaitForChild" then
+						return waitForChild
 					end
 					return node(`{self.path}/{key}`)
 				end,
@@ -47,6 +54,9 @@ return function(packages: { [string]: string }, globals: { [string]: any })
 				if type(target) == "string" then
 					local relative = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
 					return load(`{string.match(file, "^(.*)/[^/]+$")}/{relative}`)
+				end
+				if string.match(target.path, "/RuntimeLib$") then
+					return TS
 				end
 				return load(target.path)
 			end

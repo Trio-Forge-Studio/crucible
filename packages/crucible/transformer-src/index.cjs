@@ -581,6 +581,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 						"@trioforge/crucible/server",
 						"@trioforge/crucible/client",
 						"@trioforge/crucible/vide",
+						"@trioforge/crucible/ui",
 						"@trioforge/crucible/util/random",
 						"@trioforge/crucible/maths/spline",
 					].includes(specifier.text)
@@ -588,7 +589,7 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 					report(
 						node,
 						"CRU004",
-						"Import only the root, server, client, vide, util/random or maths/spline Crucible entries.",
+						"Import only the root, server, client, vide, ui, util/random or maths/spline Crucible entries.",
 					);
 			}
 			if (ts.isClassExpression(node) || ts.isClassDeclaration(node)) {

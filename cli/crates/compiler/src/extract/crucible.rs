@@ -93,6 +93,8 @@ pub(super) struct Api {
     made: Option<HashMap<P<Symbol>, Made>>,
     /// The declarations of `@trioforge/crucible/emit`.
     pub emit: Option<PathBuf>,
+    /// The declarations of `@trioforge/crucible/ui`.
+    pub ui: Option<PathBuf>,
     pub widths: HashSet<P<Symbol>>,
     pub entries: HashMap<PathBuf, Side>,
     pub entry_exports: HashMap<P<Symbol>, Side>,
@@ -116,6 +118,7 @@ impl Api {
             invalid_metadata: false,
             made: None,
             emit: None,
+            ui: None,
             widths: HashSet::new(),
             entries: HashMap::new(),
             entry_exports: HashMap::new(),
@@ -128,9 +131,8 @@ impl Api {
                 continue;
             }
             if api.emit.is_none() {
-                let mut types = Vec::new();
-                types_condition(&owner.json["exports"]["./emit"], &mut types);
-                api.emit = types.first().map(|t| normalize(&owner.dir.join(t)));
+                api.emit = entry_types(&owner, "./emit");
+                api.ui = entry_types(&owner, "./ui");
             }
             widths(c, file.as_node(), &mut api.widths);
             let Some(module) = file.as_node().symbol() else { continue };
@@ -391,6 +393,13 @@ fn source_root(root_dir: Option<PathBuf>, root_dirs: Vec<PathBuf>, mut dirs: Vec
         }
     }
     Some(root)
+}
+
+/// The declaration file of the package's `entry` export.
+fn entry_types(owner: &Package, entry: &str) -> Option<PathBuf> {
+    let mut types = Vec::new();
+    types_condition(&owner.json["exports"][entry], &mut types);
+    types.first().map(|t| normalize(&owner.dir.join(t)))
 }
 
 fn types_condition(value: &serde_json::Value, out: &mut Vec<String>) {
@@ -1216,12 +1225,12 @@ impl Extractor {
         if let Some(specifier) = specifier
             && specifier.kind() == Kind::StringLiteral
             && let Some(entry) = specifier.text().strip_prefix("@trioforge/crucible/")
-            && !matches!(entry, "server" | "client" | "vide" | "util/random" | "maths/spline")
+            && !matches!(entry, "server" | "client" | "vide" | "ui" | "util/random" | "maths/spline")
         {
             self.report(
                 n,
                 Code::Rule(4),
-                "Import only the root, server, client, vide, util/random or maths/spline Crucible entries.",
+                "Import only the root, server, client, vide, ui, util/random or maths/spline Crucible entries.",
             );
         }
     }
