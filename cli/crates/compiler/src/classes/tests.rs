@@ -97,6 +97,11 @@ fn invalid_tokens_explain_their_failure() {
     }
     let c = theme::parse(Path::new("theme.toml"), "spacing = 5").unwrap();
     assert!(c.lookup("p-0.5").unwrap_err().contains("whole-pixel"));
+    let c = theme::parse(Path::new("theme.toml"), "spacing = 50").unwrap();
+    assert_eq!(c.lookup("pt-1.1").unwrap(), vec![Value::Padding(Side::Top, 55)]);
+    let c = theme::parse(Path::new("theme.toml"), "spacing = 100").unwrap();
+    assert_eq!(c.lookup("pt-0.07").unwrap(), vec![Value::Padding(Side::Top, 7)]);
+    assert!(c.lookup("pt-0.075").unwrap_err().contains("7.5 px"));
     let c = Catalog::empty(false);
     assert!(c.lookup("bg-white").unwrap_err().contains("No theme.toml"));
     for token in ["border", "flex", "w-full", "h-px", "size-1/2"] {

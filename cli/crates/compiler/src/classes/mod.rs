@@ -276,9 +276,11 @@ impl Catalog {
             if matches!(prefix, "p" | "px" | "py" | "pt" | "pr" | "pb" | "pl" | "w" | "h" | "size" | "gap")
                 && let (Some(n), Some(step)) = (number(suffix), self.spacing)
             {
-                let px = n * step;
-                if px.fract() != 0.0 || px > i32::MAX as f64 {
-                    return Err(format!("{px} px is not a whole-pixel offset in range"));
+                let exact = n * step;
+                let px = exact.round();
+                // A decimal step such as 1.1 times 50 lands a rounding error away from a whole pixel.
+                if (exact - px).abs() > 1e-9 * px.abs().max(1.0) || px > i32::MAX as f64 {
+                    return Err(format!("{exact} px is not a whole-pixel offset in range"));
                 }
                 let px = px as i32;
                 return Ok(if size {
