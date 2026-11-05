@@ -169,7 +169,7 @@ Each call checks and encodes its payload before it returns, so changing the tabl
 
 `true` from `Network.send` means Crucible accepted the message. It never means the message arrived. Until a client is ready, both sides hold its messages in order and send them when the client finishes booting. `false` means the message was not accepted:
 
-- On the server, the player is not in the game, the player's connection failed, or this send overflowed the player's queue.
+- On the server, the player is not in the game, the player's connection failed, or this send overflowed the player's queue. A send to a player who has left returns `false`, so a send needs no check that the player is still there. It still throws for a payload that does not fit its type, as every send does.
 - On the client, the session failed or closed, or the server's catalog lacks the message.
 
 Messages to one player arrive in the order they were sent, and their callbacks start in that order.

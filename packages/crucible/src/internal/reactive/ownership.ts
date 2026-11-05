@@ -7,6 +7,7 @@ import { boundary, discard, FrameKind, pop, push, top, type Completion, type Fra
 import {
 	finishOpen,
 	guardPure,
+	Mark,
 	NodeKind,
 	originOf,
 	releaseEdges,
@@ -86,6 +87,8 @@ export interface Lifetime extends Linked {
 	warned: boolean;
 	/** Inherited context for the UI layer. Unused in v1. */
 	context?: Map<unknown, unknown>;
+	/** Its bindings, in no order. Ending one runs no code, so they need no place among the children. */
+	bindings?: BindingNode[];
 }
 
 /** @internal */
@@ -95,30 +98,27 @@ export interface EffectNode extends EffectFields, Linked {
 	readonly origin: string;
 	/** The current run's lifetime: what the run created. */
 	run?: Lifetime;
-	/** Runs in the current flush. */
-	runs: number;
 }
 
 /**
  * @internal
  * Calls `sink(target, value)` on the flush where its source's value is not `rawequal` to the last one it passed. No
- * worker, run lifetime or cleanups: it runs on the flush's thread and ends with its parent, or by `retire`.
+ * worker, run lifetime or cleanups: it runs on the flush's thread and ends with its parent, or by `retire`. Keep it
+ * at eight fields: a ninth doubles Luau's hash for it to 16 slots.
  */
-export interface BindingNode extends BindingFields, Linked {
-	/** None for a root binding, which only `retire` ends. */
+export interface BindingNode extends BindingFields {
+	/** None for a root binding, which only `retire` ends. Otherwise it is in the parent's `bindings`. */
 	readonly parent?: Lifetime;
 	readonly sink: (target: unknown, value: unknown) => void;
 	readonly target: unknown;
 	/** The value last passed to `sink`, or the caller's baseline. */
 	value: unknown;
-	/** Runs in the current flush. */
-	runs: number;
 }
 
 /** @internal */
 export type ReactionNode = EffectNode | BindingNode;
 
-type Owned = Lifetime | ReactionNode;
+type Owned = Lifetime | EffectNode;
 
 /** @internal */
 export const NO_OWNER = "effect() needs an owner: create it in a Subsystem or behaviour, or inside scope()";
@@ -173,6 +173,18 @@ export function adopt(parent: Lifetime, child: Owned) {
 	else parent.tail.next = child;
 	parent.tail = child;
 	child.linked = true;
+	counted(parent);
+}
+
+/** @internal */
+export function adoptBinding(parent: Lifetime, binding: BindingNode) {
+	const bindings = parent.bindings;
+	if (bindings === undefined) parent.bindings = [binding];
+	else bindings.push(binding);
+	counted(parent);
+}
+
+function counted(parent: Lifetime) {
 	parent.count += 1;
 	if (parent.role === Role.Generation && parent.count >= OWNER_CHILDREN_WARNING && !parent.warned) {
 		parent.warned = true;
@@ -181,6 +193,18 @@ export function adopt(parent: Lifetime, child: Owned) {
 			`Crucible: ${ownerLabel(parent.owner)} owns ${OWNER_CHILDREN_WARNING} live effects and scopes; one may be created every frame`,
 		);
 	}
+}
+
+/** Swaps a binding out of its parent's bindings, unless its parent's ending already dropped them. */
+function leaveBinding(binding: BindingNode) {
+	const parent = binding.parent;
+	const bindings = parent?.bindings;
+	if (bindings === undefined) return;
+	const index = bindings.indexOf(binding);
+	if (index < 0) return;
+	bindings[index] = bindings[bindings.size() - 1];
+	bindings.pop();
+	parent!.count -= 1;
 }
 
 function leave(child: Owned) {
@@ -254,13 +278,14 @@ export function endInterval(s: ObjectState) {
 
 /** @internal Detaches a reaction from the graph for good. No diagnostic: an ending is not a failure. */
 function halt(reaction: ReactionNode) {
-	if (reaction.stopped) return;
-	reaction.stopped = true;
+	if (reaction.mark === Mark.Stopped) return;
+	reaction.mark = Mark.Stopped;
 	releaseEdges(reaction);
 }
 
+/** Halts newest first, the order in which a shared source's observers leave from the end. */
 function latch(root: Lifetime) {
-	if (root.head === undefined) {
+	if (root.tail === undefined && root.bindings === undefined) {
 		root.ended = true;
 		return;
 	}
@@ -268,16 +293,17 @@ function latch(root: Lifetime) {
 	while (pending.size() > 0) {
 		const lifetime = pending.pop()!;
 		lifetime.ended = true;
-		let child = lifetime.head;
+		const bindings = lifetime.bindings;
+		if (bindings !== undefined) for (let i = bindings.size() - 1; i >= 0; i--) halt(bindings[i]);
+		let child = lifetime.tail;
 		while (child !== undefined) {
 			if (child.kind === NodeKind.Lifetime) {
 				if (!child.ended) pending.push(child);
 			} else {
 				halt(child);
-				if (child.kind === NodeKind.Effect && child.run !== undefined && !child.run.ended)
-					pending.push(child.run);
+				if (child.run !== undefined && !child.run.ended) pending.push(child.run);
 			}
-			child = child.next;
+			child = child.prev;
 		}
 	}
 }
@@ -319,6 +345,11 @@ function finish(lifetime: Lifetime) {
 		else retire(child);
 		child = previous;
 	}
+	const bindings = lifetime.bindings;
+	if (bindings !== undefined) {
+		lifetime.bindings = undefined;
+		lifetime.count -= bindings.size();
+	}
 	const releases = lifetime.releases;
 	runReleases(lifetime, releases, releases.size() - 2);
 	releases.clear();
@@ -328,13 +359,15 @@ function finish(lifetime: Lifetime) {
 /** @internal Stops a reaction for good: detached, an effect's current run ended, unlinked from its owner. */
 export function retire(reaction: ReactionNode) {
 	halt(reaction);
-	if (reaction.kind === NodeKind.Effect) {
-		const run = reaction.run;
-		reaction.run = undefined;
-		if (run !== undefined) {
-			latch(run);
-			finish(run);
-		}
+	if (reaction.kind === NodeKind.Binding) {
+		leaveBinding(reaction);
+		return;
+	}
+	const run = reaction.run;
+	reaction.run = undefined;
+	if (run !== undefined) {
+		latch(run);
+		finish(run);
 	}
 	leave(reaction);
 }

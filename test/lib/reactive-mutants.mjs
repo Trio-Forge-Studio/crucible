@@ -54,7 +54,13 @@ const mutants = [
 		],
 	],
 	["equal result moves the version", "guard", [5], GRAPH, [["!rawequal(cache.value, result)", "true"]]],
-	["far observers marked dirty", "swap", [5, 33], GRAPH, [["levels.push(Mark.Check);", "levels.push(Mark.Dirty);"]]],
+	[
+		"far observers marked dirty",
+		"swap",
+		[5, 33],
+		GRAPH,
+		[["raise(unmarked.pop()!, Mark.Check);", "raise(unmarked.pop()!, Mark.Dirty);"]],
+	],
 	[
 		"failure compared by its traceback",
 		"swap",
@@ -116,7 +122,7 @@ const mutants = [
 		"pair",
 		[10],
 		GRAPH,
-		[["			source.observers.add(node);\n			if (first", "			if (first"]],
+		[["			source.observers.push(node);\n			if (first", "			if (first"]],
 	],
 	["stale run not requeued", "pair", [10], FLUSH, [["	markEffect(effect, staleAfterRun(effect));\n", ""]]],
 	[
@@ -193,13 +199,7 @@ const mutants = [
 			["	if (closeScope()) drain();\n	if (!ok)", "	if (!ok)"],
 		],
 	],
-	[
-		"equal computeds do not skip a run",
-		"guard",
-		[14, 33],
-		FLUSH,
-		[["			if (mark === Mark.Check && !dependenciesMoved(effect)) continue;\n", ""]],
-	],
+	["equal computeds do not skip a run", "guard", [14, 33], FLUSH, [["				if (!moved) continue;\n", ""]]],
 	[
 		"dependencies rewired backwards",
 		"swap",
@@ -215,7 +215,7 @@ const mutants = [
 		"pair",
 		[15],
 		FLUSH,
-		[["let previous = readUntracked(source);", "let previous = undefined as unknown as T;"]],
+		[["const baseline = readUntracked(source);", "const baseline = undefined as unknown as T;"]],
 	],
 	[
 		"run owner dropped",
@@ -255,8 +255,8 @@ const mutants = [
 		FLUSH,
 		[
 			[
-				"function fail(effect: EffectNode, reason: string) {\n	retire(effect);",
-				"function fail(effect: EffectNode, reason: string) {\n	tostring(effect);",
+				"function fail(reaction: ReactionNode, reason: string) {\n	retire(reaction);",
+				"function fail(reaction: ReactionNode, reason: string) {\n	tostring(reaction);",
 			],
 		],
 	],
@@ -267,8 +267,8 @@ const mutants = [
 		FLUSH,
 		[
 			[
-				'	report("error", `Crucible: effect at',
-				'	if (false as boolean) report("error", `Crucible: effect at',
+				'	report(\n		"error",\n		`Crucible: ${what} at',
+				'	if (false as boolean) report(\n		"error",\n		`Crucible: ${what} at',
 			],
 		],
 	],
@@ -484,7 +484,7 @@ const mutants = [
 			["const [ok] = pcall(port.defer, flush);", "const [ok] = pcall(port!.defer, flush);"],
 		],
 	],
-	["batch unsorted", "pair", [33], FLUSH, [["		batch.sort(createdBefore);\n", ""]]],
+	["batch unsorted", "pair", [33], FLUSH, [["		if (!inCreationOrder(batch)) sortByCreation(batch);\n", ""]]],
 	["creation order reversed", "swap", [33], GRAPH, [["	return a.id < b.id;", "	return b.id < a.id;"]]],
 	[
 		"computed dependency not pulled",
@@ -493,8 +493,8 @@ const mutants = [
 		GRAPH,
 		[
 			[
-				"		if (source.kind === NodeKind.Computed) validate(source);\n		if (source.version !== edge.seen) return true;",
-				"		if (source.version !== edge.seen) return true;",
+				"	if (source.kind === NodeKind.Computed) validate(source);\n	return source.version !== edge.seen;",
+				"	return source.version !== edge.seen;",
 			],
 		],
 	],
@@ -503,9 +503,9 @@ const mutants = [
 		"guard",
 		[34],
 		FLUSH,
-		[["			if (effect.runs === MAX_RUNS_PER_EFFECT) {", "			if (false as boolean) {"]],
+		[["			if (count === MAX_RUNS_PER_EFFECT) {", "			if (false as boolean) {"]],
 	],
-	["run counts never reset", "guard", [34], FLUSH, [["	for (const effect of ran) effect.runs = 0;\n", ""]]],
+	["run counts never reset", "guard", [34], FLUSH, [["	runs.clear();\n", ""]]],
 	["bound report never re-armed", "guard", [34], FLUSH, [["	}\n	boundReported = false;\n}", "	}\n}"]]],
 	["bound reported every time", "guard", [34, 79], FLUSH, [["	if (boundReported) return;\n", ""]]],
 	["total bound drops the effect it stopped at", "pair", [34], FLUSH, [["				cursor -= 1;\n", ""]]],
@@ -523,7 +523,7 @@ const mutants = [
 		FLUSH,
 		[["	const blamed = culprit;\n	carry();", "	const blamed = culprit;\n	batch = [];"]],
 	],
-	["culprit not latched when stop fails", "guard", [35], FLUSH, [["			blamed.stopped = true;\n", ""]]],
+	["culprit not latched when stop fails", "guard", [35], FLUSH, [["			blamed.mark = Mark.Stopped;\n", ""]]],
 	[
 		"flushing never reset",
 		"guard",
@@ -752,7 +752,7 @@ const mutants = [
 		"swap",
 		[34],
 		FLUSH,
-		[["busiest.sort((a, b) => a.runs > b.runs);", "busiest.sort((a, b) => b.runs > a.runs);"]],
+		[["busiest.sort((a, b) => a[1] > b[1]);", "busiest.sort((a, b) => b[1] > a[1]);"]],
 	],
 	[
 		"engine release unprotected",

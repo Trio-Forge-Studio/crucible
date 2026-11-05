@@ -502,6 +502,30 @@ fn one_edit(a: &str, b: &str) -> bool {
 }
 
 /// The folder of a path as Node's `path.dirname` gives it, with `.` for a bare name.
+/// The matcher of `load` in `src/internal/boot.ts`, over an instance path instead of the instance tree.
+fn path_matches(rbx: &[String], segments: &[&str]) -> bool {
+    match segments.split_first() {
+        None => rbx.is_empty(),
+        Some((&"**", rest)) => path_matches(rbx, rest) || (!rbx.is_empty() && path_matches(&rbx[1..], segments)),
+        Some((segment, rest)) => {
+            rbx.split_first().is_some_and(|(name, tail)| name_matches(name, segment) && path_matches(tail, rest))
+        }
+    }
+}
+
+fn name_matches(name: &str, pattern: &str) -> bool {
+    if let Some(open) = pattern.find('{') {
+        let Some(close) = pattern[open..].find('}').map(|at| open + at) else { return false };
+        return pattern[open + 1..close]
+            .split(',')
+            .any(|part| name_matches(name, &format!("{}{part}{}", &pattern[..open], &pattern[close + 1..])));
+    }
+    let Some(star) = pattern.find('*') else { return name == pattern };
+    let Some(rest) = name.strip_prefix(&pattern[..star]) else { return false };
+    let tail = &pattern[star + 1..];
+    rest.char_indices().map(|(at, _)| at).chain([rest.len()]).any(|at| name_matches(&rest[at..], tail))
+}
+
 fn dirname(path: &str) -> &str {
     let trimmed = path.trim_end_matches('/');
     match trimmed.rfind('/') {
@@ -1464,7 +1488,28 @@ impl Extractor {
                 Err(()) => return Err("load prefix maps to more than one Rojo folder."),
             },
         };
-        Ok(format!("crucible-path:{}/{suffix}", mapped.join("/")))
+        let pattern = format!("{}/{suffix}", mapped.join("/"));
+        let segments: Vec<&str> = pattern.split('/').collect();
+        if !self.loads_module(game, &segments) {
+            return Err("load glob matches no module.");
+        }
+        Ok(format!("crucible-path:{pattern}"))
+    }
+
+    /// Only TypeScript compiled through the transform can define a class for boot to construct, so Luau files and
+    /// other Rojo mappings are not candidates.
+    fn loads_module(&self, game: &Place, segments: &[&str]) -> bool {
+        self.crucible.program.source_files().iter().any(|&file| {
+            if file.is_declaration_file() {
+                return false;
+            }
+            let Some(out) = game.out_path(&normalize(Path::new(file.file_name()))) else { return false };
+            let script = out
+                .file_stem()
+                .and_then(|stem| Path::new(stem).extension())
+                .is_some_and(|kind| kind == "server" || kind == "client");
+            !script && game.rojo.rbx_path(&out).is_some_and(|rbx| path_matches(&rbx, segments))
+        })
     }
 
     /// A Rojo project may map a folder's files one by one, as Rogen does before their outputs exist. Each such file

@@ -50,7 +50,7 @@ jobs:
   cli:
     strategy:
       matrix:
-        runner: [ubuntu-latest, windows-latest]
+        runner: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
