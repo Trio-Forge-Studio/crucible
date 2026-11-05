@@ -1,11 +1,13 @@
 use super::crucible::Code;
 use super::{Extractor, types};
-use crate::classes::Style;
+use crate::classes::{Class, Condition, Style, group_marker};
 use crate::facts::{ClassStyle, Prop, Site, Span};
 use std::collections::BTreeSet;
 use tsrs_ast::{Kind, Node, NodeFlags, SymbolFlags};
 use tsrs_checker::Type;
 use tsrs_core::P;
+
+type Groups = Vec<BTreeSet<Option<String>>>;
 
 impl Extractor {
     pub(super) fn component_classes(&mut self, attributes: P<Node>) {
@@ -47,6 +49,50 @@ impl Extractor {
             && self.constant_name(n.expression().unwrap())
     }
 
+    /// The text of a className value, a map from each of its bytes to its offset in the source file when the value is
+    /// inline, and the value's start.
+    fn class_text(&mut self, attribute: P<Node>, value: P<Node>) -> Option<(String, Option<Vec<u32>>, u32)> {
+        if matches!(value.kind(), Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral) {
+            let span = self.span(value);
+            let raw = &self.text[span.start as usize..span.end as usize];
+            let jsx = attribute.as_jsx_attribute().initializer == Some(value);
+            let (text, map) = decode_literal(raw, jsx);
+            Some((text, Some(map), span.start))
+        } else if self.constant_name(value) {
+            let t = self.type_of(value);
+            types::literal_string(t).map(|text| (text.to_owned(), None, self.span(value).start))
+        } else {
+            None
+        }
+    }
+
+    /// The group names of each intrinsic element whose children hold `element`, nearest first.
+    fn enclosing_groups(&mut self, element: P<Node>) -> Groups {
+        let mut groups = Vec::new();
+        let mut child = element;
+        while let Some(parent) = child.parent() {
+            if parent.kind() == Kind::JsxElement && parent.as_jsx_element().opening_element != child {
+                let opening = parent.as_jsx_element().opening_element.as_jsx_opening_element();
+                let tag = opening.tag_name;
+                if tag.kind() == Kind::Identifier && tsrs_scanner::is_intrinsic_jsx_name(tag.text()) {
+                    let mut names = BTreeSet::new();
+                    for &attribute in opening.attributes.as_jsx_attributes().properties().nodes() {
+                        if attribute.kind() == Kind::JsxAttribute
+                            && tsrs_ast::entity_name_to_string(attribute.as_jsx_attribute().name, None) == "className"
+                            && let Some(value) = class_value(attribute)
+                            && let Some((text, ..)) = self.class_text(attribute, value)
+                        {
+                            names.extend(text.split_ascii_whitespace().filter_map(group_marker));
+                        }
+                    }
+                    groups.push(names);
+                }
+            }
+            child = parent;
+        }
+        groups
+    }
+
     pub(super) fn class_attribute(
         &mut self,
         element: P<Node>,
@@ -66,20 +112,7 @@ impl Extractor {
             );
             return;
         };
-        let inline = matches!(value.kind(), Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral);
-        let known = if inline {
-            let span = self.span(value);
-            let raw = &self.text[span.start as usize..span.end as usize];
-            let jsx = attribute.as_jsx_attribute().initializer == Some(value);
-            let (text, map) = decode_literal(raw, jsx);
-            Some((text, Some(map), span.start))
-        } else if self.constant_name(value) {
-            let t = self.type_of(value);
-            types::literal_string(t).map(|text| (text.to_owned(), None, self.span(value).start))
-        } else {
-            None
-        };
-        let Some((text, map, start)) = known else {
+        let Some((text, map, start)) = self.class_text(attribute, value) else {
             self.report(
                 value,
                 Code::Rule(29),
@@ -87,12 +120,14 @@ impl Extractor {
             );
             return;
         };
-        let mut values = Vec::new();
         let gui = self
             .checker
             .resolve_name_exported("GuiObject", None, SymbolFlags::Type, false)
             .map(|s| self.checker.get_declared_type_of_symbol_exported(s));
         let fits_gui = gui.is_some_and(|gui| self.checker.is_type_assignable_to_exported(instance, gui));
+        let mut classes = Vec::new();
+        let mut tokens = Vec::new();
+        let mut enclosing: Option<Groups> = None;
         let mut offset = 0;
         for token in text.split_ascii_whitespace() {
             let at = offset + text[offset..].find(token).unwrap();
@@ -101,44 +136,76 @@ impl Extractor {
                 Some(map) => Span { start: start + map[at], end: start + map[offset] },
                 None => self.span(value),
             };
-            let resolved = self.catalog.as_ref().unwrap().lookup(token);
-            match resolved {
+            let resolved = match self.catalog.as_ref().unwrap().parse(token) {
+                Ok(resolved) => resolved,
                 Err(message) => {
-                    self.report_span(value, span, Code::Rule(28), &format!("{message} (class `{token}`, byte {at})"))
+                    self.report_span(value, span, Code::Rule(28), &format!("{message} (class `{token}`, byte {at})"));
+                    continue;
                 }
-                Ok(writes) => {
-                    if !fits_gui {
-                        self.report_span(
-                            value,
-                            span,
-                            Code::Rule(31),
-                            &format!("`{token}` requires a GuiObject; {class} is not one"),
-                        );
+            };
+            if !fits_gui {
+                self.report_span(
+                    value,
+                    span,
+                    Code::Rule(31),
+                    &format!("`{token}` requires a GuiObject; {class} is not one"),
+                );
+            }
+            if let Class::Writes(conditions, writes) = &resolved {
+                let mut missing = BTreeSet::new();
+                for write in writes {
+                    let (owner, property) = write.target().destination();
+                    if owner.is_none() && self.checker.get_property_of_type_exported(instance, property).is_none() {
+                        missing.insert(property);
                     }
-                    let mut missing = BTreeSet::new();
-                    for write in &writes {
-                        let (owner, property) = write.target().destination();
-                        if owner.is_none() && self.checker.get_property_of_type_exported(instance, property).is_none() {
-                            missing.insert(property);
-                        }
-                    }
-                    if !missing.is_empty() {
-                        self.report_span(
-                            value,
-                            span,
-                            Code::Rule(31),
-                            &format!(
-                                "`{token}` sets {}, which a {class} does not have",
-                                missing.into_iter().collect::<Vec<_>>().join(", ")
-                            ),
-                        );
-                    }
-                    values.extend(writes);
+                }
+                if !missing.is_empty() {
+                    self.report_span(
+                        value,
+                        span,
+                        Code::Rule(31),
+                        &format!(
+                            "`{token}` sets {}, which a {class} does not have",
+                            missing.into_iter().collect::<Vec<_>>().join(", ")
+                        ),
+                    );
+                }
+                let groups = enclosing.get_or_insert_with(|| self.enclosing_groups(element));
+                let orphan = conditions.iter().find_map(|c| match c {
+                    Condition::Group(name, _) if !groups.iter().any(|g| g.contains(name)) => Some(name),
+                    _ => None,
+                });
+                if let Some(name) = orphan {
+                    let marker = name.as_ref().map_or("group".to_owned(), |name| format!("group/{name}"));
+                    self.report_span(
+                        value,
+                        span,
+                        Code::Rule(28),
+                        &format!(
+                            "`{token}` reads a group, but no element around it in this JSX has class `{marker}` (byte {at})"
+                        ),
+                    );
+                    continue;
                 }
             }
+            tokens.push((token, span));
+            classes.push(resolved);
         }
-        let style = Style::new(values, explicit);
-        let kinds: BTreeSet<_> = style.fixed().keys().filter_map(|t| t.destination().0).collect();
+        let style = Style::new(classes, explicit);
+        for dead in style.dead() {
+            let ((token, span), (later, _)) = (tokens[dead.token], tokens[dead.by]);
+            let property = match dead.target.destination() {
+                (Some(kind), property) => format!("{}.{property}", kind.class()),
+                (None, property) => property.to_owned(),
+            };
+            self.report_span(
+                value,
+                span,
+                Code::Rule(28),
+                &format!("`{token}` never applies: `{later}` comes later and sets {property}"),
+            );
+        }
+        let kinds: BTreeSet<_> = style.modifiers().into_keys().collect();
         if element.kind() == Kind::JsxElement {
             for &child in element.as_jsx_element().children.nodes() {
                 let tag = match child.kind() {

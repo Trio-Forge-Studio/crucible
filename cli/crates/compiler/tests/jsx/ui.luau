@@ -20,12 +20,22 @@ local function world()
 		Color3 = roblox.Color3,
 		UDim = roblox.UDim,
 		UDim2 = roblox.UDim2,
+		Vector2 = roblox.Vector2,
 		Enum = roblox.Enum,
 	}
 	local modules = graph({}, globals)
+	local input = fake.new("UserInputService")
+	input.GetLastInputType = function()
+		return roblox.Enum.UserInputType.MouseMovement
+	end
+	local camera = fake.new("Camera")
+	camera.ViewportSize = roblox.Vector2.new(1280, 720)
+	local workspace = fake.new("Workspace")
+	workspace.CurrentCamera = camera
+	local services = { UserInputService = input, Workspace = workspace }
 	globals.game = {
 		GetService = function(_, service: string)
-			return modules.node(`{root}/{service}`)
+			return services[service] or modules.node(`{root}/{service}`)
 		end,
 	}
 	modules.load(`{crucible}/internal/log-output`).installLoggingPort(engine.loggingPort)
@@ -34,6 +44,9 @@ local function world()
 	flush.releaseBarrier()
 	return {
 		state = modules.load(crucible).state,
+		ui = modules.load(`{crucible}/ui`),
+		input = input,
+		camera = camera,
 		fixture = function(name: string)
 			return modules.load(`{client}/{name}`)
 		end,
@@ -66,7 +79,7 @@ specs["a width class preserves the height supplied by the instance"] = function(
 	local parent = fake.new("ScreenGui")
 	local cleanup = w.fixture("styled").mountWidth(parent)
 	local frame = fake.named(parent, "Width")[1]
-	eq(frame.Size, roblox.UDim2.new(0.5, 0, 0, 100), "width and preserved height")
+	eq(frame.Size, roblox.UDim2.new(0.5, 0, 0, 0), "width and the zero height Instance.new gives")
 	cleanup()
 	eq(fake.isDestroyed(frame), true, "width instance destroyed")
 	quiet(w)
@@ -294,6 +307,190 @@ specs["a component receives its children, and a fragment mounts each element"] =
 	eq(a and a.ClassName, "Frame", "the first card mounts")
 	eq(#fake.named(parent, "B"), 1, "the second card mounts")
 	eq(fake.named(a, "Body")[1] and fake.named(a, "Body")[1].Text, "a", "the card appends its children")
+	quiet(w)
+end
+
+local BRAND = roblox.Color3.fromRGB(37, 99, 235)
+local SLATE = roblox.Color3.fromRGB(30, 41, 59)
+local WHITE = roblox.Color3.fromRGB(255, 255, 255)
+local BLACK = roblox.Color3.fromRGB(0, 0, 0)
+
+local function variants()
+	local w = world()
+	local parent = fake.new("ScreenGui")
+	w.fixture("variants").mountVariants(parent)
+	local tree = fake.named(parent, "Root")[1]
+	return w, function(name: string)
+		return fake.named(tree, name)[1]
+	end
+end
+
+local function press(kind: string)
+	return { UserInputType = roblox.Enum.UserInputType[kind] }
+end
+
+specs["hover: applies while the pointer is over the element"] = function()
+	local w, find = variants()
+	local button = find("Hover")
+	eq(button.BackgroundColor3, SLATE, "the base color shows first")
+	fake.fire(button, "MouseEnter")
+	eq(button.BackgroundColor3, SLATE, "the change waits for the flush")
+	w.flush()
+	eq(button.BackgroundColor3, BRAND, "hovered")
+	fake.fire(button, "MouseLeave")
+	w.flush()
+	eq(button.BackgroundColor3, SLATE, "left")
+	quiet(w)
+end
+
+specs["active: applies from a press on the element until that input ends anywhere"] = function()
+	local w, find = variants()
+	local button = find("Active")
+	local click = press("MouseButton1")
+	fake.fire(button, "InputBegan", press("MouseMovement"))
+	w.flush()
+	eq(button.BackgroundColor3, SLATE, "a mouse move is not a press")
+	fake.fire(button, "InputBegan", click)
+	w.flush()
+	eq(button.BackgroundColor3, BRAND, "pressed")
+	fake.fire(w.input, "InputEnded", press("MouseButton1"))
+	w.flush()
+	eq(button.BackgroundColor3, BRAND, "another input's end keeps the press")
+	fake.fire(w.input, "InputEnded", click)
+	w.flush()
+	eq(button.BackgroundColor3, SLATE, "released off the element")
+	local touch = press("Touch")
+	fake.fire(button, "InputBegan", touch)
+	w.flush()
+	eq(button.BackgroundColor3, BRAND, "a touch presses")
+	fake.fire(button, "InputEnded", touch)
+	w.flush()
+	eq(button.BackgroundColor3, SLATE, "released on the element")
+	fake.fire(w.input, "InputEnded", touch)
+	w.flush()
+	eq(button.BackgroundColor3, SLATE, "the global release was disconnected")
+	quiet(w)
+end
+
+specs["focus: applies while selected or while a TextBox has the keyboard"] = function()
+	local w, find = variants()
+	local box = find("Focus")
+	fake.fire(box, "SelectionGained")
+	w.flush()
+	eq(box.BackgroundColor3, BRAND, "selected")
+	fake.fire(box, "Focused")
+	fake.fire(box, "SelectionLost")
+	w.flush()
+	eq(box.BackgroundColor3, BRAND, "typing keeps focus after the selection moves")
+	fake.fire(box, "FocusLost")
+	w.flush()
+	eq(box.BackgroundColor3, SLATE, "neither selected nor typing")
+	quiet(w)
+end
+
+specs["a breakpoint applies while the viewport is at least its width"] = function()
+	local w, find = variants()
+	local frame = find("Wide")
+	eq(frame.Size, roblox.UDim2.new(0.5, 0, 0, 0), "1280 px wide is md")
+	w.camera.ViewportSize = roblox.Vector2.new(767, 720)
+	w.flush()
+	eq(frame.Size, roblox.UDim2.new(1, 0, 0, 0), "767 px is below md")
+	w.camera.ViewportSize = roblox.Vector2.new(768, 720)
+	w.flush()
+	eq(frame.Size, roblox.UDim2.new(0.5, 0, 0, 0), "768 px is md again")
+	quiet(w)
+end
+
+specs["portrait: and landscape: follow the viewport's shape"] = function()
+	local w, find = variants()
+	local frame = find("Oriented")
+	eq(frame.BackgroundColor3, WHITE, "wider than tall")
+	w.camera.ViewportSize = roblox.Vector2.new(720, 1280)
+	w.flush()
+	eq(frame.BackgroundColor3, BRAND, "taller than wide")
+	w.camera.ViewportSize = roblox.Vector2.new(900, 900)
+	w.flush()
+	eq(frame.BackgroundColor3, WHITE, "square is landscape")
+	quiet(w)
+end
+
+specs["touch:, gamepad: and mouse: follow the last input type"] = function()
+	local w, find = variants()
+	local frame = find("Input")
+	eq(frame.BackgroundColor3, BLACK, "a mouse move starts in mouse mode")
+	fake.fire(w.input, "LastInputTypeChanged", roblox.Enum.UserInputType.Touch)
+	w.flush()
+	eq(frame.BackgroundColor3, BRAND, "touch")
+	fake.fire(w.input, "LastInputTypeChanged", roblox.Enum.UserInputType.Gamepad1)
+	w.flush()
+	eq(frame.BackgroundColor3, WHITE, "gamepad")
+	fake.fire(w.input, "LastInputTypeChanged", roblox.Enum.UserInputType.Focus)
+	w.flush()
+	eq(frame.BackgroundColor3, WHITE, "an input type of no mode keeps the mode")
+	fake.fire(w.input, "LastInputTypeChanged", roblox.Enum.UserInputType.Keyboard)
+	w.flush()
+	eq(frame.BackgroundColor3, BLACK, "the keyboard is mouse mode")
+	quiet(w)
+end
+
+specs["dark: follows environment.dark"] = function()
+	local w, find = variants()
+	local frame = find("Dark")
+	eq(frame.BackgroundColor3, WHITE, "dark starts false")
+	w.ui.environment.dark:set(true)
+	w.flush()
+	eq(frame.BackgroundColor3, roblox.Color3.fromRGB(15, 23, 42), "dark")
+	w.ui.environment.dark:set(false)
+	w.flush()
+	eq(frame.BackgroundColor3, WHITE, "light again")
+	quiet(w)
+end
+
+specs["group-hover: reads the nearest enclosing group, and a named one reads its name"] = function()
+	local w, find = variants()
+	local group, card = find("Group"), find("Card")
+	local child = fake.named(group, "Child")[1]
+	local inner = fake.named(card, "Inner")[1]
+	local named = fake.named(inner, "Named")[1]
+	fake.fire(child, "MouseEnter")
+	w.flush()
+	eq(child.BackgroundColor3, SLATE, "hovering the child alone is not hovering the group")
+	fake.fire(group, "MouseEnter")
+	w.flush()
+	eq(child.BackgroundColor3, BRAND, "the group is hovered")
+	fake.fire(group, "MouseLeave")
+	w.flush()
+	eq(child.BackgroundColor3, SLATE, "the group is left")
+	fake.fire(inner, "MouseEnter")
+	w.flush()
+	eq(named.BackgroundColor3, SLATE, "a nearer unnamed group is not the named one")
+	fake.fire(card, "MouseEnter")
+	w.flush()
+	eq(named.BackgroundColor3, BRAND, "the named group inside a Show branch")
+	fake.fire(card, "MouseLeave")
+	w.flush()
+	eq(named.BackgroundColor3, SLATE, "the named group is left")
+	quiet(w)
+end
+
+specs["a modifier that only a variant creates is parented while the variant holds"] = function()
+	local w, find = variants()
+	local frame = find("Outlined")
+	eq(#frame:GetChildren(), 0, "no stroke before the hover")
+	fake.fire(frame, "MouseEnter")
+	w.flush()
+	local stroke = frame:GetChildren()[1]
+	eq(stroke and stroke.ClassName, "UIStroke", "the stroke appears")
+	eq(stroke.Color, WHITE, "stroke color")
+	eq(stroke.Thickness, 1, "default thickness")
+	eq(stroke.ApplyStrokeMode, roblox.Enum.ApplyStrokeMode.Border, "stroke mode")
+	fake.fire(frame, "MouseLeave")
+	w.flush()
+	eq(#frame:GetChildren(), 0, "the stroke goes away")
+	eq(fake.isDestroyed(stroke), false, "the stroke waits for the next hover")
+	fake.fire(frame, "MouseEnter")
+	w.flush()
+	eq(frame:GetChildren()[1], stroke, "the same stroke comes back")
 	quiet(w)
 end
 

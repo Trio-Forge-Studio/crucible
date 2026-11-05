@@ -17,3 +17,11 @@ serde_json = "1"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[profile.dev.package]
+fancy-regex.opt-level = 3
+regex-automata.opt-level = 3
+regex-syntax.opt-level = 3
+syntect.opt-level = 3
+bincode.opt-level = 3
+miniz_oxide.opt-level = 3

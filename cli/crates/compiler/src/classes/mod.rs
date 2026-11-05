@@ -151,54 +151,248 @@ impl Value {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq)]
-enum Variant {
-    Base,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Interaction {
+    Hover,
+    Press,
+    Focus,
 }
+impl Interaction {
+    /// The `Interaction` field of `@trioforge/crucible/ui` that reads this state.
+    pub(crate) fn field(self) -> &'static str {
+        match self {
+            Self::Hover => "hover",
+            Self::Press => "press",
+            Self::Focus => "focus",
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Orientation {
+    Portrait,
+    Landscape,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum InputMode {
+    Mouse,
+    Touch,
+    Gamepad,
+}
+/// One variant of a class token. A token's writes apply while all of its conditions hold.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Condition {
+    State(Interaction),
+    /// The nearest enclosing group with this name, or with a bare `group` class.
+    Group(Option<String>, Interaction),
+    /// The viewport is at least this many pixels wide.
+    Breakpoint(String, u32),
+    Orientation(Orientation),
+    Input(InputMode),
+    Dark,
+}
+/// Whenever `a` holds, `b` holds.
+pub(crate) fn implies(a: &Condition, b: &Condition) -> bool {
+    match (a, b) {
+        (Condition::Breakpoint(_, a), Condition::Breakpoint(_, b)) => a >= b,
+        _ => a == b,
+    }
+}
+fn contradicts(a: &Condition, b: &Condition) -> bool {
+    match (a, b) {
+        (Condition::Orientation(a), Condition::Orientation(b)) => a != b,
+        (Condition::Input(a), Condition::Input(b)) => a != b,
+        _ => false,
+    }
+}
+const VARIANTS: [&str; 12] = [
+    "hover",
+    "active",
+    "focus",
+    "group-hover",
+    "group-active",
+    "group-focus",
+    "portrait",
+    "landscape",
+    "touch",
+    "mouse",
+    "gamepad",
+    "dark",
+];
+/// Whether a `[breakpoint]` name would read as a built-in variant or a group.
+pub(super) fn reserved(name: &str) -> bool {
+    VARIANTS.contains(&name) || name.starts_with("group")
+}
+pub(super) fn is_name(text: &str) -> bool {
+    text.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && text.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+/// `group` is `Some(None)` and `group/<name>` is `Some(Some(name))`.
+pub(crate) fn group_marker(token: &str) -> Option<Option<String>> {
+    match token.strip_prefix("group") {
+        Some("") => Some(None),
+        Some(rest) => rest.strip_prefix('/').filter(|name| is_name(name)).map(|name| Some(name.to_owned())),
+        None => None,
+    }
+}
+
+/// A resolved class token.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Class {
+    /// Typed writes that apply while every condition holds. The conditions are sorted.
+    Writes(Vec<Condition>, Vec<Value>),
+    /// `group` or `group/<name>`, which writes nothing and lets descendants read this element's interaction.
+    Group(Option<String>),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Rule {
-    variant: Variant,
+    conditions: Vec<Condition>,
     value: Value,
+    token: usize,
+}
+/// How a target that varies picks its value: the first case whose conditions all hold, else the fallback. A `None`
+/// fallback is the value the instance had before its classes applied.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Choice {
+    pub(crate) cases: Vec<(Vec<Condition>, Value)>,
+    pub(crate) fallback: Option<Value>,
+}
+/// A conditional rule that never applies, because a later token's rule on the same target holds whenever it does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Dead {
+    pub(crate) token: usize,
+    pub(crate) target: Target,
+    pub(crate) by: usize,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Style {
     series: BTreeMap<Target, Vec<Rule>>,
+    groups: BTreeSet<Option<String>>,
+}
+fn defaults(kind: Modifier) -> Vec<Value> {
+    match kind {
+        Modifier::Stroke => vec![Value::StrokeMode, Value::StrokeThickness(1.0), Value::StrokeColor(Rgb(0, 0, 0))],
+        Modifier::List => vec![Value::ListDirection(Direction::Horizontal), Value::ListSortOrder],
+        _ => vec![],
+    }
+}
+/// The target's last unconditional rule, and the rules after it, which decide its value while they hold. A rule right
+/// after the base that writes the base's value changes nothing, because it is tested last, so it is left out.
+fn live(rules: &[Rule]) -> (Option<&Rule>, &[Rule]) {
+    match rules.iter().rposition(|r| r.conditions.is_empty()) {
+        Some(base) => {
+            let same = rules[base + 1..].iter().take_while(|r| r.value == rules[base].value).count();
+            (Some(&rules[base]), &rules[base + 1 + same..])
+        }
+        None => (None, rules),
+    }
 }
 impl Style {
-    pub(crate) fn new(values: impl IntoIterator<Item = Value>, explicit: &BTreeSet<String>) -> Self {
+    /// `Dead` names each class by its index in `classes`.
+    pub(crate) fn new(classes: impl IntoIterator<Item = Class>, explicit: &BTreeSet<String>) -> Self {
         let mut style = Self::default();
-        for value in values {
-            let target = value.target();
-            let (owner, property) = target.destination();
-            if owner.is_none() && explicit.contains(property) {
-                continue;
+        for (token, class) in classes.into_iter().enumerate() {
+            let (conditions, values) = match class {
+                Class::Group(name) => {
+                    style.groups.insert(name);
+                    continue;
+                }
+                Class::Writes(conditions, values) => (conditions, values),
+            };
+            for value in values {
+                let target = value.target();
+                let (owner, property) = target.destination();
+                if owner.is_none() && explicit.contains(property) {
+                    continue;
+                }
+                style.series.entry(target).or_default().push(Rule { conditions: conditions.clone(), value, token });
             }
-            style.series.entry(target).or_default().push(Rule { variant: Variant::Base, value });
         }
         style
     }
+    pub(crate) fn groups(&self) -> &BTreeSet<Option<String>> {
+        &self.groups
+    }
+    /// Whether a rule reads the element's own hover, press or focus.
+    pub(crate) fn interacts(&self) -> bool {
+        self.series.values().flatten().flat_map(|r| &r.conditions).any(|c| matches!(c, Condition::State(_)))
+    }
+    /// The value of each target that never varies, and each modifier's defaults for the targets no rule sets.
     pub(crate) fn fixed(&self) -> BTreeMap<Target, Value> {
         let mut values: BTreeMap<_, _> = self
             .series
             .iter()
-            .filter_map(|(t, rules)| {
-                rules.iter().rev().find(|r| r.variant == Variant::Base).map(|r| (*t, r.value.clone()))
+            .filter_map(|(t, rules)| match live(rules) {
+                (Some(base), []) => Some((*t, base.value.clone())),
+                _ => None,
             })
             .collect();
-        let kinds: BTreeSet<_> = values.keys().filter_map(|t| t.destination().0).collect();
-        for kind in kinds {
-            let defaults = match kind {
-                Modifier::Stroke => {
-                    vec![Value::StrokeMode, Value::StrokeThickness(1.0), Value::StrokeColor(Rgb(0, 0, 0))]
+        for kind in self.modifiers().into_keys() {
+            for value in defaults(kind) {
+                if !self.series.contains_key(&value.target()) {
+                    values.insert(value.target(), value);
                 }
-                Modifier::List => vec![Value::ListDirection(Direction::Horizontal), Value::ListSortOrder],
-                _ => vec![],
-            };
-            for value in defaults {
-                values.entry(value.target()).or_insert(value);
             }
         }
         values
+    }
+    /// How each target with a conditional rule after its last unconditional one picks its value.
+    pub(crate) fn variants(&self) -> BTreeMap<Target, Choice> {
+        self.series
+            .iter()
+            .filter_map(|(t, rules)| {
+                let (base, cases) = live(rules);
+                if cases.is_empty() {
+                    return None;
+                }
+                let fallback = base.map(|r| r.value.clone()).or_else(|| {
+                    t.destination().0.and_then(|kind| defaults(kind).into_iter().find(|v| v.target() == *t))
+                });
+                let cases = cases.iter().rev().map(|r| (r.conditions.clone(), r.value.clone())).collect();
+                Some((*t, Choice { cases, fallback }))
+            })
+            .collect()
+    }
+    /// Each modifier kind a rule creates. `None` parents it always. Otherwise it is parented while any of the
+    /// condition sets holds.
+    pub(crate) fn modifiers(&self) -> BTreeMap<Modifier, Option<Vec<Vec<Condition>>>> {
+        let mut kinds: BTreeMap<Modifier, Option<Vec<Vec<Condition>>>> = BTreeMap::new();
+        for (target, rules) in &self.series {
+            let Some(kind) = target.destination().0 else { continue };
+            let entry = kinds.entry(kind).or_insert_with(|| Some(Vec::new()));
+            match (live(rules), entry) {
+                ((Some(_), _), entry) => *entry = None,
+                ((None, cases), Some(when)) => {
+                    for rule in cases {
+                        if !when.contains(&rule.conditions) {
+                            when.push(rule.conditions.clone());
+                        }
+                    }
+                }
+                ((None, _), None) => {}
+            }
+        }
+        kinds
+    }
+    /// Each token with a conditional rule that a later rule on the same target always overrides, once.
+    pub(crate) fn dead(&self) -> Vec<Dead> {
+        let mut dead = Vec::new();
+        for (target, rules) in &self.series {
+            for (i, rule) in rules.iter().enumerate() {
+                if rule.conditions.is_empty() {
+                    continue;
+                }
+                if let Some(later) = rules[i + 1..]
+                    .iter()
+                    .find(|later| later.conditions.iter().all(|c| rule.conditions.iter().any(|d| implies(d, c))))
+                {
+                    dead.push(Dead { token: rule.token, target: *target, by: later.token });
+                }
+            }
+        }
+        dead.sort_by_key(|d| d.token);
+        dead.dedup_by_key(|d| d.token);
+        dead
     }
 }
 
@@ -235,6 +429,7 @@ impl Decimal {
 pub(crate) struct Catalog {
     named: BTreeMap<String, Vec<Value>>,
     spacing: Option<Decimal>,
+    breakpoints: BTreeMap<String, u32>,
     has_theme: bool,
 }
 impl Catalog {
@@ -260,12 +455,93 @@ impl Catalog {
                 named.insert(format!("{prefix}-{suffix}"), sizes(prefix, offset));
             }
         }
-        Self { named, spacing: None, has_theme }
+        Self { named, spacing: None, breakpoints: BTreeMap::new(), has_theme }
+    }
+    /// Resolves `variant:...:utility`. Variants stack in any order, and the writes apply while all of them hold.
+    pub(crate) fn parse(&self, token: &str) -> Result<Class, String> {
+        let mut variants: Vec<&str> = token.split(':').collect();
+        let utility = variants.pop().unwrap_or_default();
+        let mut seen: Vec<(&str, Condition)> = Vec::new();
+        for variant in variants {
+            let condition = self.variant(variant)?;
+            if let Some((other, _)) = seen.iter().find(|(_, c)| *c == condition) {
+                return Err(format!("`{variant}:` repeats `{other}:`"));
+            }
+            if let Some((other, _)) = seen.iter().find(|(_, c)| contradicts(c, &condition)) {
+                return Err(format!("`{other}:` and `{variant}:` can never hold together"));
+            }
+            seen.push((variant, condition));
+        }
+        if let Some(name) = group_marker(utility) {
+            if !seen.is_empty() {
+                return Err(format!("`{utility}` takes no variants"));
+            }
+            return Ok(Class::Group(name));
+        }
+        let writes = self.lookup(utility)?;
+        let mut conditions: Vec<_> = seen.into_iter().map(|(_, c)| c).collect();
+        conditions.sort();
+        Ok(Class::Writes(conditions, writes))
+    }
+    fn variant(&self, text: &str) -> Result<Condition, String> {
+        let interaction = |text: &str| match text {
+            "hover" => Some(Interaction::Hover),
+            "active" => Some(Interaction::Press),
+            "focus" => Some(Interaction::Focus),
+            _ => None,
+        };
+        if let Some(i) = interaction(text) {
+            return Ok(Condition::State(i));
+        }
+        if let Some(rest) = text.strip_prefix("group-") {
+            let (kind, name) = match rest.split_once('/') {
+                Some((kind, name)) if is_name(name) => (kind, Some(name.to_owned())),
+                Some(_) => ("", None),
+                None => (rest, None),
+            };
+            if let Some(i) = interaction(kind) {
+                return Ok(Condition::Group(name, i));
+            }
+        }
+        Ok(match text {
+            "portrait" => Condition::Orientation(Orientation::Portrait),
+            "landscape" => Condition::Orientation(Orientation::Landscape),
+            "touch" => Condition::Input(InputMode::Touch),
+            "mouse" => Condition::Input(InputMode::Mouse),
+            "gamepad" => Condition::Input(InputMode::Gamepad),
+            "dark" => Condition::Dark,
+            _ => match self.breakpoints.get(text) {
+                Some(px) => Condition::Breakpoint(text.to_owned(), *px),
+                None => {
+                    let names = VARIANTS.into_iter().chain(self.breakpoints.keys().map(String::as_str));
+                    return Err(self.unknown(format!("`{text}:` is not a variant."), text, names, ":"));
+                }
+            },
+        })
+    }
+    /// `message`, with the nearest of `names` within edit distance 2 and a note when no theme exists.
+    fn unknown<'a>(
+        &self,
+        mut message: String,
+        text: &str,
+        names: impl Iterator<Item = &'a str>,
+        suffix: &str,
+    ) -> String {
+        if let Some((_, name)) = names
+            .filter_map(|name| {
+                let d = distance(text, name);
+                (d <= 2).then_some((d, name))
+            })
+            .min()
+        {
+            message.push_str(&format!(" Did you mean `{name}{suffix}`?"));
+        }
+        if !self.has_theme {
+            message.push_str(" No theme.toml is beside the tsconfig.");
+        }
+        message
     }
     pub(crate) fn lookup(&self, token: &str) -> Result<Vec<Value>, String> {
-        if token.contains(':') {
-            return Err("variants such as `hover:` are not supported yet".into());
-        }
         if let Some(values) = self.named.get(token) {
             return Ok(values.clone());
         }
@@ -327,22 +603,7 @@ impl Catalog {
                 });
             }
         }
-        let mut message = format!("`{token}` is not a class.");
-        if let Some(name) = self
-            .named
-            .keys()
-            .filter_map(|name| {
-                let d = distance(token, name);
-                (d <= 2).then_some((d, name))
-            })
-            .min()
-        {
-            message.push_str(&format!(" Did you mean `{}`?", name.1));
-        }
-        if !self.has_theme {
-            message.push_str(" No theme.toml is beside the tsconfig.");
-        }
-        Err(message)
+        Err(self.unknown(format!("`{token}` is not a class."), token, self.named.keys().map(String::as_str), ""))
     }
 }
 fn sizes(prefix: &str, offset: Offset) -> Vec<Value> {
