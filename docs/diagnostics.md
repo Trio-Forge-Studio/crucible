@@ -327,7 +327,7 @@ These reasons apply to every declaration:
 - `nonfinite literal`
 - `conflicting widths`, `only numeric width intersections are supported`, and `only a Crucible width brand may intersect number; this brand is foreign`, for number intersections other than one of Crucible's width types
 - `Roblox datatype not supported in v1`, for a Roblox datatype other than `Vector3`, `Color3`, `CFrame` and Instance classes
-- `collection elements and map values cannot admit undefined`
+- `collection elements and map values cannot admit undefined`, for an array, set or map element that admits `undefined`. A map value in a replicated value, a store, a profile message or a config may admit it.
 - `tuples must be fixed length with no optional or rest elements`
 - `map keys must be string, u8, u16, u32 or a literal union; float keys can round to a duplicate`
 - `union members <types> have no discriminant; give each a distinct literal property`

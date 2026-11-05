@@ -77,7 +77,7 @@ A required attribute that is missing, or any attribute of the wrong type, keeps 
 | Hook | Subsystem | Behaviour | Runs | May yield |
 | --- | --- | --- | --- | --- |
 | constructor | Yes | Yes | Once, with its dependencies | No |
-| `awake` | Yes | Yes | Once, after every object of its batch is constructed | No |
+| `awake` | Yes | Yes | Once, after its batch's constructors | No |
 | `onEnable` | No | Yes | Each time it is enabled | No |
 | `start` | Yes | Yes | Once, the first time it is enabled | Yes |
 | `fixedUpdate(dt)` | Yes | Yes | At a fixed rate while enabled, after `start` returns | No |
@@ -88,7 +88,7 @@ A required attribute that is missing, or any attribute of the wrong type, keeps 
 | `onDestroy` | No | Yes | Once, when the behaviour ends | No |
 | `onShutdown` | Server | No | Once, when the server closes | Yes |
 
-A Subsystem has no `onEnable`, `onDisable` or `onDestroy`, so Crucible never calls them on one. `preRender` and `renderPriority` need a client class, and `onShutdown` needs a server class. A method whose name is close to a hook name fails the build with CRU009, so a misspelled hook cannot pass unnoticed. Hooks must be synchronous. An `async` hook fails with CRU012.
+A Subsystem has no `onEnable`, `onDisable` or `onDestroy`, so Crucible never calls them on one. `preRender` and `renderPriority` need a client class, and `onShutdown` needs a server class. A method whose name is one typo from a hook name fails the build with CRU009, as `crucible docs diagnostics` describes. Hooks must be synchronous. An `async` hook fails with CRU012.
 
 ## Order
 
@@ -102,9 +102,11 @@ Crucible constructs new objects in batches. A batch runs each phase for every ob
 4. Every `start`.
 5. Frame hooks, from the next frame.
 
+Objects that code creates during an `awake` join the same batch. They are constructed and awake before any object of the batch is enabled.
+
 So every object of a batch is awake before any is enabled, and enabled before any starts. The first batch on each side holds every Subsystem and every behaviour for the instances that are tagged at boot. Its Subsystems come first in each phase.
 
-Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed before its own constructor runs, and awake before its own `awake` runs. Subsystems with no dependency between them follow registration order. That is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. The order between behaviours of different tags is not defined.
+Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed before its own constructor runs, and awake before its own `awake` runs. Crucible walks Subsystems in registration order and places each one's dependencies just before it. Registration order is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. A dependency registered after its dependent therefore also moves ahead of every Subsystem registered between the two. Do not rely on the order of Subsystems that do not depend on each other. The order between behaviours of different tags is not defined.
 
 A behaviour tagged after boot gets its own batch, with the same phases.
 
@@ -157,7 +159,7 @@ A parameter can name:
 
 - A Subsystem class. Crucible passes that Subsystem.
 - An interface or an abstract class that exactly one Subsystem implements or extends. Crucible passes that Subsystem. A class provides each base class and each interface it implements, including the interfaces those extend.
-- `All<T>`, where `T` is any class or interface. Crucible passes a live set of the objects that provide `T`.
+- `All<T>`, where `T` is a Subsystem or behaviour class, or an interface or abstract class that one provides. Crucible passes a live set of the objects that provide `T`. An Instance type such as `All<Part>` fails the build with CRU001.
 
 A behaviour's constructor can take Subsystems and `All<T>` in the same way. A parameter cannot be optional, have a default value or be a rest parameter. A concrete behaviour class cannot be a parameter, because many instances of it can exist. Take `All<Spinner>`, or call `Spinner.get(instance)`.
 
@@ -239,9 +241,11 @@ Guard the work that can fail, so one bad call does not end the object. Wrap it i
 
 ## Yields
 
-Only `start` and `onShutdown` may yield. A constructor, `awake`, `onEnable`, `onDisable`, `onDestroy`, a frame hook and `accepts` must return without yielding. `task.wait`, `WaitForChild`, `Network.ask`, a DataStore call and anything else that suspends the thread is a yield. A yield there faults the object with `yielded; only start may yield`, and the rest of the hook never runs.
+Only `start` and `onShutdown` may yield. A constructor, `awake`, `onEnable`, `onDisable`, `onDestroy` and a frame hook must return without yielding. `task.wait`, `WaitForChild`, `Network.ask`, a DataStore call and anything else that suspends the thread is a yield. A yield there faults the object with `yielded; only start may yield`, and the rest of the hook never runs.
 
 Callbacks passed to `forEach` and `observe` must not yield either. A yield there stops that callback and is logged, but it faults no object.
+
+`accepts` must not yield or throw. For an instance that is not bound yet, a failure logs an error and keeps the instance unbound until its tag is removed or it leaves the game. For a bound behaviour, a failure faults the behaviour.
 
 This includes a yield in a function the hook calls, at any depth. `pcall` does not catch it: Luau lets a yield pass through `pcall`, so wrapping the call changes nothing.
 
