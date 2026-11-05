@@ -104,7 +104,7 @@ Crucible constructs new objects in batches. A batch runs each phase for every ob
 
 So every object of a batch is awake before any is enabled, and enabled before any starts. The first batch on each side holds every Subsystem and every behaviour for the instances that are tagged at boot. Its Subsystems come first in each phase.
 
-Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed and awake before its own constructor and `awake` run. Subsystems with no dependency between them follow registration order. That is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. The order between behaviours of different tags is not defined.
+Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed before its own constructor runs, and awake before its own `awake` runs. Subsystems with no dependency between them follow registration order. That is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. The order between behaviours of different tags is not defined.
 
 A behaviour tagged after boot gets its own batch, with the same phases.
 
@@ -217,7 +217,7 @@ The transformer does not look for cycles, so a cycle compiles and fails at boot.
 
 ## Faults
 
-A hook or a constructor that throws faults its object. So does a yield in any hook except `start`, as the next section describes. Crucible logs one error, `<Class> faulted in <hook>: <error>`, with the instance's path for a behaviour. Errors in the cleanup that follows are added to the same message.
+A hook or a constructor that throws faults its object. So does a yield in any hook except `start` and `onShutdown`, as the next section describes. A throw in `onShutdown` is only logged. Crucible logs one error, `<Class> faulted in <hook>: <error>`, with the instance's path for a behaviour. Errors in the cleanup that follows are added to the same message.
 
 A faulted object is finished for good. Crucible does this, in order:
 
@@ -239,7 +239,9 @@ Guard the work that can fail, so one bad call does not end the object. Wrap it i
 
 ## Yields
 
-Only `start` and `onShutdown` may yield. A constructor, `awake`, `onEnable`, `onDisable`, `onDestroy`, a frame hook, `accepts`, and callbacks passed to `forEach` and `observe` must return without yielding. `task.wait`, `WaitForChild`, `Network.ask`, a DataStore call and anything else that suspends the thread is a yield. A yield there faults the object with `yielded; only start may yield`, and the rest of the hook never runs.
+Only `start` and `onShutdown` may yield. A constructor, `awake`, `onEnable`, `onDisable`, `onDestroy`, a frame hook and `accepts` must return without yielding. `task.wait`, `WaitForChild`, `Network.ask`, a DataStore call and anything else that suspends the thread is a yield. A yield there faults the object with `yielded; only start may yield`, and the rest of the hook never runs.
+
+Callbacks passed to `forEach` and `observe` must not yield either. A yield there stops that callback and is logged, but it faults no object.
 
 This includes a yield in a function the hook calls, at any depth. `pcall` does not catch it: Luau lets a yield pass through `pcall`, so wrapping the call changes nothing.
 
