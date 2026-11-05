@@ -1,3 +1,4 @@
+mod languages;
 mod reader;
 mod render;
 mod search;

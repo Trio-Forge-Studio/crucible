@@ -22,8 +22,7 @@ semver = "1"
 env_logger = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
-syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }
-two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
 nucleo-matcher = "0.3"
 open = "5"
 unicode-width = "0.2"
@@ -31,6 +30,9 @@ unicode-width = "0.2"
 [build-dependencies]
 mermaid-text = "0.58"
 pulldown-cmark = { version = "0.13", default-features = false }
+serde_json.workspace = true
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-create"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -39,4 +41,5 @@ libc = "0.2"
 httpmock = "0.8"
 rmp-serde = "1"
 portable-pty = "0.9"
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 vt100 = "0.18"
