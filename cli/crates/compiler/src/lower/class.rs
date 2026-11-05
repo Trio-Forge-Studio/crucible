@@ -29,7 +29,7 @@ fn is_super_call(s: Node) -> bool {
 }
 
 impl Lower<'_> {
-    /// Lowers a class to roblox-ts's class shape, which the sample game's `rbxtsc` output extends: a table whose
+    /// Lowers a class to the runtime's class shape: a table whose
     /// metatable's `__index` is the base class, a `constructor` method, and a `new` function unless abstract.
     pub(super) fn class_declaration(&mut self, s: Node) {
         if s.is_ambient() {
