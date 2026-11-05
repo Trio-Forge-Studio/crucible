@@ -263,3 +263,6 @@ export class Door extends CrucibleBehaviour<"Door", Model> {
 ```
 
 A thread made that way is not stopped when the object is disabled or faults. Check `isEnabled()` after it resumes. `receive()` callbacks run on their own threads and may yield, as `crucible docs networking` describes.
+
+
+The compiler checks frame connections and session ownership, including inherited bases. See CRU035 and CRU036 in `crucible docs diagnostics`.
