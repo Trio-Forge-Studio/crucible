@@ -174,6 +174,10 @@ fn class_keywords_and_diagnostics_are_documented() {
     for code in ["CRU028", "CRU029", "CRU030", "CRU031"] {
         assert!(docs.contains(code));
     }
+    for variant in VARIANTS {
+        assert!(docs.contains(&format!("`{variant}:`")), "{variant}");
+    }
+    assert!(docs.contains("[breakpoint]") && docs.contains("`group/<name>`"));
 }
 
 #[test]

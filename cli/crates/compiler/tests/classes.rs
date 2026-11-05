@@ -379,3 +379,21 @@ fn each_bad_breakpoint_reports_cru030_at_its_key_or_value() {
         assert_eq!(g.found_columns(), [format!("CRU030@theme.toml:4:{column}")], "{entry}");
     }
 }
+
+#[test]
+fn the_guide_examples_compile_against_the_guide_theme() {
+    let guide = include_str!("../../../../docs/ui.md");
+    let block = |lang: &str| -> Vec<&str> {
+        guide.split(&format!("```{lang}\n")).skip(1).map(|b| b.split("```").next().unwrap()).collect()
+    };
+    let g = Game::ui();
+    g.write("theme.toml", block("toml").first().expect("the guide has a starter theme"));
+    let sources = block("tsx");
+    assert!(sources.iter().any(|s| s.contains("group-hover:") && s.contains("md:")), "{sources:?}");
+    for (i, source) in sources.into_iter().enumerate() {
+        g.write(&format!("src/client/guide{i}.tsx"), source);
+    }
+    let facts = g.facts();
+    assert!(facts.diagnostics.is_empty(), "{}", support::lines(&facts.diagnostics));
+    g.compile();
+}
