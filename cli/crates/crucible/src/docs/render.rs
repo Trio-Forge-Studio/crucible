@@ -8,7 +8,6 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Theme};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
-use two_face::theme::{EmbeddedLazyThemeSet, EmbeddedThemeName};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub struct Page {
@@ -91,11 +90,13 @@ impl Slugger {
     }
 }
 
-static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
-static THEMES: LazyLock<EmbeddedLazyThemeSet> = LazyLock::new(two_face::theme::extra);
+static SYNTAXES: LazyLock<SyntaxSet> =
+    LazyLock::new(|| syntect::dumps::from_binary(include_bytes!(concat!(env!("OUT_DIR"), "/syntaxes.packdump"))));
+static THEME: LazyLock<Theme> =
+    LazyLock::new(|| syntect::dumps::from_binary(include_bytes!(concat!(env!("OUT_DIR"), "/theme.themedump"))));
 
 fn theme() -> &'static Theme {
-    THEMES.get(EmbeddedThemeName::Ansi)
+    &THEME
 }
 
 const CODE: Style = Style::new().fg(Color::Yellow);
@@ -564,13 +565,7 @@ fn wrap(pieces: &[Piece], width: usize) -> Vec<Row> {
 }
 
 fn highlight(lang: &str, code: &str) -> Vec<Row> {
-    let token = match lang {
-        "luau" => "lua",
-        "console" | "shell" | "sh" => "bash",
-        "" | "text" | "txt" | "plain" | "mermaid" => "",
-        other => other,
-    };
-    let syntax = (!token.is_empty()).then(|| SYNTAXES.find_syntax_by_token(token)).flatten();
+    let syntax = super::languages::syntax_token(lang).and_then(|token| SYNTAXES.find_syntax_by_token(token));
     let code = code.replace('\t', "    ");
     let Some(syntax) = syntax else {
         return code.lines().map(|line| row(line, Style::new())).collect();
@@ -833,6 +828,49 @@ mod tests {
         for (topic, source) in fences {
             assert!(diagram(&source, 80).is_some(), "build.rs did not draw the mermaid block in docs/{topic}.md");
         }
+    }
+
+    #[test]
+    fn the_bundled_syntaxes_parse_every_docs_fence_like_the_full_set() {
+        use syntect::parsing::ParseState;
+        let full = two_face::syntax::extra_newlines();
+        let mut checked = 0;
+        for topic in crate::docs::TOPICS {
+            let mut fence: Option<(String, String)> = None;
+            for event in Parser::new(topic.markdown) {
+                match event {
+                    Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                        fence = Some((info.to_string(), String::new()));
+                    }
+                    Event::Text(text) => fence.iter_mut().for_each(|(_, code)| code.push_str(&text)),
+                    Event::End(TagEnd::CodeBlock) => {
+                        let Some((language, code)) = fence.take() else { continue };
+                        let Some(token) = super::super::languages::syntax_token(&language) else { continue };
+                        let expected = full.find_syntax_by_token(token);
+                        let bundled = SYNTAXES.find_syntax_by_token(token);
+                        assert_eq!(
+                            bundled.map(|syntax| &syntax.name),
+                            expected.map(|syntax| &syntax.name),
+                            "docs/{}.md {language}",
+                            topic.name
+                        );
+                        let (Some(expected), Some(bundled)) = (expected, bundled) else { continue };
+                        let (mut want, mut got) = (ParseState::new(expected), ParseState::new(bundled));
+                        for line in LinesWithEndings::from(&code) {
+                            assert_eq!(
+                                got.parse_line(line, &SYNTAXES).unwrap(),
+                                want.parse_line(line, &full).unwrap(),
+                                "docs/{}.md {language}: {line}",
+                                topic.name
+                            );
+                        }
+                        checked += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(checked > 100, "only {checked} fences were highlighted");
     }
 
     #[test]
