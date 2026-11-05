@@ -105,7 +105,7 @@ jobs:
           node-version: 24
       - run: rustup show
       - run: pnpm install --frozen-lockfile
-      - name: Build runtime and transformer
+      - name: Build runtime
         run: |
           pnpm build
       - name: Generate notices from locked dependencies

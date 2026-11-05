@@ -1,9 +1,3 @@
-//! Crucible's network, replicated, data and config declarations and `receive`, ported from
-//! `transformer-src/tests/network.test.cjs`, `network-types.test.cjs`, `replicated.test.cjs` and `data.test.cjs`. Each
-//! expected descriptor is the JavaScript test's own `__crucible.n.*` text, compared with the emitted Luau's call tree. A
-//! case whose source TypeScript 7 rejects asserts the type error at the line its rule would report, because the
-//! compiler stops before the Crucible pass.
-
 mod support;
 
 use std::collections::{BTreeSet, HashMap};

@@ -2,7 +2,7 @@
 
 Send typed messages between the server and its clients through declared messages, `receive` fields, and `Network`.
 
-Declare messages and receivers with the root of `@trioforge/crucible`, which is safe on both sides. Send with the `Network` namespace of the side entry: `@trioforge/crucible/server` on the server and `@trioforge/crucible/client` on the client. Declarations and `receive` need the `@trioforge/crucible/transformer` plugin. Without it, each one throws "Crucible networking needs the @trioforge/crucible/transformer plugin" when its module loads.
+Declare messages and receivers with the root of `@trioforge/crucible`, which is safe on both sides. Send with the `Network` namespace of the side entry: `@trioforge/crucible/server` on the server and `@trioforge/crucible/client` on the client. Compile declarations and `receive` with the Crucible compiler through `crucible build`. If the code was not compiled by it, each one throws "Crucible networking was not compiled by the Crucible compiler; use crucible build" when its module loads.
 
 ```ts
 import { askServer, ClientReady, receive, toClient, toServer } from "@trioforge/crucible";

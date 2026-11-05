@@ -136,7 +136,7 @@ try {
 	const good = build("accepted", accepted);
 	assert.equal(good.status, 0, good.output);
 	const emitted = fs.readFileSync(path.join(good.game, "out/shared/data.luau"), "utf8");
-	assert.match(emitted, /\.profileStore\("FD\.Players", /, `the transformer rewrote profileStore\n${emitted}`);
+	assert.match(emitted, /\.profileStore\("FD\.Players", /, `the compiler rewrote profileStore\n${emitted}`);
 	assert.match(emitted, /\{ \{ "notes" \} \}/, `the emit form lists the serverOnly path\n${emitted}`);
 	const files = { ...accepted };
 	for (const [file, [text]] of Object.entries(rejected)) files[file] = text;

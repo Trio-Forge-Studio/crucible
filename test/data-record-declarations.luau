@@ -4,7 +4,7 @@ local R = require("./lib/data-records")
 
 local WALL = R.WALL
 local SEALED = "was declared after the data registry sealed; declare stores in modules that boot loads"
-local PLUGIN = "Crucible data needs the @trioforge/crucible/transformer plugin"
+local PLUGIN = "Crucible data was not compiled by the Crucible compiler; use crucible build"
 
 local function noop(current)
 	return current

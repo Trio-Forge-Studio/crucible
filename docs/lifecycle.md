@@ -2,7 +2,7 @@
 
 Write Subsystems and behaviours, and learn the order Crucible runs their hooks, how it injects dependencies, and what a fault or a yield does.
 
-Game code is classes. A class that extends `Subsystem` is a Subsystem. `boot` constructs one object of it on its side. A class that extends `CrucibleBehaviour` is a behaviour. Crucible constructs one object of it for each instance that has its tag. Both kinds come from the root entry, `@trioforge/crucible`, and a class registers when the module that declares it runs, through a call the transformer adds after the class. `boot` requires the modules its `load` globs match, as `crucible docs boot` describes, and constructs every class registered by then. That includes classes in modules those modules import. A class whose module is first required after boot throws `registered after boot`.
+Game code is classes. A class that extends `Subsystem` is a Subsystem. `boot` constructs one object of it on its side. A class that extends `CrucibleBehaviour` is a behaviour. Crucible constructs one object of it for each instance that has its tag. Both kinds come from the root entry, `@trioforge/crucible`, and a class registers when the module that declares it runs, through a call the compiler adds after the class. `boot` requires the modules its `load` globs match, as `crucible docs boot` describes, and constructs every class registered by then. That includes classes in modules those modules import. A class whose module is first required after boot throws `registered after boot`.
 
 A registered class is named, declared at the top level of its module, has no type parameters and has a public constructor. Code never calls `new` on one. `new` outside Crucible throws `constructed outside Crucible`. `crucible docs diagnostics` lists the compile errors for each rule on this page.
 
@@ -213,7 +213,7 @@ export function storeReady() {
 - A class is registered twice.
 - A class with `preRender` or `renderPriority` is loaded on the server.
 
-The transformer does not look for cycles, so a cycle compiles and fails at boot. To break one, make one side take `All<T>` of the other. `All<T>` adds no ordering edge. The set is filled once the other side is enabled, so read it from `start` or later, as with `this.others.first()`.
+The compiler does not look for cycles, so a cycle compiles and fails at boot. To break one, make one side take `All<T>` of the other. `All<T>` adds no ordering edge. The set is filled once the other side is enabled, so read it from `start` or later, as with `this.others.first()`.
 
 ## Faults
 

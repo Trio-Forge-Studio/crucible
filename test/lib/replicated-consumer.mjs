@@ -133,7 +133,7 @@ try {
 	assert.match(
 		emitted,
 		/\.replicated\("Job\.Score", 0, /,
-		`the transformer rewrote replicated to the emit form\n${emitted}`,
+		`the compiler rewrote replicated to the emit form\n${emitted}`,
 	);
 	const files = { ...accepted };
 	for (const [file, [text]] of Object.entries(rejected)) files[file] = text;

@@ -289,7 +289,7 @@ export function profileStore<T extends object>(
 	_name: string,
 	_options: ProfileOptions<T> & ReservedKeyCheck<T>,
 ): ProfileStore<T> {
-	error("Crucible data needs the @trioforge/crucible/transformer plugin");
+	error("Crucible data was not compiled by the Crucible compiler; use crucible build");
 }
 
 /** Marks a template field server-only: the owner's client never receives it. */

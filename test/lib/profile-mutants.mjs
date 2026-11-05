@@ -37,7 +37,7 @@ const occurrences = (text, before) => (text.match(matcher(before)) ?? []).length
 const apply = (text, before, after) => text.replace(matcher(before), () => after);
 // K3: every rule with a site has a guard, a swap and a pair row below. A rule or operator with no site is listed here.
 const K3 = [
-	"rules 5, 7 and 112: one declaration per schema and the persist lowering are the transformer's (T2's campaign)",
+	"rules 5, 7 and 112: one declaration per schema and the persist lowering are the compiler's (T2's campaign)",
 	"rule 8: the types are checked by test/profile-types.test.mjs and the K9 consumer build, which compile TypeScript, not the Lune specs this campaign runs",
 	"rules 15 and 16: frozen admission is D3's walk and writes never wait is D1's gate; the handles add no site of their own",
 	"rule 1 swap: each untransformed macro throws one fixed message, with no operands to exchange",
@@ -70,7 +70,7 @@ const mutants = [
 		"1",
 		"guard",
 		ROOT,
-		'error("Crucible data needs the @trioforge/crucible/transformer plugin");',
+		'error("Crucible data was not compiled by the Crucible compiler; use crucible build");',
 		"return undefined as never;",
 		DEC + "1 untransformed",
 	),
@@ -78,7 +78,7 @@ const mutants = [
 		"1",
 		"pair",
 		SD,
-		'export function profileMessage<P>(_name: string): ProfileMessage<P> {\n\terror("Crucible data needs the @trioforge/crucible/transformer plugin");',
+		'export function profileMessage<P>(_name: string): ProfileMessage<P> {\n\terror("Crucible data was not compiled by the Crucible compiler; use crucible build");',
 		"export function profileMessage<P>(_name: string): ProfileMessage<P> {\n\treturn undefined as never;",
 		DEC + "1 untransformed",
 	),

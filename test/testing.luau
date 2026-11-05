@@ -29,7 +29,7 @@ local function fails(label: string, run: () -> any, expected: string)
 	spec.has(err, expected, label)
 end
 
--- A Luau subsystem the transformer never saw, registered the way its output registers a class.
+-- A Luau subsystem the compiler never saw, registered the way its output registers a class.
 local function subsystemClass(h, id: string, constructor: (any) -> ())
 	local class = setmetatable({}, {
 		__tostring = function()
@@ -229,7 +229,7 @@ return {
 		end, `{STORE} is a Subsystem; build it with subsystem()`)
 		fails("an unregistered class", function()
 			h.testing.subsystem(named("Loose"))
-		end, "Loose is not a registered Crucible class; compile it with the Crucible transformer")
+		end, "Loose is not a registered Crucible class; compile it with the Crucible compiler through crucible build")
 		h.place:Destroy()
 	end,
 	["message, transfer, sealMessages, registration and n describe what the place declared"] = function()

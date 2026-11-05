@@ -2,7 +2,7 @@
 
 Build one Subsystem or behaviour in a Lune spec with fake constructor arguments and call its hooks, without `boot`.
 
-The entry is `@trioforge/crucible/testing`. It is for specs that run the compiled game, such as Lune specs. Game code cannot import it. The transformer rejects the import with CRU004, the same rule that rejects `@trioforge/crucible/emit`, so the entry never reaches a game build by mistake.
+The entry is `@trioforge/crucible/testing`. It is for specs that run the compiled game, such as Lune specs. Game code cannot import it. The compiler rejects the import with CRU004, the same rule that rejects `@trioforge/crucible/emit`, so the entry never reaches a game build by mistake.
 
 ## Load the entry from the class's module graph
 
@@ -13,7 +13,7 @@ local testing = import(crucible.testing)
 local Controller = import(serverScripts.systems.controller).Controller
 ```
 
-A class loaded in another module graph is not registered there, and `subsystem` throws `<class> is not a registered Crucible class; compile it with the Crucible transformer`.
+A class loaded in another module graph is not registered there, and `subsystem` throws `<class> is not a registered Crucible class; compile it with the Crucible compiler through crucible build`.
 
 ## Build a Subsystem
 
@@ -80,7 +80,7 @@ assert(got.size == 3)
 
 ## Registration
 
-`registration(Class)` returns what the transformer registered for a class. A Subsystem gives `{ id, kind = "subsystem" }`. A behaviour gives `{ id, kind = "behaviour", tag, instanceClasses }`. It throws for an unregistered class.
+`registration(Class)` returns what the compiler registered for a class. A Subsystem gives `{ id, kind = "subsystem" }`. A behaviour gives `{ id, kind = "behaviour", tag, instanceClasses }`. It throws for an unregistered class.
 
 ## What it does not do
 

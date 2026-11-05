@@ -17,7 +17,7 @@ const mutants = [
 		"value",
 		"untransformed macro message",
 		C,
-		'error("Crucible configs need the @trioforge/crucible/transformer plugin");\n}\n\n/** Declares a targeted',
+		'error("Crucible configs were not compiled by the Crucible compiler; use crucible build");\n}\n\n/** Declares a targeted',
 		'error("configs");\n}\n\n/** Declares a targeted',
 		"1 92 untransformed",
 	],

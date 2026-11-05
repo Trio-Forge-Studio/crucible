@@ -20,12 +20,12 @@ export interface PlayerConfig<T> {
  * missing key.
  */
 export function config<T = never>(_name: string, _fallback: NoInfer<T>): Config<T> {
-	error("Crucible configs need the @trioforge/crucible/transformer plugin");
+	error("Crucible configs were not compiled by the Crucible compiler; use crucible build");
 }
 
 /** Declares a targeted config by its dashboard key, read from each player's snapshot. Same form as `config`. */
 export function playerConfig<T = never>(_name: string, _fallback: NoInfer<T>): PlayerConfig<T> {
-	error("Crucible configs need the @trioforge/crucible/transformer plugin");
+	error("Crucible configs were not compiled by the Crucible compiler; use crucible build");
 }
 
 /**

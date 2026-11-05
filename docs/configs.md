@@ -29,7 +29,7 @@ export const GlobalEventConfig = config<GlobalEvent>("GlobalEvent", NO_EVENT);
 export const WelcomeDiscount = playerConfig<number>("Shop.WelcomeDiscount", 0);
 ```
 
-`config` and `playerConfig` are compiler macros. The transformer plugin checks the declaration and adds the type's descriptor. Without the plugin's config support, a declaration throws "Crucible configs need the @trioforge/crucible/transformer plugin" when its module loads.
+`config` and `playerConfig` are compiler macros. The Crucible compiler checks the declaration and adds the type's descriptor through `crucible build`. If the code was not compiled by it, a declaration throws "Crucible configs were not compiled by the Crucible compiler; use crucible build" when its module loads.
 
 A key is up to 64 bytes of dot-separated segments that start with a letter and hold letters, digits and underscores. `Crucible` is reserved as the first segment. A duplicate key, a fallback that does not match the type, more than 1,000 configs, or a declaration in a module that loads after boot throws when its module loads.
 

@@ -120,7 +120,7 @@ const rules = [
 	],
 	[
 		"62",
-		["guard", "unsupported types are CRU019 in the transformer (unit T1); no runtime node exists for them"],
+		["guard", "unsupported types are CRU019 in the compiler (unit T1); no runtime node exists for them"],
 		["swap", "no runtime site"],
 		["pair", "no runtime site"],
 	],

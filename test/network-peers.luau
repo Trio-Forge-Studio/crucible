@@ -482,7 +482,7 @@ return {
 		do
 			local ok, err = pcall(call)
 			spec.eq(ok, false, "throws")
-			spec.has(err, "Crucible networking needs the @trioforge/crucible/transformer plugin", "rule 7")
+			spec.has(err, "Crucible networking was not compiled by the Crucible compiler; use crucible build", "rule 7")
 		end
 	end,
 	["8 the root and emit never reach a session, a port, the envelope or a side entry"] = function()

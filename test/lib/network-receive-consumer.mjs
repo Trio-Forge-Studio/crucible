@@ -131,7 +131,7 @@ try {
 	const good = build("accepted", accepted);
 	assert.equal(good.status, 0, good.output);
 	const emitted = fs.readFileSync(path.join(good.game, "out/server/event.luau"), "utf8");
-	assert.match(emitted, /\.receive\(self, "r", /, `the transformer rewrote receive to the emit form\n${emitted}`);
+	assert.match(emitted, /\.receive\(self, "r", /, `the compiler rewrote receive to the emit form\n${emitted}`);
 	const bad = build("rejected", Object.fromEntries(Object.entries(rejected).map(([file, [field]]) => [file, field])));
 	assert.equal(bad.status, 1, `the Crucible compiler build rejects every wrong callback\n${bad.output}`);
 	assert.equal(bad.output.match(/ error TS/g)?.length, Object.keys(rejected).length, bad.output);

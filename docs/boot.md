@@ -18,7 +18,7 @@ boot({ load: ["src/client/systems/**", "src/shared/**/*Store.ts"] });
 
 ## Write load globs
 
-`load` takes an array of string literals. Crucible's transformer reads them at compile time and replaces each one with the instance path of the folder it names. The compile fails with `CRU006` when an entry is not a string literal, when a spread or computed key follows `load`, when the glob's folder is outside the Rojo mapping, or when the glob matches no module.
+`load` takes an array of string literals. The Crucible compiler reads them at compile time and replaces each one with the instance path of the folder it names. The compile fails with `CRU006` when an entry is not a string literal, when a spread or computed key follows `load`, when the glob's folder is outside the Rojo mapping, or when the glob matches no module.
 
 A glob is a folder path followed by a pattern. The folder is everything before the last `/` ahead of the first `*`, `?`, `{` or `[`. A glob without a pattern names one file. The pattern matches instance names, so `.ts` and `.tsx` at its end are dropped. A pattern supports these forms:
 
@@ -38,10 +38,10 @@ boot({
 
 Each glob must match at least one module, so a typo or a renamed file fails the compile instead of leaving a Subsystem unbooted. The message is `CRU006: load glob matches no module.` on the glob.
 
-A module here is a TypeScript file in the program that the Rojo project maps to a `ModuleScript`. The transformer matches the instance each file becomes, with the same rules `boot` uses at runtime. These do not count:
+A module here is a TypeScript file in the program that the Rojo project maps to a `ModuleScript`. The compiler matches the instance each file becomes, with the same rules `boot` uses at runtime. These do not count:
 
 - A `.server.ts` or `.client.ts` file, which becomes a script. `boot` requires only `ModuleScript`s.
-- A Luau file, or an instance from another Rojo mapping. Only TypeScript compiled through the transformer can define a class for `boot` to construct.
+- A Luau file, or an instance from another Rojo mapping. Only TypeScript compiled through the compiler can define a class for `boot` to construct.
 
 ```ts
 import { boot } from "@trioforge/crucible/server";

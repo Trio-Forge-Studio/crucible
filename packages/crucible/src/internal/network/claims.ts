@@ -33,7 +33,7 @@ function retire(claim: Claim) {
 
 /**
  * @internal
- * Re-checks what the transformer checked, because untransformed or cast code skips it. A violation throws from the
+ * Re-checks what the compiler checked, because untransformed or cast code skips it. A violation throws from the
  * constructor and fails boot.
  */
 export function claim(owner: object, field: string, target: unknown, callback: unknown): Receiver {

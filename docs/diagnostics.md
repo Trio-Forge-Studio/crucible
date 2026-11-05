@@ -8,7 +8,7 @@ CRU028 to CRU031 check `className` and `theme.toml`. The compiler reports all CR
 
 Each error is a TypeScript error whose code is 90000 plus the rule's number. CRU009 prints as `error TS90009: CRU009: Method resembles a lifecycle hook. Use its exact Crucible declaration name.` Every error fails the build.
 
-An error that starts with `Crucible:` instead of a code is TS90000. It means the transformer could not run. It cannot read a `package.json`, cannot compute a type id for a declaring package, or failed on the input file. Fix the package metadata it names. A type id needs the declaring package's `name` and the same folder layout for its sources and its declarations.
+An error that starts with `Crucible:` instead of a code is TS90000. It means the compiler could not run. It cannot read a `package.json`, cannot compute a type id for a declaring package, or failed on the input file. Fix the package metadata it names. A type id needs the declaring package's `name` and the same folder layout for its sources and its declarations.
 
 Several rules depend on the file's side. The side is the nearest folder named `server`, `client` or `shared` that holds the file, counted from the package root. A file under `src/server/systems` is a server file. A file under no such folder has no side.
 
@@ -119,7 +119,7 @@ CRU006: load prefix maps to more than one Rojo folder.
 CRU006: load prefix is outside the Rojo mapping.
 ```
 
-`boot` takes an object literal with a `load` property whose value is an array literal of string literals. The transformer resolves each glob's folder through the Rojo project at compile time. The last three messages mean it could not load the Rojo project, or the folder maps to no instance or to more than one. `crucible docs boot` describes the globs, the Rojo mapping and the `rojo` plugin option.
+`boot` takes an object literal with a `load` property whose value is an array literal of string literals. The compiler resolves each glob's folder through the Rojo project at compile time. The last three messages mean it could not load the Rojo project, or the folder maps to no instance or to more than one. `crucible docs boot` describes the globs, the Rojo mapping and the Rojo project.
 
 ## CRU007
 
@@ -291,7 +291,7 @@ Each declaration macro is the whole initializer of an `export const` at the top 
 | `profileMessage` | server | 1 | name |
 | `config`, `playerConfig` | server | 1 | name, fallback |
 
-The last message means a declaration has no type argument and the transformer cannot infer the value type from the call. To fix it, pass the type argument. `crucible docs networking`, `crucible docs replicated`, `crucible docs profile-stores`, `crucible docs data-stores` and `crucible docs configs` show each declaration.
+The last message means a declaration has no type argument and the compiler cannot infer the value type from the call. To fix it, pass the type argument. `crucible docs networking`, `crucible docs replicated`, `crucible docs profile-stores`, `crucible docs data-stores` and `crucible docs configs` show each declaration.
 
 ## CRU018
 
@@ -399,7 +399,7 @@ A `receive()` field is in a file on the wrong side. `ToClient` targets are recei
 CRU023: <macro> is a declaration macro and cannot be used as a value.
 ```
 
-A declaration macro is used other than by calling it, importing it or exporting it. The transformer replaces each call at compile time, so a macro passed as an argument, stored in a variable or read through a namespace import such as `C.toServer` or `C["toServer"]` cannot work. The macros are `toServer`, `toClient`, `askServer`, `receive`, `replicated`, `replicatedPerPlayer`, `profileStore`, `dataStore`, `profileMessage`, `config` and `playerConfig`. To fix it, import the macro by name and call it directly.
+A declaration macro is used other than by calling it, importing it or exporting it. The compiler replaces each call at compile time, so a macro passed as an argument, stored in a variable or read through a namespace import such as `C.toServer` or `C["toServer"]` cannot work. The macros are `toServer`, `toClient`, `askServer`, `receive`, `replicated`, `replicatedPerPlayer`, `profileStore`, `dataStore`, `profileMessage`, `config` and `playerConfig`. To fix it, import the macro by name and call it directly.
 
 ## CRU024
 

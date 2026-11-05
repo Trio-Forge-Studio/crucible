@@ -13,11 +13,11 @@ import type { RngState, SeedPart } from "@trioforge/crucible/util/random";
 const rng = new Rng("chalet", 12345);
 
 print(rng.int(1, 6));
-// â†’ 5
+// → 5
 print(rng.pick(["lamp", "vase", "clock"]));
-// â†’ vase
+// → vase
 print(rng.shuffle([1, 2, 3, 4, 5]).join(" "));
-// â†’ 5 4 1 2 3
+// → 5 4 1 2 3
 ```
 
 ## Seeds
@@ -32,7 +32,7 @@ const furniture = new Rng("furniture", houseSeed);
 const weather = new Rng("weather", houseSeed);
 ```
 
-The two streams above are unrelated, and drawing from one never changes the other. Seed numbers must be integers within Â±2^53. `new Rng()` with no parts seeds itself from the clock and `math.random`. Use it for draws nobody needs to repeat.
+The two streams above are unrelated, and drawing from one never changes the other. Seed numbers must be integers within ±2^53. `new Rng()` with no parts seeds itself from the clock and `math.random`. Use it for draws nobody needs to repeat.
 
 `fork()` takes four draws from a stream and seeds a new one from them. Give a fork to a system that draws an unknown number of times, and the parent's sequence after the fork stays the same however many times the fork draws.
 
@@ -62,7 +62,7 @@ import { Rng } from "@trioforge/crucible/util/random";
 const rng = new Rng("loot", 7);
 const rarities = ["common", "rare", "epic"];
 print(rarities[rng.weightedIndex([80, 18, 2])]);
-// â†’ common
+// → common
 ```
 
 Each method's sequence for a given state is part of the contract, so a change that would draw differently from the same seed is a breaking change.

@@ -67,7 +67,7 @@ return {
 		}, "sorted unique modules")
 		local ok, err = pcall(boot.parsePattern, "src/server/*.ts")
 		spec.eq(ok, false, "untransformed rejects")
-		spec.has(err, "transformer", "actionable")
+		spec.has(err, "use crucible build", "actionable")
 	end,
 	["load patterns reject empty and parent segments"] = function()
 		local p = platform()
