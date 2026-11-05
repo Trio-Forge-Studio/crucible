@@ -130,3 +130,20 @@ fn theme_errors_pin_keys_and_values_to_line_and_column() {
         assert_eq!((e.line, e.column), (line, column), "{text}: {}", e.message);
     }
 }
+
+#[test]
+fn class_keywords_and_diagnostics_are_documented() {
+    let docs = include_str!("../../../../../docs/ui.md");
+    for token in Catalog::empty(false).named.keys() {
+        assert!(docs.contains(token), "{token}");
+    }
+    for prefix in [
+        "bg-", "text-", "w-", "h-", "size-", "opacity-", "rounded-", "p-", "px-", "py-", "pt-", "pr-", "pb-", "pl-",
+        "border-", "gap-",
+    ] {
+        assert!(docs.contains(prefix), "{prefix}");
+    }
+    for code in ["CRU028", "CRU029", "CRU030", "CRU031"] {
+        assert!(docs.contains(code));
+    }
+}

@@ -68,7 +68,9 @@ The binding is a node kind in the reactive graph, not an effect with flags. The 
 The compiler resolves each class token to a rule. An element's style groups those rules by target:
 
 ```
-Rule    = { target: Target, variant: Variant, value: Value }
+Value   = typed write, such as Size(X, Offset) or TextColor3(Rgb)
+Rule    = { variant: Variant, value: Value }
+          -- Target is derived from Value.
 Target  = Prop(name) | Modifier(kind, prop)
           -- kind: UICorner, UIPadding, UIStroke, UIListLayout, UIGradient, size and aspect constraints
 Variant = Base | Hover | Press | Focus | Disabled | Breakpoint(name) | Orientation(name)
@@ -129,11 +131,12 @@ These are settled.
 - **Opt-in.** A file gets the compiled lowering with `jsx: "react-jsx"` and `jsxImportSource: "@trioforge/crucible/ui"`, or the `@jsxImportSource` pragma. TypeScript 5 and 7 both read the JSX types from `@trioforge/crucible/ui/jsx-runtime`, so the editor checks each prop against `T | Readable<T>` and each event against its handler. A file with `jsx: "react"` and a `jsxFactory` gets the Vide lowering. Any other setting is a compile error.
 - **Tests.** `pnpm check` builds the sample game with `rbxtsc`, which cannot build this JSX. Phase 2's Lune specs run in the compiler's ignored tests instead, on a fixture game in `cli/crates/compiler/tests/jsx/ui` and the compiler-built runtime.
 
+- **Theme ownership.** `theme.toml` beside the invoked tsconfig is the game's complete theme. No defaults, overlays, or upward search. `spacing` is pixels per step, `[color]` holds flat colors or one level of shades, `[text]` holds TextSize values from 1 to 100, and `[radius]` holds whole-pixel radii. Unknown sections fail. Breakpoints wait for variants.
+- **Fixed className.** GuiObject intrinsics accept `className?: string`. The compiler requires a literal, a template without substitutions, or a const name or readonly property of a const with one string-literal type. Calls, mutable names, reactive strings, unions, and component forwarding wait for later work. Typed writes derive their targets. One private style owns the ordered rules for each target. Later tokens win, and explicit properties own their properties regardless of attribute order.
+- **Units.** Spacing steps produce whole-pixel offsets. Size fractions and full keywords use Roblox scale. A single Size axis preserves the other axis. A `UIScale` can scale the subtree without runtime work per class.
+
 ## Open questions
 
-- **The theme file.** Its name, its format, and whether it extends a default theme or replaces it.
-- **The `className` type.** Whether a branded `ClassName` type lets a component's prop accept class literals while a plain `string` fails, without slowing the checker.
-- **Units.** Whether the spacing scale is pixel offsets only, or scales with screen size as Vela's does.
 - **Editor completion.** Build errors give a location, but completing class names in the editor needs a TypeScript plugin or language server.
 
 ## Risks
