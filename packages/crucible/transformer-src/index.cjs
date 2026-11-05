@@ -360,6 +360,19 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 			if (found.size > 1) return null;
 			return found.size ? [...found][0].split("\0") : undefined;
 		};
+		// Only TypeScript compiled through this transformer can define a class for boot to construct, so Luau files and
+		// other Rojo mappings are not candidates.
+		const loadsModule = (resolver, inputRoot, outDir, segments) =>
+			program.getSourceFiles().some((source) => {
+				const relative = path.relative(inputRoot, source.fileName);
+				if (source.isDeclarationFile || relative.startsWith("..") || path.isAbsolute(relative)) return false;
+				const stem = relative.replace(/\.tsx?$/, "");
+				if (/\.(server|client)$/.test(stem)) return false;
+				const rbx = resolver.getRbxPathFromFilePath(
+					path.join(outDir, stem.replace(/(^|[\\/])index$/, "$1init") + ".luau"),
+				);
+				return rbx !== undefined && pathMatches(rbx, segments, 0, 0);
+			});
 		const boot = (node) => {
 			let options = node.arguments[0];
 			while (
@@ -437,7 +450,12 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 						report(entry, "CRU006", "load prefix is outside the Rojo mapping.");
 						return entry;
 					}
-					return str(`crucible-path:${[...mapped, suffix].join("/")}`);
+					const pattern = [...mapped, suffix].join("/");
+					if (!loadsModule(resolver, inputRoot, opts.outDir, pattern.split("/"))) {
+						report(entry, "CRU006", "load glob matches no module.");
+						return entry;
+					}
+					return str(`crucible-path:${pattern}`);
 				});
 				return f.updatePropertyAssignment(prop, prop.name, array(entries));
 			});
@@ -777,3 +795,34 @@ module.exports = function transformer(program, config = {}, extras = {}) {
 		}
 	};
 };
+
+// The matcher of `load` in src/internal/boot.ts, over an instance path instead of the instance tree.
+function nameMatches(name, pattern) {
+	const open = pattern.indexOf("{");
+	if (open >= 0) {
+		const close = pattern.indexOf("}", open);
+		return (
+			close >= 0 &&
+			pattern
+				.slice(open + 1, close)
+				.split(",")
+				.some((part) => nameMatches(name, pattern.slice(0, open) + part + pattern.slice(close + 1)))
+		);
+	}
+	const star = pattern.indexOf("*");
+	if (star < 0) return name === pattern;
+	const prefix = pattern.slice(0, star);
+	if (!name.startsWith(prefix)) return false;
+	for (let i = prefix.length; i <= name.length; i++)
+		if (nameMatches(name.slice(i), pattern.slice(star + 1))) return true;
+	return false;
+}
+
+function pathMatches(rbx, segments, at, index) {
+	if (index === segments.length) return at === rbx.length;
+	if (segments[index] === "**")
+		return (
+			pathMatches(rbx, segments, at, index + 1) || (at < rbx.length && pathMatches(rbx, segments, at + 1, index))
+		);
+	return at < rbx.length && nameMatches(rbx[at], segments[index]) && pathMatches(rbx, segments, at + 1, index + 1);
+}
