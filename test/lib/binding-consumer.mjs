@@ -3,8 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-binding-"));
 try {
@@ -16,7 +14,12 @@ try {
 		"junction",
 	);
 	fs.mkdirSync(path.join(scratch, "node_modules/@rbxts"));
-	for (const name of ["compiler-types", "types"]) {
+	fs.symlinkSync(
+		path.join(repo, "packages/compiler-types"),
+		path.join(scratch, "node_modules/@trioforge/compiler-types"),
+		"junction",
+	);
+	for (const name of ["types"]) {
 		fs.symlinkSync(
 			fs.realpathSync(path.join(repo, "packages/crucible/node_modules/@rbxts", name)),
 			path.join(scratch, "node_modules/@rbxts", name),
@@ -27,20 +30,20 @@ try {
 	fs.writeFileSync(
 		path.join(scratch, "tsconfig.json"),
 		JSON.stringify({
-			extends: path.join(repo, "tsconfig.rbxts.json"),
+			extends: path.join(repo, "tsconfig.json"),
 			compilerOptions: {
 				rootDir: "src",
 				outDir: "out",
-				typeRoots: ["node_modules/@rbxts", "node_modules/@trioforge"],
-				types: ["compiler-types", "types"],
+
+				types: ["@trioforge/compiler-types", "@rbxts/types"],
 			},
 			include: ["src"],
 		}),
 	);
 	const source = `import { CrucibleBehaviour, type BehaviourClass } from "@trioforge/crucible";
-import { attribute } from "@trioforge/crucible/emit";
+import { attribute } from "@trioforge/crucible";
 export abstract class TriggerZone<Tag extends string> extends CrucibleBehaviour<Tag, Model> {
-	readonly speed = attribute<number>(this, "speed", 30);
+	readonly speed = attribute<number>(30);
 	readonly seen = this.speed;
 	protected override update(_dt: number): void {}
 }
@@ -49,7 +52,31 @@ export const concrete: BehaviourClass<LockerZone> = LockerZone;
 export function lookup(instance: Instance): LockerZone | undefined { return LockerZone.get(instance); }
 `;
 	fs.writeFileSync(path.join(scratch, "src/index.ts"), source);
-	const cli = [require.resolve("roblox-ts/out/CLI/cli.js"), "--type", "package", "-p", scratch];
+	fs.writeFileSync(
+		path.join(scratch, "default.project.json"),
+		JSON.stringify({
+			name: "binding",
+			tree: {
+				$className: "DataModel",
+				ReplicatedStorage: {
+					$className: "ReplicatedStorage",
+					rbxts_include: {
+						$path: "include",
+						node_modules: {
+							$className: "Folder",
+							"@trioforge": {
+								$className: "Folder",
+								crucible: { $path: path.join(repo, "packages/crucible/out") },
+							},
+						},
+					},
+					TS: { $path: "out" },
+				},
+			},
+		}),
+	);
+
+	const cli = [path.join(repo, "test/lib/compile.mjs"), scratch];
 	const result = spawnSync(process.execPath, cli, { cwd: repo, encoding: "utf8" });
 	assert.equal(result.status, 0, result.stdout + result.stderr);
 	fs.mkdirSync(path.join(repo, "build"), { recursive: true });

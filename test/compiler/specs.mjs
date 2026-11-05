@@ -37,7 +37,7 @@ const compile = (...args) =>
 		"--",
 		...args,
 	]);
-compile("packages/crucible/tsconfig.ts7.json", out);
+compile("packages/crucible/tsconfig.json", out);
 compile(
 	"examples/sample-game/tsconfig.json",
 	game,

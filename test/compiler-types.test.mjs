@@ -26,7 +26,7 @@ function check(config, ...options) {
 }
 
 for (const [config, sources, imported] of [
-	["packages/crucible/tsconfig.ts7.json", "packages/crucible/src/", undefined],
+	["packages/crucible/tsconfig.json", "packages/crucible/src/", undefined],
 	["examples/sample-game/tsconfig.json", "examples/sample-game/src/", "packages/crucible/out/index.d.ts"],
 ]) {
 	test(`${config} type-checks under TypeScript 7 with @trioforge/compiler-types`, () => {
@@ -47,12 +47,18 @@ for (const [config, sources, imported] of [
 			assert.ok(result.files.includes(prefix(imported)), `the program resolves the runtime through ${imported}`);
 	});
 }
+import { typecheck } from "./lib/typecheck.mjs";
 
-test("@rbxts/compiler-types fails the same check with TS2802", () => {
-	const result = check("packages/crucible/tsconfig.ts7.json", "--types", "@rbxts/compiler-types,@rbxts/types");
-	assert.notEqual(result.status, 0, "the upstream types fail under TypeScript 7");
-	assert.ok(
-		result.errors.some((line) => line.includes("error TS2802")),
-		`the upstream Iterable reports TS2802:\n${result.output}`,
-	);
+test("every published subpath resolves through exports with bundler resolution and no physical remaps", () => {
+	const manifest = JSON.parse(fs.readFileSync(path.join(repo, "packages/crucible/package.json"), "utf8"));
+	const source = Object.keys(manifest.exports)
+		.map(
+			(key, i) =>
+				`import * as entry${i} from "@trioforge/crucible${key === "." ? "" : key.slice(1)}";\nexport const use${i} = entry${i};`,
+		)
+		.join("\n");
+	for (const key of Object.keys(manifest.exports).filter((key) => key !== "."))
+		assert.equal(fs.existsSync(path.join(repo, "packages/crucible", key)), false, key);
+	const result = typecheck(new Map([[path.join(repo, "examples/sample-game/src/subpaths/index.ts"), source]]));
+	assert.equal(result.status, 0, result.output);
 });

@@ -16,7 +16,7 @@ local function methods(class)
 	return sorted(names)
 end
 return {
-	["a roblox-ts consumer resolves the physical emit folder and compiles dot calls"] = function()
+	["a consumer resolves and type-checks the emit export"] = function()
 		local result = require("@lune/process").exec("node", { "test/lib/emit-consumer.mjs" })
 		spec.eq(result.code, 0, result.stdout .. result.stderr)
 	end,

@@ -1367,52 +1367,31 @@ const mutants = [
 ];
 // Type-checks every mutant in one language service, so a mutant that cannot compile fails before the slow runs.
 function typecheck(originals) {
-	const ts = require(require.resolve("typescript", { paths: [path.join(scratch, "packages/crucible")] }));
-	const configPath = path.join(scratch, "packages/crucible/tsconfig.json");
-	const config = ts.parseJsonConfigFileContent(
-		ts.readConfigFile(configPath, ts.sys.readFile).config,
-		ts.sys,
-		path.dirname(configPath),
-	);
-	const texts = new Map();
-	const versions = new Map();
-	const service = ts.createLanguageService({
-		getScriptFileNames: () => config.fileNames,
-		getCompilationSettings: () => config.options,
-		getScriptVersion: (file) => String(versions.get(path.resolve(file)) ?? 0),
-		getScriptSnapshot: (file) => {
-			const text =
-				texts.get(path.resolve(file)) ?? (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined);
-			return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
-		},
-		getCurrentDirectory: () => path.dirname(configPath),
-		getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
-		fileExists: ts.sys.fileExists,
-		readFile: ts.sys.readFile,
-		readDirectory: ts.sys.readDirectory,
-		directoryExists: ts.sys.directoryExists,
-		getDirectories: ts.sys.getDirectories,
-	});
-	const errors = (file) =>
-		[...service.getSyntacticDiagnostics(file), ...service.getSemanticDiagnostics(file)].map((d) =>
-			ts.flattenDiagnosticMessageText(d.messageText, " "),
-		);
-	const baseline = new Map();
 	for (const [index, [rule, kind, file, before, after]] of mutants.entries()) {
 		if (!file.endsWith(".ts")) continue;
-		const absolute = path.resolve(scratch, file);
-		if (!baseline.has(absolute)) baseline.set(absolute, errors(absolute).length);
-		texts.set(absolute, originals.get(file).replace(before, after));
-		versions.set(absolute, (versions.get(absolute) ?? 0) + 1);
-		const found = errors(absolute);
-		texts.delete(absolute);
-		versions.set(absolute, versions.get(absolute) + 1);
-		assert.ok(
-			found.length <= baseline.get(absolute),
-			`${index} rule ${rule} ${kind} does not compile: ${found[0]}`,
-		);
+		const absolute = path.join(scratch, file);
+		try {
+			fs.writeFileSync(absolute, originals.get(file).replace(before, after));
+			const result = spawnSync(
+				process.execPath,
+				[
+					path.join(path.dirname(require.resolve("tsrs/package.json")), "bin/tsrs"),
+					"-p",
+					path.join(scratch, "packages/crucible/tsconfig.json"),
+				],
+				{ encoding: "utf8" },
+			);
+			assert.equal(
+				result.status,
+				0,
+				`${index} rule ${rule} ${kind} does not compile: ${result.stdout}${result.stderr}`,
+			);
+		} finally {
+			fs.writeFileSync(absolute, originals.get(file));
+		}
 	}
 }
+
 function run(command, args, timeout = 600000) {
 	const result = spawnSync(command, args, { cwd: scratch, encoding: "utf8", timeout });
 	assert.equal(result.error, undefined, String(result.error));
@@ -1426,7 +1405,7 @@ function spec(target) {
 	return { hung: false, status: result.status, output: result.stdout + result.stderr };
 }
 try {
-	for (const name of ["tsconfig.rbxts.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
 	fs.cpSync(path.join(repo, "test"), path.join(scratch, "test"), { recursive: true });
@@ -1447,14 +1426,7 @@ try {
 		assert.equal(count, 1, `rule ${rule} ${kind}: pattern must occur once in ${file}: ${before}`);
 	}
 	typecheck(originals);
-	const build = () =>
-		run(process.execPath, [
-			require.resolve("roblox-ts/out/CLI/cli.js"),
-			"--type",
-			"package",
-			"-p",
-			"packages/crucible",
-		]);
+	const build = () => run(process.execPath, [path.join(repo, "test/lib/compile.mjs"), "packages/crucible"]);
 	assert.equal(build().status, 0, "baseline build");
 	const targets = [...new Set(mutants.map((m) => m[5]))];
 	const baseline = run("lune", ["run", "test", ...targets]);

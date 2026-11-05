@@ -506,12 +506,14 @@ return {
 		end
 	end,
 	["rule 110 a failed admission of a record at the current version names no migration"] = function()
-		local shape =
-			{ node = recordNode(), migrations = {
+		local shape = {
+			node = recordNode(),
+			migrations = {
 				function(old)
 					return { coins = old.coins }
 				end,
-			} }
+			},
+		}
 		local backend, a = D2.world(1, { version = shape })
 		D2.seed(backend, nil, { schemaVersion = 1, payload = { coins = 2, gems = SECRET }, epoch = 5 })
 		DM.begin(a)
