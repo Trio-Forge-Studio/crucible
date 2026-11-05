@@ -135,7 +135,7 @@ fn registration_payloads_inherited_deps_tags_attributes_provides_and_symbol_iden
     has(&luau, "self.label = __crucible.attribute(self, \"label\", nil)");
     has(&luau, "__crucible.resolve(\"fixture-game/server/main:Store\")");
     has(&luau, "__crucible.resolveAll(\"fixture-game/server/main:Child\")");
-    has(&luau, "\"crucible-path:ServerScriptService/TS/**/*{Service,Behaviour}\"");
+    has(&luau, "\"crucible-path:ServerScriptService/TS/**/*{main,Service}\"");
     has(&luau, "fleetId = {\n\t\t\tname = \"FleetId\",\n\t\t\tcheck = __crucible.t.string,\n\t\t\trequired = true,");
     has(
         &luau,
@@ -153,6 +153,7 @@ fn diagnostic_probes_and_clean_controls_use_exact_source_lines() {
         ("CRU002", "export class Bad extends CrucibleBehaviour<string> {}"),
         ("CRU003", "export class Bad<T> extends Subsystem {}"),
         ("CRU006", "boot({load: [\"outside/**/*.ts\"]});"),
+        ("CRU006", "boot({load: [\"src/server/*Store.ts\"]});"),
         ("CRU007", "export class Bad extends CrucibleBehaviour<\"Bad\"> { field = attribute<never>({} as never); }"),
         ("CRU015", "const bad = attribute(1);"),
     ];
@@ -442,6 +443,7 @@ fn review_regressions_cover_alias_macros_abstract_only_imports_empty_files_and_c
     game.main(&format!("{header}const a = attribute; const bad = a(1);"));
     assert!(game.found().contains(&"CRU015@src/server/main.ts:2".to_owned()), "{:?}", game.found());
     game.remove("src/server/main.ts");
+    game.write("src/server/loaded.ts", "export const loaded = 1;");
     game.write(
         "src/client/main.ts",
         "import { boot } from \"@trioforge/crucible/client\"; boot({load: [\"src/server/**/*.ts\"]});",
@@ -573,6 +575,36 @@ fn files_of_a_load_prefix_under_different_instances_report_cru006() {
     let facts = none.facts();
     let messages: Vec<_> = facts.diagnostics.iter().filter(|d| d.code == 90006).map(|d| d.message.clone()).collect();
     assert_eq!(messages, ["CRU006: load prefix is outside the Rojo mapping."]);
+}
+
+#[test]
+fn a_load_glob_that_matches_no_module_reports_cru006_and_a_glob_that_finds_a_module_resolves() {
+    let game = Game::new();
+    game.write("src/server/systems/WalletService.ts", "export const wallet = 1;");
+    game.write("src/server/systems/Round/index.ts", "export const round = 1;");
+    game.write("src/server/systems/start.server.ts", "export {};");
+    let load = |glob: &str| -> Vec<String> {
+        game.main(&format!("import {{ boot }} from \"@trioforge/crucible/server\"; boot({{load: [\"{glob}\"]}});"));
+        game.facts().diagnostics.iter().filter(|d| d.code == 90006).map(|d| d.message.clone()).collect()
+    };
+    for glob in [
+        "src/server/sytems/**",
+        "src/server/systems/*Store.ts",
+        "src/server/systems/start*",
+        "src/server/systems/Round/*",
+        "src/server/systems/Wallet.ts",
+    ] {
+        assert_eq!(load(glob), ["CRU006: load glob matches no module."], "{glob}");
+    }
+    for glob in [
+        "src/server/systems/**",
+        "src/server/systems/*{Store,Service}.ts",
+        "src/server/systems/Round.ts",
+        "src/server/systems/R*",
+        "src/server/**/Wallet*",
+    ] {
+        assert_eq!(load(glob), Vec::<String>::new(), "{glob}");
+    }
 }
 
 /// Points a Rojo project in `gen/place` at the game's folders, leaving `include` where the compiler looks for it.

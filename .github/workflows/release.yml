@@ -34,6 +34,10 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             binary: crucible.exe
+          - platform: darwin-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            binary: crucible
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
@@ -64,6 +68,13 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
+      - name: Verify macOS arm64 binary
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          binary=target/${{ matrix.target }}/release/crucible
+          file "$binary" | grep 'Mach-O 64-bit executable arm64'
+          otool -L "$binary" | tee binary-libraries.txt
+          awk 'NR > 1 && $1 !~ /^\/usr\/lib\// && $1 !~ /^\/System\/Library\// { bad = 1 } END { exit bad }' binary-libraries.txt
       - name: Verify Windows static CRT
         if: matrix.platform == 'win32-x64'
         run: node npm/check-pe.mjs target/${{ matrix.target }}/release/crucible.exe
@@ -101,10 +112,10 @@ jobs:
         run: |
           cargo install cargo-about --version 0.8.4 --locked
           node npm/notices.mjs ../build/THIRD_PARTY_NOTICES
-      - name: Stage four packages at the Cargo version, or a PR prerelease of it
+      - name: Stage the packages at the Cargo version, or a PR prerelease of it
         run: |
-          for platform in linux-x64 win32-x64; do
-            mv "build/binaries/binary-$platform" "build/binaries/$platform"
+          for directory in build/binaries/binary-*; do
+            mv "$directory" "build/binaries/${directory##*/binary-}"
           done
           node cli/npm/release.mjs build/binaries build/release build/THIRD_PARTY_NOTICES
       - name: Test registry preflight and partial staging recovery
@@ -146,7 +157,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11.21.1
-      - name: Stage all four packages for maintainer approval
+      - name: Stage all packages for maintainer approval
         env:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |

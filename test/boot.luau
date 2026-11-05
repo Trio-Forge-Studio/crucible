@@ -425,4 +425,192 @@ return {
 		client.boot({}, true)
 		spec.eq(#client.closers, 0, "S1 client never binds")
 	end,
+	["a Subsystem whose update throws after commit stays Faulted while its plain methods still answer callers"] = function()
+		local w = world()
+		local counts = { awake = 0, start = 0, update = 0 }
+		local answers = {}
+		w.service("Faulty", {
+			awake = function()
+				counts.awake += 1
+			end,
+			start = function()
+				counts.start += 1
+			end,
+			update = function()
+				counts.update += 1
+				error("update fault sentinel")
+			end,
+			answer = function()
+				return 42
+			end,
+		})
+		w.service("Caller", {
+			update = function(self)
+				table.insert(answers, self.faulty:answer())
+			end,
+		}, {
+			deps = { "Faulty" },
+			init = function(self, faulty)
+				self.faulty = faulty
+			end,
+		})
+		w.boot()
+		for _ = 1, 3 do
+			w.engine.frame(2, 0.031)
+		end
+		spec.eq(w.engine.logged("Faulty faulted in a frame hook"), 1, "the update fault is logged once")
+		spec.eq(counts.update, 1, "a Faulted Subsystem's update never runs on later frames")
+		spec.eq(counts.awake, 1, "awake never runs again after the fault")
+		spec.eq(counts.start, 1, "start never runs again after the fault")
+		spec.list(answers, { 42, 42, 42 }, "another object still calls the Faulted object's plain method")
+	end,
+	["an awake that yields inside pcall still faults and fails boot"] = function()
+		local task = require("@lune/task")
+		local w = world()
+		local function settle()
+			local ok = pcall(task.wait, 0.01)
+			table.insert(w.events, `pcall returned {ok}`)
+		end
+		w.service("Waiter", {
+			awake = function()
+				settle()
+			end,
+		})
+		local ok, err = pcall(w.boot)
+		spec.eq(ok, false, "boot fails")
+		spec.has(err, "Waiter faulted in awake", "the fault names the class and hook")
+		spec.has(err, "yielded; only start may yield", "the fault names the yield rule")
+		spec.list(w.events, {}, "the pcall around the yield never returns, and boot never commits")
+	end,
+	["after commit an update that yields inside pcall faults, while one that yields in task.spawn keeps ticking"] = function()
+		local task = require("@lune/task")
+		local w = world()
+		local counts = { Yielder = 0, Spawner = 0 }
+		w.service("Yielder", {
+			update = function()
+				counts.Yielder += 1
+				pcall(task.wait, 0.01)
+			end,
+		})
+		w.service("Spawner", {
+			update = function()
+				counts.Spawner += 1
+				task.spawn(function()
+					task.wait(0.01)
+				end)
+			end,
+		})
+		w.boot()
+		for _ = 1, 3 do
+			w.engine.frame(2, 0.031)
+		end
+		spec.eq(w.engine.logged("Yielder faulted in a frame hook"), 1, "the pcall yield faults its object")
+		local fault = ""
+		for _, entry in w.engine.logs do
+			if string.find(entry.message, "Yielder faulted", 1, true) then
+				fault = entry.message
+			end
+		end
+		spec.has(fault, "yielded; only start may yield", "the fault names the yield rule")
+		spec.eq(counts.Yielder, 1, "the faulted object's update stops")
+		spec.eq(w.engine.logged("Spawner"), 0, "a yield in a spawned thread faults nothing")
+		spec.eq(counts.Spawner, 3, "the spawning object's update runs on every frame")
+	end,
+	["a start that yields lets the next start run and boot commit, and its later throw faults it without rollback"] = function()
+		local w = world()
+		local suspended
+		local ticks = { First = 0, Second = 0 }
+		w.service("First", {
+			start = function()
+				table.insert(w.events, "First start suspends")
+				suspended = coroutine.running()
+				coroutine.yield()
+				error("late start sentinel")
+			end,
+			update = function()
+				ticks.First += 1
+			end,
+		})
+		w.service("Second", {
+			start = function()
+				table.insert(w.events, "Second start")
+			end,
+			update = function()
+				ticks.Second += 1
+			end,
+		})
+		w.boot()
+		spec.list(
+			w.events,
+			{ "First start suspends", "Second start", "booted" },
+			"the next start and the commit do not wait for a suspended start"
+		)
+		w.engine.frame(2, 0.031)
+		spec.eq(ticks.Second, 1, "the started Subsystem ticks")
+		spec.eq(ticks.First, 0, "a Subsystem whose start has not returned does not tick")
+		spec.eq(coroutine.resume(suspended), true, "the suspended start resumes")
+		spec.eq(w.engine.logged("First faulted in start"), 1, "the late throw faults its Subsystem")
+		spec.eq(w.engine.logged("late start sentinel"), 1, "the fault carries the thrown error")
+		w.engine.frame(2, 0.031)
+		spec.eq(ticks.Second, 2, "the other Subsystem keeps ticking, so boot was not rolled back")
+		spec.eq(ticks.First, 0, "the faulted Subsystem never ticks")
+		spec.eq(w.emit.resolve("Second") ~= nil, true, "the other Subsystem still resolves")
+	end,
+	["a constructor cycle fails boot with its path, and taking All<T> on one side breaks it"] = function()
+		local w = world()
+		w.service("A", {}, { deps = { "B" } })
+		w.service("B", {}, { deps = { "A" } })
+		local ok, err = pcall(w.boot)
+		spec.eq(ok, false, "a two-Subsystem cycle fails boot")
+		local suffix = "Crucible could not boot:\n  dependency cycle A -> B -> A; break it with All<T>"
+		spec.eq(string.sub(err, -#suffix), suffix, "the error ends with the cycle line")
+
+		local broken = world()
+		local first
+		local B = broken.service("B", {}, { deps = { "A" } })
+		broken.service("A", {
+			start = function(self)
+				first = self.bs:first()
+			end,
+		}, {
+			deps = { { all = "B" } },
+			init = function(self, bs)
+				self.bs = bs
+			end,
+		})
+		broken.boot()
+		spec.eq(getmetatable(first), B, "inside A's start, All<B>:first() is B's object")
+		spec.eq(first, broken.emit.resolve("B"), "and it is the one B")
+	end,
+	["independent Subsystems construct and wake in registration order, and a dependency wakes before its dependent"] = function()
+		local w = world()
+		local function track(id, deps)
+			w.service(id, {
+				awake = function()
+					table.insert(w.events, "awake " .. id)
+				end,
+			}, {
+				deps = deps,
+				init = function()
+					table.insert(w.events, "construct " .. id)
+				end,
+			})
+		end
+		track("Dependent", { "Dependency" })
+		track("Alpha")
+		track("Beta")
+		track("Dependency")
+		w.boot()
+		spec.list(w.events, {
+			"construct Dependency",
+			"construct Dependent",
+			"construct Alpha",
+			"construct Beta",
+			"awake Dependency",
+			"awake Dependent",
+			"awake Alpha",
+			"awake Beta",
+			"booted",
+		}, "a dependency goes first, the rest keep registration order, and every awake follows every constructor")
+	end,
 }

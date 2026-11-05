@@ -52,4 +52,4 @@ type Many = All<Child>;
 export const aliasedMany: All<Child> = inject<Many>();
 type FixedCollection<_Unused> = All<Child>;
 export const genericAlias: All<Child> = inject<FixedCollection<Store>>();
-boot({ load: ["src/server/**/*{Service,Behaviour}.ts"] });
+boot({ load: ["src/server/**/*{main,Service}.ts"] });

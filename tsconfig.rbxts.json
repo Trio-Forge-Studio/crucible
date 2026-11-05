@@ -6,6 +6,7 @@
 		"moduleResolution": "Node",
 		"noLib": true,
 		"resolveJsonModule": true,
+		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"moduleDetection": "force",
 		"strict": true,

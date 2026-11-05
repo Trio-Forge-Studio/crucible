@@ -217,7 +217,7 @@ test("registration contract, inherited deps, tags, attributes, provides and symb
 	assert.match(output, /__crucible.attribute<string \| undefined>\(this, "label", undefined\)/);
 	assert.match(output, /__crucible.resolve<Store>\("fixture-game\/server\/main:Store"\)/);
 	assert.match(output, /__crucible.resolveAll<Child>\("fixture-game\/server\/main:Child"\)/);
-	assert.match(output, /"crucible-path:ServerScriptService\/TS\/\*\*\/\*\{Service,Behaviour\}"/);
+	assert.match(output, /"crucible-path:ServerScriptService\/TS\/\*\*\/\*\{main,Service\}"/);
 });
 
 test("diagnostic negative probes and clean controls use exact source lines", () => {
@@ -228,6 +228,7 @@ test("diagnostic negative probes and clean controls use exact source lines", () 
 		["CRU002", "export class Bad extends CrucibleBehaviour<string> {}"],
 		["CRU003", "export class Bad<T> extends Subsystem {}"],
 		["CRU006", 'boot({load: ["outside/**/*.ts"]});'],
+		["CRU006", 'boot({load: ["src/server/*Store.ts"]});'],
 		["CRU007", 'export class Bad extends CrucibleBehaviour<"Bad"> { field = attribute<never>({} as never); }'],
 		["CRU008", 'export class Bad extends CrucibleBehaviour<"Bad", { wrong: true }> {}'],
 		[
@@ -1618,6 +1619,38 @@ test("load resolves a folder that the Rojo project maps file by file, as Rogen d
 	} finally {
 		fs.rmSync(loaded, { recursive: true, force: true });
 		fs.rmSync(perFile, { force: true });
+	}
+});
+
+test("a load glob that matches no module reports CRU006 and a glob that finds a module resolves", () => {
+	const systems = path.join(game, "src/server/systems");
+	fs.mkdirSync(path.join(systems, "Round"), { recursive: true });
+	write(path.join(systems, "WalletService.ts"), "export const wallet = 1;");
+	write(path.join(systems, "Round/index.ts"), "export const round = 1;");
+	write(path.join(systems, "start.server.ts"), "export {};");
+	const load = (glob) =>
+		run(`import { boot } from "@trioforge/crucible/server"; boot({load: ["${glob}"]});`).diagnostics.map(
+			(d) => d.messageText,
+		);
+	try {
+		for (const glob of [
+			"src/server/sytems/**",
+			"src/server/systems/*Store.ts",
+			"src/server/systems/start*",
+			"src/server/systems/Round/*",
+			"src/server/systems/Wallet.ts",
+		])
+			assert.deepEqual(load(glob), ["CRU006: load glob matches no module."], glob);
+		for (const glob of [
+			"src/server/systems/**",
+			"src/server/systems/*{Store,Service}.ts",
+			"src/server/systems/Round.ts",
+			"src/server/systems/R*",
+			"src/server/**/Wallet*",
+		])
+			assert.deepEqual(load(glob), [], glob);
+	} finally {
+		fs.rmSync(systems, { recursive: true, force: true });
 	}
 });
 

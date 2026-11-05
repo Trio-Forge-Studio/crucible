@@ -6,7 +6,8 @@ Run `npm run fmt` to fix formatting. Use the equivalent script commands with you
 
 ## Crucible
 
-Read `npx crucible docs` and `npx crucible docs cli` first.
+Read `npx crucible docs` and `npx crucible docs cli` first. Read `npx crucible docs lifecycle` before you write a Subsystem or a behaviour. It covers hooks, their order, injection, faults and the yield rule.
+When a build fails with a `CRUnnn` code, read `npx crucible docs diagnostics`. Plain `tsc` does not report these codes, so run `npm run build` or `npm run check` to check Crucible's rules.
 Run `npx crucible upgrade` to move to the latest Crucible. It refreshes template files you have not edited, lists the ones you did, and names the docs to read again.
 Before using a module, read `npx crucible docs <topic>`, such as `npx crucible docs logging`. Documented exports are the source of truth.
 
