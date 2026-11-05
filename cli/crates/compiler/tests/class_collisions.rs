@@ -14,7 +14,7 @@ fn methods_cannot_collide_with_opposite_class_properties() {
         actual,
         [
             static_, instance, instance, static_, instance, static_, instance, static_, instance, static_, instance,
-            static_, instance
+            static_, instance, static_, instance, static_, instance
         ]
     );
     assert!(errors.iter().all(|e| e.line > 1 && e.column > 1 && e.code == 0));
