@@ -2,9 +2,9 @@
 
 Find what each Crucible compile error from CRU001 to CRU031 means and how to fix it.
 
-Crucible's transformer checks game code while roblox-ts compiles it. The transformer is the `@trioforge/crucible/transformer` entry in the tsconfig's `plugins`. `rbxtsc` runs it, and `crucible build` runs `rbxtsc`, so a game made from the template reports these errors in `npm run build` and `npm run check`. Plain `tsc` and the editor's TypeScript service do not run transformer plugins, so they never report them. Code that type-checks in the editor can still fail the build.
+Crucible's compiler checks game code while `crucible build` compiles it, so a game made from the template reports these errors in `npm run build` and `npm run check`. The editor's TypeScript service does not run these rules, so it never reports them. Code that type-checks in the editor can still fail the build.
 
-CRU028 to CRU031 check `className` and `theme.toml`. Only the Crucible compiler reports them, because only it builds Crucible UI. `crucible docs ui` describes the classes.
+CRU028 to CRU031 check `className` and `theme.toml`. Only the Crucible compiler reports them, because only it builds Crucible UI. The `@trioforge/crucible/transformer` plugin for rbxtsc reports the others. `crucible docs ui` describes the classes.
 
 Each error is a TypeScript error whose code is 90000 plus the rule's number. CRU009 prints as `error TS90009: CRU009: Method resembles a lifecycle hook. Use its exact Crucible declaration name.` Every error fails the build.
 

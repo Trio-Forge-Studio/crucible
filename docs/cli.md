@@ -18,22 +18,30 @@ Commands print text. The result goes to stdout, and progress and errors go to st
 
 ## crucible build
 
-Run `npx crucible build` from the game's root. It runs the project's roblox-ts once as `rbxtsc --type game`, then builds every place in `crucible.toml` to `build/<name>.rbxl` with the Rojo it embeds. `crucible --version` names that Rojo version. Projects need no separate Rojo install.
+Run `npx crucible build` from the game's root. It compiles every place in `crucible.toml` with Crucible's TypeScript 7 compiler, then builds each one to `build/<name>.rbxl` with Rojo. The binary embeds both, so the build runs no Node, roblox-ts, or TypeScript, and projects need no separate Rojo install. `crucible --version` names the Rojo version.
 
-- roblox-ts resolves the way Node resolves `roblox-ts` from the game's root, through each parent `node_modules`. It runs with the `node` on `PATH`. Its diagnostics reach stderr with their file and line positions. When stderr is not a terminal, their colour codes are removed.
+- A place compiles its `tsconfig` against its Rojo `project`. Type errors, Crucible rule errors (`CRUnnn`), and code the compiler cannot lower reach stderr as `file(line,column): error ...`, with paths relative to the game's root.
+- When any selected place fails to compile, the build writes nothing and builds no place file. Places compile one after another, and the first failure stops the build.
+- The build writes the compiled Luau into the tsconfig's `outDir` and skips each file whose bytes already match. It deletes the files it compiled earlier that no longer have a source, and keeps every other file there.
+- It writes roblox-ts 3.0.0's `RuntimeLib.lua` and `Promise.lua` into the place's `include` folder, which the project must map. A file whose bytes already match is left alone, and other files there stay.
+- Places that name the same `tsconfig`, `project`, and `include` compile once. Two places that compile different code into the same `outDir`, or into one inside the other, exit 1 before anything is written.
+- Each place compiles in its own process, so a build's peak memory is that of its largest place.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.
-- When the installed `@trioforge/crucible` transformer differs from the one recorded in `out/transformer.sha256`, `out` is deleted and the game compiles from clean.
-- Exit 0 means every place built. Exit 1 means `crucible.toml` could not be read, or roblox-ts or Rojo failed. Exit 2 means a usage error or an invalid `crucible.toml`, reported before anything compiles.
+- Exit 0 means every place built. Exit 1 means `crucible.toml` could not be read, a place failed to compile or write, or Rojo failed. Exit 2 means a usage error or an invalid `crucible.toml`, reported before anything compiles.
 
-`crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `default.project.json`.
+`crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `tsconfig.json`, `default.project.json`, and the `include` folder at the root.
+
+A place names its Rojo `project`. `tsconfig` defaults to `tsconfig.json` and `include` defaults to `include`. All three paths are relative to the game's root. A place with its own tsconfig needs an `outDir` that no other place writes.
 
 ```toml
 [places.start]
 project = "default.project.json"
 
 [places.arena]
+tsconfig = "tsconfig.arena.json"
 project = "arena.project.json"
+include = "places/arena/include"
 
 [env.staging]
 universe = 1234
@@ -52,9 +60,9 @@ Every env must map every declared place, and only declared places. A game whose 
 
 Run `npx @trioforge/crucible-cli create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx @trioforge/crucible-cli create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files. Names and path components cannot end in a dot or space or use Windows device names, including names with extensions such as `con.txt`. A target below an existing file also exits 2.
 
-The game pins the CLI and runtime at the CLI version and includes the tested roblox-ts toolchain, Vite+, side entry scripts, transformer config, and a Rojo project. Template files use MIT-0. No separate Rojo or Rokit install is needed.
+The game pins the CLI, the runtime, and `@trioforge/compiler-types` at the CLI version, and includes the Roblox types, Vite+, side entry scripts, a TypeScript 7 tsconfig, and a Rojo project. Template files use MIT-0. No roblox-ts, TypeScript, Rojo, or Rokit install is needed.
 
-The command detects npm, pnpm, Yarn, or Bun from `npm_config_user_agent`, with npm as the default. Yarn projects include `.yarnrc.yml` with `nodeLinker: node-modules` for roblox-ts and Rojo. `--no-install` writes files without running install. Install failures exit 1 and leave the project available for a manual retry. Progress and install output go to stderr. Success prints the project path to stdout.
+The command detects npm, pnpm, Yarn, or Bun from `npm_config_user_agent`, with npm as the default. Yarn projects include `.yarnrc.yml` with `nodeLinker: node-modules`, because the compiler and the Rojo project read packages from `node_modules`. `--no-install` writes files without running install. Install failures exit 1 and leave the project available for a manual retry. Progress and install output go to stderr. Success prints the project path to stdout.
 
 In the new directory, run `npx crucible build`, then open `build/start.rbxl` in Studio.
 
@@ -124,7 +132,7 @@ npx crucible upgrade 0.2.0
 ```
 
 - The latest version comes from `npm view @trioforge/crucible-cli version` in the game's root, so the registry and credentials in `.npmrc` apply. A game where either package is already newer, such as a prerelease, exits 0 and changes nothing.
-- Both packages move to the same exact version in `package.json`. Only their version strings change, so the file keeps its formatting and line endings. A `workspace:`, `file:`, `link:`, `npm:` alias, Git, URL, path, or tag spec exits 2, because only a registry version or range can be rewritten. Any npm range is accepted, such as `^0.1.0 || ^0.2.0`, `>=0.1.0 <0.2.0`, or `0.1.0 - 0.2.0`.
+- Both packages move to the same exact version in `package.json`, and so does `@trioforge/compiler-types` when the game pins it. Only their version strings change, so the file keeps its formatting and line endings. A `workspace:`, `file:`, `link:`, `npm:` alias, Git, URL, path, or tag spec exits 2, because only a registry version or range can be rewritten. Any npm range is accepted, such as `^0.1.0 || ^0.2.0`, `>=0.1.0 <0.2.0`, or `0.1.0 - 0.2.0`.
 - The game's package manager installs them. The nearest lockfile in the game's root or a parent directory picks the manager, so a workspace member installs with its workspace's manager: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, or `package-lock.json`. Without one, `npm_config_user_agent` picks it, with npm as the default. pnpm runs with `--no-frozen-lockfile` and Yarn Berry with `--no-immutable`, because under CI both refuse a changed `package.json` by default.
 - A version older than either installed package exits 2 unless you pass `--allow-downgrade`. When both pins and both installed packages are already at the version, it exits 0 and changes nothing. Otherwise it installs again, so a retry after a failed install finishes the job.
 - After install, both installed packages and the installed binary must report the new version, or the command exits 1 with the versions it found.

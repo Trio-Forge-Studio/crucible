@@ -4,7 +4,7 @@ Write JSX that creates Roblox instances and binds them to Crucible's reactive va
 
 Crucible UI has no virtual tree and no re-render. Crucible's compiler turns each element into instance code: it creates the instance, sets each fixed prop once, binds each prop whose value is a `Readable`, and connects each event. A component is a function that runs once and returns instances.
 
-Only Crucible's compiler builds this JSX. `crucible build` still runs `rbxtsc`, which cannot build it, so a game that uses it builds with the compiler. The root, server and client entries never load the `ui` entry.
+Only Crucible's compiler builds this JSX, and `crucible build` runs it. The root, server and client entries never load the `ui` entry.
 
 ## Opt a file in
 
