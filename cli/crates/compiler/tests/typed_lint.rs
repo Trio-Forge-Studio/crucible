@@ -105,3 +105,35 @@ if (value) {}
     );
     assert_eq!(rules(&game), [(5, 5, 90032)]);
 }
+
+#[test]
+fn raw_array_keys_report_comparisons_escaped_indices_and_aliases() {
+    let game = Game::new();
+    game.main(
+        r#"export function sawIndexZero(array: string[]) {
+	let found = false;
+	for (const [key] of pairs(array)) {
+		if (typeIs(key, "number") && key === 0) found = true;
+	}
+	return found;
+}
+export function lastByKey(array: string[]) {
+	let last = -1;
+	for (const [key] of pairs(array)) {
+		if (typeIs(key, "number") && key > last) last = key;
+	}
+	return array[last];
+}
+export function aliasIndex(array: string[]) {
+	let out = "";
+	for (const [key] of pairs(array)) {
+		if (!typeIs(key, "number")) continue;
+		const i = key;
+		out += array[i];
+	}
+	return out;
+}
+"#,
+    );
+    assert_eq!(rules(&game), [(4, 22, 90034), (11, 22, 90034), (18, 22, 90034)]);
+}
