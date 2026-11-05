@@ -494,7 +494,7 @@ Only the Crucible compiler reports CRU032 to CRU037. It checks these rules in it
 | CRU033 | LuaTuple declarations | Unexpected LuaTuple in declaration, use array destructuring. |
 | CRU034 | Array pairs | Do not use Array<T> with pairs(). Key values will not be shifted from 1-indexed to 0-indexed. |
 | CRU034 | Array ipairs | Do not use Array<T> with ipairs(). Key values will not be shifted from 1-indexed to 0-indexed. |
-| CRU035 | Frame connections | This <signal> connection lasts the object's whole life. Implement Crucible's update, fixedUpdate, lateUpdate or preRender instead. |
+| CRU035 | Frame connections | This `<signal>` connection lasts the object's whole life. Implement Crucible's update, fixedUpdate, lateUpdate or preRender instead. |
 | CRU036 | Subsystem destruction | Crucible never destroys a subsystem. Do last writes in onShutdown, and give other lifetimes their own owner. |
 | CRU036 | Subsystem Janitor | A subsystem lives for the whole session. Put the Janitor on the lifetime that ends. |
 | CRU037 | State as a function | A Crucible State is a callable table, not a function, so code that tests type(x) == "function", such as Vide, treats it as a constant. Pass () => state(), or type the receiver as Readable. |
