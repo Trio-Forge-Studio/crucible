@@ -102,23 +102,18 @@ pub fn build(
 
 struct SharedCompile<'m> {
     place: &'m Place,
-    names: Vec<&'m str>,
     compiled: Compiled,
 }
 
 fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<Vec<SharedCompile<'m>>, Error> {
     let mut compiles: Vec<SharedCompile<'m>> = Vec::new();
     for &(name, place) in selected {
-        if let Some(shared) = compiles.iter_mut().find(|shared| shared.place == place) {
-            shared.names.push(name);
+        if compiles.iter().any(|shared| shared.place == place) {
             continue;
         }
         let compiled = compile(root, place).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
-        compiles.push(SharedCompile { place, names: vec![name], compiled });
+        compiles.push(SharedCompile { place, compiled });
     }
-    let outputs: Vec<_> =
-        compiles.iter().map(|shared| Output::new(shared.names[0], shared.compiled.out_dir.clone())).collect();
-    refuse_overlaps(root, &outputs, |a, b| compiles[a].compiled.modules == compiles[b].compiled.modules)?;
     Ok(compiles)
 }
 
@@ -126,30 +121,23 @@ struct Output<'m> {
     place: &'m str,
     dir: PathBuf,
     key: PathBuf,
+    inputs: [PathBuf; 3],
 }
 
-impl<'m> Output<'m> {
-    fn new(place: &'m str, dir: PathBuf) -> Self {
-        Self { place, key: case_folded_canonical(&dir), dir }
-    }
-}
-
+// The tsconfig, project and include together decide the code, so only places that share all three may share an outDir.
 fn refuse_declared_out_dir_overlaps(root: &Path, manifest: &Manifest) -> Result<(), Error> {
-    let (mut outputs, mut configs) = (Vec::new(), Vec::new());
+    let mut outputs = Vec::new();
     for (name, place) in &manifest.places {
         let tsconfig = root.join(&place.tsconfig);
         if let Some(dir) = crucible_compiler::out_dir(&tsconfig) {
-            outputs.push(Output::new(name, dir));
-            configs.push(case_folded_canonical(&tsconfig));
+            let inputs = [&tsconfig, &root.join(&place.project), &root.join(&place.include)]
+                .map(|path| case_folded_canonical(path));
+            outputs.push(Output { place: name, key: case_folded_canonical(&dir), dir, inputs });
         }
     }
-    refuse_overlaps(root, &outputs, |a, b| configs[a] == configs[b])
-}
-
-fn refuse_overlaps(root: &Path, outputs: &[Output<'_>], same_code: impl Fn(usize, usize) -> bool) -> Result<(), Error> {
     for (a, x) in outputs.iter().enumerate() {
-        for (b, y) in outputs.iter().enumerate().skip(a + 1) {
-            if x.key == y.key && !same_code(a, b) {
+        for y in &outputs[a + 1..] {
+            if x.key == y.key && x.inputs != y.inputs {
                 return Err(Error::Failed(format!(
                     "places {} and {} compile different code into {}. Give each a tsconfig with its own outDir",
                     x.place,

@@ -57,7 +57,7 @@ fn a_failed_reinstall_off_roblox_ts_restores_package_json_and_exits_1_until_upgr
     let manifest = roblox_ts_game(&root);
 
     npm_exiting(&bin, 42);
-    let failed = crucible(&root, &bin, &["__upgrade-apply", "0.3.0", "0.3.0", "0.3.0"]);
+    let failed = crucible(&root, &bin, &["__upgrade-apply", "0.2.0", "0.2.0", "0.2.0"]);
     let (stdout, stderr) = (text(&failed.stdout), text(&failed.stderr));
     assert_eq!(failed.status.code(), Some(1), "{stdout}\n{stderr}");
     assert_eq!(fs::read_to_string(root.join("package.json")).unwrap(), manifest, "package.json is restored");
@@ -68,7 +68,10 @@ fn a_failed_reinstall_off_roblox_ts_restores_package_json_and_exits_1_until_upgr
         ),
         "{stderr}"
     );
-    assert!(stdout.starts_with(&format!("Upgraded crucible and @trioforge/crucible from 0.3.0 to {VERSION}.\n")));
+    assert!(
+        stdout.starts_with(&format!("Upgraded crucible and @trioforge/crucible from 0.2.0 to {VERSION}.\n")),
+        "{stdout}"
+    );
     assert!(!stdout.contains("Moved this game") && !stdout.contains("run check"), "{stdout}");
 
     npm_exiting(&bin, 0);

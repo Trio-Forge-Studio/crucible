@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitCode, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -168,7 +168,7 @@ pub fn apply_main(from: Version, crucible: String, runtime: String) -> ExitCode 
                 .map_err(|error| Error::Failed(format!("cannot read the current directory: {error}")))
         })
         .and_then(|root| apply(&root, &from, &pins, &input))
-        .map(|report| print!("{report}"));
+        .and_then(Report::print);
     exit(result)
 }
 
@@ -202,6 +202,12 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
         None => latest(root)?,
     };
     match plan(&pins, &installed, &target, args.version.is_some(), args.allow_downgrade)? {
+        Plan::Current if on_roblox_ts(&manifest) => {
+            let mut report = format!("crucible is already at {target}.\n");
+            let migration = move_off_roblox_ts(root, &target, manager);
+            migration.report(&mut report);
+            return Report::new(report, migration, manager).print();
+        }
         Plan::Current => {
             println!("crucible is already at {target}.");
             return Ok(());
@@ -335,7 +341,7 @@ fn reported_version(stdout: &str) -> Option<&str> {
     Some(version)
 }
 
-fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<String, Error> {
+fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report, Error> {
     let (_, manifest) = read_manifest(root)?;
     let name = package_name(&manifest)?;
     let old = old_template(input, from, pins)
@@ -420,23 +426,31 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<String
         report +=
             &format!("Merge by hand. `npx crucible create {name} <empty-dir> --no-install` writes the new template.\n");
     }
-    let mut list = |heading: &str, lines: &[String]| {
-        if !lines.is_empty() {
-            report += &format!("\n{heading}\n");
-            report.extend(lines.iter().map(|line| format!("  {line}\n")));
-        }
-    };
-    list("Moved this game from roblox-ts to Crucible's compiler:", &migration.done);
-    list(
-        "Finish the move by hand. `npx crucible docs cli` explains each step under Upgrading from roblox-ts:",
-        &migration.left,
-    );
+    migration.report(&mut report);
     if !topics.is_empty() {
         report += "\nThese docs changed. Read them before you continue:\n";
         report.extend(topics.iter().map(|topic| format!("  npx crucible docs {topic}\n")));
     }
-    report += &format!("\nRun `{} run check` next.\n", manager.program());
-    Ok(report)
+    Ok(Report::new(report, migration, manager))
+}
+
+struct Report {
+    text: String,
+    failed: Option<String>,
+}
+
+impl Report {
+    fn new(mut text: String, migration: Migration, manager: Manager) -> Self {
+        if migration.failed.is_none() {
+            text += &format!("\nRun `{} run check` next.\n", manager.program());
+        }
+        Self { text, failed: migration.failed }
+    }
+
+    fn print(self) -> Result<(), Error> {
+        print!("{}", self.text);
+        self.failed.map_or(Ok(()), |failed| Err(Error::Failed(failed)))
+    }
 }
 
 fn old_template(input: &str, from: &Version, pins: &Pins) -> Result<SnapshotV1, String> {
@@ -657,11 +671,38 @@ fn entries(text: &str, key: &str, value: &str) -> Vec<Entry> {
 struct Migration {
     done: Vec<String>,
     left: Vec<String>,
+    failed: Option<String>,
+}
+
+impl Migration {
+    fn report(&self, report: &mut String) {
+        for (heading, lines) in [
+            ("Moved this game from roblox-ts to Crucible's compiler:", &self.done),
+            (
+                "Finish the move by hand. `npx crucible docs cli` explains each step under Upgrading from roblox-ts:",
+                &self.left,
+            ),
+        ] {
+            if !lines.is_empty() {
+                *report += &format!("\n{heading}\n");
+                report.extend(lines.iter().map(|line| format!("  {line}\n")));
+            }
+        }
+    }
+}
+
+fn on_roblox_ts(manifest: &serde_json::Value) -> bool {
+    ["roblox-ts", "@rbxts/compiler-types"]
+        .iter()
+        .any(|package| GROUPS.iter().any(|group| manifest[group].get(package).is_some()))
 }
 
 fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration {
     let mut migration = Migration::default();
     let roblox_ts = move_toolchain(root, to, manager, &mut migration);
+    if migration.failed.is_some() {
+        return migration;
+    }
     let places = crate::manifest::Manifest::read(root).ok().flatten().unwrap_or_default().places;
     let mut tsconfigs: Vec<_> = places.into_values().map(|place| place.tsconfig).collect();
     tsconfigs.sort();
@@ -669,13 +710,10 @@ fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration 
     for tsconfig in &tsconfigs {
         clear_rbxtsc_output(root, tsconfig, &mut migration);
     }
-    for tsconfig in &tsconfigs {
-        let Ok(text) = fs::read_to_string(root.join(tsconfig)) else { continue };
-        let shown = tsconfig.to_string_lossy().replace('\\', "/");
-        match typescript_7_changes(&text, roblox_ts) {
-            Some(changes) => migration.left.extend(changes.iter().map(|change| format!("{shown}: {change}"))),
-            None => {
-                migration.left.push(format!("{shown}: it is not valid JSON, so check it for each TypeScript 7 change"))
+    for tsconfig in tsconfigs.iter().filter(|tsconfig| root.join(tsconfig).is_file()) {
+        for line in typescript_7_changes(root, tsconfig, roblox_ts) {
+            if !migration.left.contains(&line) {
+                migration.left.push(line);
             }
         }
     }
@@ -684,10 +722,10 @@ fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration 
 
 fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut Migration) -> bool {
     let Ok((text, manifest)) = read_manifest(root) else { return false };
-    let listed = |package: &str| GROUPS.iter().any(|group| manifest[group].get(package).is_some());
-    if !listed("roblox-ts") && !listed("@rbxts/compiler-types") {
+    if !on_roblox_ts(&manifest) {
         return false;
     }
+    let listed = |package: &str| GROUPS.iter().any(|group| manifest[group].get(package).is_some());
     let dropped: Vec<_> = ROBLOX_TS_TOOLCHAIN.into_iter().filter(|package| listed(package)).collect();
     let added = (!listed(COMPILER_TYPES)).then(|| to.to_string());
     let install = manager.install_line();
@@ -703,18 +741,27 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
         migration.left.push(by_hand("crucible upgrade cannot edit it in place".into()));
         return true;
     };
-    if let Err(error) = write_atomic(&root.join("package.json"), &edited) {
+    let manifest_path = root.join("package.json");
+    if let Err(error) = write_atomic(&manifest_path, &edited) {
         migration.left.push(by_hand(format!("crucible upgrade cannot write it: {error}")));
+        return true;
+    }
+    if let Err(error) = run_install(root, manager) {
+        let then = "then run `npx crucible upgrade` again to finish the move off roblox-ts";
+        migration.failed = Some(match restore(&manifest_path, &text) {
+            Ok(()) => format!(
+                "{error}. package.json is restored, so it still lists {}. Run `{install}` to return node_modules to it, {then}",
+                dropped.join(", ")
+            ),
+            Err(restore) => format!("{error}. Restoring package.json also failed: {restore}. Run `{install}`, {then}"),
+        });
         return true;
     }
     if let Some(version) = &added {
         migration.done.push(format!("package.json lists {COMPILER_TYPES} {version}"));
     }
     migration.done.push(format!("package.json no longer lists {}", dropped.join(", ")));
-    match run_install(root, manager) {
-        Ok(()) => migration.done.push(format!("ran `{install}`")),
-        Err(error) => migration.left.push(format!("{error}. Run `{install}` again")),
-    }
+    migration.done.push(format!("ran `{install}`"));
     true
 }
 
@@ -793,59 +840,138 @@ fn remove_rbxtsc_modules(dir: &Path) -> io::Result<usize> {
     Ok(removed)
 }
 
-type CompilerOptions = serde_json::Map<String, serde_json::Value>;
-type Applies = fn(&CompilerOptions, missing_counts: bool) -> bool;
+type Applies = fn(Option<&serde_json::Value>, missing_counts: bool) -> bool;
 
-const TYPESCRIPT_7: [(Applies, &str); 8] = [
+const TYPESCRIPT_7: [(&str, Applies, &str); 8] = [
     (
-        |options, _| {
-            let resolution = options.get("moduleResolution").and_then(serde_json::Value::as_str);
-            matches!(resolution.map(str::to_ascii_lowercase).as_deref(), Some("node" | "node10" | "classic"))
+        "moduleResolution",
+        |value, _| {
+            let resolution = value.and_then(serde_json::Value::as_str).map(str::to_ascii_lowercase);
+            matches!(resolution.as_deref(), Some("node" | "node10" | "classic"))
         },
         r#"Set "module" to "preserve" and "moduleResolution" to "bundler"."#,
     ),
+    ("baseUrl", |value, _| value.is_some(), r#"Remove "baseUrl", and add a "paths" entry for each source root."#),
+    ("downlevelIteration", |value, _| value.is_some(), r#"Remove "downlevelIteration"."#),
+    ("typeRoots", |value, _| value.is_some(), r#"Remove "typeRoots"."#),
     (
-        |options, _| options.contains_key("baseUrl"),
-        r#"Remove "baseUrl", and add a "paths" entry for each source root."#,
-    ),
-    (|options, _| options.contains_key("downlevelIteration"), r#"Remove "downlevelIteration"."#),
-    (|options, _| options.contains_key("typeRoots"), r#"Remove "typeRoots"."#),
-    (
-        |options, missing_counts| match options.get("types").and_then(serde_json::Value::as_array) {
+        "types",
+        |value, missing_counts| match value.and_then(serde_json::Value::as_array) {
             Some(types) => !types.iter().any(|name| name == "@trioforge/compiler-types"),
             None => missing_counts,
         },
         r#"Set "types" to ["@trioforge/compiler-types", "@rbxts/types"], and name any other type package in full."#,
     ),
     (
-        |options, missing_counts| missing_counts && !options.contains_key("rootDir"),
+        "rootDir",
+        |value, missing_counts| missing_counts && value.is_none(),
         r#"Set "rootDir" to the source folder, such as "src"."#,
     ),
     (
-        |options, missing_counts| options.get("skipLibCheck").map_or(missing_counts, |value| *value != true),
+        "skipLibCheck",
+        |value, missing_counts| value.map_or(missing_counts, |value| *value != true),
         r#"Set "skipLibCheck" to true."#,
     ),
-    (
-        |options, _| options.contains_key("plugins"),
-        r#"Remove "plugins". The compiler applies Crucible's transform itself."#,
-    ),
+    ("plugins", |value, _| value.is_some(), r#"Remove "plugins". The compiler applies Crucible's transform itself."#),
 ];
 
-// A base tsconfig can supply a missing setting, and a game that never used roblox-ts chose its own, so a missing
-// setting counts only in a roblox-ts game's tsconfig that extends nothing.
-fn typescript_7_changes(text: &str, moved_off_roblox_ts: bool) -> Option<Vec<&'static str>> {
-    let config = jsonc_parser::parse_to_serde_value(text, &Default::default()).ok()??;
-    let options = config.get("compilerOptions").and_then(serde_json::Value::as_object).cloned().unwrap_or_default();
-    let changes = |missing_counts| -> Vec<&'static str> {
+#[derive(Default)]
+struct Chain {
+    settings: BTreeMap<String, (serde_json::Value, PathBuf)>,
+    unread: Vec<(PathBuf, String)>,
+}
+
+// TypeScript merges compilerOptions key by key, so each setting comes from the nearest tsconfig in the chain that sets it.
+fn read_chain(file: &Path, chain: &mut Chain, stack: &mut Vec<PathBuf>) {
+    let parsed = fs::read_to_string(file)
+        .ok()
+        .and_then(|text| jsonc_parser::parse_to_serde_value(&text, &Default::default()).ok()?);
+    let Some(config) = parsed else {
+        chain.unread.push((file.to_owned(), "it is not valid JSON, so check it for each TypeScript 7 change".into()));
+        return;
+    };
+    let bases = match &config["extends"] {
+        serde_json::Value::String(base) => vec![base.as_str()],
+        serde_json::Value::Array(bases) => bases.iter().filter_map(serde_json::Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    stack.push(file.to_owned());
+    for base in bases {
+        match extended(file.parent().unwrap_or(Path::new("")), base) {
+            Some(path) if stack.contains(&path) => {}
+            Some(path) => read_chain(&path, chain, stack),
+            None => chain.unread.push((
+                file.to_owned(),
+                format!(
+                    "crucible upgrade cannot find {base}, which it extends, so check that tsconfig for each TypeScript 7 change"
+                ),
+            )),
+        }
+    }
+    stack.pop();
+    for (key, value) in config["compilerOptions"].as_object().into_iter().flatten() {
+        chain.settings.insert(key.clone(), (value.clone(), file.to_owned()));
+    }
+}
+
+// TypeScript's rules: a relative or rooted path, with .json added when it names no file, or else a package in node_modules.
+fn extended(dir: &Path, base: &str) -> Option<PathBuf> {
+    let base = base.replace('\\', "/");
+    let file = |path: &Path| {
+        let path = lexical(path);
+        let mut json = path.clone().into_os_string();
+        json.push(".json");
+        [path, PathBuf::from(json)].into_iter().find(|path| path.is_file())
+    };
+    if base.starts_with("./") || base.starts_with("../") || Path::new(&base).is_absolute() {
+        return file(&dir.join(&base));
+    }
+    dir.ancestors().map(|dir| dir.join("node_modules").join(&base)).find_map(|package| {
+        file(&package).or_else(|| {
+            let manifest: serde_json::Value =
+                fs::read(package.join("package.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok())?;
+            let tsconfig = lexical(&package.join(manifest["tsconfig"].as_str().unwrap_or("tsconfig.json")));
+            tsconfig.is_file().then_some(tsconfig)
+        })
+    })
+}
+
+fn lexical(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normal.pop();
+            }
+            component => normal.push(component),
+        }
+    }
+    normal
+}
+
+// A game that never used roblox-ts chose its own settings, and a base that cannot be read may supply a missing one, so
+// a missing setting counts only in a roblox-ts game whose whole chain was read.
+fn typescript_7_changes(root: &Path, tsconfig: &Path, moved_off_roblox_ts: bool) -> Vec<String> {
+    let top = lexical(&root.join(tsconfig));
+    let mut chain = Chain::default();
+    read_chain(&top, &mut chain, &mut Vec::new());
+    let shown = |file: &Path| file.strip_prefix(root).unwrap_or(file).to_string_lossy().replace('\\', "/");
+    let changes = |missing_counts| -> Vec<String> {
         TYPESCRIPT_7
             .iter()
-            .filter(|(applies, _)| applies(&options, missing_counts))
-            .map(|&(_, change)| change)
+            .filter_map(|&(key, applies, change)| {
+                let setting = chain.settings.get(key);
+                applies(setting.map(|(value, _)| value), missing_counts)
+                    .then(|| format!("{}: {change}", shown(setting.map_or(&top, |(_, file)| file))))
+            })
             .collect()
     };
     let held = changes(false);
-    let roblox_ts = moved_off_roblox_ts || !held.is_empty();
-    Some(if roblox_ts && config.get("extends").is_none() { changes(true) } else { held })
+    let missing_counts = (moved_off_roblox_ts || !held.is_empty()) && chain.unread.is_empty();
+    let mut lines = if missing_counts { changes(true) } else { held };
+    lines.extend(chain.unread.iter().map(|(file, problem)| format!("{}: {problem}", shown(file))));
+    lines
 }
 
 fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
@@ -1264,7 +1390,7 @@ mod tests {
         }
         let from = version(env!("CARGO_PKG_VERSION"));
         let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
-        let report = apply(root, &from, &exact, &serde_json::to_string(&old).unwrap()).unwrap();
+        let report = apply(root, &from, &exact, &serde_json::to_string(&old).unwrap()).unwrap().text;
         assert!(
             report.starts_with(&format!(
                 "Upgraded crucible and {RUNTIME} from {} to 9.0.0.\n",
@@ -1369,7 +1495,7 @@ mod tests {
         fs::write(root.join("AGENTS.md"), &old_agents).unwrap();
         fs::write(root.join("LICENSE"), &old_license).unwrap();
         let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
-        let report = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, &old.to_string()).unwrap();
+        let report = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, &old.to_string()).unwrap().text;
         assert!(report.contains("Refreshed from the new template:\n  AGENTS.md (## Crucible)\n"), "{report}");
         assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), agents);
         assert!(report.contains("never rewrites them. Review the change:\n  LICENSE\n"), "{report}");
@@ -1664,7 +1790,7 @@ else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2),
             fs::write(root.join(path), text).unwrap();
         }
         let exact = pins(env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"));
-        let report = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, "").unwrap();
+        let report = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, "").unwrap().text;
         assert!(
             report.contains("Moved this game from roblox-ts to Crucible's compiler:\n  deleted the 2 modules rbxtsc compiled into out\n"),
             "{report}"
@@ -1679,7 +1805,7 @@ else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2),
             "never rewritten"
         );
 
-        let again = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, "").unwrap();
+        let again = apply(root, &version(env!("CARGO_PKG_VERSION")), &exact, "").unwrap().text;
         assert!(!again.contains("Moved this game"), "a second run finds nothing to move: {again}");
     }
 }
