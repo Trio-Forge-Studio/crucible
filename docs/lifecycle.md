@@ -62,9 +62,9 @@ An instance of the wrong class is never bound, and Crucible warns once.
 
 ### Attributes
 
-`attribute()` reads an instance attribute into a field. The attribute's name is the field name with its first letter in upper case, so `speed` reads `Speed`. `attribute(90)` is optional and takes `90` when the attribute is missing. `attribute<string>()` is required. A field can be `string`, `number`, `boolean`, `Vector3`, `Color3`, a literal, or a union of them.
+`attribute()` reads an instance attribute into a field. The attribute's name is the field name with its first letter in upper case, so `speed` reads `Speed`. `attribute(90)` is optional and takes `90` when the attribute is missing as the behaviour is built. `attribute<string>()` is required. A field can be `string`, `number`, `boolean`, `Vector3`, `Color3`, a literal, or a union of them.
 
-A required attribute that is missing, or any attribute of the wrong type, keeps the instance unbound and logs a warning. Fixing the attribute binds it. When a bound behaviour's attribute changes, the field takes the new value. A write of the wrong type keeps the last valid value and warns.
+A required attribute that is missing, or any attribute of the wrong type, keeps the instance unbound and logs a warning. Fixing the attribute binds it. When a bound behaviour's attribute changes, the field takes the new value. A write of the wrong type keeps the last valid value and warns. Removing a required attribute counts as a write of the wrong type. Removing an optional attribute sets the field to `undefined`, not to its fallback, so read an optional field with `??` when the attribute can be removed at run time.
 
 ### Find, enable and remove a behaviour
 
