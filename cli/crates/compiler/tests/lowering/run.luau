@@ -238,6 +238,7 @@ list("assign patterns", patterns.assign({ 5, 6 }), { 5, 6, 1 })
 list("LuaTuple elements", patterns.tuples(), { 10, 2, "first", "second" })
 
 local fd = load("fd")
+eq("a call with no results is one macro argument", fd.pushMissing(function() end), 0)
 list("class ancestry", fd.instances(), { true, true, false })
 list("delete and in", fd.members(), { true, true, true, false })
 list("optional method retains receiver", fd.optional(true), { 7, 2, 2 })

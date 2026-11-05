@@ -45,3 +45,9 @@ export function checked() {
 export function promise() {
 	return new Promise<number>((resolve) => resolve(9));
 }
+
+export function pushMissing(value: () => number) {
+	const items: number[] = [];
+	items.push(value());
+	return items.size();
+}

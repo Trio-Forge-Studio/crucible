@@ -239,9 +239,42 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
 }
 
 #[test]
-fn fd_features_lower_to_members_runtime_classes_and_module_values() {
-    has("fd.luau", &["TS.instanceof(", " = nil", " ~= nil", "TS.Promise.new(", "value = 7"]);
+fn instanceof_uses_runtime_class_ancestry() {
+    has("fd.luau", &["TS.instanceof(leaf, Base)", "TS.instanceof(leaf, Leaf)"]);
+}
+
+#[test]
+fn delete_clears_the_member_and_returns_true() {
+    has("fd.luau", &["object.a = nil", "local removed = true", "local again = true"]);
+}
+
+#[test]
+fn in_tests_presence_even_when_the_value_is_false() {
+    has("fd.luau", &["local before = object.b ~= nil", "object.a ~= nil"]);
+}
+
+#[test]
+fn optional_method_calls_save_the_receiver_and_guard_the_arguments() {
+    has("fd.luau", &["local _0 = get()", "local _1 = _0.run", "_1 = _1(_0, arg())", "_3(_2, arg())"]);
+}
+
+#[test]
+fn promise_construction_calls_the_runtime_constructor() {
+    has("fd.luau", &["TS.Promise.new(function(resolve)"]);
+}
+
+#[test]
+fn satisfies_keeps_the_checked_expression() {
+    has("fd.luau", &["value = 7", "}).value"]);
+}
+
+#[test]
+fn export_assignment_returns_the_module_value() {
     has("assignment.luau", &["return story"]);
+}
+
+#[test]
+fn star_exports_import_and_forward_members() {
     has("star.luau", &["TS.import(", "own = 12", "for "]);
 }
 
