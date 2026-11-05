@@ -104,6 +104,16 @@ Crucible constructs new objects in batches. A batch runs these steps in order:
 
 The first wave is the batch's objects. Objects that code creates during an `awake` form the next wave, which runs steps 1 and 2 again. Step 3 begins once a wave creates nothing more. So every object of a batch is awake before any is enabled, and enabled before any starts. The first batch on each side holds every Subsystem and every behaviour for the instances that are tagged at boot. Its Subsystems come first in each phase.
 
+```mermaid
+flowchart TD
+    construct["1. Every constructor of the wave"] --> awake["2. Every awake of the wave"]
+    awake --> created{"Did an awake create objects?"}
+    created -- "yes, they form the next wave" --> construct
+    created -- no --> enable["3. Every onEnable, for behaviours"]
+    enable --> start["4. Every start"]
+    start --> frames["5. Frame hooks, from the next frame"]
+```
+
 Subsystems are ordered dependencies first. A Subsystem's constructor dependencies are constructed before its own constructor runs, and awake before its own `awake` runs. Crucible walks Subsystems in registration order and visits each one's dependencies before it. Registration order is the order `boot` requires modules, sorted by full instance path, then the order of classes in each module. A module's imports run before it, so they register first. The walk can move a dependency ahead of Subsystems that do not depend on it, so do not rely on the order of Subsystems that do not depend on each other. The order between behaviours of different tags is not defined.
 
 A behaviour tagged after boot gets its own batch, with the same phases.
