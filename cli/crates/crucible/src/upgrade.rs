@@ -1556,10 +1556,15 @@ else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2),
     }
 
     #[test]
-    fn a_roblox_ts_tsconfig_lists_each_typescript_7_change_it_needs() {
-        let commented = ROBLOX_TS_TSCONFIG.replacen("{\n", "{\n\t// made by crucible create 0.3.0\n", 1);
-        assert_eq!(
-            typescript_7_changes(&commented, false).unwrap(),
+    fn each_typescript_7_change_names_the_tsconfig_in_the_extends_chain_that_holds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |path: &str, text: &str| {
+            fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            fs::write(root.join(path), text).unwrap();
+        };
+        let changes = |tsconfig: &str, moved| typescript_7_changes(root, Path::new(tsconfig), moved);
+        let roblox_ts = |file: &str| -> Vec<String> {
             [
                 r#"Set "module" to "preserve" and "moduleResolution" to "bundler"."#,
                 r#"Remove "downlevelIteration"."#,
@@ -1568,19 +1573,75 @@ else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2),
                 r#"Set "skipLibCheck" to true."#,
                 r#"Remove "plugins". The compiler applies Crucible's transform itself."#,
             ]
+            .iter()
+            .map(|change| format!("{}: {change}", if change.contains("skipLibCheck") { "tsconfig.json" } else { file }))
+            .collect()
+        };
+
+        write(
+            "tsconfig.json",
+            &ROBLOX_TS_TSCONFIG.replacen(
+                "{
+",
+                "{
+	// made by crucible create 0.3.0
+",
+                1,
+            ),
         );
-        assert_eq!(typescript_7_changes(&template("tsconfig.json"), true).unwrap(), Vec::<&str>::new());
-        let extending = r#"{ "extends": "./base.json", "compilerOptions": { "outDir": "out", "baseUrl": "src", }, }"#;
+        assert_eq!(changes("tsconfig.json", false), roblox_ts("tsconfig.json"));
+        write("tsconfig.json", &template("tsconfig.json"));
+        assert_eq!(changes("tsconfig.json", true), Vec::<String>::new());
+
+        write("config/base.json", ROBLOX_TS_TSCONFIG);
+        write("tsconfig.json", r#"{ "extends": "./config/base", "compilerOptions": { "noImplicitReturns": true, }, }"#);
         assert_eq!(
-            typescript_7_changes(extending, true).unwrap(),
-            [r#"Remove "baseUrl", and add a "paths" entry for each source root."#],
-            "settings a base tsconfig can hold are not required"
+            changes("tsconfig.json", false),
+            roblox_ts("config/base.json"),
+            "a game that moved its settings into a base"
         );
-        let own =
-            r#"{ "compilerOptions": { "types": ["@trioforge/compiler-types", "@rbxts/types"], "rootDir": "src" } }"#;
-        assert_eq!(typescript_7_changes(own, false).unwrap(), Vec::<&str>::new(), "a game that chose its own settings");
-        assert_eq!(typescript_7_changes(own, true).unwrap(), [r#"Set "skipLibCheck" to true."#]);
-        assert_eq!(typescript_7_changes("{ not json", true), None);
+
+        write("node_modules/@game/tsconfig/package.json", r#"{ "tsconfig": "roblox.json" }"#);
+        write(
+            "node_modules/@game/tsconfig/roblox.json",
+            r#"{ "compilerOptions": { "downlevelIteration": true, "skipLibCheck": false, "rootDir": "src" } }"#,
+        );
+        write("local.json", r#"{ "compilerOptions": { "baseUrl": "src" } }"#);
+        write(
+            "tsconfig.arena.json",
+            r#"{ "extends": ["@game/tsconfig", "./local.json"], "compilerOptions": { "skipLibCheck": true } }"#,
+        );
+        assert_eq!(
+            changes("tsconfig.arena.json", true),
+            [
+                r#"local.json: Remove "baseUrl", and add a "paths" entry for each source root."#,
+                r#"node_modules/@game/tsconfig/roblox.json: Remove "downlevelIteration"."#,
+                r#"tsconfig.arena.json: Set "types" to ["@trioforge/compiler-types", "@rbxts/types"], and name any other type package in full."#,
+            ],
+            "a package base supplies rootDir, and the tsconfig overrides its skipLibCheck"
+        );
+
+        write(
+            "tsconfig.lost.json",
+            r#"{ "extends": "@game/missing", "compilerOptions": { "downlevelIteration": true } }"#,
+        );
+        assert_eq!(
+            changes("tsconfig.lost.json", true),
+            [
+                r#"tsconfig.lost.json: Remove "downlevelIteration"."#,
+                "tsconfig.lost.json: crucible upgrade cannot find @game/missing, which it extends, so check that tsconfig for each TypeScript 7 change",
+            ],
+            "a base that cannot be read may supply the missing settings"
+        );
+        write("broken.json", "{ not json");
+        write("tsconfig.broken.json", r#"{ "extends": "./broken.json" }"#);
+        assert_eq!(
+            changes("tsconfig.broken.json", true),
+            ["broken.json: it is not valid JSON, so check it for each TypeScript 7 change"]
+        );
+        write("loop-a.json", r#"{ "extends": "./loop-b" }"#);
+        write("loop-b.json", r#"{ "extends": "./sub/../loop-a.json" }"#);
+        assert_eq!(changes("loop-a.json", false), Vec::<String>::new(), "a cycle ends");
     }
 
     #[test]
