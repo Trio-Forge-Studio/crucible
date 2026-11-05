@@ -1,16 +1,20 @@
 export function truthy(n: number, s: string, flag?: boolean) {
 	const parts = new Array<string>();
+	// oxlint-disable-next-line roblox-ts/lua-truthiness -- Exercises the lowering of this otherwise rejected form.
 	if (n) parts.push("n");
+	// oxlint-disable-next-line roblox-ts/lua-truthiness -- Exercises the lowering of this otherwise rejected form.
 	if (s) parts.push("s");
 	if (!flag) parts.push("!flag");
 	return parts.join(",");
 }
 
 export function pick(n: number, fallback: number) {
+	// oxlint-disable-next-line roblox-ts/lua-truthiness -- Exercises the lowering of this otherwise rejected form.
 	return n || fallback;
 }
 
 export function both(n: number, other: number) {
+	// oxlint-disable-next-line roblox-ts/lua-truthiness -- Exercises the lowering of this otherwise rejected form.
 	return n && other;
 }
 
@@ -69,6 +73,7 @@ export function order() {
 }
 
 export function eitherOr(n: number) {
+	// oxlint-disable-next-line roblox-ts/lua-truthiness -- Exercises the lowering of this otherwise rejected form.
 	return (n && "s") || "fallback";
 }
 

@@ -230,8 +230,8 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
         "7:1 export let is not supported; export a const",
         "10:9 loose equality is not supported; use === or !==",
         "14:8 `table` cannot be a Luau local name",
-        "19:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
-        "25:9 instanceof is not supported",
+        "20:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
+        "26:9 instanceof is not supported",
     ];
     assert_eq!(found, expected);
 }

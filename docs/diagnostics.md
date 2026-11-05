@@ -498,11 +498,11 @@ The Crucible compiler checks these rules in its fact pass. Each diagnostic is an
 | CRU036 | Subsystem Janitor | A subsystem lives for the whole session. Put the Janitor on the lifetime that ends. |
 | CRU037 | State as a function | A Crucible State is a callable table, not a function, so code that tests type(x) == "function", such as Vide, treats it as a constant. Pass () => state(), or type the receiver as Readable. |
 
-CRU032 checks conditions, negation, and the left operand of `&&` and `||`. In an `if` condition using `??`, it checks the right operand. Numeric and string literals that cannot be zero or empty are allowed. Generic constraints, unions, intersections, `any`, `unknown`, and empty object types participate in the check.
+CRU032 checks conditions, negation, and the left operand of `&&` and `||`. In an `if` condition using `??`, it checks the right operand. Numeric and string literals that cannot be zero or empty are allowed. Explicit boolean coercion with `!!` is allowed because the compiler preserves JavaScript truthiness. Generic constraints, unions, intersections, `any`, `unknown`, and empty object types participate in the check.
 
-CRU033 checks LuaTuple values in conditions, logical operands, equality operands, and iteration. A single variable cannot capture a LuaTuple return or iterator step. Array destructuring is allowed.
+CRU033 checks LuaTuple values in conditions, logical operands, equality operands, and iteration. A single variable cannot capture a LuaTuple return or iterator step. Array destructuring is allowed. An unused `_` iterator binding discards the step and is allowed. Direct iteration over a LuaTuple is allowed because the compiler packs the returned values into an array.
 
-CRU034 checks arrays passed to `pairs` and `ipairs`. Maps and unconstrained values are allowed.
+CRU034 checks arrays passed to `pairs` and `ipairs`. Maps and unconstrained values are allowed. A `pairs` loop that binds only the key may inspect raw table keys with `typeIs(key, "number")`. The key cannot index a table, be returned, or be passed to another function. This permits dense-array validation and argument counting without treating raw keys as array indices.
 
 CRU035 checks direct `RunService` frame signal connections from a constructor, `awake`, or `start` in a Subsystem or CrucibleBehaviour, including inherited abstract bases. It covers `Connect`, `Once`, and `ConnectParallel`. Nested callbacks and other methods are allowed. A behaviour may assign a connection to `this.field` when its own or an inherited `onDestroy` calls `this.field.Disconnect()` or `this.field?.Disconnect()`.
 

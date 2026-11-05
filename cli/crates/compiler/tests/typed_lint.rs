@@ -52,3 +52,56 @@ fn fd_state_passed_where_plain_function_expected() {
         source.lines().enumerate().filter_map(|(i, l)| l.ends_with("// fires").then_some((i + 1, 90037))).collect();
     assert_eq!(rules(&game).iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), expected);
 }
+
+#[test]
+fn explicit_boolean_coercion_raw_key_validation_and_discarded_steps_are_safe() {
+    let game = Game::new();
+    game.main(
+        r#"
+export function probe(value: unknown, array: unknown[], object: Record<string, unknown>) {
+    const boolean = !!value;
+    let count = 0;
+    for (const [key] of pairs(array)) {
+        if (!typeIs(key, "number") || key < 1 || key > array.size()) return false;
+        count++;
+    }
+    for (const _ of pairs(object)) count++;
+    const components = new CFrame().GetComponents();
+    for (const value of new CFrame().GetComponents()) count += value;
+    return boolean;
+}
+"#,
+    );
+    let found = rules(&game);
+    assert_eq!(found.iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), [(10, 90033)]);
+}
+
+#[test]
+fn inspected_keys_still_cannot_index_arrays_and_discard_names_cannot_be_read() {
+    let game = Game::new();
+    game.main(
+        r#"
+export function probe(array: unknown[], object: Record<string, unknown>) {
+    for (const [key] of pairs(array)) {
+        if (typeIs(key, "number")) array[key] = 1;
+    }
+    for (const _ of pairs(object)) print(_);
+}
+"#,
+    );
+    assert_eq!(rules(&game).iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), [(3, 90034), (6, 90033)]);
+}
+
+#[test]
+fn suppression_applies_only_to_the_immediately_following_line() {
+    let game = Game::new();
+    game.main(
+        r#"
+declare const value: number;
+// oxlint-disable-next-line roblox-ts/lua-truthiness
+
+if (value) {}
+"#,
+    );
+    assert_eq!(rules(&game), [(5, 5, 90032)]);
+}

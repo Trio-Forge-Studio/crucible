@@ -56,7 +56,13 @@ impl Extractor {
         let start = self.span(n).start as usize;
         let before = &self.text[..start];
         let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-        let previous = self.text[..line_start].trim_end_matches(['\r', '\n']).rsplit('\n').next().unwrap_or("");
+        let previous = self.text[..line_start]
+            .strip_suffix('\n')
+            .unwrap_or("")
+            .trim_end_matches('\r')
+            .rsplit('\n')
+            .next()
+            .unwrap_or("");
         if let Some((_, rules)) = previous.split_once("oxlint-disable-next-line") {
             let rules = rules.split("--").next().unwrap().trim().trim_end_matches("*/");
             if rules.split(',').any(|r| r.trim() == rule.legacy()) {
@@ -107,6 +113,7 @@ impl Extractor {
             _ => false,
         };
         let t = self.type_of(n);
+        let t = self.checker.get_base_constraint_of_type_exported(t).unwrap_or(t);
         candidate && t.alias().and_then(|a| a.symbol()).is_some_and(|s| s.name() == "LuaTuple")
     }
     fn lint_tuple_use(&mut self, n: P<Node>) {
@@ -147,7 +154,12 @@ impl Extractor {
             }
             Kind::PrefixUnaryExpression if n.as_prefix_unary_expression().operator == Kind::ExclamationToken => {
                 let operand = unwrap(n.as_prefix_unary_expression().operand);
-                self.lint_truthy(operand);
+                if !parent(n).is_some_and(|p| {
+                    p.kind() == Kind::PrefixUnaryExpression
+                        && p.as_prefix_unary_expression().operator == Kind::ExclamationToken
+                }) {
+                    self.lint_truthy(operand);
+                }
                 self.lint_tuple_use(operand);
             }
             Kind::BinaryExpression => {
@@ -197,9 +209,12 @@ impl Extractor {
                     } else {
                         init
                     };
-                    self.lint_tuple_declaration(name);
-                } else {
-                    self.lint_tuple_use(unwrap(e));
+                    if name.kind() != Kind::Identifier
+                        || name.as_identifier().text() != "_"
+                        || self.lint_identifier_used(n, name)
+                    {
+                        self.lint_tuple_declaration(name);
+                    }
                 }
             }
             Kind::CallExpression => {
@@ -210,7 +225,7 @@ impl Extractor {
                     && let Some(&a) = c.arguments().nodes().first()
                 {
                     let t = self.type_of(a);
-                    if self.lint_array(t) {
+                    if self.lint_array(t) && !self.lint_raw_keys(n) {
                         self.lint_report(n, Rule::ArrayPairs, &format!("Do not use Array<T> with {}(). Key values will not be shifted from 1-indexed to 0-indexed.", self.lint_text(c.expression)));
                     }
                 }
@@ -221,6 +236,87 @@ impl Extractor {
         if matches!(n.kind(), Kind::Identifier | Kind::PropertyAccessExpression) {
             self.lint_state(n);
         }
+    }
+    fn lint_identifier_used(&mut self, root: P<Node>, name: P<Node>) -> bool {
+        let symbol = self.checker.get_symbol_at_location_exported(name);
+        fn walk(x: &mut Extractor, n: P<Node>, name: P<Node>, symbol: Option<P<tsrs_ast::Symbol>>) -> bool {
+            if n != name && n.kind() == Kind::Identifier && x.checker.get_symbol_at_location_exported(n) == symbol {
+                return true;
+            }
+            let mut used = false;
+            n.for_each_child(&mut |c| {
+                used |= walk(x, c, name, symbol);
+                used
+            });
+            used
+        }
+        walk(self, root, name, symbol)
+    }
+    fn lint_raw_keys(&mut self, call: P<Node>) -> bool {
+        if self.lint_text(call.expression().unwrap()) != "pairs" {
+            return false;
+        }
+        let Some(loop_node) = parent(call).filter(|p| p.kind() == Kind::ForOfStatement) else {
+            return false;
+        };
+        let init = loop_node.initializer().unwrap();
+        if init.kind() != Kind::VariableDeclarationList {
+            return false;
+        }
+        let name = init.as_variable_declaration_list().declarations().nodes()[0].name().unwrap();
+        if name.kind() != Kind::ArrayBindingPattern || name.elements().len() != 1 {
+            return false;
+        }
+        let Some(key) = name.elements()[0].name().filter(|n| n.kind() == Kind::Identifier) else {
+            return false;
+        };
+        let symbol = self.checker.get_symbol_at_location_exported(key);
+        let mut checked = false;
+        let mut escaped = false;
+        fn walk(
+            x: &mut Extractor,
+            n: P<Node>,
+            key: P<Node>,
+            symbol: Option<P<tsrs_ast::Symbol>>,
+            checked: &mut bool,
+            escaped: &mut bool,
+            escaping: bool,
+        ) {
+            let escaping = escaping
+                || tsrs_ast::is_function_like(n)
+                || matches!(
+                    n.kind(),
+                    Kind::ElementAccessExpression
+                        | Kind::ReturnStatement
+                        | Kind::ArrayLiteralExpression
+                        | Kind::PropertyAssignment
+                        | Kind::ShorthandPropertyAssignment
+                )
+                || (n.kind() == Kind::CallExpression && x.lint_text(n.expression().unwrap()) != "typeIs");
+            if n != key
+                && n.kind() == Kind::Identifier
+                && x.checker.get_symbol_at_location_exported(n) == symbol
+                && let Some(p) = parent(n)
+            {
+                *escaped |= escaping;
+                if p.kind() == Kind::CallExpression {
+                    let c = p.as_call_expression();
+                    let valid = x.lint_text(c.expression) == "typeIs"
+                        && c.arguments().nodes().first() == Some(&n)
+                        && c.arguments().nodes().get(1).is_some_and(|&a| {
+                            a.kind() == Kind::StringLiteral && a.as_string_literal().text() == "number"
+                        });
+                    *checked |= valid;
+                    *escaped |= !valid;
+                }
+            }
+            n.for_each_child(&mut |c| {
+                walk(x, c, key, symbol, checked, escaped, escaping);
+                false
+            });
+        }
+        walk(self, loop_node, key, symbol, &mut checked, &mut escaped, false);
+        checked && !escaped
     }
     fn lint_lineage(&mut self, n: P<Node>, seen: &mut Vec<P<Node>>) -> Option<ClassKind> {
         if seen.contains(&n) {
