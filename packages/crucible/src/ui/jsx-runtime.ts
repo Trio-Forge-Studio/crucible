@@ -14,7 +14,8 @@ export type EventProps<T extends Instance> = {
 };
 
 /** The props of an intrinsic element that creates a `T`. */
-export type IntrinsicProps<T extends Instance> = PropertyProps<T> & EventProps<T> & { children?: Node };
+export type IntrinsicProps<T extends Instance> = PropertyProps<T> &
+	EventProps<T> & { children?: Node } & (T extends GuiObject ? { className?: string } : {});
 
 export declare namespace JSX {
 	type Element = Node;

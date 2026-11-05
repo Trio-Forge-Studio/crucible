@@ -824,7 +824,7 @@ fn decode_entities(text: &str) -> String {
     out
 }
 
-fn decode_entity(entity: &str) -> Option<char> {
+pub(crate) fn decode_entity(entity: &str) -> Option<char> {
     let code = match entity.strip_prefix('#') {
         Some(hex) if hex.starts_with(['x', 'X']) => u32::from_str_radix(&hex[1..], 16).ok()?,
         Some(decimal) => decimal.parse().ok()?,

@@ -127,10 +127,14 @@ impl Lower<'_> {
                     continue;
                 }
             };
-            let Some(prop) = self.fact(node).and_then(|f| f.prop) else {
+            let Some(prop) = self.fact(node).and_then(|f| f.prop.as_ref()) else {
                 self.error(node, "the type facts do not say how this attribute lowers");
                 continue;
             };
+            if let Prop::Class(_) = prop {
+                self.error(node, "class lowering is not implemented");
+                continue;
+            }
             let value = self.attribute_value(value);
             let statement = match prop {
                 Prop::Fixed => Stmt::Assign(vec![instance.clone().field(name)], vec![value]),
@@ -140,6 +144,7 @@ impl Lower<'_> {
                 }
                 Prop::Event => Stmt::Call(instance.clone().field(name).method("Connect", vec![value])),
                 Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value])),
+                Prop::Class(_) => unreachable!(),
             };
             self.current_block.push(statement);
         }

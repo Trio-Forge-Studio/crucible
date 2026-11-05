@@ -34,6 +34,15 @@ pub fn copy_declarations(from: &Path, to: &Path) {
 }
 
 impl Game {
+    pub fn ui() -> Game {
+        let game = Self::new();
+        game.config(|c| {
+            c["compilerOptions"]["jsx"] = "react-jsx".into();
+            c["compilerOptions"]["jsxImportSource"] = "@trioforge/crucible/ui".into();
+        });
+        game
+    }
+
     pub fn new() -> Game {
         Game::under("client")
     }
@@ -115,6 +124,13 @@ impl Game {
 
     pub fn found(&self) -> Vec<String> {
         self.found_at("tsconfig.json")
+    }
+    pub fn found_columns(&self) -> Vec<String> {
+        self.facts()
+            .diagnostics
+            .iter()
+            .map(|d| format!("{}@{}:{}:{}", code(d), self.relative(d), d.line, d.column))
+            .collect()
     }
 
     pub fn found_at(&self, tsconfig: &str) -> Vec<String> {

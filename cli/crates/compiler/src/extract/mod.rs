@@ -3,6 +3,7 @@
 //! transform asks the checker a question whose answer changes the emitted Luau. Checks that only report an error are
 //! not sites yet.
 
+mod classes;
 mod crucible;
 mod data;
 mod network;
@@ -38,6 +39,19 @@ pub(crate) fn extract(checked: Checked) -> Facts {
     let globals = types::Globals::new(&mut checker);
     let crucible = crucible::Api::new(program, &mut checker, host);
     let mut facts = Facts::default();
+    let catalog = match crate::classes::Catalog::load(Path::new(&dir)) {
+        Ok(catalog) => Some(catalog),
+        Err(e) => {
+            facts.diagnostics.push(Diagnostic {
+                path: Some(e.path),
+                line: e.line,
+                column: e.column,
+                code: 90030,
+                message: format!("CRU030: {}", e.message),
+            });
+            None
+        }
+    };
     let game = match Game::load(Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
         Ok(game) => game,
         Err(message) => {
@@ -81,6 +95,7 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         options,
         jsx: None,
         instance_classes: None,
+        catalog,
     };
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
@@ -172,6 +187,7 @@ fn computed_key(n: P<Node>) -> bool {
 }
 
 struct Extractor {
+    catalog: Option<crate::classes::Catalog>,
     checker: CheckerHandle,
     resolver: P<EmitResolver>,
     globals: types::Globals,
@@ -185,7 +201,7 @@ struct Extractor {
     table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
-    reported: HashSet<(String, u32, Code)>,
+    reported: HashSet<(String, Span, Code)>,
     options: P<CompilerOptions>,
     jsx: Option<Jsx>,
     /// `CreatableInstances`'s classes by their lowercase name, read at the first intrinsic element.
@@ -849,6 +865,7 @@ impl Extractor {
             }
         };
         if tag.kind() != Kind::Identifier || !tsrs_scanner::is_intrinsic_jsx_name(tag.text()) {
+            self.component_classes(attributes);
             return;
         }
         self.site();
@@ -856,11 +873,23 @@ impl Extractor {
         let span = self.span(tag);
         self.table.store(span, Site::Jsx, |f| &mut f.instance_class, class.name().into());
         let instance = self.checker.get_type_of_symbol_exported(class);
+        let explicit = attributes
+            .as_jsx_attributes()
+            .properties()
+            .nodes()
+            .iter()
+            .filter(|a| a.kind() == Kind::JsxAttribute)
+            .map(|a| tsrs_ast::entity_name_to_string(a.as_jsx_attribute().name, None))
+            .collect();
         for &attribute in attributes.as_jsx_attributes().properties().nodes() {
             if attribute.kind() != Kind::JsxAttribute {
                 continue;
             }
             self.site();
+            if tsrs_ast::entity_name_to_string(attribute.as_jsx_attribute().name, None) == "className" {
+                self.class_attribute(n, instance, class.name(), attribute, &explicit);
+                continue;
+            }
             match self.prop(instance, attribute) {
                 Ok(prop) => {
                     let span = self.span(attribute);
