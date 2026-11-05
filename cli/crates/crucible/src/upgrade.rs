@@ -795,10 +795,11 @@ fn remove_rbxtsc_modules(dir: &Path) -> io::Result<usize> {
 }
 
 type CompilerOptions = serde_json::Map<String, serde_json::Value>;
+type Applies = fn(&CompilerOptions, bool) -> bool;
 
 // The TypeScript 7 table in design/compiler.md, plus the skipLibCheck that the table assumes. A tsconfig that extends
 // another can inherit a setting, so one that is missing counts only in a tsconfig that extends nothing.
-const TYPESCRIPT_7: [(fn(&CompilerOptions, bool) -> bool, &str); 8] = [
+const TYPESCRIPT_7: [(Applies, &str); 8] = [
     (
         |options, _| {
             let resolution = options.get("moduleResolution").and_then(serde_json::Value::as_str);
