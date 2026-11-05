@@ -136,10 +136,10 @@ fn refuse_declared_out_dir_overlaps(root: &Path, manifest: &Manifest) -> Result<
             ))
         };
         let dir = match crucible_compiler::out_dir(&tsconfig) {
-            Ok(Some(dir)) => dir,
-            Ok(None) => return Err(unknown("sets no outDir", String::new())),
-            Err(diagnostics) => {
-                let details = diagnostics.iter().map(|d| format!("\n  {d}")).collect();
+            (Some(dir), errors) if errors.is_empty() => dir,
+            (None, errors) if errors.is_empty() => return Err(unknown("sets no outDir", String::new())),
+            (_, errors) => {
+                let details = errors.iter().map(|d| format!("\n  {d}")).collect();
                 return Err(unknown("cannot be read", details));
             }
         };
