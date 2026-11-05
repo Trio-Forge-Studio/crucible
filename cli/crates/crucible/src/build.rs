@@ -246,23 +246,9 @@ fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
     Ok(Compiled { out_dir: child.out_dir, modules })
 }
 
-// The checker recurses as deep as the source nests, so the compile gets the stack tsrs's own command line gives it.
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
     child::exit_with_parent();
-    match std::thread::Builder::new()
-        .stack_size(512 << 20)
-        .spawn(move || compile_and_send(&tsconfig, &project, &include))
-    {
-        Ok(compile) => compile.join().unwrap_or(ExitCode::from(101)),
-        Err(error) => {
-            eprintln!("crucible build: cannot start the compile thread: {error}");
-            ExitCode::from(2)
-        }
-    }
-}
-
-fn compile_and_send(tsconfig: &Path, project: &Path, include: &Path) -> ExitCode {
-    match crucible_compiler::compile(tsconfig, Target::Game { project, include }) {
+    match crucible_compiler::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
         Ok(compiled) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
             let child = ChildModules { out_dir: compiled.out_dir, modules };
