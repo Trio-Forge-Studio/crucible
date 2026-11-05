@@ -209,9 +209,9 @@ const OLD_TEMPLATE = {
 	agents: (text) => `${text.trimEnd()}\n\nThe old version had this line.\n`,
 };
 
-// The next version reuses this binary, so its shim reports the next version and
-// rewrites the old template it receives to stand in for an older release whose
-// template and docs differed. Each snapshot part holds the whole rendered file.
+// The next version reuses this binary, so its shim reports the next version. With
+// CRUCIBLE_TEST_OLD_TEMPLATE set, it rewrites the old template it receives to stand in
+// for an older release whose template and docs differed. Each snapshot part holds the whole rendered file.
 const NEXT_VERSION_SHIM = `#!/usr/bin/env node
 const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
@@ -225,7 +225,7 @@ if (args[0] === "--version") {
 		.map(([key, edit]) => `${key}: ${edit}`)
 		.join(", ")}};
 	let input = readFileSync(0, "utf8");
-	if (input) {
+	if (input && process.env.CRUCIBLE_TEST_OLD_TEMPLATE) {
 		const old = JSON.parse(input);
 		for (const part of old.owned) {
 			if (part.path === "tsconfig.json") part.content = OLD_TEMPLATE.tsconfig(part.content);
@@ -351,7 +351,7 @@ test(
 		assert.equal(downgrade.status, 2, downgrade.stderr);
 		assert.match(downgrade.stderr, /--allow-downgrade/);
 
-		const upgraded = run("npx", ["crucible", "upgrade"], game);
+		const upgraded = run("npx", ["crucible", "upgrade"], game, { CRUCIBLE_TEST_OLD_TEMPLATE: "1" });
 		assert.equal(upgraded.status, 0, upgraded.stderr);
 		const report = upgraded.stdout;
 		assert.match(
@@ -423,6 +423,51 @@ test(
 			/the old template is unknown, so they were left alone:\n {2}default\.project\.json\n/,
 		);
 		assertPinned(game, cliVersion());
+	},
+);
+
+// The last release whose games build with roblox-ts. Its binary installs the upgrade without knowing the new toolchain.
+const ROBLOX_TS_RELEASE = "0.3.0";
+
+test(
+	`upgrade moves a game made by ${ROBLOX_TS_RELEASE} off roblox-ts, and its check passes`,
+	{ skip: !supported && `no package for ${host}` },
+	async () => {
+		const setup = await startUpgradeRegistry();
+		const game = join(root, "roblox-ts-game");
+		const cli = `@trioforge/crucible-cli@${ROBLOX_TS_RELEASE}`;
+		const created = run("npx", ["--yes", cli, "create", "roblox-ts-game", game, "--no-install"], root);
+		assert.equal(created.status, 0, created.stderr);
+		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
+		assert.equal(installed.status, 0, installed.stderr);
+		assert.ok(existsSync(join(game, "node_modules", "roblox-ts")), "the old template builds with roblox-ts");
+		writeFileSync(join(game, ".npmrc"), `registry=http://127.0.0.1:${setup.port}/\n`);
+
+		const upgraded = run("npx", ["crucible", "upgrade", setup.next], game);
+		assert.equal(upgraded.status, 0, `${upgraded.stdout}\n${upgraded.stderr}`);
+		assert.ok(
+			upgraded.stdout.startsWith(
+				`Upgraded crucible and @trioforge/crucible from ${ROBLOX_TS_RELEASE} to ${setup.next}.\n`,
+			),
+			upgraded.stdout,
+		);
+		assert.match(upgraded.stdout, /Refreshed from the new template:\n {2}tsconfig\.json\n/);
+		assert.match(
+			upgraded.stdout,
+			/ {2}package\.json no longer lists roblox-ts, typescript, @rbxts\/compiler-types\n {2}ran `npm install`\n/,
+		);
+		assert.doesNotMatch(upgraded.stdout, /by hand/);
+		const manifest = JSON.parse(readFileSync(join(game, "package.json"), "utf8"));
+		assert.equal(manifest.devDependencies["@trioforge/compiler-types"], setup.next);
+		const toolchain = run(
+			"npm",
+			["ls", "typescript", "roblox-ts", "@rbxts/compiler-types", "--all", "--json"],
+			game,
+		);
+		assert.deepEqual(JSON.parse(toolchain.stdout).dependencies ?? {}, {}, "no roblox-ts toolchain is left");
+		const checked = run("npm", ["run", "check"], game);
+		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
+		assert.ok(existsSync(join(game, "build", "start.rbxl")));
 	},
 );
 
