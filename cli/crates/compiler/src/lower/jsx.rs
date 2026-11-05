@@ -131,8 +131,8 @@ impl Lower<'_> {
                 self.error(node, "the type facts do not say how this attribute lowers");
                 continue;
             };
-            if let Prop::Class(_) = prop {
-                self.error(node, "class lowering is not implemented");
+            if let Prop::Class(style) = prop {
+                self.fixed_style(&instance, style.style());
                 continue;
             }
             let value = self.attribute_value(value);

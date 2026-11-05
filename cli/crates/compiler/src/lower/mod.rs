@@ -5,6 +5,7 @@ mod expr;
 mod jsx;
 mod pattern;
 mod stmt;
+mod style;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
