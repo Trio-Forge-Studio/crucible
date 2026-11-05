@@ -163,6 +163,19 @@ Games made by `crucible create` 0.3.0 and earlier build with roblox-ts. The old 
 
 The report asks for a missing `types`, `rootDir`, or `skipLibCheck` only when it read every tsconfig in the chain, because a base it cannot read can supply them, and it names the place's own tsconfig for each. It asks only in a game moving off roblox-ts, because a newer game chose its own settings. After the changes, run `npm run check`.
 
+The 0.3.0 binary starts the upgrade, so two of its limits need a step first.
+
+On Windows with Yarn, Yarn cannot replace `crucible.exe` while it runs, so `npx crucible upgrade` fails with `EPERM` and leaves `node_modules/@trioforge/crucible-cli` empty. Run a copy of the binary from outside `node_modules` instead. It hands off to the new version as usual. In PowerShell, write `$env:TEMP` for `%TEMP%`.
+
+```console
+copy node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe %TEMP%\crucible-0.3.0.exe
+%TEMP%\crucible-0.3.0.exe upgrade
+```
+
+If the upgrade already failed this way, `yarn install --no-immutable` alone does not relink the CLI. Delete `node_modules/.yarn-state.yml`, run `yarn install --no-immutable`, then run the copy.
+
+When every package is in `devDependencies` and `package.json` has no `dependencies` field, 0.3.0 exits 1 with "cannot update package.json automatically". Add `"dependencies": {}` to `package.json`, then run `npx crucible upgrade`. You can delete the empty field afterwards.
+
 ### When install fails
 
 A failed install restores `package.json` and exits 1. `node_modules` can still hold a mix of versions, so the message names the install command that returns it to the restored pins, such as `npm install` or `pnpm install --no-frozen-lockfile`. Run it, then upgrade again. If the restore itself fails, the message names the temporary file beside `package.json` that holds the original.
