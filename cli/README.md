@@ -4,7 +4,7 @@
 
 ## Docs topics
 
-Each file in `docs` is one topic, named by its file stem. `build.rs` embeds every `docs/*.md` file in the binary and reruns when the folder changes. `crucible docs` lists the topics, and `crucible docs <topic>` prints one.
+Each file in `docs` is one topic, named by its file stem. `build.rs` embeds every `docs/*.md` file in the binary and reruns when the folder changes. When stdin or stdout is not a terminal, or with `--plain`, `crucible docs` lists the topics and `crucible docs <topic>` prints one as the file's exact bytes. When both are a terminal, they open the reader in `src/docs`, which renders the Markdown with `pulldown-cmark`, highlights code with `syntect` and `two-face`, and runs on `ratatui`. `build.rs` draws each `mermaid` fence with `mermaid-text` at a few widths, so the binary carries no Mermaid renderer and the build fails for a fence that does not render.
 
 A topic starts with a `# Title` line, a blank line, and a one-line summary that ends with a period. `crucible docs` prints that summary, and `cargo test` fails for a topic without one. Use plain Markdown, because a website will render the same files. Document only what the code exports today. Keep the `## crucible <command>` sections in `docs/cli.md` in alphabetical order.
 
@@ -101,7 +101,7 @@ Every released binary keeps this contract with every other, because an old binar
    {"format":1,"version":"0.1.0","owned":[{"path":"AGENTS.md","section":"## Crucible","content":"<whole rendered file>"}],"docs":{"cli":"<sha256>"}}
    ```
 
-   `owned` lists every file the old binary's template owns. `content` is the whole rendered file, and `section` is the heading of the part it owns, or `null` for the whole file. The reading binary cuts sections with its own rules. `docs` maps each topic name to the lowercase hex SHA-256 of the topic's Markdown bytes, exactly as `crucible docs <topic>` prints them.
+   `owned` lists every file the old binary's template owns. `content` is the whole rendered file, and `section` is the heading of the part it owns, or `null` for the whole file. The reading binary cuts sections with its own rules. `docs` maps each topic name to the lowercase hex SHA-256 of the topic's Markdown bytes, exactly as `crucible docs <topic> --plain` prints them.
 4. The new binary inherits the old binary's stdout and stderr. It prints the report on stdout and diagnostics on stderr. Exit 0 means the report is complete, and any other exit means the refresh did not finish. With no exit within 120 seconds, the old binary kills the process tree. On any failure the old binary exits 1 and says the template was not refreshed.
 5. The new binary treats the old template as unknown, which lists differing files and writes none, when the snapshot's format is higher than its own, when the snapshot's `version` differs from `<old version>`, or when either old spec is a range it can evaluate that excludes `<old version>`.
 
