@@ -50,7 +50,7 @@ fn every_family_has_typed_writes() {
     ] {
         assert_eq!(c.lookup(token).unwrap(), expected, "{token}");
     }
-    for prefix in ["w", "h", "size"] {
+    for (prefix, axes) in [("w", vec![Axis::X]), ("h", vec![Axis::Y]), ("size", vec![Axis::X, Axis::Y])] {
         for (suffix, offset) in [
             ("2", Offset::Pixels(8)),
             ("0.5", Offset::Pixels(2)),
@@ -58,7 +58,8 @@ fn every_family_has_typed_writes() {
             ("full", Offset::Scale(1.0)),
             ("1/2", Offset::Scale(0.5)),
         ] {
-            assert_eq!(c.lookup(&format!("{prefix}-{suffix}")).unwrap(), sizes(prefix, offset));
+            let expected: Vec<_> = axes.iter().map(|axis| Value::Size(*axis, offset)).collect();
+            assert_eq!(c.lookup(&format!("{prefix}-{suffix}")).unwrap(), expected);
         }
     }
 }
