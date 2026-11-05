@@ -74,7 +74,7 @@ try {
 		);
 	});
 	console.log(
-		`every Lowering descriptor shape type-checks with the Crucible compiler; ${starts.length} rejected shapes fail to type-check`,
+		`every Lowering descriptor shape type-checks under TypeScript 7; ${starts.length} rejected shapes fail to type-check`,
 	);
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });

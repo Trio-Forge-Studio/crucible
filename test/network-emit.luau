@@ -5,7 +5,7 @@ local spec = require("./lib/load")
 local h = require("./lib/network-codec")
 
 return {
-	["57 every Lowering shape type-checks through the physical emit entry and rejected shapes do not"] = function()
+	["57 every Lowering shape type-checks through the emit export and rejected shapes do not"] = function()
 		local result = process.exec("node", { "test/lib/network-consumer.mjs" })
 		spec.eq(result.code, 0, result.stdout .. result.stderr)
 	end,

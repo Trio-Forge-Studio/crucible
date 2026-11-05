@@ -9,8 +9,7 @@
 		"moduleDetection": "force",
 		"strict": true,
 		"target": "ESNext",
-		// @rbxts/types references @rbxts/compiler-types by name, so the upstream copy loads beside this fork, and
-		// library checking reports their duplicate declarations.
+		// The Roblox declarations reference the upstream compiler types by name. This project supplies its TS7 fork.
 		"skipLibCheck": true,
 		"noEmit": true,
 		"types": ["@trioforge/compiler-types", "@rbxts/types"]

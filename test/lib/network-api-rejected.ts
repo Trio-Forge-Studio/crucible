@@ -27,7 +27,7 @@ export const n9 = () => ClientNetwork.ask(DoorToggle, { door, open: true });
 export const n10 = () => ServerNetwork.broadcast(Analytics, "Upgrades");
 export class N11 {
 	readonly a = receive(Prof, (_p, { userId }) => {
-		print(userId);
+		return userId;
 	});
 }
 export class N12 {

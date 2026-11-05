@@ -780,6 +780,9 @@ try {
 	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
+	fs.cpSync(path.join(repo, "cli/crates/compiler/roblox-ts"), path.join(scratch, "cli/crates/compiler/roblox-ts"), {
+		recursive: true,
+	});
 	fs.cpSync(path.join(repo, "test"), path.join(scratch, "test"), { recursive: true });
 	fs.cpSync(path.join(repo, "packages/crucible"), path.join(scratch, "packages/crucible"), {
 		recursive: true,

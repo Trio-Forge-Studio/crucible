@@ -597,31 +597,28 @@ test("public binding declarations compile; all reserved names reject; compiled u
 	local exports = require("@lune/luau").load(require("@lune/fs").readFile("build/binding-usage.luau"), {
 		environment = {
 			script = {},
-			_G = setmetatable({}, {
-				__index = function()
-					return {
-						getModule = function()
-							return { out = { emit = "emit" } }
-						end,
-						import = function(_, entry)
-							return if entry == "emit" then w.emit else { CrucibleBehaviour = w.behaviour }
-						end,
-					}
+			game = {
+				GetService = function()
+					local node = {}
+					function node:WaitForChild()
+						return node
+					end
+					return node
 				end,
-			}),
+			},
+			require = function()
+				return {
+					import = function(_, _, ...)
+						local parts = { ... }
+						return if parts[#parts] == "emit" then w.emit else { CrucibleBehaviour = w.behaviour }
+					end,
+				}
+			end,
 		},
 	})()
 	spec.eq(rawget(exports.LockerZone, "update"), nil, "no forwarding method")
 	spec.eq(w.hooks.hooks().overrides(exports.LockerZone), 4, "compiled inherited Update")
-	w.emit.defineClass(exports.LockerZone, {
-		kind = "behaviour",
-		id = "Locker",
-		tag = "Locker",
-		deps = {},
-		provides = {},
-		instance = { "Model" },
-		attributes = { speed = numeric(true) },
-	})
+
 	local i = w.tagged("I", "Locker", { Speed = 12 })
 	w.boot()
 	local object = exports.LockerZone:get(i)
