@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { PLATFORMS, platformPackageName } from "./stage.mjs";
 import { SHIM, main, unused } from "./registry.mjs";
 
 test("preflight rejects live and unpublished versions", () => {
@@ -21,11 +22,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		mkdirSync(join(directory, "packages"));
 		// The publish job downloads the tarballs to `packages`, and npm reads `packages/<file>` as a GitHub repository.
 		process.chdir(directory);
-		const names = [
-			SHIM,
-			"@trioforge/crucible",
-			...["linux-x64", "win32-x64"].map((platform) => `@trioforge/crucible-cli-${platform}`),
-		];
+		const names = [SHIM, "@trioforge/crucible", ...PLATFORMS.map(platformPackageName)];
 		const documents = {};
 		const manifests = new Map();
 		for (const [index, name] of names.entries()) {
@@ -58,7 +55,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		);
 		assert.deepEqual(published, []);
 		await main("stage", "packages", async (name) => documents[name] ?? {}, publish);
-		assert.equal(published.length, 3);
+		assert.equal(published.length, names.length - 1);
 		assert.equal(published.at(-1), SHIM);
 		assert.ok(!published.includes(names[2]));
 		published.length = 0;
@@ -74,7 +71,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 			),
 			/Not staged by this run: @trioforge\/crucible@1\.2\.3-beta\.1\. If npmjs\.com > Staged Packages/,
 		);
-		assert.equal(published.length, 2);
+		assert.equal(published.length, names.length - 2);
 		assert.equal(published.at(-1), SHIM);
 		documents[names[2]].versions["1.2.3-beta.1"].dist.integrity = "different";
 		await assert.rejects(

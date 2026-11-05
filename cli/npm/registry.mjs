@@ -5,6 +5,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { PLATFORMS, platformPackageName } from "./stage.mjs";
+
 export const SHIM = "@trioforge/crucible-cli";
 
 export function unused(document, name, version) {
@@ -42,17 +44,10 @@ export async function main(
 			return { path, name, version };
 		})
 		.sort((a, b) => Number(a.name === SHIM) - Number(b.name === SHIM) || a.name.localeCompare(b.name));
-	assert.equal(packages.length, 4);
+	const expected = new Set([SHIM, "@trioforge/crucible", ...PLATFORMS.map(platformPackageName)]);
+	assert.equal(packages.length, expected.size);
 	assert.equal(new Set(packages.map(({ version }) => version)).size, 1);
-	assert.deepEqual(
-		new Set(packages.map(({ name }) => name)),
-		new Set([
-			SHIM,
-			"@trioforge/crucible",
-			"@trioforge/crucible-cli-linux-x64",
-			"@trioforge/crucible-cli-win32-x64",
-		]),
-	);
+	assert.deepEqual(new Set(packages.map(({ name }) => name)), expected);
 	const documents = await Promise.all(packages.map(({ name }) => lookup(name)));
 	const failed = [];
 	for (const [index, { path, name, version }] of packages.entries()) {
