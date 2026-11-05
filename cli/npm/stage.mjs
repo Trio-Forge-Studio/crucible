@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const cli = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const PLATFORMS = [
+	{ os: "darwin", cpu: "arm64" },
 	{ os: "win32", cpu: "x64" },
 	{ os: "linux", cpu: "x64" },
 ];
