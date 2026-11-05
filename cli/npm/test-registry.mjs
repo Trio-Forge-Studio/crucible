@@ -14,6 +14,13 @@ const server = createServer(async (request, response) => {
 		response.end(readFileSync(files[Number(tarball[1])]));
 		return;
 	}
+	// Without a packument `time`, pnpm dates a locked version by its earliest npm attestation, so the real
+	// release's attestation would date this local build and trip the default one-day minimumReleaseAge.
+	const attestation = /^-\/npm\/v1\/attestations\/(.+)@[^@]+$/.exec(path);
+	if (attestation && packages[attestation[1]]) {
+		response.writeHead(404).end();
+		return;
+	}
 	const versions = packages[path];
 	if (!versions) {
 		const upstream = await fetch(`https://registry.npmjs.org/${path.replace("/", "%2f")}`, {
