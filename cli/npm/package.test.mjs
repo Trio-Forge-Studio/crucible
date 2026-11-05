@@ -169,6 +169,12 @@ test(
 		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
 		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
 		assert.equal(installed.status, 0, installed.stderr);
+		const toolchain = run("npm", ["ls", "typescript", "roblox-ts", "--all", "--json"], game);
+		assert.deepEqual(
+			JSON.parse(toolchain.stdout).dependencies ?? {},
+			{},
+			"the game installs no TypeScript or roblox-ts",
+		);
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
 		assert.match(checked.stdout, /vp check/);
@@ -178,7 +184,6 @@ test(
 				.equals(Buffer.from("<roblox!")),
 		);
 		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
-		assert.ok(!existsSync(join(game, "node_modules", "roblox-ts")), "the game builds without roblox-ts");
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);
