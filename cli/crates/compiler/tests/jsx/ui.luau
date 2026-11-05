@@ -87,6 +87,32 @@ specs["an event prop connects its handler"] = function()
 	eq(bought, 1, "Activated runs the handler")
 end
 
+specs["an omitted optional prop is left at its default and a given one applies"] = function()
+	local w = world()
+	local parent = fake.new("ScreenGui")
+	local size, clicks = w.state(14), 0
+	w.fixture("optional").mountButtons(parent, size, function()
+		clicks += 1
+	end)
+	local buttons = fake.named(parent, "Button")
+	eq(#buttons, 2, "both buttons mount")
+	local bare, full = buttons[1], buttons[2]
+	if bare.Text ~= nil then
+		bare, full = full, bare
+	end
+	eq(bare.Text, nil, "an omitted Text is never assigned")
+	eq(bare.TextSize, nil, "an omitted Readable is never bound")
+	eq(full.Text, "Buy", "a given Text is set")
+	eq(full.TextSize, 14, "a given Readable is bound")
+	size:set(20)
+	w.flush()
+	eq(full.TextSize, 20, "the bound prop updates")
+	fake.fire(bare, "Activated")
+	fake.fire(full, "Activated")
+	eq(clicks, 1, "only the given handler is connected")
+	quiet(w)
+end
+
 specs["an unmount destroys the instances and ends their bindings and connections"] = function()
 	local w = world()
 	local parent = fake.new("ScreenGui")

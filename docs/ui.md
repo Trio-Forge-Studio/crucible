@@ -45,7 +45,9 @@ export function CoinButton() {
 }
 ```
 
-The compiler decides from types, never from the value at run time, because a `state` is a callable table. A value whose type may be either a `Readable` or a plain value, such as `string | Readable<string>`, fails the build at the prop. So does a `Readable` that may be `undefined`, and a spread attribute on an intrinsic element. Pass one kind or the other.
+The compiler decides from types, never from the value at run time, because a `state` is a callable table. A value whose type may be either a `Readable` or a plain value, such as `string | Readable<string>`, fails the build at the prop. So does a spread attribute on an intrinsic element. Pass one kind or the other.
+
+A prop whose value may be `undefined`, such as an optional callback a component forwards, is set, bound or connected only when the value is not `undefined`. Otherwise the instance keeps its default, as with a prop left out.
 
 A child element is parented to the element. Any other child, such as `props.children`, a component, a fragment or an array, is appended through `append`. A component receives its children in `props.children`: the child itself when there is one, and an array when there are several.
 

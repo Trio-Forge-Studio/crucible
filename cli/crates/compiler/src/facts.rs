@@ -165,11 +165,11 @@ pub enum Jsx {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Prop {
     /// Assigned once, when the element creates its instance.
-    Fixed,
+    Fixed { optional: bool },
     /// A `Readable`, which `bind` assigns now and again on each change.
-    Reactive,
+    Reactive { optional: bool },
     /// An event, whose handler the element connects.
-    Event,
+    Event { optional: bool },
     /// `children`, which the element appends as it appends a child.
     Children,
 }

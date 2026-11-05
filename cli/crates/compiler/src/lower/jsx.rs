@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::Lower;
 use crate::facts::{Jsx, Prop};
-use crate::luau::{Block, Expr, Field, Stmt};
+use crate::luau::{BinOp, Block, Expr, Field, Stmt};
 use crate::tree::{Kind, Node};
 
 /// A JSX element or fragment, as each lowering reads it.
@@ -132,16 +132,25 @@ impl Lower<'_> {
                 continue;
             };
             let value = self.attribute_value(value);
+            let optional = matches!(
+                prop,
+                Prop::Fixed { optional: true } | Prop::Reactive { optional: true } | Prop::Event { optional: true }
+            );
+            let value = if optional { self.push_temp(value) } else { value };
             let statement = match prop {
-                Prop::Fixed => Stmt::Assign(vec![instance.clone().field(name)], vec![value]),
-                Prop::Reactive => {
+                Prop::Fixed { .. } => Stmt::Assign(vec![instance.clone().field(name)], vec![value.clone()]),
+                Prop::Reactive { .. } => {
                     let property = Expr::String(Cow::Owned(name));
-                    Stmt::Call(self.ui("bind").call(vec![instance.clone(), property, value]))
+                    Stmt::Call(self.ui("bind").call(vec![instance.clone(), property, value.clone()]))
                 }
-                Prop::Event => Stmt::Call(instance.clone().field(name).method("Connect", vec![value])),
-                Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value])),
+                Prop::Event { .. } => Stmt::Call(instance.clone().field(name).method("Connect", vec![value.clone()])),
+                Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value.clone()])),
             };
-            self.current_block.push(statement);
+            if optional {
+                self.current_block.push(Stmt::If(value.binary(BinOp::Ne, Expr::Nil), vec![statement], None));
+            } else {
+                self.current_block.push(statement);
+            }
         }
         for child in element.children {
             match child {
