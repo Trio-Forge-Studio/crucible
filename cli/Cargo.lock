@@ -522,6 +522,7 @@ dependencies = [
  "dirs 6.0.0",
  "env_logger",
  "httpmock",
+ "jsonc-parser",
  "libc",
  "oc-registry",
  "percent-encoding",
