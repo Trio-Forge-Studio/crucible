@@ -22,6 +22,9 @@ export const text = (
 	</frame>
 );
 export const spaced = <frame> a </frame>;
+export const entities = (
+	<frame Name="&copy; &amp;x41; &#X41; &bogus;">&copy; &#169; &#x41; &mdash; &hellip; &euro; &bogus; &amp;</frame>
+);
 export const spreadAfter = <frame Name="Last" {...maybe} Visible />;
 export const spreadChildren = <frame>{...rows}</frame>;
 export const ordered = (

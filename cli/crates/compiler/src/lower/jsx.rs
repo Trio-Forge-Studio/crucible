@@ -270,6 +270,9 @@ impl Lower<'_> {
 
     fn attribute_value(&mut self, value: Option<Node>) -> Expr {
         match value {
+            Some(value) if value.kind() == Kind::StringLiteral => {
+                Expr::String(Cow::Owned(crate::entities::decode(value.text()).into_owned()))
+            }
             Some(value) => self.expr(value),
             None => Expr::Bool(true),
         }
