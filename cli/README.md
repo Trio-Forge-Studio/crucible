@@ -49,7 +49,7 @@ Trusted publishing needs packages that already exist, so the operator publishes 
 
 ### Add a platform
 
-Trusted publishing only stages versions of packages that already exist. Before the first tag that includes a new platform package, an `@trioforge` organization member publishes a placeholder by hand. Use its tarball from a green Release run's `npm-release` artifact, or publish version `0.0.0-stage` to match the existing packages on npm. Run the `npm trust github <name> ...` command from step 4 above for the new package name.
+Trusted publishing only stages versions of packages that already exist. Before the first tag that includes a new platform package, an `@trioforge` organization member publishes a placeholder by hand. Download the `npm-release` artifact from a green pull request Release run and run `npm publish <tarball> --access public --tag next` for the new platform's tarball. Its version is `<version>-pr.<run id>`, and npm publishes a prerelease only under a non-`latest` tag. Then run the `npm trust github <name> ...` command from step 4 above for the new package name.
 
 ### Cut a release
 
