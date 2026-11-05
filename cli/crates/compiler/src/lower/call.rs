@@ -218,6 +218,11 @@ impl Lower<'_> {
     fn constructor_macro(&mut self, m: Macro, n: Node) -> Expr {
         let args: Vec<Node> = n.arguments().iter().collect();
         let value = match m {
+            Macro::Promise => {
+                self.uses_ts = true;
+                let args = self.arguments(n);
+                Expr::global("TS.Promise").field("new").call(args)
+            }
             Macro::NewArray => {
                 if args.is_empty() {
                     Expr::Table(Vec::new())

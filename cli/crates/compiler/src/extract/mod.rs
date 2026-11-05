@@ -958,7 +958,12 @@ impl Extractor {
             return;
         }
         let declaration = n.as_export_declaration();
-        let Some(clause) = declaration.export_clause else { return };
+        let Some(clause) = declaration.export_clause else {
+            if let Some(specifier) = declaration.module_specifier {
+                self.modules.push(ModuleUse { specifier, kept: Kept::Always });
+            }
+            return;
+        };
         if clause.kind() != Kind::NamedExports {
             return;
         }

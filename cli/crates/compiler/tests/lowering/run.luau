@@ -42,6 +42,32 @@ function TS.import(_caller, base, ...)
 	return load(path)
 end
 
+function TS.instanceof(value, class)
+	if type(value) ~= "table" then
+		return false
+	end
+	local current = getmetatable(value)
+	while current do
+		if current == class then
+			return true
+		end
+		current = getmetatable(current)
+		if current then
+			current = current.__index
+		end
+	end
+	return false
+end
+TS.Promise = {
+	new = function(executor)
+		local result
+		executor(function(value)
+			result = value
+		end)
+		return { value = result }
+	end,
+}
+
 local failures = 0
 local function eq(label: string, actual: any, expected: any)
 	if actual ~= expected then
@@ -210,6 +236,17 @@ list("destructure", patterns.destructure({ 1, 2, nil, 4, 5 }, { a = 9 }), { 1, "
 eq("parameters", patterns.parameters({ x = 1 }, { 3, 4 }, 7, 8), 12)
 list("assign patterns", patterns.assign({ 5, 6 }), { 5, 6, 1 })
 list("LuaTuple elements", patterns.tuples(), { 10, 2, "first", "second" })
+
+local fd = load("fd")
+list("class ancestry", fd.instances(), { true, true, false })
+list("delete and in", fd.members(), { true, true, true, false })
+list("optional method retains receiver", fd.optional(true), { 7, 2, 2 })
+list("optional method skips arguments", fd.optional(false), { -1, 2, 0 })
+eq("satisfies keeps its value", fd.checked(), 7)
+eq("Promise constructor", fd.promise().value, 9)
+eq("export assignment", load("assignment").value, 11)
+eq("star export", load("star").greeting, "hi")
+eq("explicit export with star", load("star").own, 12)
 
 if failures > 0 then
 	print(`{failures} failed`)

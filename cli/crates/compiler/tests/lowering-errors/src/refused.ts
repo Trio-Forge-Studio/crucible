@@ -20,7 +20,3 @@ export function whole(steps: IterableFunction<LuaTuple<number[]>>) {
 		print(step.size());
 	}
 }
-
-export function check(value: unknown) {
-	return value instanceof Instance;
-}

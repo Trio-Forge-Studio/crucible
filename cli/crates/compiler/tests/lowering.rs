@@ -29,14 +29,17 @@ fn every_source_file_becomes_a_module_and_index_becomes_init() {
     let mut paths: Vec<&str> = MODULES.iter().map(|m| m.path.as_str()).collect();
     paths.sort_unstable();
     let expected = [
+        "assignment.luau",
         "classes.luau",
         "control.luau",
         "exceptions.luau",
+        "fd.luau",
         "macros.luau",
         "modules.luau",
         "nested/init.luau",
         "operators.luau",
         "patterns.luau",
+        "star.luau",
         "util.luau",
     ];
     assert_eq!(paths, expected);
@@ -231,9 +234,15 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
         "10:9 loose equality is not supported; use === or !==",
         "14:8 `table` cannot be a Luau local name",
         "19:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
-        "25:9 instanceof is not supported",
     ];
     assert_eq!(found, expected);
+}
+
+#[test]
+fn fd_features_lower_to_members_runtime_classes_and_module_values() {
+    has("fd.luau", &["TS.instanceof(", " = nil", " ~= nil", "TS.Promise.new(", "value = 7"]);
+    has("assignment.luau", &["return story"]);
+    has("star.luau", &["TS.import(", "own = 12", "for "]);
 }
 
 #[test]

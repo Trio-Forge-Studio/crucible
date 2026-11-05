@@ -86,7 +86,11 @@ impl Lower<'_> {
             Kind::YieldExpression => self.unsupported(n, "yield"),
             Kind::TaggedTemplateExpression => self.unsupported(n, "a tagged template"),
             Kind::ClassExpression => self.unsupported(n, "a class expression"),
-            Kind::DeleteExpression => self.unsupported(n, "delete"),
+            Kind::DeleteExpression => {
+                let place = self.place(n.expression());
+                self.current_block.push(Stmt::Assign(vec![place.expr()], vec![Expr::Nil]));
+                Expr::Bool(true)
+            }
             Kind::TypeOfExpression => {
                 self.error(n, "typeof is not supported; use typeOf or typeIs");
                 Expr::Nil
@@ -394,8 +398,15 @@ impl Lower<'_> {
                 Expr::Nil
             }
             Op::Comma => self.unsupported(n, "the comma operator"),
-            Op::In => self.unsupported(n, "the in operator"),
-            Op::InstanceOf => self.unsupported(n, "instanceof"),
+            Op::In => {
+                let (key, object) = self.ordered_pair(n.left(), n.right());
+                object.index(key).binary(BinOp::Ne, Expr::Nil)
+            }
+            Op::InstanceOf => {
+                self.uses_ts = true;
+                let (value, class) = self.ordered_pair(n.left(), n.right());
+                Expr::global("TS.instanceof").call(vec![value, class])
+            }
             op => {
                 let (left, right) = self.ordered_pair(n.left(), n.right());
                 if let Some(binop) = arithmetic(op).or_else(|| comparison(op)) {
@@ -792,16 +803,25 @@ impl Lower<'_> {
             self.unsupported(n, "this optional chain");
             return if statement { None } else { Some(Expr::Nil) };
         };
-        if first.kind() == Kind::CallExpression {
-            match self.fact(first.expression()).and_then(|f| f.callee) {
-                Some(Callee::Method) => {
-                    self.unsupported(n, "an optional call of a method");
-                }
-                Some(_) => {}
-                None => self.error(first.expression(), "the type facts do not say how to call this"),
-            }
-        }
-        let base = self.expr(cur);
+        let mut receiver = None;
+        let base = if first.kind() == Kind::CallExpression
+            && self.fact(first.expression()).and_then(|f| f.callee) == Some(Callee::Method)
+            && matches!(cur.kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression)
+        {
+            let object = self.expr(cur.expression());
+            let object = self.push_temp(object);
+            let function = if cur.kind() == Kind::PropertyAccessExpression {
+                object.clone().field(Cow::Borrowed(cur.name().unwrap().text()))
+            } else {
+                let kind = self.receiver(cur.expression());
+                let key = self.expr(cur.argument_expression());
+                object.clone().index(element_key(kind, key))
+            };
+            receiver = Some(object);
+            function
+        } else {
+            self.expr(cur)
+        };
         let result = self.push_temp(base);
         let mut segment: Vec<Block> = Vec::new();
         let mut open: Option<Block> = None;
@@ -820,9 +840,17 @@ impl Lower<'_> {
                     && !next.has_question_dot()
                     && skip_non_null(next.expression()) == link
             });
+            let optional_method = links.get(i + 1).is_some_and(|call| {
+                call.kind() == Kind::CallExpression
+                    && call.has_question_dot()
+                    && self.fact(call.expression()).and_then(|f| f.callee) == Some(Callee::Method)
+            });
             let (value, block) = self.capture(|l| {
+                if optional_method {
+                    receiver = Some(l.push_temp(result.clone()));
+                }
                 if let Some(call) = call_of_link {
-                    l.chain_call(call, ChainCallee::Member(link), result.clone())
+                    l.chain_call(call, link, result.clone())
                 } else {
                     match link.kind() {
                         Kind::PropertyAccessExpression => match link.name() {
@@ -834,7 +862,13 @@ impl Lower<'_> {
                             let key = l.expr(link.argument_expression());
                             result.clone().index(element_key(receiver, key))
                         }
-                        _ => l.chain_call(link, ChainCallee::Value, result.clone()),
+                        _ => {
+                            let mut args = l.arguments(link);
+                            if let Some(object) = receiver.take() {
+                                args.insert(0, object);
+                            }
+                            result.clone().call(args)
+                        }
                     }
                 }
             });
@@ -864,11 +898,7 @@ impl Lower<'_> {
         if statement { None } else { Some(result) }
     }
 
-    fn chain_call(&mut self, call: Node, callee: ChainCallee, object: Expr) -> Expr {
-        let ChainCallee::Member(member) = callee else {
-            let args = self.arguments(call);
-            return object.call(args);
-        };
+    fn chain_call(&mut self, call: Node, member: Node, object: Expr) -> Expr {
         let Some(kind) = self.fact(call.expression()).and_then(|f| f.callee) else {
             self.error(call.expression(), "the type facts do not say how to call this");
             return Expr::Nil;
@@ -922,12 +952,6 @@ impl Lowered {
 struct Property {
     key: Lowered,
     value: Lowered,
-}
-
-#[derive(Clone, Copy)]
-enum ChainCallee {
-    Value,
-    Member(Node),
 }
 
 pub(super) fn keyed_fields(values: Vec<Expr>) -> Vec<Field> {
