@@ -568,7 +568,7 @@ impl Extractor {
         let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
         let start = span.start;
         let path = file.file_name().replace('\\', "/");
-        if !self.reported.insert((path.clone(), span, code)) {
+        if !self.reported.insert((path.clone(), span, code, message.to_owned())) {
             return;
         }
         let Position { line, column } = File::new(file).position(start);

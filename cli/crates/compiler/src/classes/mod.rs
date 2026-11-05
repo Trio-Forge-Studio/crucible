@@ -270,7 +270,6 @@ impl Catalog {
                 && let Some((a, b)) = suffix.split_once('/')
                 && let (Some(a), Some(b)) = (number(a), number(b))
                 && b > 0.0
-                && a <= b
             {
                 return Ok(sizes(prefix, Offset::Scale(a / b)));
             }
@@ -334,7 +333,7 @@ fn number(text: &str) -> Option<f64> {
 fn percent(text: &str) -> Result<f64, String> {
     text.parse::<u8>()
         .ok()
-        .filter(|n| *n <= 100)
+        .filter(|n| *n <= 100 && text.bytes().all(|b| b.is_ascii_digit()))
         .map(|n| f64::from(100 - n) / 100.0)
         .ok_or_else(|| "opacity must be a whole number from 0 to 100".into())
 }

@@ -94,3 +94,82 @@ fn one_size_axis_preserves_the_instances_other_axis() {
     has(&source, "UDim2.new(_1.Size.X, UDim.new(0, 16))");
     has(&source, ".GroupTransparency = 0.1");
 }
+
+#[test]
+fn no_theme_keeps_keywords_and_reports_missing_theme_values() {
+    let g = Game::ui();
+    g.write("src/client/view.tsx", "export const view = <frame className=\"flex border w-full rounded-full\" />;");
+    let source = g.luau("client/view.luau");
+    has(&source, "Enum.FillDirection.Horizontal");
+    has(&source, "UDim.new(1, 0)");
+    g.write("src/client/view.tsx", "export const view = <frame className=\"bg-brand\" />;");
+    assert_eq!(g.found_columns(), ["CRU028@src/client/view.tsx:1:39"]);
+    has(&g.facts().diagnostics[0].message, "No theme.toml");
+}
+
+#[test]
+fn readonly_and_singleton_types_do_not_authorize_effects_or_mutable_reads() {
+    let g = game();
+    g.write("src/client/rejected.tsx", include_str!("classes/rejected.tsx"));
+    let found = g.found_columns();
+    assert_eq!(found, include_str!("classes/rejected.snap").lines().map(str::to_owned).collect::<Vec<_>>());
+}
+
+#[test]
+fn indirect_unknown_tokens_both_report_at_the_use() {
+    let g = game();
+    g.write("src/client/view.tsx", "const classes = 'bad nope';\nexport const view = <frame className={classes} />;\n");
+    assert_eq!(g.found_columns(), ["CRU028@src/client/view.tsx:2:39", "CRU028@src/client/view.tsx:2:39"]);
+}
+
+#[test]
+fn theme_is_local_to_the_invoked_config_even_without_a_rojo_project() {
+    let g = game();
+    g.remove("default.project.json");
+    g.write("src/client/view.tsx", "export const view = <frame className=\"bg-brand\" />;");
+    g.config(|c| {
+        c["compilerOptions"]["rootDir"] = "src/client".into();
+        c["compilerOptions"]["jsx"] = "react-jsx".into();
+        c["compilerOptions"]["jsxImportSource"] = "@trioforge/crucible/ui".into();
+    });
+    has(&g.luau("view.luau"), "Color3.fromRGB(37, 99, 235)");
+    g.write("src/client/theme.toml", "[color]\nbrand = '#000000'\n");
+    has(&g.luau("view.luau"), "Color3.fromRGB(37, 99, 235)");
+    g.write("theme.toml", "[color]\nbrand = '#ff0000'\n");
+    has(&g.luau("view.luau"), "Color3.fromRGB(255, 0, 0)");
+    g.write("nested/tsconfig.json", "{\"extends\": \"../tsconfig.json\", \"include\": [\"../src\"]}");
+    let facts = g.analyze_at("nested/tsconfig.json").unwrap();
+    assert_eq!(facts.diagnostics.len(), 1);
+    assert_eq!(facts.diagnostics[0].code, 90028);
+    has(&facts.diagnostics[0].message, "No theme.toml");
+}
+
+#[test]
+fn explicit_props_do_not_hide_invalid_class_targets() {
+    let g = game();
+    g.write(
+        "src/client/view.tsx",
+        "export const view = <frame className=\"text-white\" BackgroundTransparency={1} />;",
+    );
+    assert_eq!(g.found_columns(), ["CRU031@src/client/view.tsx:1:39"]);
+}
+
+#[test]
+fn wrong_kind_values_stop_at_the_typescript_boundary() {
+    let g = game();
+    g.write("src/client/types.tsx", "import type { Readable } from '@trioforge/crucible';\ndeclare const readable: Readable<string>;\nexport const bare = <frame className />;\nexport const read = <frame className={readable} />;\nexport const gui = <screengui className=\"border\" />;\n");
+    assert_eq!(g.type_errors(), ["src/client/types.tsx:3", "src/client/types.tsx:4", "src/client/types.tsx:5"]);
+}
+
+#[test]
+fn each_modifier_kind_conflicts_with_an_authored_direct_child() {
+    for (token, tag) in
+        [("rounded-md", "uicorner"), ("p-2", "uipadding"), ("border", "uistroke"), ("gap-2", "uilistlayout")]
+    {
+        let g = game();
+        let source = format!("export const view = <frame className=\"{token}\"><{tag} /></frame>;");
+        let column = source.find(&format!("<{tag}")).unwrap() + 2;
+        g.write("src/client/view.tsx", &source);
+        assert_eq!(g.found_columns(), [format!("CRU031@src/client/view.tsx:1:{column}")]);
+    }
+}

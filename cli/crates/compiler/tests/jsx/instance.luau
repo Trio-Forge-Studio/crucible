@@ -3,6 +3,7 @@
 -- unparents the subtree, locks its Parent and disconnects its connections. The names in EVENTS read as signals, and
 -- `fire` runs their handlers at once.
 local fake = {}
+local roblox = require("@lune/roblox")
 
 local EVENTS = { Activated = true, MouseEnter = true, MouseLeave = true }
 
@@ -111,6 +112,7 @@ function fake.new(className: string): any
 	meta.__signals = {}
 	meta.ClassName = className
 	meta.Name = className
+	meta.Size = roblox.UDim2.new(0, 100, 0, 100)
 	return instance
 end
 

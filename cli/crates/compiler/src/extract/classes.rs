@@ -88,6 +88,11 @@ impl Extractor {
             return;
         };
         let mut values = Vec::new();
+        let gui = self
+            .checker
+            .resolve_name_exported("GuiObject", None, SymbolFlags::Type, false)
+            .map(|s| self.checker.get_declared_type_of_symbol_exported(s));
+        let fits_gui = gui.is_some_and(|gui| self.checker.is_type_assignable_to_exported(instance, gui));
         let mut offset = 0;
         for token in text.split_ascii_whitespace() {
             let at = offset + text[offset..].find(token).unwrap();
@@ -102,6 +107,14 @@ impl Extractor {
                     self.report_span(value, span, Code::Rule(28), &format!("{message} (class `{token}`, byte {at})"))
                 }
                 Ok(writes) => {
+                    if !fits_gui {
+                        self.report_span(
+                            value,
+                            span,
+                            Code::Rule(31),
+                            &format!("`{token}` requires a GuiObject; {class} is not one"),
+                        );
+                    }
                     let mut missing = BTreeSet::new();
                     for write in &writes {
                         let (owner, property) = write.target().destination();
@@ -109,12 +122,15 @@ impl Extractor {
                             missing.insert(property);
                         }
                     }
-                    for property in missing {
+                    if !missing.is_empty() {
                         self.report_span(
                             value,
                             span,
                             Code::Rule(31),
-                            &format!("`{token}` sets {property}, which a {class} does not have"),
+                            &format!(
+                                "`{token}` sets {}, which a {class} does not have",
+                                missing.into_iter().collect::<Vec<_>>().join(", ")
+                            ),
                         );
                     }
                     values.extend(writes);

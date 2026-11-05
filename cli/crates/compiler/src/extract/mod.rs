@@ -201,7 +201,7 @@ struct Extractor {
     table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
-    reported: HashSet<(String, Span, Code)>,
+    reported: HashSet<(String, Span, Code, String)>,
     options: P<CompilerOptions>,
     jsx: Option<Jsx>,
     /// `CreatableInstances`'s classes by their lowercase name, read at the first intrinsic element.
