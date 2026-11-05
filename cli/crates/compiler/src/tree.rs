@@ -107,6 +107,10 @@ kinds! {
     JsxElement,
     JsxSelfClosingElement,
     JsxFragment,
+    JsxText,
+    JsxExpression,
+    JsxAttribute,
+    JsxSpreadAttribute,
     ComputedPropertyName,
     Parameter,
     Decorator,
@@ -683,6 +687,80 @@ impl Node {
         self.wrap_opt(self.n.as_export_declaration().export_clause)
     }
 
+    /// The tag of an element, which a fragment has not.
+    pub fn jsx_tag(&self) -> Option<Node> {
+        match self.n.kind() {
+            TsKind::JsxElement => {
+                Some(self.wrap(self.n.as_jsx_element().opening_element.as_jsx_opening_element().tag_name))
+            }
+            TsKind::JsxSelfClosingElement => Some(self.wrap(self.n.as_jsx_self_closing_element().tag_name)),
+            _ => None,
+        }
+    }
+
+    /// Whether a tag names an intrinsic element, such as `frame`, rather than a component.
+    pub fn is_intrinsic_tag(&self) -> bool {
+        match self.n.kind() {
+            TsKind::Identifier => tsrs_scanner::is_intrinsic_jsx_name(self.n.text()),
+            TsKind::JsxNamespacedName => true,
+            _ => false,
+        }
+    }
+
+    /// A tag's or an attribute's name, with a namespace as `namespace:name`.
+    pub fn jsx_name(&self) -> String {
+        tsrs_ast::entity_name_to_string(self.n, None)
+    }
+
+    pub fn jsx_attributes(&self) -> Nodes {
+        let attributes = match self.n.kind() {
+            TsKind::JsxElement => self.n.as_jsx_element().opening_element.as_jsx_opening_element().attributes,
+            TsKind::JsxSelfClosingElement => self.n.as_jsx_self_closing_element().attributes,
+            _ => return self.list(&[]),
+        };
+        self.list(attributes.as_jsx_attributes().properties().nodes())
+    }
+
+    pub fn jsx_children(&self) -> Nodes {
+        match self.n.kind() {
+            TsKind::JsxElement => self.list(self.n.as_jsx_element().children.nodes()),
+            TsKind::JsxFragment => self.list(self.n.as_jsx_fragment().children.nodes()),
+            _ => self.list(&[]),
+        }
+    }
+
+    pub fn jsx_attribute_name(&self) -> Node {
+        self.wrap(self.n.as_jsx_attribute().name)
+    }
+
+    pub fn jsx_attribute_value(&self) -> Option<Node> {
+        self.wrap_opt(self.n.as_jsx_attribute().initializer)
+    }
+
+    pub fn jsx_spread_expression(&self) -> Node {
+        self.wrap(self.n.as_jsx_spread_attribute().expression)
+    }
+
+    /// A `{...}` child or attribute value's expression, which `{}` has not.
+    pub fn jsx_expression(&self) -> Option<Node> {
+        self.wrap_opt(self.n.as_jsx_expression().expression)
+    }
+
+    pub fn is_jsx_spread_child(&self) -> bool {
+        self.n.as_jsx_expression().dot_dot_dot_token.is_some()
+    }
+
+    /// The string a text child renders, as TypeScript's JSX emit trims and joins its lines. `None` when it is only
+    /// whitespace.
+    pub fn jsx_text(&self) -> Option<String> {
+        let text = self.n.as_jsx_text();
+        if text.contains_only_trivia_white_spaces() {
+            return None;
+        }
+        let fixed = jsx_text(text.text());
+        (!fixed.is_empty()).then_some(fixed)
+    }
+
     pub fn for_each_child(&self, f: &mut dyn FnMut(Node)) {
         let text = self.text;
         self.n.for_each_child(&mut |child| {
@@ -702,6 +780,67 @@ impl Node {
                     | TsKind::IndexSignature
             )
     }
+}
+
+/// Trims each line of JSX text, drops the empty ones, joins the rest with a space and decodes entities. Named entities
+/// other than XML's five and `nbsp` stay as written.
+fn jsx_text(text: &str) -> String {
+    let is_break = |c: char| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}');
+    let lines: Vec<&str> = text.split(is_break).collect();
+    if lines.len() == 1 {
+        return decode_entities(text);
+    }
+    let last = lines.len() - 1;
+    let mut parts = Vec::new();
+    for (i, line) in lines.into_iter().enumerate() {
+        let line = if i == 0 { line } else { line.trim_start() };
+        let line = if i == last { line } else { line.trim_end() };
+        if !line.trim().is_empty() {
+            parts.push(decode_entities(line));
+        }
+    }
+    parts.join(" ")
+}
+
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let decoded = rest[1..].find(';').and_then(|semi| Some((decode_entity(&rest[1..=semi])?, semi + 2)));
+        match decoded {
+            Some((c, len)) => {
+                out.push(c);
+                rest = &rest[len..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_entity(entity: &str) -> Option<char> {
+    let code = match entity.strip_prefix('#') {
+        Some(hex) if hex.starts_with(['x', 'X']) => u32::from_str_radix(&hex[1..], 16).ok()?,
+        Some(decimal) => decimal.parse().ok()?,
+        None => {
+            return Some(match entity {
+                "amp" => '&',
+                "lt" => '<',
+                "gt" => '>',
+                "quot" => '"',
+                "apos" => '\'',
+                "nbsp" => '\u{a0}',
+                _ => return None,
+            });
+        }
+    };
+    char::from_u32(code)
 }
 
 fn parse_integer(text: &str) -> Option<f64> {

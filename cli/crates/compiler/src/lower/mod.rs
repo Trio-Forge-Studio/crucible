@@ -2,6 +2,7 @@ mod call;
 mod class;
 mod crucible;
 mod expr;
+mod jsx;
 mod pattern;
 mod stmt;
 

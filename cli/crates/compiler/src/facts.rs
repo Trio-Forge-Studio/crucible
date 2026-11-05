@@ -131,7 +131,25 @@ pub enum Constant {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Import {
     Keep,
+    /// A default import of a module that assigns `export =`, which binds the whole module rather than its `default`.
+    KeepModule,
     Elide,
+}
+
+impl Import {
+    pub fn kept(self) -> bool {
+        self != Import::Elide
+    }
+}
+
+/// How a file's JSX lowers, from the compiler options and the file's pragmas.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Jsx {
+    /// `jsx: "react"`. Each element calls `factory`, such as `Vide.jsx`, with its tag, its attributes and its
+    /// children, as roblox-ts emits it, and a fragment passes `fragment` as its tag. Both are dotted names.
+    Factory { factory: Box<str>, fragment: Option<Box<str>> },
+    /// Any other `jsx` setting, which the lowering refuses.
+    Unsupported,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -324,6 +342,8 @@ pub struct FileFacts {
     /// The absolute path with forward slashes.
     pub path: String,
     pub facts: Vec<(Span, Fact)>,
+    /// `None` when the file has no JSX.
+    pub jsx: Option<Jsx>,
 }
 
 impl FileFacts {
