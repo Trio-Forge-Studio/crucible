@@ -544,9 +544,9 @@ fn package_name(manifest: &serde_json::Value) -> Result<String, Error> {
 }
 
 fn read_pins(manifest: &serde_json::Value) -> Result<Pins, Error> {
-    let mut found = [None, None];
+    let mut found = [None, None, None];
     for group in ["dependencies", "devDependencies"] {
-        for (slot, package) in found.iter_mut().zip([CLI, RUNTIME]) {
+        for (slot, package) in found.iter_mut().zip(RELEASED_WITH_CLI) {
             let Some(spec) = manifest[group].get(package) else { continue };
             let spec = spec.as_str().filter(|spec| registry_spec(spec)).ok_or_else(|| {
                 Error::Usage(format!(
@@ -556,7 +556,7 @@ fn read_pins(manifest: &serde_json::Value) -> Result<Pins, Error> {
             slot.get_or_insert_with(|| spec.to_owned());
         }
     }
-    let [crucible, runtime] = found;
+    let [crucible, runtime, _] = found;
     let missing = |package: &str| {
         Error::Failed(format!("package.json does not list {package} in dependencies or devDependencies"))
     };
@@ -625,7 +625,7 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
     }
     if serde_json::from_str::<serde_json::Value>(&result).ok().as_ref() != Some(&expected) {
         return Err(Error::Failed(format!(
-            "cannot update package.json automatically. Set crucible and {RUNTIME} to {version} and run install"
+            "cannot update package.json automatically. Set {CLI}, {RUNTIME}, and {COMPILER_TYPES} if the game lists it, to {version} and run install"
         )));
     }
     Ok(result)
