@@ -561,16 +561,25 @@ fn property_name(p: P<Node>) -> Option<&'static str> {
 impl Extractor {
     pub(super) fn report(&mut self, at: P<Node>, code: Code, message: &str) {
         let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
-        self.report_span(at, crate::tree::span(at, file.text()), code, message);
+        let span = crate::tree::span(at, file.text());
+        let path = file.file_name().replace('\\', "/");
+        if self.reported.insert((path, span.start, code)) {
+            self.push_diagnostic(at, span, code, message);
+        }
     }
 
     pub(super) fn report_span(&mut self, at: P<Node>, span: crate::facts::Span, code: Code, message: &str) {
         let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
-        let start = span.start;
         let path = file.file_name().replace('\\', "/");
-        if !self.reported.insert((path.clone(), span, code, message.to_owned())) {
-            return;
+        if self.reported_classes.insert((path, span, code, message.to_owned())) {
+            self.push_diagnostic(at, span, code, message);
         }
+    }
+
+    fn push_diagnostic(&mut self, at: P<Node>, span: crate::facts::Span, code: Code, message: &str) {
+        let file = tsrs_ast::get_source_file_of_node(at).unwrap();
+        let path = file.file_name().replace('\\', "/");
+        let start = span.start;
         let Position { line, column } = File::new(file).position(start);
         let (number, message) = match code {
             Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),

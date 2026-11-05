@@ -92,6 +92,7 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         pending: Vec::new(),
         modules: Vec::new(),
         reported: HashSet::new(),
+        reported_classes: HashSet::new(),
         options,
         jsx: None,
         instance_classes: None,
@@ -201,7 +202,8 @@ struct Extractor {
     table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
-    reported: HashSet<(String, Span, Code, String)>,
+    reported: HashSet<(String, u32, Code)>,
+    reported_classes: HashSet<(String, Span, Code, String)>,
     options: P<CompilerOptions>,
     jsx: Option<Jsx>,
     /// `CreatableInstances`'s classes by their lowercase name, read at the first intrinsic element.
