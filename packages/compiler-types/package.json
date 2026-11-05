@@ -1,12 +1,11 @@
 {
 	"name": "@trioforge/compiler-types",
-	"version": "0.1.0",
-	"private": true,
+	"version": "0.3.0",
 	"description": "roblox-ts compiler types with the three-parameter iterator types that TypeScript 7 requires.",
 	"license": "MIT",
 	"types": "types/core.d.ts",
 	"files": [
-		"types/*.d.ts",
+		"types",
 		"LICENSE"
 	],
 	"devDependencies": {

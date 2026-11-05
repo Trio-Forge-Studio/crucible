@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { PLATFORMS, platformPackageName } from "./stage.mjs";
 
 export const SHIM = "@trioforge/crucible-cli";
+export const WORKSPACE_PACKAGES = ["@trioforge/crucible", "@trioforge/compiler-types"];
 
 export function unused(document, name, version) {
 	assert.ok(
@@ -44,7 +45,7 @@ export async function main(
 			return { path, name, version };
 		})
 		.sort((a, b) => Number(a.name === SHIM) - Number(b.name === SHIM) || a.name.localeCompare(b.name));
-	const expected = new Set([SHIM, "@trioforge/crucible", ...PLATFORMS.map(platformPackageName)]);
+	const expected = new Set([SHIM, ...WORKSPACE_PACKAGES, ...PLATFORMS.map(platformPackageName)]);
 	assert.equal(packages.length, expected.size);
 	assert.equal(new Set(packages.map(({ version }) => version)).size, 1);
 	assert.deepEqual(new Set(packages.map(({ name }) => name)), expected);

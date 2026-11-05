@@ -134,6 +134,7 @@ test(
 	() => {
 		const runtimeDir = join(cli, "..", "packages", "crucible");
 		const runtime = pack(runtimeDir, join(root, "tarballs"));
+		const compilerTypes = pack(join(cli, "..", "packages", "compiler-types"), join(root, "tarballs"));
 		const contents = run("npm", ["pack", "--dry-run", "--json"], runtimeDir);
 		assert.equal(contents.status, 0, contents.stderr);
 		const files = JSON.parse(contents.stdout)[0].files.map(({ path }) => path);
@@ -156,9 +157,13 @@ test(
 		const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 		assert.equal(manifest.dependencies["@trioforge/crucible"], cliVersion());
 		assert.equal(manifest.devDependencies["@trioforge/crucible-cli"], cliVersion());
+		assert.equal(manifest.devDependencies["@trioforge/compiler-types"], cliVersion());
+		for (const toolchain of ["roblox-ts", "typescript", "@rbxts/compiler-types"])
+			assert.equal(manifest.devDependencies[toolchain], undefined, `the game needs no ${toolchain}`);
 		assert.equal(manifest.scripts.check, "vp check && crucible build");
 		manifest.dependencies["@trioforge/crucible"] = runtime;
 		manifest.devDependencies["@trioforge/crucible-cli"] = shim;
+		manifest.devDependencies["@trioforge/compiler-types"] = compilerTypes;
 		manifest.devDependencies[platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host))] =
 			platform;
 		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
@@ -172,6 +177,8 @@ test(
 				.subarray(0, 8)
 				.equals(Buffer.from("<roblox!")),
 		);
+		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
+		assert.ok(!existsSync(join(game, "node_modules", "roblox-ts")), "the game builds without roblox-ts");
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);
@@ -246,6 +253,7 @@ function launchUpgradeRegistry() {
 	const sources = {
 		"@trioforge/crucible-cli": join(root, "staged", "crucible"),
 		"@trioforge/crucible": join(root, "upgrade-runtime"),
+		"@trioforge/compiler-types": join(root, "upgrade-compiler-types"),
 		[platformName]: join(root, "staged", `crucible-cli-${host}`),
 	};
 	for (const entry of ["package.json", "out", "transformer", "server", "client", "emit"]) {
@@ -253,6 +261,15 @@ function launchUpgradeRegistry() {
 			recursive: true,
 			filter: (source) => !source.endsWith(".tsbuildinfo"),
 		});
+	}
+	for (const entry of ["package.json", "types", "LICENSE"]) {
+		cpSync(
+			join(cli, "..", "packages", "compiler-types", entry),
+			join(sources["@trioforge/compiler-types"], entry),
+			{
+				recursive: true,
+			},
+		);
 	}
 	const tarballs = join(root, "upgrade-tarballs");
 	mkdirSync(tarballs);

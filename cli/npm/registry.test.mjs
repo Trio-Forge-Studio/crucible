@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { PLATFORMS, platformPackageName } from "./stage.mjs";
-import { SHIM, main, unused } from "./registry.mjs";
+import { SHIM, WORKSPACE_PACKAGES, main, unused } from "./registry.mjs";
 
 test("preflight rejects live and unpublished versions", () => {
 	unused({}, SHIM, "1.2.3");
@@ -22,7 +22,7 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		mkdirSync(join(directory, "packages"));
 		// The publish job downloads the tarballs to `packages`, and npm reads `packages/<file>` as a GitHub repository.
 		process.chdir(directory);
-		const names = [SHIM, "@trioforge/crucible", ...PLATFORMS.map(platformPackageName)];
+		const names = [SHIM, ...WORKSPACE_PACKAGES, ...PLATFORMS.map(platformPackageName)];
 		const documents = {};
 		const manifests = new Map();
 		for (const [index, name] of names.entries()) {
