@@ -291,7 +291,7 @@ const interactions = setmetatable(new Map<GuiObject, Interaction>(), { __mode: "
 /**
  * The interaction state of `instance`, made on the first call and shared by every later one. It follows the
  * instance's events until the instance is destroyed. A press in progress stops listening for its release when the
- * current owner ends. With no owner it throws.
+ * owner of the first call ends. The first call needs an owner and throws without one.
  */
 export function interaction(instance: GuiObject): Interaction {
 	const known = interactions.get(instance);

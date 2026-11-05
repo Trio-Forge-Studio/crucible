@@ -203,7 +203,7 @@ export function logInputMode() {
 }
 ```
 
-`interaction(instance)` returns the `hover`, `press` and `focus` readables that the element's own and group variants read. The first call for an instance creates them, and every later call returns the same ones. They follow the instance's events until it is destroyed. A press in progress stops listening for its release when the current owner ends, and with no owner the call throws.
+`interaction(instance)` returns the `hover`, `press` and `focus` readables that the element's own and group variants read. The first call for an instance creates them, and every later call returns the same ones. They follow the instance's events until it is destroyed. A press in progress stops listening for its release when the owner of the first call ends. The first call needs an owner and throws without one.
 
 ## Mount a component
 
