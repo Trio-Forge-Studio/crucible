@@ -72,7 +72,7 @@ jobs:
           cache: pnpm
       - name: Install the workspace and build the runtime for dev and create tests
         working-directory: .
-        run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build:transformer && pnpm --filter @trioforge/crucible build
+        run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build
       - run: cargo test --workspace --locked
       - name: Install Lune
         if: runner.os == 'Linux'

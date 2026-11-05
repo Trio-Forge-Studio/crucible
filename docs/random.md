@@ -13,11 +13,11 @@ import type { RngState, SeedPart } from "@trioforge/crucible/util/random";
 const rng = new Rng("chalet", 12345);
 
 print(rng.int(1, 6));
-// → 5
+// â†’ 5
 print(rng.pick(["lamp", "vase", "clock"]));
-// → vase
+// â†’ vase
 print(rng.shuffle([1, 2, 3, 4, 5]).join(" "));
-// → 5 4 1 2 3
+// â†’ 5 4 1 2 3
 ```
 
 ## Seeds
@@ -32,7 +32,7 @@ const furniture = new Rng("furniture", houseSeed);
 const weather = new Rng("weather", houseSeed);
 ```
 
-The two streams above are unrelated, and drawing from one never changes the other. Seed numbers must be integers within ±2^53. `new Rng()` with no parts seeds itself from the clock and `math.random`. Use it for draws nobody needs to repeat.
+The two streams above are unrelated, and drawing from one never changes the other. Seed numbers must be integers within Â±2^53. `new Rng()` with no parts seeds itself from the clock and `math.random`. Use it for draws nobody needs to repeat.
 
 `fork()` takes four draws from a stream and seeds a new one from them. Give a fork to a system that draws an unknown number of times, and the parent's sequence after the fork stays the same however many times the fork draws.
 
@@ -54,7 +54,7 @@ The two streams above are unrelated, and drawing from one never changes the othe
 | `shuffle(items)` | A shuffled copy. The array you pass stays as it was |
 | `sample(items, count)` | `count` distinct items, in the order they were drawn |
 
-Indices are 0-based, as everywhere in roblox-ts. Weights must be finite and non-negative, with a positive total. A zero weight is never chosen.
+Indices are 0-based. Weights must be finite and non-negative, with a positive total. A zero weight is never chosen.
 
 ```ts
 import { Rng } from "@trioforge/crucible/util/random";
@@ -62,7 +62,7 @@ import { Rng } from "@trioforge/crucible/util/random";
 const rng = new Rng("loot", 7);
 const rarities = ["common", "rare", "epic"];
 print(rarities[rng.weightedIndex([80, 18, 2])]);
-// → common
+// â†’ common
 ```
 
 Each method's sequence for a given state is part of the contract, so a change that would draw differently from the same seed is a breaking change.

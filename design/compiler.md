@@ -1,6 +1,6 @@
 # Crucible compiler design
 
-The Crucible compiler is a proposed replacement for roblox-ts that compiles Roblox games written in TypeScript to Luau. It lives in this repository as crates in the `cli` workspace and runs inside the `crucible` binary, so `crucible build` compiles in process with no Node and no separate command. Its one overriding requirement is the speed and footprint of the compiler itself, so that many agents can build separate worktrees of one game on one machine. The quality of the emitted Luau is secondary, and matching roblox-ts output is not a goal. This document records the measurements taken on 2026-11-01, the design they lead to, and the phases that each end in a budget check. Phases 0 to 4 are merged. In phase 6, `crucible build` compiles in process, and the runtime package builds with `rbxtsc` until `transformer-src` is deleted.
+The Crucible compiler is a proposed replacement for roblox-ts that compiles Roblox games written in TypeScript to Luau. It lives in this repository as crates in the `cli` workspace and runs inside the `crucible` binary, so `crucible build` compiles in process with no Node and no separate command. Its one overriding requirement is the speed and footprint of the compiler itself, so that many agents can build separate worktrees of one game on one machine. The quality of the emitted Luau is secondary, and matching roblox-ts output is not a goal. This document records the measurements taken on 2026-11-01, the design they lead to, and the phases that each end in a budget check. Phases 0 to 4 are merged. The Crucible half of phase 6 is complete. The runtime, sample and template use the compiler and TypeScript 7. FD migration waits for a release.
 
 ## Goal and pass bar
 
@@ -16,7 +16,7 @@ A phase passes when the stack's own tests pass and the compiler meets these budg
 | The same build after editing one file | 3 s | 42.4 s |
 | Peak memory of one build | 250 MB | 1,040 MB |
 
-Correctness comes from the stack's tests, not from roblox-ts. These are Crucible's `pnpm check` with its Lune specs and transformer tests, FD's `lune run test`, and a Studio smoke run.
+Correctness comes from the stack's tests, not from roblox-ts. These are Crucible's `pnpm check` with its Lune specs and compiler tests, FD's `lune run test`, and a Studio smoke run.
 
 ## Where the time goes today
 
@@ -121,7 +121,7 @@ Each phase ends in a budget check and a test run that a reviewer can repeat.
 3. **Lower Crucible's runtime.** Implement the lowering for the features Crucible's runtime uses. The check is Crucible's Lune specs passing on the compiler's output.
 4. **Add the Crucible transform.** Port `transformer-src` into the compiler crates. The check is the sample game passing `pnpm check`, with the transformer tests ported to `cargo test` and passing.
 5. **Cover FD's feature set.** Add JSX, `export =`, merged declarations, and `satisfies`. Try with throw landed in phase 3, because the runtime's data module throws. The check is FD's tests passing and every budget in the pass bar met on FD.
-6. **Move the stack.** Switch `crucible build` from `rbxtsc` to the in-process compiler. Remove `roblox-ts` and `typescript` from the template and the sample, delete `transformer-src`, and drop the physical `server`, `client`, and `emit` folders if `exports` resolution passes. The check is green CI on Crucible and FD.
+6. **Move the stack. Crucible complete, FD pending release.** Switch `crucible build` from `rbxtsc` to the in-process compiler. Remove `roblox-ts` and `typescript` from the template and the sample, delete `transformer-src`, and drop the physical `server`, `client`, and `emit` folders if `exports` resolution passes. The check is green CI on Crucible and FD.
 7. **Add a cache, only if needed.** If the full build misses its budget, or agents need a faster edit loop, key each file's output by its content and the declarations it imports. A changed merged declaration invalidates every file. The check is an edit build under 500 ms with FD's tests still passing.
 
 ## Decisions

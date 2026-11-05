@@ -1,6 +1,6 @@
 # Crucible
 
-Crucible is Trio Forge's roblox-ts game framework. This workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. The tag-triggered release workflow stages the CLI, the runtime, and `@trioforge/compiler-types` together for npm with provenance.
+Crucible is Trio Forge's TypeScript game framework. This workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. The tag-triggered release workflow stages the CLI, the runtime, and `@trioforge/compiler-types` together for npm with provenance.
 
 ## Check the workspace
 
@@ -24,7 +24,7 @@ Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to
 
 The sample server imports `@trioforge/crucible` and `@trioforge/crucible/server`. The sample client imports the root and `@trioforge/crucible/client`. Both scripts store the imported placeholders as attributes so the specs can assert their values.
 
-The root stays shared-safe. Requiring it must never load server or client code. The package keeps physical subpath folders because roblox-ts 3.0.0 does not resolve an exports-only remap. The Rojo project maps the package's `out` folder under `ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible`.
+The root stays shared-safe. Requiring it must never load server or client code. The exports map resolves every subpath with TypeScript 7 bundler resolution. The Rojo project maps the package's `out` folder under `ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible`.
 
 Two shared-safe subpaths carry the code of the retired `@trioforge/random` and `@trioforge/spline` packages. `@trioforge/crucible/util/random` exports the seeded `Rng`, and `@trioforge/crucible/maths/spline` exports the Catmull-Rom, cubic Bezier and uniform B-spline curves. Neither has dependencies, and no other entry loads them. `npx crucible docs random` and `npx crucible docs spline` print their guides.
 

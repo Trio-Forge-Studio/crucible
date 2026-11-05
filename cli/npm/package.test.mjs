@@ -142,9 +142,9 @@ test(
 		for (const file of [
 			"out/init.luau",
 			"out/index.d.ts",
-			"transformer/index.js",
-			"server/package.json",
-			"client/package.json",
+			"out/server/init.luau",
+			"out/client/init.luau",
+			"out/testing/init.luau",
 		]) {
 			assert.ok(files.includes(file), `runtime tarball includes ${file}`);
 		}
@@ -178,7 +178,14 @@ test(
 				.equals(Buffer.from("<roblox!")),
 		);
 		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
-		assert.ok(!existsSync(join(game, "node_modules", "roblox-ts")), "the game builds without roblox-ts");
+		for (const name of ["roblox-ts", "typescript"]) {
+			const listing = run("npm", ["ls", name, "--all", "--json"], game);
+			assert.equal(
+				JSON.parse(listing.stdout).dependencies,
+				undefined,
+				`${name} is absent from the installed consumer tree`,
+			);
+		}
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);

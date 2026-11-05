@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use support::{Game, copy_declarations, has, lines, project, repo, slashes};
 
 const HEADER: &str = "import { Subsystem, CrucibleBehaviour, attribute, type All } from \"@trioforge/crucible\";\nimport { boot } from \"@trioforge/crucible/server\";\n";
-const POSITIVE: &str = include_str!("../../../../packages/crucible/transformer-src/tests/fixtures/game.ts");
+const POSITIVE: &str = include_str!("transform-fixtures/game.ts");
 
 fn line_count(text: &str) -> usize {
     text.trim_end().split('\n').count()
@@ -48,9 +48,6 @@ fn the_fixture_installs_the_real_package_declarations_byte_for_byte() {
     let package = repo().join("packages/crucible");
     let read = |p: &Path| std::fs::read(p).unwrap();
     assert_eq!(read(&installed.join("package.json")), read(&package.join("package.json")));
-    for side in ["server", "client", "emit", "vide", "ui", "ui/jsx-runtime", "util/random", "maths/spline"] {
-        assert_eq!(read(&installed.join(side).join("package.json")), read(&package.join(side).join("package.json")));
-    }
     let mut declarations = Vec::new();
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -1221,7 +1218,7 @@ fn package_sides_without_a_package_search_the_whole_path() {
     );
     let roots = repo().join("packages/crucible/node_modules");
     let config = json!({
-        "extends": slashes(&repo().join("tsconfig.ts7.json")),
+        "extends": slashes(&repo().join("tsconfig.json")),
         "compilerOptions": {
             "rootDir": "server/combat",
             "typeRoots": [slashes(&roots.join("@trioforge")), slashes(&roots.join("@rbxts"))],

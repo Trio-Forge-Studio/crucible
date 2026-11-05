@@ -4,7 +4,7 @@ Find what each Crucible compile error from CRU001 to CRU031 means and how to fix
 
 Crucible's compiler checks game code while `crucible build` compiles it, so a game made from the template reports these errors in `npm run build` and `npm run check`. The editor's TypeScript service does not run these rules, so it never reports them. Code that type-checks in the editor can still fail the build.
 
-CRU028 to CRU031 check `className` and `theme.toml`. Only the Crucible compiler reports them, because only it builds Crucible UI. The `@trioforge/crucible/transformer` plugin for rbxtsc reports the others. `crucible docs ui` describes the classes.
+CRU028 to CRU031 check `className` and `theme.toml`. The compiler reports all CRU diagnostics during the build. `crucible docs ui` describes the classes.
 
 Each error is a TypeScript error whose code is 90000 plus the rule's number. CRU009 prints as `error TS90009: CRU009: Method resembles a lifecycle hook. Use its exact Crucible declaration name.` Every error fails the build.
 
