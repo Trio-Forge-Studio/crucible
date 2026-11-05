@@ -99,7 +99,7 @@ fn theme() -> &'static Theme {
 }
 
 const CODE: Style = Style::new().fg(Color::Yellow);
-const LINK: Style = Style::new().fg(Color::Blue).add_modifier(Modifier::UNDERLINED);
+const LINK: Style = Style::new().fg(Color::LightBlue).add_modifier(Modifier::UNDERLINED);
 const FRAME: Style = Style::new().fg(Color::DarkGray);
 const LABEL: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::ITALIC);
 
