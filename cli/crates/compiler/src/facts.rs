@@ -26,6 +26,7 @@ pub struct Fact {
     /// Whether a callee may be a Roblox API, which tells a missing argument from `nil`. Asked at calls with a call
     /// argument, which the lowering wraps in parentheses when it may return nothing.
     pub roblox_api: Option<bool>,
+    pub class_constructor: Option<bool>,
     pub falsy: Option<Falsy>,
     /// The value of an enum member or a const enum member access.
     pub constant: Option<Constant>,
@@ -410,6 +411,7 @@ pub enum Site {
     /// The callee of a call or a tagged template.
     CallCallee,
     NewCallee,
+    InstanceOfClass,
     /// A reference to an identifier macro.
     Identifier,
     /// An indexed value, or an object pattern with a computed key.

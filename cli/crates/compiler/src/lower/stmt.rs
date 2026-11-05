@@ -129,7 +129,12 @@ impl Lower<'_> {
             }
             Kind::ExportAssignment => {
                 let value = self.expr(s.expression());
-                self.export_assignment = Some(value);
+                if s.is_export_equals() {
+                    self.export_assignment = Some(value);
+                } else {
+                    let value = self.push_temp(value);
+                    self.exports.push((Cow::Borrowed("default"), value));
+                }
             }
             Kind::ImportEqualsDeclaration => {
                 self.unsupported(s, "import assignment");
@@ -1051,6 +1056,9 @@ impl Lower<'_> {
         }
         let Some(clause) = s.export_clause() else {
             if let Some(specifier) = s.module_specifier() {
+                if !self.import_fact(specifier).kept() {
+                    return;
+                }
                 let module = self.import_call(specifier);
                 let module = self.push_temp(module);
                 self.export_stars.push(module);

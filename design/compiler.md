@@ -105,7 +105,8 @@ Compiled code reaches `RuntimeLib` only through `TS.import`, `TS.getModule`, `TS
 These counts come from the spike's collector. FD has 117,409 type-dependent sites, and Crucible has 5,520.
 
 - **Calls, indexing, operators, and loops.** Macro, method, and function callees. Array, Map, Set, and String receivers. LuaTuple returns. String `+` versus numeric `+`. Truthiness, `??`, numeric `for` loops, and `for..of` over arrays, maps, sets, and `pairs()`.
-- **Classes and modules.** Classes, enums, `export =`, and `declare module` merging.
+- **Classes and modules.** Classes, enums, default and named exports, `export =`, star exports, and `declare module` merging. Type-only star exports are elided. `instanceof` requires a TypeScript or Crucible class; Roblox constructors are compile errors.
+- **Object membership.** `in` supports objects, records, and class instances. Arrays, tuples, Maps, Sets, strings, and iterator receivers are compile errors. `delete` supports object and record members; deleting an array or tuple element is a compile error.
 - **Other syntax.** `satisfies` and try with throw.
 - **JSX for Vide.** 2,106 elements, of which only the 17 spread attributes need a fact.
 - **Crucible's transform.** Registration, `attribute()`, `inject<T>()`, `boot()`, `receive()`, the network, replicated, data and config declaration macros, the emit import, and the CRU lint rules.

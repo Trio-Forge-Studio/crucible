@@ -87,6 +87,13 @@ impl Lower<'_> {
             Kind::TaggedTemplateExpression => self.unsupported(n, "a tagged template"),
             Kind::ClassExpression => self.unsupported(n, "a class expression"),
             Kind::DeleteExpression => {
+                let target = skip_parens_and_assertions(n.expression());
+                if matches!(target.kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression)
+                    && matches!(self.receiver(target.expression()), Some(Receiver::Array | Receiver::LuaTuple))
+                {
+                    self.error(n, "delete on an array or tuple is not supported");
+                    return Expr::Nil;
+                }
                 let place = self.place(n.expression());
                 self.current_block.push(Stmt::Assign(vec![place.expr()], vec![Expr::Nil]));
                 Expr::Bool(true)
@@ -399,10 +406,18 @@ impl Lower<'_> {
             }
             Op::Comma => self.unsupported(n, "the comma operator"),
             Op::In => {
+                if self.receiver(n.right()) != Some(Receiver::Other) {
+                    self.error(n, "in requires an object, record or class instance");
+                    return Expr::Nil;
+                }
                 let (key, object) = self.ordered_pair(n.left(), n.right());
                 object.index(key).binary(BinOp::Ne, Expr::Nil)
             }
             Op::InstanceOf => {
+                if self.fact(n.right()).and_then(|f| f.class_constructor) != Some(true) {
+                    self.error(n, "instanceof requires a TypeScript class");
+                    return Expr::Nil;
+                }
                 self.uses_ts = true;
                 let (value, class) = self.ordered_pair(n.left(), n.right());
                 Expr::global("TS.instanceof").call(vec![value, class])
@@ -845,9 +860,15 @@ impl Lower<'_> {
                     && call.has_question_dot()
                     && self.fact(call.expression()).and_then(|f| f.callee) == Some(Callee::Method)
             });
+            let saved_receiver = optional_method.then(|| {
+                let name = self.temp();
+                self.current_block.push(Stmt::Local(vec![name.clone()], Vec::new()));
+                Expr::Name(name)
+            });
             let (value, block) = self.capture(|l| {
-                if optional_method {
-                    receiver = Some(l.push_temp(result.clone()));
+                if let Some(object) = saved_receiver {
+                    l.current_block.push(Stmt::Assign(vec![object.clone()], vec![result.clone()]));
+                    receiver = Some(object);
                 }
                 if let Some(call) = call_of_link {
                     l.chain_call(call, link, result.clone())
