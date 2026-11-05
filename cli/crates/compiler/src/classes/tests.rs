@@ -102,6 +102,22 @@ fn invalid_tokens_explain_their_failure() {
     let c = theme::parse(Path::new("theme.toml"), "spacing = 100").unwrap();
     assert_eq!(c.lookup("pt-0.07").unwrap(), vec![Value::Padding(Side::Top, 7)]);
     assert!(c.lookup("pt-0.075").unwrap_err().contains("7.5 px"));
+    for (spacing, token, px) in [
+        ("3", "pt-0.333333333", None),
+        ("4", "pt-0.25", Some(1)),
+        ("0.1", "pt-10", Some(1)),
+        ("0.1", "pt-0.5", None),
+        ("1", "pt-2147483647", Some(i32::MAX)),
+        ("1", "pt-2147483648", None),
+        ("1", "pt-2147483647.5", None),
+        ("4", "pt-0", Some(0)),
+    ] {
+        let c = theme::parse(Path::new("theme.toml"), &format!("spacing = {spacing}")).unwrap();
+        match px {
+            Some(px) => assert_eq!(c.lookup(token).unwrap(), vec![Value::Padding(Side::Top, px)], "{spacing} {token}"),
+            None => assert!(c.lookup(token).unwrap_err().contains("whole-pixel"), "{spacing} {token}"),
+        }
+    }
     let c = Catalog::empty(false);
     assert!(c.lookup("bg-white").unwrap_err().contains("No theme.toml"));
     for token in ["border", "flex", "w-full", "h-px", "size-1/2"] {

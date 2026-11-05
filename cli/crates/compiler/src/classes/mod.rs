@@ -202,9 +202,39 @@ impl Style {
     }
 }
 
+/// A nonnegative decimal kept as its digits and the count of them after the point, so a product of two is exact.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Decimal {
+    digits: u128,
+    scale: u32,
+}
+impl Decimal {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        if whole.is_empty() && fraction.is_empty() || !whole.bytes().chain(fraction.bytes()).all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        let digits = format!("{whole}{fraction}").parse().ok()?;
+        Some(Self { digits, scale: u32::try_from(fraction.len()).ok()? })
+    }
+    /// The product as whole pixels, or `None` when it has a fractional part or does not fit an offset.
+    fn whole_product(self, other: Self) -> Option<i32> {
+        let product = self.digits.checked_mul(other.digits)?;
+        let unit = 10u128.checked_pow(self.scale.checked_add(other.scale)?)?;
+        if product % unit != 0 {
+            return None;
+        }
+        i32::try_from(product / unit).ok()
+    }
+    fn to_f64(self) -> f64 {
+        self.digits as f64 / 10f64.powi(self.scale as i32)
+    }
+}
+
 pub(crate) struct Catalog {
     named: BTreeMap<String, Vec<Value>>,
-    spacing: Option<f64>,
+    spacing: Option<Decimal>,
     has_theme: bool,
 }
 impl Catalog {
@@ -274,15 +304,11 @@ impl Catalog {
                 return Ok(sizes(prefix, Offset::Scale(a / b)));
             }
             if matches!(prefix, "p" | "px" | "py" | "pt" | "pr" | "pb" | "pl" | "w" | "h" | "size" | "gap")
-                && let (Some(n), Some(step)) = (number(suffix), self.spacing)
+                && let (Some(n), Some(step)) = (Decimal::parse(suffix), self.spacing)
             {
-                let exact = n * step;
-                let px = exact.round();
-                // A decimal step such as 1.1 times 50 lands a rounding error away from a whole pixel.
-                if (exact - px).abs() > 1e-9 * px.abs().max(1.0) || px > i32::MAX as f64 {
-                    return Err(format!("{exact} px is not a whole-pixel offset in range"));
-                }
-                let px = px as i32;
+                let Some(px) = n.whole_product(step) else {
+                    return Err(format!("{} px is not a whole-pixel offset in range", n.to_f64() * step.to_f64()));
+                };
                 return Ok(if size {
                     sizes(prefix, Offset::Pixels(px))
                 } else if prefix == "gap" {

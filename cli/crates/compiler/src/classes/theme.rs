@@ -158,6 +158,6 @@ pub(super) fn parse(path: &Path, text: &str) -> Result<Catalog, ThemeError> {
             }
         }
     }
-    catalog.spacing = spacing;
+    catalog.spacing = spacing.and_then(|n: f64| super::Decimal::parse(&n.to_string()));
     Ok(catalog)
 }
