@@ -24,7 +24,7 @@ Run `npx crucible build` from the game's root. It compiles every place in `cruci
 - When any selected place fails to compile, the build writes nothing and builds no place file. Places compile one after another, and the first failure stops the build.
 - The build writes the compiled Luau into the tsconfig's `outDir` and skips each file whose bytes already match. It deletes the files it compiled earlier that no longer have a source, and keeps every other file there.
 - It writes roblox-ts 3.0.0's `RuntimeLib.lua` and `Promise.lua` into the place's `include` folder, which the project must map. A file whose bytes already match is left alone, and other files there stay.
-- Places that name the same `tsconfig`, `project`, and `include` compile once. Two places that compile different code into the same `outDir`, or into one inside the other, exit 1 before anything is written.
+- Places that name the same `tsconfig`, `project`, and `include` compile once. Before anything compiles, the build reads the `outDir` of every place in `crucible.toml`, including places `--place` leaves out. Two places with different tsconfigs and the same `outDir`, or with one `outDir` inside the other, exit 1. Folder names that differ only in case count as the same folder on every platform. Places that share a tsconfig but compile different code into its `outDir`, because their projects differ, exit 1 before anything is written.
 - Each place compiles in its own process, so a build's peak memory is that of its largest place.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.

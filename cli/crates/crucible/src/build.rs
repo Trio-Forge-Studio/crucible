@@ -85,6 +85,7 @@ pub fn build(
             selected.len()
         )));
     }
+    refuse_shared_out_dirs(root, manifest)?;
     write(root, &compile_all(root, &selected)?)?;
     let mut built = Vec::new();
     for (name, place) in selected {
@@ -115,29 +116,56 @@ fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<
         let compiled = compile(root, place).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
         compiles.push(SharedCompile { place, names: vec![name], compiled });
     }
-    refuse_mixed_out_dirs(root, &compiles)?;
+    let outputs: Vec<_> =
+        compiles.iter().map(|shared| Output::new(shared.names[0], shared.compiled.out_dir.clone())).collect();
+    refuse_overlaps(root, &outputs, |a, b| compiles[a].compiled.modules == compiles[b].compiled.modules)?;
     Ok(compiles)
 }
 
-fn refuse_mixed_out_dirs(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
-    for (index, a) in compiles.iter().enumerate() {
-        for b in &compiles[index + 1..] {
-            let (x, y) = (&a.compiled.out_dir, &b.compiled.out_dir);
-            if x == y && a.compiled.modules != b.compiled.modules {
+struct Output<'m> {
+    place: &'m str,
+    dir: PathBuf,
+    key: PathBuf,
+}
+
+impl<'m> Output<'m> {
+    fn new(place: &'m str, dir: PathBuf) -> Self {
+        Self { place, key: folder_key(&dir), dir }
+    }
+}
+
+// A build deletes the modules it no longer compiles, so a place that shares another's outDir would delete that
+// place's modules, even when `--place` leaves the other place out of the build.
+fn refuse_shared_out_dirs(root: &Path, manifest: &Manifest) -> Result<(), Error> {
+    let (mut outputs, mut configs) = (Vec::new(), Vec::new());
+    for (name, place) in &manifest.places {
+        let tsconfig = root.join(&place.tsconfig);
+        if let Some(dir) = crucible_compiler::out_dir(&tsconfig) {
+            outputs.push(Output::new(name, dir));
+            configs.push(folder_key(&tsconfig));
+        }
+    }
+    refuse_overlaps(root, &outputs, |a, b| configs[a] == configs[b])
+}
+
+fn refuse_overlaps(root: &Path, outputs: &[Output<'_>], same_code: impl Fn(usize, usize) -> bool) -> Result<(), Error> {
+    for (a, x) in outputs.iter().enumerate() {
+        for (b, y) in outputs.iter().enumerate().skip(a + 1) {
+            if x.key == y.key && !same_code(a, b) {
                 return Err(Error::Failed(format!(
                     "places {} and {} compile different code into {}. Give each a tsconfig with its own outDir",
-                    a.names[0],
-                    b.names[0],
-                    shown(root, x)
+                    x.place,
+                    y.place,
+                    shown(root, &x.dir)
                 )));
             }
-            if x != y && (x.starts_with(y) || y.starts_with(x)) {
+            if x.key != y.key && (x.key.starts_with(&y.key) || y.key.starts_with(&x.key)) {
                 return Err(Error::Failed(format!(
                     "places {} and {} compile into {} and {}, one inside the other. Give each an outDir outside the other's",
-                    a.names[0],
-                    b.names[0],
-                    shown(root, x),
-                    shown(root, y)
+                    x.place,
+                    y.place,
+                    shown(root, &x.dir),
+                    shown(root, &y.dir)
                 )));
             }
         }
@@ -145,13 +173,32 @@ fn refuse_mixed_out_dirs(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<
     Ok(())
 }
 
+// Case folds on every platform, so a crucible.toml that is safe on Linux is also safe where file names ignore case.
+fn folder_key(path: &Path) -> PathBuf {
+    let (mut existing, mut missing) = (path, Vec::new());
+    let resolved = loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            break resolved;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name);
+                existing = parent;
+            }
+            _ => break existing.to_path_buf(),
+        }
+    };
+    let full = missing.iter().rev().fold(resolved, |full, name| full.join(name));
+    full.to_string_lossy().to_lowercase().into()
+}
+
 fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
     let failed =
         |path: &Path, error: std::io::Error| Error::Failed(format!("cannot write {}: {error}", shown(root, path)));
-    let mut written: Vec<&Path> = Vec::new();
+    let mut written: Vec<PathBuf> = Vec::new();
     for shared in compiles {
         let out = shared.compiled.out_dir.as_path();
-        if !written.contains(&out) {
+        if !written.contains(&folder_key(out)) {
             let changes =
                 crucible_compiler::write(out, &shared.compiled.modules).map_err(|error| failed(out, error))?;
             eprintln!(
@@ -160,7 +207,7 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
                 shared.compiled.modules.len(),
                 shown(root, out)
             );
-            written.push(out);
+            written.push(folder_key(out));
         }
         let include = root.join(&shared.place.include);
         crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;

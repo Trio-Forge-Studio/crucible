@@ -72,6 +72,11 @@ pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Facts, Vec<Diagnos
     Ok(extract::extract(checked, target))
 }
 
+/// The `outDir` that `tsconfig` sets, read without building its program. `None` when it sets none or cannot be read.
+pub fn out_dir(tsconfig: &Path) -> Option<PathBuf> {
+    program::out_dir(tsconfig).map(PathBuf::from)
+}
+
 #[derive(Clone, Debug)]
 pub struct Compiled {
     /// The tsconfig's `outDir`, or the source root when it sets none. Each module's path is relative to it.
