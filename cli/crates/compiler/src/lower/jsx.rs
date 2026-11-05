@@ -111,7 +111,8 @@ impl Lower<'_> {
         }
     }
 
-    /// Creates the instance, sets, binds or connects each attribute by its `Prop` fact, then parents each child.
+    /// Creates the instance and applies its classes, then sets, binds or connects each attribute by its `Prop` fact, so
+    /// a prop that turns out nil leaves the class value in place. Then parents each child.
     fn instance_element(&mut self, n: Node, element: Element) -> Expr {
         let tag = n.jsx_tag().expect("an intrinsic element has a tag");
         let Some(class) = self.fact(tag).and_then(|f| f.instance_class.as_deref()) else {
@@ -119,6 +120,13 @@ impl Lower<'_> {
         };
         let new = Expr::global("Instance.new").call(vec![Expr::String(Cow::Owned(class.to_owned()))]);
         let instance = self.push_temp(new);
+        for attribute in &element.attributes {
+            if let Attribute::Named { node, .. } = attribute
+                && let Some(Prop::Class(style)) = self.fact(*node).and_then(|f| f.prop.as_ref())
+            {
+                self.fixed_style(&instance, style.style());
+            }
+        }
         for attribute in element.attributes {
             let (node, name, value) = match attribute {
                 Attribute::Named { node, name, value } => (node, name, value),
@@ -127,10 +135,13 @@ impl Lower<'_> {
                     continue;
                 }
             };
-            let Some(prop) = self.fact(node).and_then(|f| f.prop) else {
+            let Some(prop) = self.fact(node).and_then(|f| f.prop.as_ref()) else {
                 self.error(node, "the type facts do not say how this attribute lowers");
                 continue;
             };
+            if let Prop::Class(_) = prop {
+                continue;
+            }
             let value = self.attribute_value(value);
             let optional = matches!(
                 prop,
@@ -145,6 +156,7 @@ impl Lower<'_> {
                 }
                 Prop::Event { .. } => Stmt::Call(instance.clone().field(name).method("Connect", vec![value.clone()])),
                 Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value.clone()])),
+                Prop::Class(_) => unreachable!(),
             };
             if optional {
                 self.current_block.push(Stmt::If(value.binary(BinOp::Ne, Expr::Nil), vec![statement], None));

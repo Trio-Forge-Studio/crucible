@@ -162,16 +162,36 @@ pub enum Jsx {
 }
 
 /// How an attribute of an intrinsic element lowers, from the instance's declared property and the value's type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Prop {
     /// Assigned once, when the element creates its instance.
-    Fixed { optional: bool },
+    Fixed {
+        optional: bool,
+    },
     /// A `Readable`, which `bind` assigns now and again on each change.
-    Reactive { optional: bool },
+    Reactive {
+        optional: bool,
+    },
     /// An event, whose handler the element connects.
-    Event { optional: bool },
+    Event {
+        optional: bool,
+    },
     /// `children`, which the element appends as it appends a child.
     Children,
+    Class(ClassStyle),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassStyle {
+    style: Box<crate::classes::Style>,
+}
+impl ClassStyle {
+    pub(crate) fn new(style: crate::classes::Style) -> Self {
+        Self { style: Box::new(style) }
+    }
+    pub(crate) fn style(&self) -> &crate::classes::Style {
+        &self.style
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

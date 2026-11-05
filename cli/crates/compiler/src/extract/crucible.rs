@@ -59,6 +59,17 @@ pub(super) enum Code {
     Place,
 }
 
+impl Code {
+    /// The TypeScript error number and the printed message.
+    pub(super) fn render(self, message: &str) -> (i32, String) {
+        match self {
+            Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),
+            Code::Setup => (90000, format!("Crucible: {message}")),
+            Code::Place => (0, message.to_owned()),
+        }
+    }
+}
+
 /// Which generic instantiations a provided type or an `All` or `inject` target may use.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Generic {
@@ -585,17 +596,27 @@ fn property_name(p: P<Node>) -> Option<&'static str> {
 impl Extractor {
     pub(super) fn report(&mut self, at: P<Node>, code: Code, message: &str) {
         let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
-        let start = crate::tree::span(at, file.text()).start;
+        let span = crate::tree::span(at, file.text());
         let path = file.file_name().replace('\\', "/");
-        if !self.reported.insert((path.clone(), start, code)) {
-            return;
+        if self.reported.insert((path, span.start, code)) {
+            self.push_diagnostic(at, span, code, message);
         }
+    }
+
+    pub(super) fn report_span(&mut self, at: P<Node>, span: crate::facts::Span, code: Code, message: &str) {
+        let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
+        let path = file.file_name().replace('\\', "/");
+        if self.reported_classes.insert((path, span, code, message.to_owned())) {
+            self.push_diagnostic(at, span, code, message);
+        }
+    }
+
+    fn push_diagnostic(&mut self, at: P<Node>, span: crate::facts::Span, code: Code, message: &str) {
+        let file = tsrs_ast::get_source_file_of_node(at).unwrap();
+        let path = file.file_name().replace('\\', "/");
+        let start = span.start;
         let Position { line, column } = File::new(file).position(start);
-        let (number, message) = match code {
-            Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),
-            Code::Setup => (90000, format!("Crucible: {message}")),
-            Code::Place => (0, message.to_owned()),
-        };
+        let (number, message) = code.render(message);
         self.facts.diagnostics.push(crate::Diagnostic { path: Some(path), line, column, code: number, message });
     }
 

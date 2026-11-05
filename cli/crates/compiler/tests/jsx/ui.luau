@@ -5,6 +5,7 @@ local task = require("@lune/task")
 local Engine = require("../../../../../test/lib/engine")
 local fake = require("./instance")
 local graph = require("./load")
+local roblox = require("@lune/roblox")
 
 local root = assert(process.args[1], "usage: ui.luau <root>")
 local crucible = `{root}/ReplicatedStorage/rbxts_include/node_modules/@trioforge/crucible/out`
@@ -12,7 +13,15 @@ local client = `{root}/StarterPlayer/StarterPlayerScripts/TS`
 
 local function world()
 	local engine = Engine.new()
-	local globals: { [string]: any } = { Instance = fake.Instance, typeof = fake.typeof, task = task }
+	local globals: { [string]: any } = {
+		Instance = fake.Instance,
+		typeof = fake.typeof,
+		task = task,
+		Color3 = roblox.Color3,
+		UDim = roblox.UDim,
+		UDim2 = roblox.UDim2,
+		Enum = roblox.Enum,
+	}
 	local modules = graph({}, globals)
 	globals.game = {
 		GetService = function(_, service: string)
@@ -51,6 +60,79 @@ local function quiet(w)
 end
 
 local specs = {}
+
+specs["a width class preserves the height supplied by the instance"] = function()
+	local w = world()
+	local parent = fake.new("ScreenGui")
+	local cleanup = w.fixture("styled").mountWidth(parent)
+	local frame = fake.named(parent, "Width")[1]
+	eq(frame.Size, roblox.UDim2.new(0.5, 0, 0, 100), "width and preserved height")
+	cleanup()
+	eq(fake.isDestroyed(frame), true, "width instance destroyed")
+	quiet(w)
+end
+
+specs["an optional prop that is left out keeps the class value"] = function()
+	local w = world()
+	local parent = fake.new("ScreenGui")
+	w.fixture("styled").mountTinted(parent)
+	local colors = {}
+	for _, frame in fake.named(parent, "Tinted") do
+		colors[tostring(frame.BackgroundColor3)] = true
+	end
+	eq(colors[tostring(roblox.Color3.fromRGB(37, 99, 235))], true, "the class color applies without the prop")
+	eq(colors[tostring(roblox.Color3.fromRGB(1, 2, 3))], true, "a given prop overrides the class")
+	quiet(w)
+end
+
+specs["classes mount configured modifiers and unmount the whole subtree"] = function()
+	local w = world()
+	local parent = fake.new("ScreenGui")
+	local text = w.state("Buy")
+	local clicks = 0
+	local cleanup = w.fixture("styled").mountStyled(parent, text, function()
+		clicks += 1
+	end)
+	local button = fake.named(parent, "Styled")[1]
+	eq(button.BackgroundColor3, roblox.Color3.fromRGB(37, 99, 235), "theme color")
+	eq(button.BackgroundTransparency, 0.1, "color opacity")
+	eq(button.TextColor3, roblox.Color3.fromRGB(255, 255, 255), "text color")
+	eq(button.TextTransparency, 0, "text opacity")
+	eq(button.TextSize, 18, "text size")
+	eq(button.Size, roblox.UDim2.new(0, 256, 0, 64), "merged size")
+	local children = button:GetChildren()
+	eq(#children, 4, "one child of each modifier kind")
+	local kinds = {}
+	for _, child in children do
+		assert(not kinds[child.ClassName], "no duplicate modifiers")
+		kinds[child.ClassName] = child
+		eq(child.Parent, button, "modifier parent")
+	end
+	eq(kinds.UICorner.CornerRadius, roblox.UDim.new(0, 6), "corner radius")
+	eq(kinds.UIPadding.PaddingTop, roblox.UDim.new(0, 16), "top padding")
+	eq(kinds.UIPadding.PaddingRight, roblox.UDim.new(0, 24), "right padding")
+	eq(kinds.UIPadding.PaddingBottom, roblox.UDim.new(0, 16), "bottom padding")
+	eq(kinds.UIPadding.PaddingLeft, roblox.UDim.new(0, 24), "left padding")
+	eq(kinds.UIStroke.ApplyStrokeMode, roblox.Enum.ApplyStrokeMode.Border, "stroke mode")
+	eq(kinds.UIStroke.Color, roblox.Color3.fromRGB(255, 255, 255), "stroke color")
+	eq(kinds.UIStroke.Thickness, 1, "a border color creates a one pixel stroke")
+	eq(kinds.UIStroke.Transparency, 0, "stroke opacity")
+	eq(kinds.UIListLayout.FillDirection, roblox.Enum.FillDirection.Horizontal, "gap creates a horizontal list")
+	eq(kinds.UIListLayout.Padding, roblox.UDim.new(0, 8), "list gap")
+	eq(kinds.UIListLayout.SortOrder, roblox.Enum.SortOrder.LayoutOrder, "layout order")
+	text:set("Bought")
+	w.flush()
+	eq(button.Text, "Bought", "reactive props still update")
+	fake.fire(button, "Activated")
+	eq(clicks, 1, "events still connect")
+	cleanup()
+	eq(fake.isDestroyed(button), true, "styled instance destroyed")
+	for _, child in children do
+		eq(fake.isDestroyed(child), true, "modifier destroyed")
+	end
+	eq(#parent:GetChildren(), 0, "mount parent empty after cleanup")
+	quiet(w)
+end
 
 specs["a mount shows a reactive prop's value on the first frame, before any flush"] = function()
 	local w = world()

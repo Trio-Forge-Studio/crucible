@@ -1,8 +1,10 @@
 # Diagnostics
 
-Find what each Crucible compile error from CRU001 to CRU027 means and how to fix it.
+Find what each Crucible compile error from CRU001 to CRU031 means and how to fix it.
 
 Crucible's transformer checks game code while roblox-ts compiles it. The transformer is the `@trioforge/crucible/transformer` entry in the tsconfig's `plugins`. `rbxtsc` runs it, and `crucible build` runs `rbxtsc`, so a game made from the template reports these errors in `npm run build` and `npm run check`. Plain `tsc` and the editor's TypeScript service do not run transformer plugins, so they never report them. Code that type-checks in the editor can still fail the build.
+
+CRU028 to CRU031 check `className` and `theme.toml`. Only the Crucible compiler reports them, because only it builds Crucible UI. `crucible docs ui` describes the classes.
 
 Each error is a TypeScript error whose code is 90000 plus the rule's number. CRU009 prints as `error TS90009: CRU009: Method resembles a lifecycle hook. Use its exact Crucible declaration name.` Every error fails the build.
 
@@ -434,3 +436,49 @@ CRU027: <store>.<method> is server-only; the client reads <store>().
 ```
 
 A profile store call runs on the wrong side. `store()` and `store.loaded()` with no arguments read the local player's profile, so they belong in client files. `store(player)`, `store.loaded(player)` and every other method, such as `save`, `onLoad` or `grant`, belong in server files. A file with no side fails both ways. To fix it, move the call to a file on the matching side, or call the form for that side. `crucible docs profile-stores` lists the methods.
+
+## CRU028
+
+```text
+CRU028: `<token>` is not a class. Did you mean `<name>`?
+CRU028: `<token>` is not a class. No theme.toml is beside the tsconfig.
+CRU028: variants such as `hover:` are not supported yet
+CRU028: <n> px is not a whole-pixel offset in range
+CRU028: opacity must be a whole number from 0 to 100
+CRU028: <message> (class `<token>`, byte <n>)
+```
+
+A `className` token does not resolve to a class. It is unknown, uses a variant prefix, gives a spacing step that lands on a fraction of a pixel, or gives an opacity outside 0 to 100. An inline class reports at the token. A class read from a constant reports at the use and names the token and its byte offset in the string. To fix it, use a class from `crucible docs ui`, add the missing name to `theme.toml`, or pick a step that gives whole pixels.
+
+## CRU029
+
+```text
+CRU029: className requires a string literal or a constant with one string-literal type
+CRU029: className requires a string literal or a const name or readonly property with one string-literal type
+CRU029: className on components is not supported until class forwarding exists
+```
+
+The compiler cannot read a `className` as one string at build time, or the attribute is on a component. A call, a `let`, a widened `string`, a union of literals and a `Readable` all fail. To fix it, write the classes inline, or read them from a `const` whose type is one string literal. Put a component's classes on the intrinsic elements it returns.
+
+## CRU030
+
+```text
+CRU030: cannot read theme.toml: <reason>
+CRU030: two definitions make class `<token>`
+CRU030: unknown section `<section>`; expected spacing, color, text or radius
+CRU030: a color must be #rrggbb
+CRU030: text size must be from 1 to 100 pixels
+CRU030: expected a finite number
+```
+
+The `theme.toml` beside the tsconfig cannot be read, is not valid TOML, or holds a value the theme does not accept. It also fails when two names make the same class, such as a color and a text size both called `label`. The error points at the key or value in `theme.toml`. While the theme is broken, the compiler skips class resolution, so one theme error does not also report every class. To fix it, correct the entry at the reported line.
+
+## CRU031
+
+```text
+CRU031: `<token>` sets <property>, which a <class> does not have
+CRU031: `<token>` requires a GuiObject; <class> is not one
+CRU031: <modifier> is both created by classes and authored as a direct child
+```
+
+A class sets a property the element's instance class does not have, such as `text-white` on a `frame`, or an element has a class that creates a modifier and also a direct child of the same modifier kind. Roblox would throw on the first and keep two modifiers on the second. To fix it, move the class to an element that has the property, or keep either the class or the authored child.

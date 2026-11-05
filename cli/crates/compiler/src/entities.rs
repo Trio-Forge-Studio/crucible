@@ -28,7 +28,7 @@ pub(crate) fn decode(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-fn entity(entity: &str) -> Option<char> {
+pub(crate) fn entity(entity: &str) -> Option<char> {
     let code = match entity.strip_prefix('#') {
         Some(hex) if hex.starts_with('x') => {
             let digits = &hex[1..];

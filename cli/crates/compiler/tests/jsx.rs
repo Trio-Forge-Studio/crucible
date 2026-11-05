@@ -120,11 +120,8 @@ fn the_vide_lowering_mounts_updates_and_connects_through_vide() {
 }
 
 fn ui_game() -> Game {
-    let game = Game::new();
-    game.config(|c| {
-        c["compilerOptions"]["jsx"] = "react-jsx".into();
-        c["compilerOptions"]["jsxImportSource"] = "@trioforge/crucible/ui".into();
-    });
+    let game = Game::ui();
+    game.write("theme.toml", include_str!("classes/theme.toml"));
     for entry in std::fs::read_dir(fixture("ui")).expect("the UI fixtures exist") {
         let path = entry.expect("the entry is readable").path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
