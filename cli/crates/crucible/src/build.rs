@@ -103,10 +103,13 @@ pub fn compile(root: &Path) -> Result<(), Error> {
     command.args(["--type", "game"]);
     let status = child::status_on_stderr(command)
         .map_err(|error| Error::Failed(format!("cannot run node: {error}. Install Node.js and put node on PATH")))?;
+    // roblox-ts deletes the receipt with every out file it did not emit, even
+    // when it fails, and what it leaves in out came from this transformer.
+    let written = receipt.map_or(Ok(()), |receipt| receipt.write());
     if !status.success() {
         return Err(Error::Failed("roblox-ts failed".into()));
     }
-    receipt.map_or(Ok(()), |receipt| receipt.write())
+    written
 }
 
 pub fn rbxtsc(root: &Path) -> Result<Command, Error> {
