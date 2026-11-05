@@ -1,4 +1,4 @@
-use super::{Catalog, Offset, Rgb, Value};
+use super::{Catalog, Offset, Rgb, Value, is_name as name, reserved};
 use std::path::Path;
 use toml::de::{DeTable, DeValue};
 
@@ -26,10 +26,6 @@ pub(super) fn load(dir: &Path) -> Result<Catalog, ThemeError> {
         Err(e) => Err(error(&path, "", 0, format!("cannot read theme.toml: {e}"))),
     }
 }
-fn name(text: &str) -> bool {
-    text.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-        && text.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-}
 fn numeric(value: &DeValue<'_>) -> Option<f64> {
     match value {
         DeValue::Integer(n) => i64::from_str_radix(n.as_str(), n.radix()).ok().map(|n| n as f64),
@@ -48,6 +44,7 @@ pub(super) fn parse(path: &Path, text: &str) -> Result<Catalog, ThemeError> {
         Ok(())
     };
     let mut spacing = None;
+    let mut breakpoints = std::collections::BTreeMap::new();
     for (section, value) in document.get_ref() {
         let section_name = section.get_ref().as_ref();
         let bad = |message: &str| error(path, text, value.span().start, message);
@@ -59,12 +56,12 @@ pub(super) fn parse(path: &Path, text: &str) -> Result<Catalog, ThemeError> {
             );
             continue;
         }
-        if !matches!(section_name, "color" | "text" | "radius") {
+        if !matches!(section_name, "color" | "text" | "radius" | "breakpoint") {
             return Err(error(
                 path,
                 text,
                 section.span().start,
-                format!("unknown section `{section_name}`; expected spacing, color, text or radius"),
+                format!("unknown section `{section_name}`; expected spacing, color, text, radius or breakpoint"),
             ));
         }
         let DeValue::Table(table) = value.get_ref() else {
@@ -80,7 +77,27 @@ pub(super) fn parse(path: &Path, text: &str) -> Result<Catalog, ThemeError> {
                     "a name must start with a lowercase letter and contain only lowercase letters and digits",
                 ));
             }
-            if section_name == "color" {
+            if section_name == "breakpoint" {
+                if reserved(key_name) {
+                    return Err(error(
+                        path,
+                        text,
+                        key.span().start,
+                        format!("`{key_name}` is a built-in variant or a group, not a breakpoint name"),
+                    ));
+                }
+                let px = numeric(value.get_ref())
+                    .filter(|n| n.fract() == 0.0 && (1.0..=100_000.0).contains(n))
+                    .ok_or_else(|| {
+                        error(
+                            path,
+                            text,
+                            value.span().start,
+                            "a breakpoint must be a whole number of pixels from 1 to 100000",
+                        )
+                    })?;
+                breakpoints.insert(key_name.to_owned(), px as u32);
+            } else if section_name == "color" {
                 let mut color =
                     |suffix: String, value: &DeValue<'_>, at: usize, key_at: usize| -> Result<(), ThemeError> {
                         let rgb = match value {
@@ -158,6 +175,7 @@ pub(super) fn parse(path: &Path, text: &str) -> Result<Catalog, ThemeError> {
             }
         }
     }
+    catalog.breakpoints = breakpoints;
     catalog.spacing = spacing.and_then(|n: f64| super::Decimal::parse(&n.to_string()));
     Ok(catalog)
 }

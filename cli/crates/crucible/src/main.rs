@@ -33,7 +33,7 @@ fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(Cli { command: Command::Build(args) }) => return build::main(args),
         Ok(Cli { command: Command::Create(args) }) => return create::main(args),
-        Ok(Cli { command: Command::Docs { topic } }) => return docs::run(topic.as_deref()),
+        Ok(Cli { command: Command::Docs { topic, plain } }) => return docs::run(topic.as_deref(), plain),
         Ok(Cli { command: Command::Oc(cli) }) => cli,
         Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::Upgrade(args) }) => return upgrade::main(args),
