@@ -234,6 +234,12 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
         "10:9 loose equality is not supported; use === or !==",
         "14:8 `table` cannot be a Luau local name",
         "19:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
+        "24:55 instanceof requires a TypeScript class",
+        "25:50 in requires an object, record or class instance",
+        "26:56 in requires an object, record or class instance",
+        "27:60 in requires an object, record or class instance",
+        "28:49 in requires an object, record or class instance",
+        "29:66 delete on an array or tuple is not supported",
     ];
     assert_eq!(found, expected);
 }

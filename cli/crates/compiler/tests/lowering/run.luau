@@ -249,6 +249,36 @@ eq("export assignment", load("assignment").value, 11)
 eq("star export", load("star").greeting, "hi")
 eq("explicit export with star", load("star").own, 12)
 
+list("default expression and named exports", load("default-use").run(), { 3, "N" })
+eq("star keeps named exports beside a default expression", load("default-star").named, "N")
+eq("star excludes default expression", load("default-star").default, nil)
+eq("star of only types with a value", load("type-star").value, 42)
+load("type-star-only")
+local optional = load("optional-receivers")
+local function method(self, value)
+	return self.tag + value
+end
+list(
+	"nested optional method receivers",
+	optional.run({
+		tag = 10,
+		m = method,
+		b = { tag = 20, m = method },
+		control = {
+			buttonAUp = function(value)
+				return value * 3
+			end,
+		},
+	}),
+	{ 12, 12, 22, 6, 5 }
+)
+list(
+	"optional functions skip arguments",
+	optional.run({ tag = 10, b = { tag = 20 }, control = {} }),
+	{ -1, -1, -1, -1, 0 }
+)
+list("optional holder skips arguments", optional.run(nil), { -1, -1, -1, -1, 0 })
+
 if failures > 0 then
 	print(`{failures} failed`)
 	process.exit(1)

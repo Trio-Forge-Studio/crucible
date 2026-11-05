@@ -20,3 +20,22 @@ export function whole(steps: IterableFunction<LuaTuple<number[]>>) {
 		print(step.size());
 	}
 }
+
+export function robloxInstance(value: unknown) {
+	return value instanceof Instance;
+}
+export function arrayIn(value: number[]) {
+	return 0 in value;
+}
+export function tupleIn(value: [number, string]) {
+	return 0 in value;
+}
+export function mapIn(value: Map<string, number>) {
+	return "a" in value;
+}
+export function setIn(value: Set<string>) {
+	return "a" in value;
+}
+export function arrayDelete(value: (number | undefined)[]) {
+	return delete value[0];
+}
