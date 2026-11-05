@@ -21,12 +21,11 @@ struct Game {
 impl Game {
     fn new() -> Self {
         let game = Self { dir: tempfile::tempdir().unwrap() };
-        game.json("tsconfig.json", &game::tsconfig());
+        game.json("tsconfig.json", &game::ts7_config());
         game
     }
 
-    /// The template's layout: one place from the root files, with no crucible.toml.
-    fn single() -> Self {
+    fn template_layout() -> Self {
         let game = Self::new();
         game.json(
             "default.project.json",
@@ -51,10 +50,7 @@ impl Game {
         game
     }
 
-    /// FD's layout: per-place tsconfigs and generated projects at the root, shared core sources, and an outDir and
-    /// include folder under `places/<place>`. Each place maps core under its own folder, so code compiled against
-    /// the other place's project would require the wrong instance. The Rogen inputs beside them map no code.
-    fn places() -> Self {
+    fn fd_layout() -> Self {
         let game = Self::new();
         game.config(|c| {
             let options = c["compilerOptions"].as_object_mut().unwrap();
@@ -148,7 +144,6 @@ impl Game {
             .unwrap()
     }
 
-    /// Every file under `folders` with its bytes and modification time.
     fn snapshot(&self, folders: &[&str]) -> BTreeMap<String, (Vec<u8>, SystemTime)> {
         let mut files = BTreeMap::new();
         let mut pending: Vec<PathBuf> = folders.iter().map(|folder| self.path(folder)).collect();
@@ -192,7 +187,7 @@ fn printed(output: &Output) -> Vec<String> {
 
 #[test]
 fn without_manifest_builds_start_from_the_root_files() {
-    let game = Game::single();
+    let game = Game::template_layout();
     let out = game.build(&[]);
     let stderr = text(&out.stderr);
     assert_eq!(code(&out), 0, "{stderr}");
@@ -211,7 +206,7 @@ fn without_manifest_builds_start_from_the_root_files() {
 
 #[test]
 fn each_place_compiles_its_own_tsconfig_against_its_own_project() {
-    let game = Game::places();
+    let game = Game::fd_layout();
     let out = game.build(&[]);
     let stderr = text(&out.stderr);
     assert_eq!(code(&out), 0, "{stderr}");
@@ -251,7 +246,7 @@ fn each_place_compiles_its_own_tsconfig_against_its_own_project() {
 
 #[test]
 fn a_type_error_prints_positions_and_writes_nothing() {
-    let game = Game::places();
+    let game = Game::fd_layout();
     assert_eq!(code(&game.build(&[])), 0);
     let before = game.snapshot(&["places", "build"]);
     game.write(
@@ -272,7 +267,7 @@ fn a_type_error_prints_positions_and_writes_nothing() {
     assert!(out.stdout.is_empty());
     assert_eq!(game.snapshot(&["places", "build"]), before, "job compiled first, but its output waits for every place");
 
-    let fresh = Game::places();
+    let fresh = Game::fd_layout();
     fresh.write("src/core/greeting.ts", "export const greet = (name: string): number => name;\n");
     let out = fresh.build(&[]);
     let stderr = text(&out.stderr);
@@ -286,7 +281,7 @@ fn a_type_error_prints_positions_and_writes_nothing() {
 
 #[test]
 fn place_filter_compiles_only_that_place_and_output_renames_the_file() {
-    let game = Game::places();
+    let game = Game::fd_layout();
     let out = game.build(&["--place", "warehouse", "--output", "custom/warehouse-test.rbxl"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     assert_eq!(printed(&out), ["custom/warehouse-test.rbxl"]);
@@ -296,7 +291,7 @@ fn place_filter_compiles_only_that_place_and_output_renames_the_file() {
 
 #[test]
 fn places_sharing_a_tsconfig_compile_once_or_refuse_to_mix_their_code() {
-    let game = Game::single();
+    let game = Game::template_layout();
     game.write("crucible.toml", TWO_PLACES);
     fs::copy(game.path("default.project.json"), game.path("arena.project.json")).unwrap();
     let out = game.build(&[]);
@@ -327,7 +322,7 @@ fn places_sharing_a_tsconfig_compile_once_or_refuse_to_mix_their_code() {
 
 #[test]
 fn usage_errors_exit_2_before_compiling() {
-    let game = Game::single();
+    let game = Game::template_layout();
     game.write("crucible.toml", TWO_PLACES);
     for (args, message) in [
         (&["--place", "lobby"][..], "unknown place lobby. Places: arena, start"),
@@ -357,7 +352,7 @@ fn a_missing_tsconfig_or_project_exits_1_naming_it() {
         ("[places.start]\nproject = \"default.project.json\"\ntsconfig = \"nope.json\"\n", "nope.json"),
         ("[places.start]\nproject = \"missing.project.json\"\n", "missing.project.json"),
     ] {
-        let game = Game::single();
+        let game = Game::template_layout();
         game.write("crucible.toml", manifest);
         let out = game.build(&[]);
         let stderr = text(&out.stderr);
@@ -372,7 +367,7 @@ fn a_missing_tsconfig_or_project_exits_1_naming_it() {
 
 #[test]
 fn a_project_without_the_include_folder_names_both() {
-    let game = Game::single();
+    let game = Game::template_layout();
     let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
     project["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("rbxts_include");
     game.json("default.project.json", &project);
@@ -387,7 +382,7 @@ fn a_project_without_the_include_folder_names_both() {
 
 #[test]
 fn rojo_failure_exits_1_with_rojo_diagnostics() {
-    let game = Game::single();
+    let game = Game::template_layout();
     let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
     project["tree"]["Workspace"] = json!({ "$className": "Workspace", "Map": { "$path": "missing-map" } });
     game.json("default.project.json", &project);
@@ -400,7 +395,7 @@ fn rojo_failure_exits_1_with_rojo_diagnostics() {
 
 #[test]
 fn unreadable_manifest_exits_1() {
-    let game = Game::single();
+    let game = Game::template_layout();
     fs::create_dir(game.path("crucible.toml")).unwrap();
     let out = game.build(&[]);
     assert_eq!(code(&out), 1, "an I/O failure is not a usage error");
@@ -413,7 +408,7 @@ fn unreadable_manifest_exits_1() {
 fn killing_crucible_stops_its_rojo_child() {
     use std::io::BufRead;
     use std::time::Duration;
-    let game = Game::single();
+    let game = Game::template_layout();
     let mut parent = Command::new(env!("CARGO_BIN_EXE_crucible"))
         .arg("build")
         .current_dir(game.dir.path())

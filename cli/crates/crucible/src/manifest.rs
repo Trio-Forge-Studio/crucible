@@ -17,15 +17,12 @@ pub struct Manifest {
     pub envs: BTreeMap<String, Env>,
 }
 
-/// What a place builds from. Paths are relative to the game root.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Place {
-    /// The Rojo project that Rojo builds and that lays out the compiled code.
     pub project: PathBuf,
     #[serde(default = "Place::default_tsconfig")]
     pub tsconfig: PathBuf,
-    /// The folder the project maps for roblox-ts's runtime library, which the build writes.
     #[serde(default = "Place::default_include")]
     pub include: PathBuf,
 }

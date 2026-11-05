@@ -28,8 +28,8 @@ const FORMAT: u32 = 1;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 const CLI: &str = "@trioforge/crucible-cli";
 const RUNTIME: &str = "@trioforge/crucible";
-// Released with the CLI, so a game that pins it moves with the CLI.
 const COMPILER_TYPES: &str = "@trioforge/compiler-types";
+const RELEASED_WITH_CLI: [&str; 3] = [CLI, RUNTIME, COMPILER_TYPES];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Upkeep {
@@ -593,7 +593,7 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
     let mut expected: serde_json::Value = serde_json::from_str(text).expect("package.json was parsed before");
     let mut result = text.to_owned();
     for group in ["dependencies", "devDependencies"] {
-        for package in [CLI, RUNTIME, COMPILER_TYPES] {
+        for package in RELEASED_WITH_CLI {
             let Some(spec) = expected[group].get_mut(package) else { continue };
             let Some(old) = spec.as_str() else { continue };
             let key = serde_json::to_string(package).expect("strings serialize");

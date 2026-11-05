@@ -14,7 +14,7 @@ impl Game {
     fn new(manifest: Option<&str>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        fs::write(root.join("tsconfig.json"), game::tsconfig().to_string()).unwrap();
+        fs::write(root.join("tsconfig.json"), game::ts7_config().to_string()).unwrap();
         fs::create_dir(root.join("src")).unwrap();
         fs::write(root.join("src/main.ts"), "export const value = 1;\n").unwrap();
         fs::write(

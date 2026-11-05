@@ -1,11 +1,10 @@
-//! roblox-ts 3.0.0's runtime library, which emitted code reaches through `TS.import`, `TS.getModule` and `TS.Promise`.
-//! The files in `roblox-ts/` are copied unchanged from that release, under its MIT license in `roblox-ts/LICENSE`.
+//! The files in `roblox-ts/` are copied unchanged from roblox-ts 3.0.0, under its MIT license in `roblox-ts/LICENSE`.
 
 use std::io;
 use std::path::Path;
 
-/// The module emitted code requires. It keeps rbxtsc's `.lua` name, so a game's first build replaces rbxtsc's copy
-/// instead of adding a second `RuntimeLib` instance beside it.
+// Keeps rbxtsc's `.lua` name, so a game's first build replaces rbxtsc's copy instead of adding a second
+// `RuntimeLib` instance beside it.
 pub(crate) const RUNTIME_LIB: &str = "RuntimeLib.lua";
 
 const FILES: [(&str, &[u8]); 2] = [

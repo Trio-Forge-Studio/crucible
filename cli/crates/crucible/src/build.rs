@@ -99,29 +99,29 @@ pub fn build(
     Ok(built)
 }
 
-/// One compile, shared by the selected places that name the same files.
-struct Unit<'m> {
+struct SharedCompile<'m> {
     place: &'m Place,
     names: Vec<&'m str>,
     compiled: Compiled,
 }
 
-/// Compiles every selected place before writing anything, so a place that fails to compile leaves every output as
-/// it was.
-fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<Vec<Unit<'m>>, Error> {
-    let mut units: Vec<Unit<'m>> = Vec::new();
+fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<Vec<SharedCompile<'m>>, Error> {
+    let mut compiles: Vec<SharedCompile<'m>> = Vec::new();
     for &(name, place) in selected {
-        if let Some(unit) = units.iter_mut().find(|unit| unit.place == place) {
-            unit.names.push(name);
+        if let Some(shared) = compiles.iter_mut().find(|shared| shared.place == place) {
+            shared.names.push(name);
             continue;
         }
         let compiled = compile(root, place).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
-        units.push(Unit { place, names: vec![name], compiled });
+        compiles.push(SharedCompile { place, names: vec![name], compiled });
     }
-    // The writer deletes the compiler's files that are not in its modules, so two writers of one folder, or of
-    // nested folders, would delete each other's code.
-    for (index, a) in units.iter().enumerate() {
-        for b in &units[index + 1..] {
+    refuse_mixed_out_dirs(root, &compiles)?;
+    Ok(compiles)
+}
+
+fn refuse_mixed_out_dirs(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
+    for (index, a) in compiles.iter().enumerate() {
+        for b in &compiles[index + 1..] {
             let (x, y) = (&a.compiled.out_dir, &b.compiled.out_dir);
             if x == y && a.compiled.modules != b.compiled.modules {
                 return Err(Error::Failed(format!(
@@ -142,26 +142,27 @@ fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<
             }
         }
     }
-    Ok(units)
+    Ok(())
 }
 
-fn write(root: &Path, units: &[Unit<'_>]) -> Result<(), Error> {
+fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
     let failed =
         |path: &Path, error: std::io::Error| Error::Failed(format!("cannot write {}: {error}", shown(root, path)));
     let mut written: Vec<&Path> = Vec::new();
-    for unit in units {
-        let out = unit.compiled.out_dir.as_path();
+    for shared in compiles {
+        let out = shared.compiled.out_dir.as_path();
         if !written.contains(&out) {
-            let changes = crucible_compiler::write(out, &unit.compiled.modules).map_err(|error| failed(out, error))?;
+            let changes =
+                crucible_compiler::write(out, &shared.compiled.modules).map_err(|error| failed(out, error))?;
             eprintln!(
                 "crucible build: wrote {} of {} modules to {}",
                 changes.written,
-                unit.compiled.modules.len(),
+                shared.compiled.modules.len(),
                 shown(root, out)
             );
             written.push(out);
         }
-        let include = root.join(&unit.place.include);
+        let include = root.join(&shared.place.include);
         crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;
     }
     Ok(())
@@ -173,9 +174,8 @@ fn shown(root: &Path, path: &Path) -> String {
 
 pub const COMPILE: &str = "__compile";
 
-/// What a compile child prints on stdout.
 #[derive(Serialize, Deserialize)]
-struct Wire {
+struct ChildModules {
     out_dir: PathBuf,
     modules: Vec<(String, String)>,
 }
@@ -196,21 +196,19 @@ fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
         _ => return Err(format!("the compiler stopped unexpectedly ({status}), so nothing was written")),
     }
     read.map_err(|error| format!("cannot read the compiler's output: {error}"))?;
-    let wire: Wire =
+    let child: ChildModules =
         serde_json::from_slice(&json).map_err(|error| format!("cannot read the compiler's output: {error}"))?;
-    let modules = wire.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
-    Ok(Compiled { out_dir: wire.out_dir, modules })
+    let modules = child.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
+    Ok(Compiled { out_dir: child.out_dir, modules })
 }
 
-/// Compiles one place and prints its modules as JSON on stdout. On failure it prints the diagnostics on stderr, with
-/// paths relative to the game root, and exits 1. It writes no file.
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
     child::exit_with_parent();
     match crucible_compiler::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
         Ok(compiled) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
-            let wire = Wire { out_dir: compiled.out_dir, modules };
-            match serde_json::to_writer(std::io::stdout().lock(), &wire) {
+            let child = ChildModules { out_dir: compiled.out_dir, modules };
+            match serde_json::to_writer(std::io::stdout().lock(), &child) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("crucible build: cannot send the compiled modules: {error}");
@@ -219,15 +217,15 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> Ex
             }
         }
         Err(failure) => {
-            let root = std::env::current_dir().unwrap_or_default();
-            let prefixes =
-                [root.to_string_lossy().replace('\\', "/") + "/", root.to_string_lossy().into_owned() + "\\"];
-            for line in failure.to_string().lines() {
-                eprintln!("{}", prefixes.iter().fold(line.to_owned(), |line, prefix| line.replace(prefix, "")));
-            }
+            eprint!("{}", relative_to_cwd(&failure.to_string()));
             ExitCode::FAILURE
         }
     }
+}
+
+fn relative_to_cwd(text: &str) -> String {
+    let cwd = std::env::current_dir().unwrap_or_default().to_string_lossy().into_owned();
+    text.replace(&(cwd.replace('\\', "/") + "/"), "").replace(&(cwd + "\\"), "")
 }
 
 // Rojo prints progress with println!, so it runs in a child whose stdout is our

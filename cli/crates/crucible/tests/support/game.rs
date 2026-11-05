@@ -9,8 +9,7 @@ pub fn slashes(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-/// A game's TypeScript 7 config that reads the repository's installed type packages, which `pnpm install` provides.
-pub fn tsconfig() -> Value {
+pub fn ts7_config() -> Value {
     let types = repo().join("packages/crucible/node_modules");
     json!({
         "compilerOptions": {

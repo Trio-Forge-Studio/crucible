@@ -1,10 +1,3 @@
-//! Compiles a project and writes its modules.
-//!
-//! `cargo run --release -p crucible-compiler --example compile -- <tsconfig> <out> [<project> <include>]`
-//!
-//! With a Rojo project and an include folder it compiles a game and writes the runtime library into the include
-//! folder. Without them it compiles a package.
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;

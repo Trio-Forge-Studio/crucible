@@ -118,12 +118,12 @@ impl Game {
 
     pub fn analyze_at(&self, tsconfig: &str) -> Result<Facts, Vec<Diagnostic>> {
         let (project, include) = (self.project(), self.include());
-        crucible_compiler::analyze(&self.dir.join(tsconfig), target(&project, &include))
+        crucible_compiler::analyze(&self.dir.join(tsconfig), game_or_package(&project, &include))
     }
 
     pub fn try_compile(&self) -> Result<Compiled, Failure> {
         let (project, include) = (self.project(), self.include());
-        crucible_compiler::compile(&self.dir.join("tsconfig.json"), target(&project, &include))
+        crucible_compiler::compile(&self.dir.join("tsconfig.json"), game_or_package(&project, &include))
     }
 
     pub fn facts(&self) -> Facts {
@@ -179,8 +179,7 @@ impl Game {
     }
 }
 
-/// A game's project and include folder, or a package once a test removes the project.
-pub fn target<'a>(project: &'a Path, include: &'a Path) -> Target<'a> {
+pub fn game_or_package<'a>(project: &'a Path, include: &'a Path) -> Target<'a> {
     if project.is_file() { Target::Game { project, include } } else { Target::Package }
 }
 

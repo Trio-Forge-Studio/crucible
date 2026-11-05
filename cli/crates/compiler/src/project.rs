@@ -141,7 +141,6 @@ impl Rojo {
     }
 }
 
-/// A program compiled for a place, which its Rojo project lays out.
 pub(crate) struct Game {
     pub rojo: Rojo,
     /// The package root `boot` globs are relative to: the nearest folder at or above `dir` with a `package.json`, or
@@ -154,11 +153,10 @@ pub(crate) struct Game {
 }
 
 impl Game {
-    /// `dir` is the tsconfig's folder, where the package root search starts.
     pub fn load(
         project: &Path,
         include: &Path,
-        dir: &Path,
+        tsconfig_dir: &Path,
         root: &Path,
         out_dir: Option<&Path>,
     ) -> Result<Game, String> {
@@ -177,7 +175,7 @@ impl Game {
                 include.display()
             ));
         };
-        let package = package_dir(dir).unwrap_or(dir);
+        let package = package_dir(tsconfig_dir).unwrap_or(tsconfig_dir);
         let packages = packages(&package.join("node_modules"));
         Ok(Game {
             rojo,

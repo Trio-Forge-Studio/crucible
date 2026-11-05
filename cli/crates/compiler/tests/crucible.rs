@@ -8,8 +8,7 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-/// The sample game's Rojo project and include folder.
-fn sample() -> (PathBuf, PathBuf) {
+fn sample_place() -> (PathBuf, PathBuf) {
     let dir = repo().join("examples/sample-game");
     (dir.join("default.project.json"), dir.join("include"))
 }
@@ -89,7 +88,7 @@ fn sample_game_checks_and_every_site_is_answered() {
         repo().join("packages/crucible/out/index.d.ts").is_file(),
         "packages/crucible/out exists; run pnpm build first"
     );
-    let (project, include) = sample();
+    let (project, include) = sample_place();
     let facts = analyze("examples/sample-game/tsconfig.json", Target::Game { project: &project, include: &include });
     assert_complete(&facts, "examples/sample-game/src");
 
@@ -146,7 +145,7 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
 
 #[test]
 fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
-    let (project, include) = sample();
+    let (project, include) = sample_place();
     let target = Target::Game { project: &project, include: &include };
     let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
         .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))

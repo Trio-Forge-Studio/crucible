@@ -1,8 +1,4 @@
 //! Checks a project and prints a summary of its fact table.
-//!
-//! `cargo run --release -p crucible-compiler --example facts -- <tsconfig> [<project> <include>]`
-//!
-//! With a Rojo project and an include folder it analyzes a game, and without them a package.
 
 use std::path::PathBuf;
 use std::process::ExitCode;

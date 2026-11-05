@@ -607,13 +607,12 @@ fn a_load_glob_that_matches_no_module_reports_cru006_and_a_glob_that_finds_a_mod
     }
 }
 
-/// Points a Rojo project in `gen/place` at the game's folders.
-fn up(value: &mut Value) {
+fn rebase_two_folders_up(value: &mut Value) {
     if let Value::Object(map) = value {
         for (key, entry) in map.iter_mut() {
             match entry {
                 Value::String(path) if key == "$path" => *path = format!("../../{path}"),
-                other => up(other),
+                other => rebase_two_folders_up(other),
             }
         }
     }
@@ -623,7 +622,7 @@ fn up(value: &mut Value) {
 fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     let game = Game::new();
     let mut tree = project();
-    up(&mut tree);
+    rebase_two_folders_up(&mut tree);
     game.json("gen/place/default.project.json", &tree);
     game.json(
         "gen/place/tsconfig.json",
