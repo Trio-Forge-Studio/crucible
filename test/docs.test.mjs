@@ -7,6 +7,14 @@ import { typecheck } from "./lib/typecheck.mjs";
 const repo = path.resolve(import.meta.dirname, "..");
 const sample = path.join(repo, "examples/sample-game").replaceAll("\\", "/");
 
+test("docs contain no UTF-8 mojibake", () => {
+	for (const name of fs.readdirSync(path.join(repo, "docs"), { recursive: true })) {
+		if (!name.endsWith(".md")) continue;
+		const markdown = fs.readFileSync(path.join(repo, "docs", name), "utf8");
+		assert.doesNotMatch(markdown, /\u00c3|\u00c2|\u00e2\u20ac|\u00e2\u2020/u, `${name} contains UTF-8 mojibake`);
+	}
+});
+
 function codeBlocks() {
 	const files = new Map();
 	for (const name of fs.readdirSync(path.join(repo, "docs"))) {
