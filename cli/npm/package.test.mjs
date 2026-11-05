@@ -178,14 +178,9 @@ test(
 				.equals(Buffer.from("<roblox!")),
 		);
 		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
-		for (const name of ["roblox-ts", "typescript"]) {
-			const listing = run("npm", ["ls", name, "--all", "--json"], game);
-			assert.equal(
-				JSON.parse(listing.stdout).dependencies,
-				undefined,
-				`${name} is absent from the installed consumer tree`,
-			);
-		}
+		const listing = run("npm", ["ls", "--all", "--json"], game);
+		assert.equal(listing.status, 0, listing.stderr);
+		assert.doesNotMatch(listing.stdout, /"(?:roblox-ts|typescript)"\s*:/);
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);
