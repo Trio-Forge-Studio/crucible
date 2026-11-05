@@ -161,7 +161,7 @@ Games made by `crucible create` 0.3.0 and earlier build with roblox-ts. The old 
 | no `skipLibCheck` | Set `skipLibCheck` to `true`. |
 | `plugins` | Remove it. The compiler applies Crucible's transform itself. |
 
-A tsconfig that `extends` another can inherit `types`, `rootDir`, and `skipLibCheck`, so the report asks for those only in a tsconfig that extends nothing. After the changes, run `npm run check`.
+The report asks for a missing `types`, `rootDir`, or `skipLibCheck` only in a tsconfig that extends nothing, because a base tsconfig can supply them. It asks only in a game moving off roblox-ts, because a newer game chose its own settings. After the changes, run `npm run check`.
 
 ### When install fails
 

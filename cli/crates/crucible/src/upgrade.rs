@@ -661,7 +661,7 @@ struct Migration {
 
 fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration {
     let mut migration = Migration::default();
-    move_toolchain(root, to, manager, &mut migration);
+    let roblox_ts = move_toolchain(root, to, manager, &mut migration);
     let places = crate::manifest::Manifest::read(root).ok().flatten().unwrap_or_default().places;
     let mut tsconfigs: Vec<_> = places.into_values().map(|place| place.tsconfig).collect();
     tsconfigs.sort();
@@ -672,7 +672,7 @@ fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration 
     for tsconfig in &tsconfigs {
         let Ok(text) = fs::read_to_string(root.join(tsconfig)) else { continue };
         let shown = tsconfig.to_string_lossy().replace('\\', "/");
-        match typescript_7_changes(&text) {
+        match typescript_7_changes(&text, roblox_ts) {
             Some(changes) => migration.left.extend(changes.iter().map(|change| format!("{shown}: {change}"))),
             None => {
                 migration.left.push(format!("{shown}: it is not valid JSON, so check it for each TypeScript 7 change"))
@@ -682,11 +682,11 @@ fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration 
     migration
 }
 
-fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut Migration) {
-    let Ok((text, manifest)) = read_manifest(root) else { return };
+fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut Migration) -> bool {
+    let Ok((text, manifest)) = read_manifest(root) else { return false };
     let listed = |package: &str| GROUPS.iter().any(|group| manifest[group].get(package).is_some());
     if !listed("roblox-ts") && !listed("@rbxts/compiler-types") {
-        return;
+        return false;
     }
     let dropped: Vec<_> = ROBLOX_TS_TOOLCHAIN.into_iter().filter(|package| listed(package)).collect();
     let added = (!listed(COMPILER_TYPES)).then(|| to.to_string());
@@ -701,11 +701,11 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
     };
     let Some(edited) = drop_toolchain(&text, &manifest, &dropped, added.as_deref()) else {
         migration.left.push(by_hand("crucible upgrade cannot edit it in place".into()));
-        return;
+        return true;
     };
     if let Err(error) = write_atomic(&root.join("package.json"), &edited) {
         migration.left.push(by_hand(format!("crucible upgrade cannot write it: {error}")));
-        return;
+        return true;
     }
     if let Some(version) = &added {
         migration.done.push(format!("package.json lists {COMPILER_TYPES} {version}"));
@@ -715,6 +715,7 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
         Ok(()) => migration.done.push(format!("ran `{install}`")),
         Err(error) => migration.left.push(format!("{error}. Run `{install}` again")),
     }
+    true
 }
 
 fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], added: Option<&str>) -> Option<String> {
@@ -793,7 +794,7 @@ fn remove_rbxtsc_modules(dir: &Path) -> io::Result<usize> {
 }
 
 type CompilerOptions = serde_json::Map<String, serde_json::Value>;
-type Applies = fn(&CompilerOptions, extends_nothing: bool) -> bool;
+type Applies = fn(&CompilerOptions, missing_counts: bool) -> bool;
 
 const TYPESCRIPT_7: [(Applies, &str); 8] = [
     (
@@ -810,18 +811,18 @@ const TYPESCRIPT_7: [(Applies, &str); 8] = [
     (|options, _| options.contains_key("downlevelIteration"), r#"Remove "downlevelIteration"."#),
     (|options, _| options.contains_key("typeRoots"), r#"Remove "typeRoots"."#),
     (
-        |options, extends_nothing| match options.get("types").and_then(serde_json::Value::as_array) {
+        |options, missing_counts| match options.get("types").and_then(serde_json::Value::as_array) {
             Some(types) => !types.iter().any(|name| name == "@trioforge/compiler-types"),
-            None => extends_nothing,
+            None => missing_counts,
         },
         r#"Set "types" to ["@trioforge/compiler-types", "@rbxts/types"], and name any other type package in full."#,
     ),
     (
-        |options, extends_nothing| extends_nothing && !options.contains_key("rootDir"),
+        |options, missing_counts| missing_counts && !options.contains_key("rootDir"),
         r#"Set "rootDir" to the source folder, such as "src"."#,
     ),
     (
-        |options, extends_nothing| options.get("skipLibCheck").map_or(extends_nothing, |value| *value != true),
+        |options, missing_counts| options.get("skipLibCheck").map_or(missing_counts, |value| *value != true),
         r#"Set "skipLibCheck" to true."#,
     ),
     (
@@ -830,17 +831,21 @@ const TYPESCRIPT_7: [(Applies, &str); 8] = [
     ),
 ];
 
-fn typescript_7_changes(text: &str) -> Option<Vec<&'static str>> {
+// A base tsconfig can supply a missing setting, and a game that never used roblox-ts chose its own, so a missing
+// setting counts only in a roblox-ts game's tsconfig that extends nothing.
+fn typescript_7_changes(text: &str, moved_off_roblox_ts: bool) -> Option<Vec<&'static str>> {
     let config = jsonc_parser::parse_to_serde_value(text, &Default::default()).ok()??;
-    let extends_nothing = config.get("extends").is_none();
     let options = config.get("compilerOptions").and_then(serde_json::Value::as_object).cloned().unwrap_or_default();
-    Some(
+    let changes = |missing_counts| -> Vec<&'static str> {
         TYPESCRIPT_7
             .iter()
-            .filter(|(applies, _)| applies(&options, extends_nothing))
+            .filter(|(applies, _)| applies(&options, missing_counts))
             .map(|&(_, change)| change)
-            .collect(),
-    )
+            .collect()
+    };
+    let held = changes(false);
+    let roblox_ts = moved_off_roblox_ts || !held.is_empty();
+    Some(if roblox_ts && config.get("extends").is_none() { changes(true) } else { held })
 }
 
 fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
@@ -1554,7 +1559,7 @@ else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2),
     fn a_roblox_ts_tsconfig_lists_each_typescript_7_change_it_needs() {
         let commented = ROBLOX_TS_TSCONFIG.replacen("{\n", "{\n\t// made by crucible create 0.3.0\n", 1);
         assert_eq!(
-            typescript_7_changes(&commented).unwrap(),
+            typescript_7_changes(&commented, false).unwrap(),
             [
                 r#"Set "module" to "preserve" and "moduleResolution" to "bundler"."#,
                 r#"Remove "downlevelIteration"."#,
@@ -1564,14 +1569,18 @@ else fs.writeFileSync('seen.json', JSON.stringify({ argv: process.argv.slice(2),
                 r#"Remove "plugins". The compiler applies Crucible's transform itself."#,
             ]
         );
-        assert_eq!(typescript_7_changes(&template("tsconfig.json")).unwrap(), Vec::<&str>::new());
+        assert_eq!(typescript_7_changes(&template("tsconfig.json"), true).unwrap(), Vec::<&str>::new());
         let extending = r#"{ "extends": "./base.json", "compilerOptions": { "outDir": "out", "baseUrl": "src", }, }"#;
         assert_eq!(
-            typescript_7_changes(extending).unwrap(),
+            typescript_7_changes(extending, true).unwrap(),
             [r#"Remove "baseUrl", and add a "paths" entry for each source root."#],
             "settings a base tsconfig can hold are not required"
         );
-        assert_eq!(typescript_7_changes("{ not json"), None);
+        let own =
+            r#"{ "compilerOptions": { "types": ["@trioforge/compiler-types", "@rbxts/types"], "rootDir": "src" } }"#;
+        assert_eq!(typescript_7_changes(own, false).unwrap(), Vec::<&str>::new(), "a game that chose its own settings");
+        assert_eq!(typescript_7_changes(own, true).unwrap(), [r#"Set "skipLibCheck" to true."#]);
+        assert_eq!(typescript_7_changes("{ not json", true), None);
     }
 
     #[test]
