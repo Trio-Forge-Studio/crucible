@@ -782,13 +782,12 @@ impl Node {
     }
 }
 
-/// Trims each line of JSX text, drops the empty ones, joins the rest with a space and decodes entities. Named entities
-/// other than XML's five and `nbsp` stay as written.
+/// Trims each line of JSX text, drops the empty ones, joins the rest with a space and decodes entities.
 fn jsx_text(text: &str) -> String {
     let is_break = |c: char| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}');
     let lines: Vec<&str> = text.split(is_break).collect();
     if lines.len() == 1 {
-        return decode_entities(text);
+        return crate::entities::decode(text).into_owned();
     }
     let last = lines.len() - 1;
     let mut parts = Vec::new();
@@ -796,51 +795,10 @@ fn jsx_text(text: &str) -> String {
         let line = if i == 0 { line } else { line.trim_start() };
         let line = if i == last { line } else { line.trim_end() };
         if !line.trim().is_empty() {
-            parts.push(decode_entities(line));
+            parts.push(crate::entities::decode(line).into_owned());
         }
     }
     parts.join(" ")
-}
-
-fn decode_entities(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find('&') {
-        out.push_str(&rest[..at]);
-        rest = &rest[at..];
-        let decoded = rest[1..].find(';').and_then(|semi| Some((decode_entity(&rest[1..=semi])?, semi + 2)));
-        match decoded {
-            Some((c, len)) => {
-                out.push(c);
-                rest = &rest[len..];
-            }
-            None => {
-                out.push('&');
-                rest = &rest[1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-pub(crate) fn decode_entity(entity: &str) -> Option<char> {
-    let code = match entity.strip_prefix('#') {
-        Some(hex) if hex.starts_with(['x', 'X']) => u32::from_str_radix(&hex[1..], 16).ok()?,
-        Some(decimal) => decimal.parse().ok()?,
-        None => {
-            return Some(match entity {
-                "amp" => '&',
-                "lt" => '<',
-                "gt" => '>',
-                "quot" => '"',
-                "apos" => '\'',
-                "nbsp" => '\u{a0}',
-                _ => return None,
-            });
-        }
-    };
-    char::from_u32(code)
 }
 
 fn parse_integer(text: &str) -> Option<f64> {

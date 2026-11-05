@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::Lower;
 use crate::facts::{Jsx, Prop};
-use crate::luau::{Block, Expr, Field, Stmt};
+use crate::luau::{BinOp, Block, Expr, Field, Stmt};
 use crate::tree::{Kind, Node};
 
 /// A JSX element or fragment, as each lowering reads it.
@@ -111,7 +111,8 @@ impl Lower<'_> {
         }
     }
 
-    /// Creates the instance, sets, binds or connects each attribute by its `Prop` fact, then parents each child.
+    /// Creates the instance and applies its classes, then sets, binds or connects each attribute by its `Prop` fact, so
+    /// a prop that turns out nil leaves the class value in place. Then parents each child.
     fn instance_element(&mut self, n: Node, element: Element) -> Expr {
         let tag = n.jsx_tag().expect("an intrinsic element has a tag");
         let Some(class) = self.fact(tag).and_then(|f| f.instance_class.as_deref()) else {
@@ -119,6 +120,13 @@ impl Lower<'_> {
         };
         let new = Expr::global("Instance.new").call(vec![Expr::String(Cow::Owned(class.to_owned()))]);
         let instance = self.push_temp(new);
+        for attribute in &element.attributes {
+            if let Attribute::Named { node, .. } = attribute
+                && let Some(Prop::Class(style)) = self.fact(*node).and_then(|f| f.prop.as_ref())
+            {
+                self.fixed_style(&instance, style.style());
+            }
+        }
         for attribute in element.attributes {
             let (node, name, value) = match attribute {
                 Attribute::Named { node, name, value } => (node, name, value),
@@ -131,22 +139,30 @@ impl Lower<'_> {
                 self.error(node, "the type facts do not say how this attribute lowers");
                 continue;
             };
-            if let Prop::Class(style) = prop {
-                self.fixed_style(&instance, style.style());
+            if let Prop::Class(_) = prop {
                 continue;
             }
             let value = self.attribute_value(value);
+            let optional = matches!(
+                prop,
+                Prop::Fixed { optional: true } | Prop::Reactive { optional: true } | Prop::Event { optional: true }
+            );
+            let value = if optional { self.push_temp(value) } else { value };
             let statement = match prop {
-                Prop::Fixed => Stmt::Assign(vec![instance.clone().field(name)], vec![value]),
-                Prop::Reactive => {
+                Prop::Fixed { .. } => Stmt::Assign(vec![instance.clone().field(name)], vec![value.clone()]),
+                Prop::Reactive { .. } => {
                     let property = Expr::String(Cow::Owned(name));
-                    Stmt::Call(self.ui("bind").call(vec![instance.clone(), property, value]))
+                    Stmt::Call(self.ui("bind").call(vec![instance.clone(), property, value.clone()]))
                 }
-                Prop::Event => Stmt::Call(instance.clone().field(name).method("Connect", vec![value])),
-                Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value])),
+                Prop::Event { .. } => Stmt::Call(instance.clone().field(name).method("Connect", vec![value.clone()])),
+                Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value.clone()])),
                 Prop::Class(_) => unreachable!(),
             };
-            self.current_block.push(statement);
+            if optional {
+                self.current_block.push(Stmt::If(value.binary(BinOp::Ne, Expr::Nil), vec![statement], None));
+            } else {
+                self.current_block.push(statement);
+            }
         }
         for child in element.children {
             match child {
@@ -275,6 +291,9 @@ impl Lower<'_> {
 
     fn attribute_value(&mut self, value: Option<Node>) -> Expr {
         match value {
+            Some(value) if value.kind() == Kind::StringLiteral => {
+                Expr::String(Cow::Owned(crate::entities::decode(value.text()).into_owned()))
+            }
             Some(value) => self.expr(value),
             None => Expr::Bool(true),
         }

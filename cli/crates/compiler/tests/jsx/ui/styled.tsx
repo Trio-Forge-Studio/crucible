@@ -5,6 +5,22 @@ export function mountWidth(parent: Instance) {
 	return mount(() => <frame Name="Width" className="w-1/2" />, parent);
 }
 
+function Tinted(props: { color?: Color3 }) {
+	return <frame Name="Tinted" BackgroundColor3={props.color} className="bg-brand" />;
+}
+
+export function mountTinted(parent: Instance) {
+	return mount(
+		() => (
+			<>
+				<Tinted />
+				<Tinted color={Color3.fromRGB(1, 2, 3)} />
+			</>
+		),
+		parent,
+	);
+}
+
 export function mountStyled(parent: Instance, text: Readable<string>, onBuy: () => void) {
 	return mount(
 		() => (

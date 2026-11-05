@@ -45,7 +45,9 @@ export function CoinButton() {
 }
 ```
 
-The compiler decides from types, never from the value at run time, because a `state` is a callable table. A value whose type may be either a `Readable` or a plain value, such as `string | Readable<string>`, fails the build at the prop. So does a `Readable` that may be `undefined`, and a spread attribute on an intrinsic element. Pass one kind or the other.
+The compiler decides from types, never from the value at run time, because a `state` is a callable table. A value whose type may be either a `Readable` or a plain value, such as `string | Readable<string>`, fails the build at the prop. So does a spread attribute on an intrinsic element. Pass one kind or the other.
+
+A prop whose value may be `undefined`, such as an optional callback a component forwards, is set, bound or connected only when the value is not `undefined`. Otherwise the instance keeps its default, as with a prop left out.
 
 A child element is parented to the element. Any other child, such as `props.children`, a component, a fragment or an array, is appended through `append`. A component receives its children in `props.children`: the child itself when there is one, and an array when there are several.
 
@@ -105,7 +107,7 @@ export function BuyButton() {
 }
 ```
 
-Later tokens win for each target. `size-16 w-64` sets width to 256 px and height to 64 px with the starter theme. `p-4 px-6` sets top and bottom padding to 16 px and left and right padding to 24 px. Explicit JSX properties beat classes in either attribute order, including reactive props. An explicit `Size` owns both axes. A width or height class alone preserves the instance's other axis.
+Later tokens win for each target. `size-16 w-64` sets width to 256 px and height to 64 px with the starter theme. `p-4 px-6` sets top and bottom padding to 16 px and left and right padding to 24 px. Explicit JSX properties beat classes in either attribute order, including reactive props. An explicit prop whose value may be `undefined` beats the class only when it has a value, so the class is its fallback. An explicit `Size` owns both axes. A width or height class alone preserves the instance's other axis.
 
 The value accepts a string literal, a template without substitutions, or a const name or readonly property of a const whose type is one string literal. Calls, getters, mutable names, widened strings, unions, and reactive class strings fail with CRU029. Components cannot accept a `className` attribute yet. Their intrinsic elements can use fixed classes.
 

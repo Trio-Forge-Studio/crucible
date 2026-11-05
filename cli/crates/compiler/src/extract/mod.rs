@@ -9,7 +9,7 @@ mod data;
 mod network;
 mod types;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use tsrs_ast::{Kind, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
@@ -875,30 +875,31 @@ impl Extractor {
         let span = self.span(tag);
         self.table.store(span, Site::Jsx, |f| &mut f.instance_class, class.name().into());
         let instance = self.checker.get_type_of_symbol_exported(class);
-        let explicit = attributes
-            .as_jsx_attributes()
-            .properties()
-            .nodes()
-            .iter()
-            .filter(|a| a.kind() == Kind::JsxAttribute)
-            .map(|a| tsrs_ast::entity_name_to_string(a.as_jsx_attribute().name, None))
-            .collect();
+        let mut explicit = BTreeSet::new();
+        let mut classes = Vec::new();
         for &attribute in attributes.as_jsx_attributes().properties().nodes() {
             if attribute.kind() != Kind::JsxAttribute {
                 continue;
             }
             self.site();
-            if tsrs_ast::entity_name_to_string(attribute.as_jsx_attribute().name, None) == "className" {
-                self.class_attribute(n, instance, class.name(), attribute, &explicit);
+            let name = tsrs_ast::entity_name_to_string(attribute.as_jsx_attribute().name, None);
+            if name == "className" {
+                classes.push(attribute);
                 continue;
             }
             match self.prop(instance, attribute) {
                 Ok(prop) => {
+                    if matches!(prop, Prop::Fixed { optional: false } | Prop::Reactive { optional: false }) {
+                        explicit.insert(name);
+                    }
                     let span = self.span(attribute);
                     self.table.store(span, Site::Jsx, |f| &mut f.prop, prop);
                 }
                 Err(reason) => self.unanswered(attribute, Site::Jsx, reason),
             }
+        }
+        for attribute in classes {
+            self.class_attribute(n, instance, class.name(), attribute, &explicit);
         }
     }
 
@@ -917,29 +918,32 @@ impl Extractor {
     }
 
     /// An event by the instance's declared property, and otherwise a `Readable` when every member of the value's type
-    /// is callable. A value that may be nil, or that mixes callable and plain members, has no answer.
+    /// is callable. A value that mixes callable and plain members has no answer. A value that may be nil is optional,
+    /// so the element applies it only when it is not nil, as Vide skips a nil prop.
     fn prop(&mut self, instance: P<Type>, attribute: P<Node>) -> Result<Prop, Reason> {
         let jsx = attribute.as_jsx_attribute();
         let name = tsrs_ast::entity_name_to_string(jsx.name, None);
         if name == "children" {
             return Ok(Prop::Children);
         }
-        if let Some(property) = self.checker.get_property_of_type_exported(instance, &name) {
-            let declared = self.checker.get_type_of_symbol_exported(property);
-            if declared.symbol().is_some() && declared.symbol() == self.globals.signal {
-                return Ok(Prop::Event);
-            }
-        }
         let value = match jsx.initializer {
             Some(v) if v.kind() == Kind::JsxExpression => v.as_jsx_expression().expression,
             value => value,
         };
-        let Some(value) = value.filter(|v| v.kind() != Kind::StringLiteral) else { return Ok(Prop::Fixed) };
+        let Some(value) = value.filter(|v| v.kind() != Kind::StringLiteral) else {
+            return Ok(Prop::Fixed { optional: false });
+        };
         let t = self.type_of(value);
         if types::is_any(t) {
             return Err(Reason::Any);
         }
-        let nullable = self.falsy(t).contains(Falsy::NIL);
+        let optional = self.falsy(t).contains(Falsy::NIL);
+        if let Some(property) = self.checker.get_property_of_type_exported(instance, &name) {
+            let declared = self.checker.get_type_of_symbol_exported(property);
+            if declared.symbol().is_some() && declared.symbol() == self.globals.signal {
+                return Ok(Prop::Event { optional });
+            }
+        }
         let t = self.checker.get_non_nullable_type(t);
         let mut parts = Vec::new();
         self.walk_types(t, &mut parts);
@@ -948,8 +952,8 @@ impl Extractor {
             .filter(|&&part| !self.checker.get_signatures_of_type_exported(part, SignatureKind::Call).is_empty())
             .count();
         match callable {
-            0 => Ok(Prop::Fixed),
-            n if n == parts.len() && !nullable => Ok(Prop::Reactive),
+            0 => Ok(Prop::Fixed { optional }),
+            n if n == parts.len() => Ok(Prop::Reactive { optional }),
             _ => Err(Reason::Mixed),
         }
     }

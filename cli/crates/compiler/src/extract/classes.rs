@@ -189,7 +189,7 @@ fn decode_literal(raw: &str, jsx: bool) -> (String, Vec<u32>) {
         i += c.len_utf8();
         if jsx && c == '&' {
             if let Some(end) = rest.find(';')
-                && let Some(decoded) = crate::tree::decode_entity(&rest[1..end])
+                && let Some(decoded) = crate::entities::entity(&rest[1..end])
             {
                 c = decoded;
                 i = at + end + 1;

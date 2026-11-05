@@ -86,6 +86,26 @@ fn explicit_props_own_each_property_in_either_attribute_order() {
 }
 
 #[test]
+fn an_optional_prop_overrides_the_class_only_when_it_is_not_nil() {
+    let g = game();
+    g.write(
+        "src/client/fallback.tsx",
+        "export const fallback = (color?: Color3) => <frame BackgroundColor3={color} className=\"bg-brand\" />;
+",
+    );
+    has(
+        &g.luau("client/fallback.luau"),
+        "local _0 = Instance.new(\"Frame\")
+	_0.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
+	_0.BackgroundTransparency = 0
+	local _1 = color
+	if _1 ~= nil then
+		_0.BackgroundColor3 = _1
+	end",
+    );
+}
+
+#[test]
 fn one_size_axis_preserves_the_instances_other_axis() {
     let g = game();
     g.write("src/client/axes.tsx", "export const width = <frame className=\"w-full\" />;\nexport const height = <frame className=\"h-4\" />;\nexport const opacity = <canvasgroup className=\"opacity-90\" />;");

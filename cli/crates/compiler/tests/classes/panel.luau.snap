@@ -1,5 +1,4 @@
 local _0 = Instance.new("TextButton")
-_0.Name = "Panel"
 _0.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
 _0.BackgroundTransparency = 0.1
 _0.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -27,6 +26,7 @@ _4.FillDirection = Enum.FillDirection.Vertical
 _4.Padding = UDim.new(0, 8)
 _4.SortOrder = Enum.SortOrder.LayoutOrder
 _4.Parent = _0
+_0.Name = "Panel"
 local _5 = Instance.new("Frame")
 _5.Name = "Authored"
 _5.Parent = _0

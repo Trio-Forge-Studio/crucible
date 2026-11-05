@@ -54,6 +54,7 @@ function methods.GetChildren(instance)
 end
 
 local function connect(signal, handler)
+	assert(type(handler) == "function", "Attempt to connect failed: Passed value is not a function")
 	local connection = setmetatable({ Connected = true }, {
 		__index = {
 			Disconnect = function(self)
@@ -94,6 +95,7 @@ local function newindex(instance, key, value)
 		reparent(instance, value)
 	else
 		assert(not EVENTS[key], `{key} is an event`)
+		assert(value ~= nil, `Unable to assign property {key}. Property expected, got nil`)
 		getmetatable(instance)[key] = value
 	end
 end

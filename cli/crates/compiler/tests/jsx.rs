@@ -73,6 +73,12 @@ fn text_is_trimmed_and_joined_by_line_and_a_pragma_picks_the_factory() {
         "local text = h(\"frame\", nil, \"Coins & gems ! left over from the last delivery, which the formatter keeps on several lines because the text is longer than one line\")",
     );
     has(shapes, "local spaced = h(\"frame\", nil, \" a \")");
+    has(
+        shapes,
+        "local entities = h(\"frame\", {
+	Name = \"© &x41; &#X41; &bogus;\",
+}, \"© © A — … € &bogus; &\")",
+    );
     has(shapes, "local empty = h(Group)");
     has(shapes, "local grouped = h(Group, nil, count())");
 }
@@ -168,11 +174,20 @@ fn a_component_takes_a_props_table_with_its_children_and_a_fragment_is_an_array(
 }
 
 #[test]
+fn a_value_that_may_be_nil_is_set_bound_or_connected_only_when_it_is_not_nil() {
+    has(
+        ui("client/optional.luau"),
+        "local _1 = props.label\n\tif _1 ~= nil then\n\t\t_0.Text = _1\n\tend\n\tlocal _2 = props.size\n\tif _2 ~= nil then\n\t\t__ui.bind(_0, \"TextSize\", _2)\n\tend\n\tlocal _3 = props.onClick\n\tif _3 ~= nil then\n\t\t_0.Activated:Connect(_3)\n\tend",
+    );
+    has(ui("client/optional.luau"), "_0.Name = \"Button\"\n\tlocal _1");
+}
+
+#[test]
 fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
     let game = ui_game();
     game.write(
         "src/client/mixed.tsx",
-        "import type { Readable } from \"@trioforge/crucible\";\nexport const mixed = (text: string | Readable<string>, maybe?: Readable<string>) => [\n\t<textlabel Text={text} />,\n\t<textlabel Text={maybe} />,\n\t<textlabel {...{ Text: \"x\" }} />,\n];\n",
+        "import type { Readable } from \"@trioforge/crucible\";\nexport const mixed = (text: string | Readable<string>) => [\n\t<textlabel Text={text} />,\n\t<textlabel {...{ Text: \"x\" }} />,\n];\n",
     );
     let Err(Failure::Lower(errors)) = crucible_compiler::compile(&game.dir.join("tsconfig.json")) else {
         panic!("the refused props fail the compile");
@@ -186,9 +201,7 @@ fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
     let expected = [
         "3:13 the type facts cannot answer this Jsx site (Mixed)",
         "3:13 the type facts do not say how this attribute lowers",
-        "4:13 the type facts cannot answer this Jsx site (Mixed)",
-        "4:13 the type facts do not say how this attribute lowers",
-        "5:17 a spread attribute on an intrinsic element is not supported",
+        "4:17 a spread attribute on an intrinsic element is not supported",
     ];
     assert_eq!(found, expected);
 }
