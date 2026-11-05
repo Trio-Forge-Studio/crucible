@@ -433,9 +433,9 @@ impl Builder {
         self.open_block();
         let avail = self.width.saturating_sub(self.prefix_width()).max(12);
         if lang == "mermaid"
-            && let Ok(diagram) = mermaid_text::render_with_width(code, Some(avail))
+            && let Some(diagram) = diagram(code, avail)
         {
-            for line in compact(&diagram) {
+            for line in diagram {
                 self.push_row(row(line.trim_end(), Style::new().fg(Color::Cyan)));
             }
             return;
@@ -474,7 +474,7 @@ impl Builder {
         }
         while widths.iter().sum::<usize>() > avail {
             let widest = (0..columns).max_by_key(|&column| widths[column]).expect("a table has columns");
-            if widths[widest] <= 6 {
+            if widths[widest] <= 3 {
                 break;
             }
             widths[widest] -= 1;
@@ -649,7 +649,18 @@ fn push_split(rows: &mut Vec<Row>, text: &str, style: Style, link: Option<usize>
     }
 }
 
-/// mermaid-text pads every edge with many identical rows of bare `│`. One of each run keeps the drawing intact.
+/// Each Mermaid fence in `docs`, drawn by `build.rs` at a few widths, narrowest first.
+static DIAGRAMS: &[(&str, &[&str])] = &include!(concat!(env!("OUT_DIR"), "/diagrams.rs"));
+
+fn diagram(source: &str, width: usize) -> Option<Vec<&'static str>> {
+    let (_, drawings) = DIAGRAMS.iter().find(|(known, _)| *known == source)?;
+    let drawings: Vec<Vec<&str>> = drawings.iter().map(|drawing| compact(drawing)).collect();
+    let fits = |drawing: &&Vec<&str>| drawing.iter().all(|line| line.trim_end().width() <= width);
+    drawings.iter().rfind(fits).or(drawings.first()).cloned()
+}
+
+/// mermaid-text pads every edge with many identical rows of bare `│` and centres the drawing in spaces.
+/// One row of each run and no shared indent keep the drawing intact in fewer cells.
 fn compact(diagram: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = Vec::new();
     for line in diagram.lines() {
@@ -662,7 +673,13 @@ fn compact(diagram: &str) -> Vec<&str> {
     while lines.last().is_some_and(|line| line.trim().is_empty()) {
         lines.pop();
     }
-    lines
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .min()
+        .unwrap_or(0);
+    lines.iter().map(|line| line.get(indent..).unwrap_or("")).collect()
 }
 
 #[cfg(test)]
@@ -759,22 +776,52 @@ mod tests {
         assert_eq!(Target::parse("https://x.dev/a.md"), Target::External("https://x.dev/a.md".into()));
     }
 
-    #[test]
-    fn a_mermaid_fence_becomes_a_diagram() {
-        let page = render("```mermaid\nflowchart TD\n  A[Build] --> B[Ship]\n```\n", 80);
-        let drawing = page_text(&page);
-        assert!(drawing.contains('┌') && drawing.contains('▾'), "{drawing}");
-        assert!(drawing.contains("Build") && drawing.contains("Ship"));
-        assert!(!drawing.contains("-->"));
-        let gaps = drawing.lines().collect::<Vec<_>>().windows(2).filter(|pair| pair[0] == pair[1]).count();
-        assert_eq!(gaps, 0, "{drawing}");
+    fn mermaid_fences() -> Vec<(&'static str, String)> {
+        let mut fences = Vec::new();
+        for topic in crate::docs::TOPICS {
+            let mut fence = None;
+            for event in Parser::new(topic.markdown) {
+                match event {
+                    Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) if info.as_ref() == "mermaid" => {
+                        fence = Some(String::new());
+                    }
+                    Event::Text(text) => fence.iter_mut().for_each(|fence| fence.push_str(&text)),
+                    Event::End(TagEnd::CodeBlock) => fences.extend(fence.take().map(|fence| (topic.name, fence))),
+                    _ => {}
+                }
+            }
+        }
+        fences
     }
 
     #[test]
-    fn a_broken_mermaid_fence_shows_its_source() {
-        let page = render("```mermaid\nnot a diagram at all\n```\n", 80);
-        assert!(page_text(&page).contains("not a diagram at all"));
+    fn a_mermaid_fence_becomes_a_diagram_that_fits() {
+        let (_, source) = mermaid_fences().into_iter().find(|(topic, _)| *topic == "lifecycle").unwrap();
+        for width in [40, 80, 120] {
+            let page = render(&format!("```mermaid\n{source}```\n"), width);
+            let drawing = page_text(&page);
+            assert!(drawing.contains('┌') && drawing.contains('▾'), "{drawing}");
+            assert!(drawing.contains("Every start") && !drawing.contains("-->"), "{drawing}");
+            assert!(page.lines.iter().all(|line| line.width() <= usize::from(width)), "{width}:\n{drawing}");
+            let gaps = drawing.lines().collect::<Vec<_>>().windows(2).filter(|pair| pair[0] == pair[1]).count();
+            assert_eq!(gaps, 0, "{drawing}");
+        }
+    }
+
+    #[test]
+    fn a_mermaid_fence_outside_the_docs_shows_its_source() {
+        let page = render("```mermaid\nflowchart TD\n  A --> B\n```\n", 80);
+        assert!(page_text(&page).contains("A --> B"));
         assert!(text(&page.lines[0]).starts_with("╭─ mermaid "));
+    }
+
+    #[test]
+    fn every_mermaid_fence_in_the_docs_has_a_drawing() {
+        let fences = mermaid_fences();
+        assert!(!fences.is_empty(), "the docs hold a mermaid diagram");
+        for (topic, source) in fences {
+            assert!(diagram(&source, 80).is_some(), "build.rs did not draw the mermaid block in docs/{topic}.md");
+        }
     }
 
     #[test]
@@ -791,39 +838,9 @@ mod tests {
                 let page = render(topic.markdown, width);
                 assert!(!page.lines.is_empty(), "{}", topic.name);
                 assert_eq!(page.headings[0].level, 1, "{}", topic.name);
-                let widest = page.lines.iter().map(Line::width).max().unwrap();
-                assert!(widest <= usize::from(width).max(80), "docs/{}.md at {width}: {widest}", topic.name);
+                let widest = page.lines.iter().max_by_key(|line| line.width()).unwrap();
+                assert!(widest.width() <= usize::from(width), "docs/{}.md at {width}: {}", topic.name, text(widest));
             }
         }
-    }
-
-    #[test]
-    fn every_mermaid_fence_in_the_docs_renders() {
-        let mut seen = 0;
-        for topic in crate::docs::TOPICS {
-            let mut fence = None;
-            for event in Parser::new(topic.markdown) {
-                match event {
-                    Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) if info.as_ref() == "mermaid" => {
-                        fence = Some(String::new());
-                    }
-                    Event::Text(text) => {
-                        if let Some(fence) = &mut fence {
-                            fence.push_str(&text);
-                        }
-                    }
-                    Event::End(TagEnd::CodeBlock) => {
-                        if let Some(source) = fence.take() {
-                            seen += 1;
-                            if let Err(error) = mermaid_text::render(&source) {
-                                panic!("docs/{}.md has a mermaid block that does not render: {error}", topic.name);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        assert!(seen > 0, "the docs hold a mermaid diagram");
     }
 }

@@ -108,7 +108,7 @@ The first wave is the batch's objects. Objects that code creates during an `awak
 flowchart TD
     construct["1. Every constructor of the wave"] --> awake["2. Every awake of the wave"]
     awake --> created{"Did an awake create objects?"}
-    created -- "yes, they form the next wave" --> construct
+    created -- yes --> construct
     created -- no --> enable["3. Every onEnable, for behaviours"]
     enable --> start["4. Every start"]
     start --> frames["5. Frame hooks, from the next frame"]
