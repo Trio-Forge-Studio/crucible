@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 pub const FILE: &str = "crucible.toml";
 pub const DEFAULT_PLACE: &str = "start";
 pub const DEFAULT_PROJECT: &str = "default.project.json";
+pub const DEFAULT_TSCONFIG: &str = "tsconfig.json";
+pub const DEFAULT_INCLUDE: &str = "include";
 
 #[derive(Debug, PartialEq)]
 pub struct Manifest {
@@ -15,10 +17,27 @@ pub struct Manifest {
     pub envs: BTreeMap<String, Env>,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+/// What a place builds from. Paths are relative to the game root.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Place {
+    /// The Rojo project that Rojo builds and that lays out the compiled code.
     pub project: PathBuf,
+    #[serde(default = "Place::default_tsconfig")]
+    pub tsconfig: PathBuf,
+    /// The folder the project maps for roblox-ts's runtime library, which the build writes.
+    #[serde(default = "Place::default_include")]
+    pub include: PathBuf,
+}
+
+impl Place {
+    fn default_tsconfig() -> PathBuf {
+        DEFAULT_TSCONFIG.into()
+    }
+
+    fn default_include() -> PathBuf {
+        DEFAULT_INCLUDE.into()
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -90,7 +109,14 @@ struct RawEnv {
 impl Default for Manifest {
     fn default() -> Self {
         Self {
-            places: BTreeMap::from([(DEFAULT_PLACE.into(), Place { project: DEFAULT_PROJECT.into() })]),
+            places: BTreeMap::from([(
+                DEFAULT_PLACE.into(),
+                Place {
+                    project: DEFAULT_PROJECT.into(),
+                    tsconfig: Place::default_tsconfig(),
+                    include: Place::default_include(),
+                },
+            )]),
             envs: BTreeMap::new(),
         }
     }
@@ -210,6 +236,26 @@ mod tests {
         let manifest = Manifest::parse("[env.production]\nuniverse = 9999\nplace = 4321\n").unwrap();
         assert_eq!(manifest.places, Manifest::default().places);
         assert_eq!(manifest.envs["production"].places, BTreeMap::from([("start".into(), id(4321))]));
+    }
+
+    #[test]
+    fn a_place_names_its_tsconfig_and_include_or_takes_the_root_ones() {
+        let manifest = Manifest::parse(
+            "[places.job]\ntsconfig = \"tsconfig.job.json\"\nproject = \"job.generated.project.json\"\n\
+             include = \"places/job/include\"\n[places.start]\nproject = \"default.project.json\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.places["job"],
+            Place {
+                project: "job.generated.project.json".into(),
+                tsconfig: "tsconfig.job.json".into(),
+                include: "places/job/include".into(),
+            }
+        );
+        assert_eq!(manifest.places["start"], Manifest::default().places["start"]);
+        let start = &Manifest::default().places["start"];
+        assert_eq!((start.tsconfig.to_str(), start.include.to_str()), (Some("tsconfig.json"), Some("include")));
     }
 
     #[test]

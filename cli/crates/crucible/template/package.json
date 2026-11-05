@@ -13,9 +13,7 @@
 	},
 	"devDependencies": {
 		"@trioforge/crucible-cli": "__VERSION__",
-		"roblox-ts": "__ROBLOX_TS__",
-		"typescript": "__TYPESCRIPT__",
-		"@rbxts/compiler-types": "__RBXTS_COMPILER_TYPES__",
+		"@trioforge/compiler-types": "__VERSION__",
 		"@rbxts/types": "__RBXTS_TYPES__",
 		"vite-plus": "__VITE_PLUS__"
 	}

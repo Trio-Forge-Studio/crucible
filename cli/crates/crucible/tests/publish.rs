@@ -1,3 +1,5 @@
+#[path = "support/game.rs"]
+mod game;
 #[path = "support/sequence.rs"]
 mod sequence;
 mod support;
@@ -12,23 +14,12 @@ impl Game {
     fn new(manifest: Option<&str>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let compiler = root.join("node_modules/roblox-ts");
-        fs::create_dir_all(&compiler).unwrap();
-        fs::write(compiler.join("package.json"), r#"{"bin":{"rbxtsc":"cli.js"}}"#).unwrap();
-        fs::write(
-            compiler.join("cli.js"),
-            r#"
-const fs = require('node:fs');
-console.log('compiler progress');
-if (process.env.FAIL_BUILD) process.exit(1);
-fs.mkdirSync('out', {recursive:true});
-fs.writeFileSync('out/main.luau', 'return 1');
-"#,
-        )
-        .unwrap();
+        fs::write(root.join("tsconfig.json"), game::tsconfig().to_string()).unwrap();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.ts"), "export const value = 1;\n").unwrap();
         fs::write(
             root.join("default.project.json"),
-            r#"{"name":"fixture","tree":{"$className":"DataModel","ReplicatedStorage":{"$path":"out"}}}"#,
+            r#"{"name":"fixture","tree":{"$className":"DataModel","ReplicatedStorage":{"$className":"ReplicatedStorage","Out":{"$path":"out"},"rbxts_include":{"$path":"include"}}}}"#,
         )
         .unwrap();
         if let Some(text) = manifest {
@@ -48,8 +39,7 @@ fs.writeFileSync('out/main.luau', 'return 1');
             .env("CRUCIBLE_OC_ORIGIN", origin)
             .env("CRUCIBLE_OC_API_KEY", KEY)
             .env("CRUCIBLE_CONFIG", self.0.path().join("config.toml"))
-            .env_remove("CRUCIBLE_OC_PROFILE")
-            .env_remove("FAIL_BUILD");
+            .env_remove("CRUCIBLE_OC_PROFILE");
         command
     }
     fn publish(&self, origin: &str, args: &[&str]) -> Output {
@@ -88,7 +78,7 @@ fn publishes_built_bytes_with_receipts_and_stderr_progress() {
         assert!(request.body.starts_with(b"<roblox!"));
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("compiler progress") && stderr.contains("Built project"));
+    assert!(stderr.contains("modules to out") && stderr.contains("Built project"));
 }
 
 #[test]
@@ -199,7 +189,8 @@ fn invalid_targets_and_arguments_are_json_usage_errors_without_requests() {
 fn build_failure_is_unavailable_and_never_uploads() {
     let game = Game::new(Some(TWO));
     let server = Server::new(vec![]);
-    let out = game.command(&server.origin).arg("production").env("FAIL_BUILD", "1").output().unwrap();
+    fs::write(game.0.path().join("src/main.ts"), "export const value: number = \"one\";\n").unwrap();
+    let out = game.command(&server.origin).arg("production").output().unwrap();
     assert_eq!(code(&out), 7);
     assert_eq!(document(&out)["error"]["publish"]["notAttempted"], json!(["arena", "start"]));
     assert!(server.requests().is_empty());

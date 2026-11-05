@@ -1,7 +1,9 @@
 use crate::child;
-use crate::manifest::{Manifest, ManifestError};
-use sha2::{Digest, Sha256};
+use crate::manifest::{Manifest, ManifestError, Place};
+use crucible_compiler::{Compiled, Module, Target};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
@@ -83,7 +85,7 @@ pub fn build(
             selected.len()
         )));
     }
-    compile(root)?;
+    write(root, &compile_all(root, &selected)?)?;
     let mut built = Vec::new();
     for (name, place) in selected {
         let path = match output {
@@ -97,99 +99,135 @@ pub fn build(
     Ok(built)
 }
 
-pub fn compile(root: &Path) -> Result<(), Error> {
-    let receipt = Receipt::prepare(root)?;
-    let mut command = rbxtsc(root)?;
-    command.args(["--type", "game"]);
-    let status = child::status_on_stderr(command)
-        .map_err(|error| Error::Failed(format!("cannot run node: {error}. Install Node.js and put node on PATH")))?;
-    // roblox-ts deletes the receipt with every out file it did not emit, even
-    // when it fails, and what it leaves in out came from this transformer.
-    let written = receipt.map_or(Ok(()), |receipt| receipt.write());
-    if !status.success() {
-        return Err(Error::Failed("roblox-ts failed".into()));
-    }
-    written
+/// One compile, shared by the selected places that name the same files.
+struct Unit<'m> {
+    place: &'m Place,
+    names: Vec<&'m str>,
+    compiled: Compiled,
 }
 
-pub fn rbxtsc(root: &Path) -> Result<Command, Error> {
-    let package = node_package(root, "roblox-ts").ok_or_else(|| {
-        Error::Failed(format!("roblox-ts is not installed in {} or a parent node_modules", root.display()))
-    })?;
-    let manifest: serde_json::Value = std::fs::read(package.join("package.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
-    let bin = manifest["bin"]["rbxtsc"]
-        .as_str()
-        .or(manifest["bin"].as_str())
-        .ok_or_else(|| Error::Failed(format!("{} declares no rbxtsc bin", package.display())))?;
-    let mut command = Command::new("node");
-    command.arg(package.join(bin)).current_dir(root).stdin(Stdio::null());
-    Ok(command)
-}
-
-pub struct Receipt {
-    path: PathBuf,
-    fingerprint: String,
-}
-
-impl Receipt {
-    pub fn prepare(root: &Path) -> Result<Option<Self>, Error> {
-        let Some(package) = node_package(root, "@trioforge/crucible") else {
-            return Ok(None);
-        };
-        let fingerprint = fingerprint(&package.join("transformer"))?;
-        let out = root.join("out");
-        let path = out.join("transformer.sha256");
-        if out.exists() && std::fs::read_to_string(&path).ok().as_deref() != Some(&fingerprint) {
-            eprintln!("crucible: the installed Crucible transformer changed, compiling from clean");
-            std::fs::remove_dir_all(&out)
-                .map_err(|error| Error::Failed(format!("cannot remove {}: {error}", out.display())))?;
+/// Compiles every selected place before writing anything, so a place that fails to compile leaves every output as
+/// it was.
+fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<Vec<Unit<'m>>, Error> {
+    let mut units: Vec<Unit<'m>> = Vec::new();
+    for &(name, place) in selected {
+        if let Some(unit) = units.iter_mut().find(|unit| unit.place == place) {
+            unit.names.push(name);
+            continue;
         }
-        Ok(Some(Self { path, fingerprint }))
+        let compiled = compile(root, place).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
+        units.push(Unit { place, names: vec![name], compiled });
     }
-
-    pub fn write(&self) -> Result<(), Error> {
-        std::fs::create_dir_all(self.path.parent().unwrap_or(Path::new(".")))
-            .and_then(|()| std::fs::write(&self.path, &self.fingerprint))
-            .map_err(|error| Error::Failed(format!("cannot write {}: {error}", self.path.display())))
-    }
-}
-
-fn fingerprint(root: &Path) -> Result<String, Error> {
-    let unreadable =
-        |path: &Path, error: std::io::Error| Error::Failed(format!("cannot read {}: {error}", path.display()));
-    let mut files = Vec::new();
-    let mut dirs = vec![root.to_path_buf()];
-    while let Some(dir) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).map_err(|error| unreadable(&dir, error))? {
-            let path = entry.map_err(|error| unreadable(&dir, error))?.path();
-            if path.is_dir() {
-                dirs.push(path);
-            } else if path.is_file() {
-                let relative = path.strip_prefix(root).unwrap_or(&path).components();
-                let name = relative.map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
-                files.push((name, path));
+    // The writer deletes the compiler's files that are not in its modules, so two writers of one folder, or of
+    // nested folders, would delete each other's code.
+    for (index, a) in units.iter().enumerate() {
+        for b in &units[index + 1..] {
+            let (x, y) = (&a.compiled.out_dir, &b.compiled.out_dir);
+            if x == y && a.compiled.modules != b.compiled.modules {
+                return Err(Error::Failed(format!(
+                    "places {} and {} compile different code into {}. Give each a tsconfig with its own outDir",
+                    a.names[0],
+                    b.names[0],
+                    shown(root, x)
+                )));
+            }
+            if x != y && (x.starts_with(y) || y.starts_with(x)) {
+                return Err(Error::Failed(format!(
+                    "places {} and {} compile into {} and {}, one inside the other. Give each an outDir outside the other's",
+                    a.names[0],
+                    b.names[0],
+                    shown(root, x),
+                    shown(root, y)
+                )));
             }
         }
     }
-    files.sort();
-    let mut hash = Sha256::new();
-    for (name, path) in files {
-        let bytes = std::fs::read(&path).map_err(|error| unreadable(&path, error))?;
-        hash.update((name.len() as u64).to_le_bytes());
-        hash.update(name);
-        hash.update((bytes.len() as u64).to_le_bytes());
-        hash.update(bytes);
-    }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(units)
 }
 
-pub fn node_package(root: &Path, name: &str) -> Option<PathBuf> {
-    root.ancestors()
-        .map(|dir| dir.join("node_modules").join(name))
-        .find(|package| package.join("package.json").is_file())
+fn write(root: &Path, units: &[Unit<'_>]) -> Result<(), Error> {
+    let failed =
+        |path: &Path, error: std::io::Error| Error::Failed(format!("cannot write {}: {error}", shown(root, path)));
+    let mut written: Vec<&Path> = Vec::new();
+    for unit in units {
+        let out = unit.compiled.out_dir.as_path();
+        if !written.contains(&out) {
+            let changes = crucible_compiler::write(out, &unit.compiled.modules).map_err(|error| failed(out, error))?;
+            eprintln!(
+                "crucible build: wrote {} of {} modules to {}",
+                changes.written,
+                unit.compiled.modules.len(),
+                shown(root, out)
+            );
+            written.push(out);
+        }
+        let include = root.join(&unit.place.include);
+        crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;
+    }
+    Ok(())
+}
+
+fn shown(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+}
+
+pub const COMPILE: &str = "__compile";
+
+/// What a compile child prints on stdout.
+#[derive(Serialize, Deserialize)]
+struct Wire {
+    out_dir: PathBuf,
+    modules: Vec<(String, String)>,
+}
+
+// tsrs never frees a program, so each compile runs in its own process and a build's peak memory is its largest place.
+fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
+    let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
+    let mut command = Command::new(exe);
+    command.arg(COMPILE).arg(&place.tsconfig).arg(&place.project).arg(&place.include);
+    command.current_dir(root).stdout(Stdio::piped());
+    let mut tied = child::spawn_tied(&mut command).map_err(|error| format!("cannot start the compiler: {error}"))?;
+    let mut json = Vec::new();
+    let read = tied.child.stdout.take().expect("stdout is piped").read_to_end(&mut json);
+    let status = tied.child.wait().map_err(|error| format!("the compiler did not finish: {error}"))?;
+    match status.code() {
+        Some(0) => {}
+        Some(1) => return Err("the compile failed, so nothing was written".into()),
+        _ => return Err(format!("the compiler stopped unexpectedly ({status}), so nothing was written")),
+    }
+    read.map_err(|error| format!("cannot read the compiler's output: {error}"))?;
+    let wire: Wire =
+        serde_json::from_slice(&json).map_err(|error| format!("cannot read the compiler's output: {error}"))?;
+    let modules = wire.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
+    Ok(Compiled { out_dir: wire.out_dir, modules })
+}
+
+/// Compiles one place and prints its modules as JSON on stdout. On failure it prints the diagnostics on stderr, with
+/// paths relative to the game root, and exits 1. It writes no file.
+pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
+    child::exit_with_parent();
+    match crucible_compiler::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
+        Ok(compiled) => {
+            let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
+            let wire = Wire { out_dir: compiled.out_dir, modules };
+            match serde_json::to_writer(std::io::stdout().lock(), &wire) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("crucible build: cannot send the compiled modules: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        Err(failure) => {
+            let root = std::env::current_dir().unwrap_or_default();
+            let prefixes =
+                [root.to_string_lossy().replace('\\', "/") + "/", root.to_string_lossy().into_owned() + "\\"];
+            for line in failure.to_string().lines() {
+                eprintln!("{}", prefixes.iter().fold(line.to_owned(), |line, prefix| line.replace(prefix, "")));
+            }
+            ExitCode::FAILURE
+        }
+    }
 }
 
 // Rojo prints progress with println!, so it runs in a child whose stdout is our

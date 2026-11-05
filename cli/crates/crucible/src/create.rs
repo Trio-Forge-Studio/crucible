@@ -169,13 +169,9 @@ pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
     let sample: serde_json::Value = serde_json::from_str(include_str!("../../../../examples/sample-game/package.json"))
         .expect("sample package.json is valid");
     let mut tokens = vec![("__NAME__", name.into()), ("__VERSION__", env!("CARGO_PKG_VERSION").into())];
-    for (token, package, manifest) in [
-        ("__ROBLOX_TS__", "roblox-ts", &workspace),
-        ("__TYPESCRIPT__", "typescript", &workspace),
-        ("__VITE_PLUS__", "vite-plus", &workspace),
-        ("__RBXTS_COMPILER_TYPES__", "@rbxts/compiler-types", &sample),
-        ("__RBXTS_TYPES__", "@rbxts/types", &sample),
-    ] {
+    for (token, package, manifest) in
+        [("__VITE_PLUS__", "vite-plus", &workspace), ("__RBXTS_TYPES__", "@rbxts/types", &sample)]
+    {
         tokens
             .push((token, manifest["devDependencies"][package].as_str().expect("toolchain version is pinned").into()));
     }
@@ -229,10 +225,14 @@ mod tests {
     }
 
     #[test]
-    fn runtime_and_cli_release_together() {
-        let runtime: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../packages/crucible/package.json")).unwrap();
-        assert_eq!(runtime["version"], env!("CARGO_PKG_VERSION"));
+    fn runtime_compiler_types_and_cli_release_together() {
+        for manifest in [
+            include_str!("../../../../packages/crucible/package.json"),
+            include_str!("../../../../packages/compiler-types/package.json"),
+        ] {
+            let package: serde_json::Value = serde_json::from_str(manifest).unwrap();
+            assert_eq!(package["version"], env!("CARGO_PKG_VERSION"), "{}", package["name"]);
+        }
     }
 
     #[test]

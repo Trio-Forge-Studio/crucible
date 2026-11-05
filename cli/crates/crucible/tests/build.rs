@@ -1,48 +1,138 @@
+#[path = "support/game.rs"]
+mod game;
+
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::SystemTime;
 
-const FAKE_RBXTSC: &str = r#"
-const fs = require("node:fs");
-fs.appendFileSync("rbxtsc.log", JSON.stringify({ args: process.argv.slice(2), stale: fs.existsSync("out/stale") }) + "\n");
-console.log("\x1b[90mrbxtsc progress\x1b[39m");
-// roblox-ts removes every out file without a source before it compiles.
-for (const name of fs.existsSync("out") ? fs.readdirSync("out") : []) {
-	if (!["main.server.luau", "tsconfig.tsbuildinfo"].includes(name)) fs.rmSync(`out/${name}`, { recursive: true });
-}
-if (process.env.FAKE_RBXTSC_EXIT) {
-	console.error("\x1b[96msrc/main.server.ts\x1b[0m:\x1b[93m1\x1b[0m:\x1b[93m1\x1b[0m - \x1b[91merror\x1b[0m\x1b[90m TS1005: \x1b[0mfake failure");
-	process.exit(Number(process.env.FAKE_RBXTSC_EXIT));
-}
-fs.mkdirSync("out", { recursive: true });
-fs.writeFileSync("out/main.server.luau", "print('hi')");
-"#;
+use game::{repo, slashes};
+use serde_json::{Value, json};
 
-const PROJECT: &str = r#"{"name":"fixture","tree":{"$className":"DataModel","ReplicatedStorage":{"$className":"ReplicatedStorage","Out":{"$path":"out"}}}}"#;
+fn vendored(name: &str) -> Vec<u8> {
+    fs::read(repo().join("cli/crates/compiler/roblox-ts").join(name)).unwrap()
+}
 
 struct Game {
     dir: tempfile::TempDir,
 }
 
 impl Game {
-    fn new(manifest: Option<&str>) -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let rbxts = root.join("node_modules/roblox-ts");
-        fs::create_dir_all(rbxts.join("out/CLI")).unwrap();
-        fs::write(rbxts.join("package.json"), r#"{"name":"roblox-ts","bin":{"rbxtsc":"out/CLI/cli.js"}}"#).unwrap();
-        fs::write(rbxts.join("out/CLI/cli.js"), FAKE_RBXTSC).unwrap();
-        let crucible = root.join("node_modules/@trioforge/crucible");
-        fs::create_dir_all(crucible.join("transformer")).unwrap();
-        fs::write(crucible.join("package.json"), r#"{"name":"@trioforge/crucible"}"#).unwrap();
-        fs::write(crucible.join("transformer/index.js"), "module.exports = 1;").unwrap();
-        for name in ["default.project.json", "arena.project.json"] {
-            fs::write(root.join(name), PROJECT).unwrap();
+    fn new() -> Self {
+        let game = Self { dir: tempfile::tempdir().unwrap() };
+        game.json("tsconfig.json", &game::tsconfig());
+        game
+    }
+
+    /// The template's layout: one place from the root files, with no crucible.toml.
+    fn single() -> Self {
+        let game = Self::new();
+        game.json(
+            "default.project.json",
+            &json!({
+                "name": "single",
+                "tree": {
+                    "$className": "DataModel",
+                    "ReplicatedStorage": {
+                        "$className": "ReplicatedStorage",
+                        "rbxts_include": { "$path": "include" },
+                        "TS": { "$path": "out/shared" },
+                    },
+                    "ServerScriptService": { "$className": "ServerScriptService", "TS": { "$path": "out/server" } },
+                },
+            }),
+        );
+        game.write("src/shared/greeting.ts", "export const greet = (name: string) => `hello from ${name}`;\n");
+        game.write(
+            "src/server/main.server.ts",
+            "import { greet } from \"../shared/greeting\";\nprint(greet(\"start\"));\n",
+        );
+        game
+    }
+
+    /// FD's layout: per-place tsconfigs and generated projects at the root, shared core sources, and an outDir and
+    /// include folder under `places/<place>`. Each place maps core under its own folder, so code compiled against
+    /// the other place's project would require the wrong instance. The Rogen inputs beside them map no code.
+    fn places() -> Self {
+        let game = Self::new();
+        game.config(|c| {
+            let options = c["compilerOptions"].as_object_mut().unwrap();
+            options.remove("rootDir");
+            options.remove("outDir");
+        });
+        let mut manifest = String::new();
+        for (place, folder) in [("job", "Job"), ("warehouse", "Warehouse")] {
+            game.json(
+                &format!("tsconfig.{place}.json"),
+                &json!({
+                    "extends": "./tsconfig.json",
+                    "compilerOptions": {
+                        "rootDir": "src",
+                        "rootDirs": ["src/core", format!("src/{place}")],
+                        "outDir": format!("places/{place}/out"),
+                    },
+                    "include": ["src/core", format!("src/{place}")],
+                }),
+            );
+            game.json(
+                &format!("{place}.generated.project.json"),
+                &json!({
+                    "name": place,
+                    "tree": {
+                        "$className": "DataModel",
+                        "ReplicatedStorage": {
+                            "$className": "ReplicatedStorage",
+                            "rbxts_include": { "$path": { "optional": format!("places/{place}/include") } },
+                            folder: { "$className": "Folder", "core": { "$path": format!("places/{place}/out/core") } },
+                        },
+                        "ServerScriptService": {
+                            "$className": "ServerScriptService",
+                            "TS": { "$path": format!("places/{place}/out/{place}") },
+                        },
+                    },
+                }),
+            );
+            game.json(
+                &format!("{place}.project.json"),
+                &json!({ "name": place, "tree": { "$className": "DataModel", "Workspace": { "$className": "Workspace" } } }),
+            );
+            game.write(
+                &format!("src/{place}/main.server.ts"),
+                &format!("import {{ greet }} from \"../core/greeting\";\nprint(greet(\"{place}\"));\n"),
+            );
+            manifest += &format!(
+                "[places.{place}]\ntsconfig = \"tsconfig.{place}.json\"\nproject = \"{place}.generated.project.json\"\ninclude = \"places/{place}/include\"\n"
+            );
         }
-        if let Some(manifest) = manifest {
-            fs::write(root.join("crucible.toml"), manifest).unwrap();
-        }
-        Self { dir }
+        game.write("src/core/greeting.ts", "export const greet = (name: string) => `hello from ${name}`;\n");
+        game.write("crucible.toml", &manifest);
+        game
+    }
+
+    fn path(&self, relative: &str) -> PathBuf {
+        self.dir.path().join(relative)
+    }
+
+    fn write(&self, relative: &str, text: &str) -> &Self {
+        let file = self.path(relative);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, text).unwrap();
+        self
+    }
+
+    fn json(&self, relative: &str, value: &Value) -> &Self {
+        self.write(relative, &serde_json::to_string_pretty(value).unwrap())
+    }
+
+    fn config(&self, edit: impl FnOnce(&mut Value)) -> &Self {
+        let mut config: Value = serde_json::from_str(&self.read("tsconfig.json")).unwrap();
+        edit(&mut config);
+        self.json("tsconfig.json", &config)
+    }
+
+    fn read(&self, relative: &str) -> String {
+        fs::read_to_string(self.path(relative)).unwrap_or_else(|_| panic!("{relative} exists"))
     }
 
     fn root(&self) -> PathBuf {
@@ -54,26 +144,29 @@ impl Game {
             .arg("build")
             .args(args)
             .current_dir(self.dir.path())
-            .env_remove("FAKE_RBXTSC_EXIT")
             .output()
             .unwrap()
     }
 
-    fn fail(&self) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_crucible"))
-            .arg("build")
-            .current_dir(self.dir.path())
-            .env("FAKE_RBXTSC_EXIT", "3")
-            .output()
-            .unwrap()
-    }
-
-    fn compiles(&self) -> Vec<serde_json::Value> {
-        fs::read_to_string(self.dir.path().join("rbxtsc.log"))
-            .unwrap_or_default()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect()
+    /// Every file under `folders` with its bytes and modification time.
+    fn snapshot(&self, folders: &[&str]) -> BTreeMap<String, (Vec<u8>, SystemTime)> {
+        let mut files = BTreeMap::new();
+        let mut pending: Vec<PathBuf> = folders.iter().map(|folder| self.path(folder)).collect();
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).unwrap_or_else(|_| panic!("{} exists", dir.display())) {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+                    files.insert(
+                        slashes(path.strip_prefix(self.dir.path()).unwrap()),
+                        (fs::read(&path).unwrap(), modified),
+                    );
+                }
+            }
+        }
+        files
     }
 }
 
@@ -98,44 +191,144 @@ fn printed(output: &Output) -> Vec<String> {
 }
 
 #[test]
-fn builds_every_place_and_prints_only_their_paths() {
-    let game = Game::new(Some(TWO_PLACES));
+fn without_manifest_builds_start_from_the_root_files() {
+    let game = Game::single();
     let out = game.build(&[]);
-    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    let root = game.root();
-    let expected = [root.join("build/arena.rbxl"), root.join("build/start.rbxl")];
-    assert_eq!(printed(&out), ["build/arena.rbxl", "build/start.rbxl"], "stdout holds only place paths");
-    expected.iter().for_each(|path| assert_place(path));
     let stderr = text(&out.stderr);
-    assert!(stderr.contains("rbxtsc progress") && stderr.contains("Built project"), "{stderr}");
-    let compiles = game.compiles();
-    assert_eq!(compiles.len(), 1, "roblox-ts runs once for every place");
-    assert_eq!(compiles[0]["args"], serde_json::json!(["--type", "game"]));
-}
-
-#[test]
-fn without_manifest_builds_start_from_default_project() {
-    let game = Game::new(None);
-    let out = game.build(&[]);
-    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    assert_eq!(printed(&out), ["build/start.rbxl"]);
+    assert_eq!(code(&out), 0, "{stderr}");
+    assert_eq!(printed(&out), ["build/start.rbxl"], "stdout holds only place paths");
     assert_place(&game.root().join("build/start.rbxl"));
+    assert!(
+        stderr.contains("crucible build: wrote 2 of 2 modules to out") && stderr.contains("Built project"),
+        "{stderr}"
+    );
+    assert!(game.read("out/server/main.server.luau").starts_with("-- Compiled with crucible-compiler\n"));
+    for name in ["RuntimeLib.lua", "Promise.lua"] {
+        assert_eq!(fs::read(game.path("include").join(name)).unwrap(), vendored(name), "{name} is roblox-ts's copy");
+    }
+    assert!(!game.path("out/transformer.sha256").exists(), "the build keeps no transformer receipt");
 }
 
 #[test]
-fn place_filter_limits_rojo_and_output_renames_the_file() {
-    let game = Game::new(Some(TWO_PLACES));
-    let out = game.build(&["--place", "arena", "--output", "custom/arena-test.rbxl"]);
+fn each_place_compiles_its_own_tsconfig_against_its_own_project() {
+    let game = Game::places();
+    let out = game.build(&[]);
+    let stderr = text(&out.stderr);
+    assert_eq!(code(&out), 0, "{stderr}");
+    assert_eq!(printed(&out), ["build/job.rbxl", "build/warehouse.rbxl"]);
+    for (place, other, folder) in [("job", "warehouse", "Job"), ("warehouse", "job", "Warehouse")] {
+        assert_place(&game.root().join(format!("build/{place}.rbxl")));
+        assert!(stderr.contains(&format!("wrote 2 of 2 modules to places/{place}/out")), "{stderr}");
+        let main = game.read(&format!("places/{place}/out/{place}/main.server.luau"));
+        assert!(
+            main.contains(&format!("\"{folder}\", \"core\", \"greeting\"")),
+            "{place} requires core through its project:\n{main}"
+        );
+        assert!(game.path(&format!("places/{place}/out/core/greeting.luau")).is_file());
+        assert!(!game.path(&format!("places/{place}/out/{other}")).exists(), "{place} compiles none of {other}'s code");
+        assert_eq!(
+            fs::read(game.path(&format!("places/{place}/include/RuntimeLib.lua"))).unwrap(),
+            vendored("RuntimeLib.lua")
+        );
+    }
+    assert!(!game.path("out").exists() && !game.path("include").exists(), "nothing is written at the root");
+
+    let before = game.snapshot(&["places"]);
+    let again = game.build(&[]);
+    assert_eq!(code(&again), 0, "{}", text(&again.stderr));
+    assert!(text(&again.stderr).contains("wrote 0 of 2 modules to places/job/out"), "{}", text(&again.stderr));
+    assert_eq!(game.snapshot(&["places"]), before, "an unchanged rebuild rewrites no output or include file");
+
+    let xml = game.build(&["--place", "job", "--output", "build/job.rbxlx"]);
+    assert_eq!(code(&xml), 0, "{}", text(&xml.stderr));
+    let place = game.read("build/job.rbxlx").replace("&quot;", "\"");
+    assert!(place.contains("print((greet(\"job\")))"), "the job place file holds job's script");
+    for module in ["RuntimeLib", "Promise"] {
+        assert!(place.contains(&format!("<string name=\"Name\">{module}</string>")), "the place has {module}");
+    }
+    assert!(!place.contains("greet(\"warehouse\")"), "the job place file holds none of warehouse's code");
+}
+
+#[test]
+fn a_type_error_prints_positions_and_writes_nothing() {
+    let game = Game::places();
+    assert_eq!(code(&game.build(&[])), 0);
+    let before = game.snapshot(&["places", "build"]);
+    game.write(
+        "src/job/main.server.ts",
+        "import { greet } from \"../core/greeting\";\nprint(greet(\"job, edited\"));\n",
+    );
+    game.write("src/warehouse/main.server.ts", "export {};\nconst count: number = \"many\";\n");
+    let out = game.build(&[]);
+    let stderr = text(&out.stderr);
+    assert_eq!(code(&out), 1, "{stderr}");
+    assert!(
+        stderr.contains(
+            "src/warehouse/main.server.ts(2,7): error TS2322: Type 'string' is not assignable to type 'number'."
+        ),
+        "the error keeps its root-relative file position: {stderr}"
+    );
+    assert!(stderr.contains("crucible build: place warehouse: the compile failed, so nothing was written"), "{stderr}");
+    assert!(out.stdout.is_empty());
+    assert_eq!(game.snapshot(&["places", "build"]), before, "job compiled first, but its output waits for every place");
+
+    let fresh = Game::places();
+    fresh.write("src/core/greeting.ts", "export const greet = (name: string): number => name;\n");
+    let out = fresh.build(&[]);
+    let stderr = text(&out.stderr);
+    assert_eq!(code(&out), 1);
+    assert_eq!(stderr.matches("src/core/greeting.ts(1,").count(), 1, "a core error prints once: {stderr}");
+    assert!(stderr.contains("place job: the compile failed"), "{stderr}");
+    for folder in ["places/job/out", "places/job/include", "places/warehouse/out", "build"] {
+        assert!(!fresh.path(folder).exists(), "a failed first build creates no {folder}");
+    }
+}
+
+#[test]
+fn place_filter_compiles_only_that_place_and_output_renames_the_file() {
+    let game = Game::places();
+    let out = game.build(&["--place", "warehouse", "--output", "custom/warehouse-test.rbxl"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    let custom = game.root().join("custom/arena-test.rbxl");
-    assert_eq!(printed(&out), ["custom/arena-test.rbxl"]);
-    assert_place(&custom);
-    assert!(!game.dir.path().join("build").exists(), "no other place was built");
+    assert_eq!(printed(&out), ["custom/warehouse-test.rbxl"]);
+    assert_place(&game.root().join("custom/warehouse-test.rbxl"));
+    assert!(!game.path("build").exists() && !game.path("places/job").exists(), "no other place was compiled or built");
+}
+
+#[test]
+fn places_sharing_a_tsconfig_compile_once_or_refuse_to_mix_their_code() {
+    let game = Game::single();
+    game.write("crucible.toml", TWO_PLACES);
+    fs::copy(game.path("default.project.json"), game.path("arena.project.json")).unwrap();
+    let out = game.build(&[]);
+    let stderr = text(&out.stderr);
+    assert_eq!(code(&out), 0, "{stderr}");
+    assert_eq!(printed(&out), ["build/arena.rbxl", "build/start.rbxl"]);
+    assert_eq!(stderr.matches("modules to out").count(), 1, "one write for the shared outDir: {stderr}");
+
+    let mut arena: Value = serde_json::from_str(&game.read("arena.project.json")).unwrap();
+    let shared = arena["tree"]["ReplicatedStorage"]["TS"].take();
+    arena["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("TS");
+    arena["tree"]["ReplicatedStorage"]["Shared"] = shared;
+    game.json("arena.project.json", &arena);
+    fs::remove_dir_all(game.path("build")).unwrap();
+    let before = game.snapshot(&["out"]);
+    let out = game.build(&[]);
+    let stderr = text(&out.stderr);
+    assert_eq!(code(&out), 1, "{stderr}");
+    assert!(
+        stderr.contains(
+            "places arena and start compile different code into out. Give each a tsconfig with its own outDir"
+        ),
+        "{stderr}"
+    );
+    assert_eq!(game.snapshot(&["out"]), before);
+    assert!(!game.path("build").exists());
 }
 
 #[test]
 fn usage_errors_exit_2_before_compiling() {
-    let game = Game::new(Some(TWO_PLACES));
+    let game = Game::single();
+    game.write("crucible.toml", TWO_PLACES);
     for (args, message) in [
         (&["--place", "lobby"][..], "unknown place lobby. Places: arena, start"),
         (&["--output", "one.rbxl"][..], "--output needs exactly one place"),
@@ -146,113 +339,73 @@ fn usage_errors_exit_2_before_compiling() {
         assert!(text(&out.stderr).contains(message), "{args:?}: {}", text(&out.stderr));
         assert!(out.stdout.is_empty());
     }
-    let broken = Game::new(Some("[places.start]\nprojet = \"default.project.json\"\n"));
-    let out = broken.build(&[]);
-    assert_eq!(code(&out), 2);
-    assert!(text(&out.stderr).contains("crucible.toml") && text(&out.stderr).contains("unknown field"));
-    assert!(game.compiles().is_empty() && broken.compiles().is_empty(), "no usage error compiles");
+    for manifest in [
+        "[places.start]\nprojet = \"default.project.json\"\n",
+        "[places.start]\nproject = \"default.project.json\"\nincludes = \"include\"\n",
+    ] {
+        game.write("crucible.toml", manifest);
+        let out = game.build(&[]);
+        assert_eq!(code(&out), 2);
+        assert!(text(&out.stderr).contains("crucible.toml") && text(&out.stderr).contains("unknown field"));
+    }
+    assert!(!game.path("out").exists() && !game.path("include").exists(), "no usage error compiles");
 }
 
 #[test]
-fn roblox_ts_failure_keeps_its_diagnostics_and_builds_nothing() {
-    let game = Game::new(None);
-    let out = game.fail();
-    assert_eq!(code(&out), 1);
+fn a_missing_tsconfig_or_project_exits_1_naming_it() {
+    for (manifest, named) in [
+        ("[places.start]\nproject = \"default.project.json\"\ntsconfig = \"nope.json\"\n", "nope.json"),
+        ("[places.start]\nproject = \"missing.project.json\"\n", "missing.project.json"),
+    ] {
+        let game = Game::single();
+        game.write("crucible.toml", manifest);
+        let out = game.build(&[]);
+        let stderr = text(&out.stderr);
+        assert_eq!(code(&out), 1, "{stderr}");
+        assert!(
+            stderr.contains(named) && stderr.contains("crucible build: place start: the compile failed"),
+            "{stderr}"
+        );
+        assert!(out.stdout.is_empty() && !game.path("build").exists());
+    }
+}
+
+#[test]
+fn a_project_without_the_include_folder_names_both() {
+    let game = Game::single();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("rbxts_include");
+    game.json("default.project.json", &project);
+    let out = game.build(&[]);
     let stderr = text(&out.stderr);
-    assert!(stderr.contains("src/main.server.ts:1:1 - error TS1005: fake failure"), "{stderr}");
-    assert!(stderr.contains("crucible build: roblox-ts failed"), "{stderr}");
-    assert!(!stderr.contains('\x1b'), "redirected stderr carries no colour: {stderr:?}");
-    assert!(out.stdout.is_empty());
-    assert!(!game.dir.path().join("build").exists());
+    assert_eq!(code(&out), 1, "{stderr}");
+    assert!(
+        stderr.contains("default.project.json maps no folder for include, where roblox-ts's runtime library goes"),
+        "{stderr}"
+    );
 }
 
 #[test]
 fn rojo_failure_exits_1_with_rojo_diagnostics() {
-    let game = Game::new(Some("[places.start]\nproject = \"missing.project.json\"\n"));
+    let game = Game::single();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["Workspace"] = json!({ "$className": "Workspace", "Map": { "$path": "missing-map" } });
+    game.json("default.project.json", &project);
     let out = game.build(&[]);
     assert_eq!(code(&out), 1);
     let stderr = text(&out.stderr);
-    assert!(stderr.contains("failed to canonicalize path") && stderr.contains("Caused by:"), "{stderr}");
-    assert!(stderr.contains("crucible build: place start:"), "{stderr}");
+    assert!(stderr.contains("File $path: missing-map") && stderr.contains("crucible build: place start:"), "{stderr}");
     assert!(out.stdout.is_empty());
 }
 
 #[test]
-fn transformer_change_compiles_from_clean() {
-    let game = Game::new(None);
-    let receipt = game.dir.path().join("out/transformer.sha256");
-    let stale = game.dir.path().join("out/stale");
-    assert_eq!(code(&game.build(&[])), 0);
-    let first = fs::read_to_string(&receipt).unwrap();
-    fs::write(&stale, "").unwrap();
-    assert_eq!(code(&game.build(&[])), 0);
-    assert_eq!(game.compiles()[1]["stale"], true, "an unchanged transformer keeps out");
-    let transformer = game.dir.path().join("node_modules/@trioforge/crucible/transformer");
-    fs::write(transformer.join("type-id.cjs"), "a").unwrap();
-    let out = game.build(&[]);
-    assert_eq!(code(&out), 0);
-    assert!(text(&out.stderr).contains("transformer changed"));
-    assert_eq!(game.compiles()[2]["stale"], false, "a changed transformer removes out before compiling");
-    let second = fs::read_to_string(&receipt).unwrap();
-    assert_ne!(first, second);
-    fs::write(&stale, "").unwrap();
-    fs::write(transformer.join("type-id.cjs"), "b").unwrap();
-    assert_eq!(code(&game.build(&[])), 0);
-    assert_eq!(game.compiles()[3]["stale"], false, "a same-length content edit invalidates");
-    fs::create_dir(transformer.join("lib")).unwrap();
-    fs::write(transformer.join("lib/macro.cjs"), "a").unwrap();
-    fs::write(&stale, "").unwrap();
-    assert_eq!(code(&game.build(&[])), 0);
-    assert_eq!(game.compiles()[4]["stale"], false, "a new nested file invalidates");
-    fs::write(&stale, "").unwrap();
-    fs::write(transformer.join("lib/macro.cjs"), "b").unwrap();
-    assert_eq!(code(&game.build(&[])), 0);
-    assert_eq!(game.compiles()[5]["stale"], false, "a nested content edit invalidates");
-}
-
-#[test]
-fn failed_build_keeps_the_transformer_receipt() {
-    let game = Game::new(None);
-    let stale = game.dir.path().join("out/stale");
-    let changed = |out: &Output| text(&out.stderr).contains("transformer changed");
-    assert_eq!(code(&game.build(&[])), 0);
-    for (round, broken) in [true, true, false].into_iter().enumerate() {
-        fs::write(&stale, "").unwrap();
-        let out = if broken { game.fail() } else { game.build(&[]) };
-        assert_eq!(code(&out), if broken { 1 } else { 0 }, "{}", text(&out.stderr));
-        assert!(!changed(&out), "round {round}: {}", text(&out.stderr));
-        assert_eq!(game.compiles()[round + 1]["stale"], true, "round {round} keeps out");
-    }
-    let transformer = game.dir.path().join("node_modules/@trioforge/crucible/transformer");
-    fs::write(transformer.join("index.js"), "module.exports = 2;").unwrap();
-    fs::write(&stale, "").unwrap();
-    let out = game.fail();
-    assert!(changed(&out), "a changed transformer still compiles from clean: {}", text(&out.stderr));
-    assert_eq!(game.compiles()[4]["stale"], false);
-    fs::write(&stale, "").unwrap();
-    let out = game.build(&[]);
-    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    assert!(!changed(&out), "the failed build recorded the new transformer: {}", text(&out.stderr));
-    assert_eq!(game.compiles()[5]["stale"], true);
-}
-
-#[test]
 fn unreadable_manifest_exits_1() {
-    let game = Game::new(None);
-    fs::create_dir(game.dir.path().join("crucible.toml")).unwrap();
+    let game = Game::single();
+    fs::create_dir(game.path("crucible.toml")).unwrap();
     let out = game.build(&[]);
     assert_eq!(code(&out), 1, "an I/O failure is not a usage error");
     assert!(text(&out.stderr).contains("cannot read crucible.toml"), "{}", text(&out.stderr));
-    assert!(game.compiles().is_empty());
-}
-
-#[test]
-fn missing_roblox_ts_exits_1() {
-    let game = Game::new(None);
-    fs::remove_dir_all(game.dir.path().join("node_modules/roblox-ts")).unwrap();
-    let out = game.build(&[]);
-    assert_eq!(code(&out), 1);
-    assert!(text(&out.stderr).contains("roblox-ts is not installed"), "{}", text(&out.stderr));
+    assert!(!game.path("out").exists());
 }
 
 #[cfg(debug_assertions)]
@@ -260,7 +413,7 @@ fn missing_roblox_ts_exits_1() {
 fn killing_crucible_stops_its_rojo_child() {
     use std::io::BufRead;
     use std::time::Duration;
-    let game = Game::new(None);
+    let game = Game::single();
     let mut parent = Command::new(env!("CARGO_BIN_EXE_crucible"))
         .arg("build")
         .current_dir(game.dir.path())

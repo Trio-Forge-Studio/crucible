@@ -1,4 +1,4 @@
-use crate::build::{Error, node_package};
+use crate::build::Error;
 use crate::create::{FILES, package_manager, package_manager_command, render, tokens};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,8 @@ const FORMAT: u32 = 1;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 const CLI: &str = "@trioforge/crucible-cli";
 const RUNTIME: &str = "@trioforge/crucible";
+// Released with the CLI, so a game that pins it moves with the CLI.
+const COMPILER_TYPES: &str = "@trioforge/compiler-types";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Upkeep {
@@ -591,7 +593,7 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
     let mut expected: serde_json::Value = serde_json::from_str(text).expect("package.json was parsed before");
     let mut result = text.to_owned();
     for group in ["dependencies", "devDependencies"] {
-        for package in [CLI, RUNTIME] {
+        for package in [CLI, RUNTIME, COMPILER_TYPES] {
             let Some(spec) = expected[group].get_mut(package) else { continue };
             let Some(old) = spec.as_str() else { continue };
             let key = serde_json::to_string(package).expect("strings serialize");
@@ -698,6 +700,12 @@ fn detect_manager(root: &Path, agent: &str) -> Manager {
         "bun" => Manager::Bun,
         _ => Manager::Npm,
     }
+}
+
+fn node_package(root: &Path, name: &str) -> Option<PathBuf> {
+    root.ancestors()
+        .map(|dir| dir.join("node_modules").join(name))
+        .find(|package| package.join("package.json").is_file())
 }
 
 fn installed_version(root: &Path, package: &str) -> Result<Option<Version>, Error> {
@@ -868,8 +876,8 @@ mod tests {
     }
 
     #[test]
-    fn bump_edits_only_the_two_versions() {
-        let text = "{\n\t\"name\": \"crucible-game\",\n\t\"scripts\": { \"@trioforge/crucible-cli\": \"^0.1.0\" },\n\t\"dependencies\": {\n\t\t\"@trioforge/crucible\": \"0.1.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"@trioforge/crucible-cli\" :  \"^0.1.0\"\n\t}\n}\n";
+    fn bump_edits_only_the_crucible_versions() {
+        let text = "{\n\t\"name\": \"crucible-game\",\n\t\"scripts\": { \"@trioforge/crucible-cli\": \"^0.1.0\" },\n\t\"dependencies\": {\n\t\t\"@trioforge/crucible\": \"0.1.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"@trioforge/crucible-cli\" :  \"^0.1.0\",\n\t\t\"@trioforge/compiler-types\": \"0.1.0\",\n\t\t\"@rbxts/types\": \"1.0.959\"\n\t}\n}\n";
         let bumped = bump(text, "0.2.0");
         assert!(bumped.is_err(), "an ambiguous script entry is not rewritten silently");
         let text = text.replace("{ \"@trioforge/crucible-cli\": \"^0.1.0\" }", "{}");
