@@ -42,13 +42,8 @@ pub(crate) fn extract(checked: Checked) -> Facts {
     let catalog = match crate::classes::Catalog::load(Path::new(&dir)) {
         Ok(catalog) => Some(catalog),
         Err(e) => {
-            facts.diagnostics.push(Diagnostic {
-                path: Some(e.path),
-                line: e.line,
-                column: e.column,
-                code: 90030,
-                message: format!("CRU030: {}", e.message),
-            });
+            let (code, message) = crucible::Code::Rule(30).render(&e.message);
+            facts.diagnostics.push(Diagnostic { path: Some(e.path), line: e.line, column: e.column, code, message });
             None
         }
     };

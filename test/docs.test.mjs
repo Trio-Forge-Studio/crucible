@@ -88,6 +88,8 @@ const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 
 const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
 const sorted = (codes) => [...new Set(codes)].sort();
+// Crucible UI builds only with the Crucible compiler, so the rbxtsc transformer never reports its class codes.
+const compilerOnly = ["CRU028", "CRU029", "CRU030", "CRU031"];
 
 test("the diagnostics guide lists every CRU code the transformer and the compiler report, in order", () => {
 	const transformerDir = path.join(repo, "packages/crucible/transformer-src");
@@ -112,11 +114,15 @@ test("the diagnostics guide lists every CRU code the transformer and the compile
 	);
 	const headings = [...read(path.join(repo, "docs/diagnostics.md")).matchAll(/^## (CRU\d{3})$/gm)].map((m) => m[1]);
 	assert.ok(transformer.length > 0 && compiler.length > 0, "found CRU codes in both rule sources");
-	assert.deepEqual(compiler, transformer, "the compiler and the transformer report different CRU codes");
+	assert.deepEqual(
+		compiler,
+		sorted([...transformer, ...compilerOnly]),
+		"the compiler reports the transformer's CRU codes plus the Crucible UI class codes",
+	);
 	assert.deepEqual(headings, sorted(headings), "docs/diagnostics.md lists its CRU headings out of order or twice");
 	assert.deepEqual(
 		headings,
-		transformer,
+		compiler,
 		"docs/diagnostics.md headings differ from the CRU codes the transformer and the compiler report",
 	);
 });

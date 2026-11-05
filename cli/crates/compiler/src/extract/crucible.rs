@@ -59,6 +59,17 @@ pub(super) enum Code {
     Place,
 }
 
+impl Code {
+    /// The TypeScript error number and the printed message.
+    pub(super) fn render(self, message: &str) -> (i32, String) {
+        match self {
+            Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),
+            Code::Setup => (90000, format!("Crucible: {message}")),
+            Code::Place => (0, message.to_owned()),
+        }
+    }
+}
+
 /// Which generic instantiations a provided type or an `All` or `inject` target may use.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Generic {
@@ -605,11 +616,7 @@ impl Extractor {
         let path = file.file_name().replace('\\', "/");
         let start = span.start;
         let Position { line, column } = File::new(file).position(start);
-        let (number, message) = match code {
-            Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),
-            Code::Setup => (90000, format!("Crucible: {message}")),
-            Code::Place => (0, message.to_owned()),
-        };
+        let (number, message) = code.render(message);
         self.facts.diagnostics.push(crate::Diagnostic { path: Some(path), line, column, code: number, message });
     }
 
