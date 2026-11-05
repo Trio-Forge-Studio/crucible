@@ -26,7 +26,7 @@ try {
 }
 
 // cargo-about prints each crate's license, but Apache-2.0 also asks for tsrs's NOTICE, and the binary embeds
-// roblox-ts's runtime library, which no crate declares.
+// roblox-ts's runtime library and the roblox-lua-promise copy inside it, which no crate declares.
 const metadata = spawnSync("cargo", ["metadata", "--format-version", "1", "--locked", ...manifest], {
 	encoding: "utf8",
 	maxBuffer: 64 * 1024 * 1024,
@@ -40,5 +40,6 @@ appendFileSync(
 	[
 		`${rule}\ntsrs NOTICE (${tsrs.source})\n\n${readFileSync(join(dirname(tsrs.manifest_path), "../../NOTICE"), "utf8")}`,
 		`${rule}\nroblox-ts 3.0.0 runtime library (RuntimeLib.lua and Promise.lua), MIT\n\n${readFileSync("crates/compiler/roblox-ts/LICENSE", "utf8")}`,
+		`${rule}\nroblox-lua-promise (Promise.lua, as roblox-ts 3.0.0 ships it), MIT\n\n${readFileSync("crates/compiler/roblox-ts/Promise.LICENSE", "utf8")}`,
 	].join("\n"),
 );

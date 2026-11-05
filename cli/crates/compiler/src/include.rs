@@ -1,4 +1,5 @@
 //! The files in `roblox-ts/` are copied unchanged from roblox-ts 3.0.0, under its MIT license in `roblox-ts/LICENSE`.
+//! `Promise.lua` is evaera's roblox-lua-promise, under its own MIT license in `roblox-ts/Promise.LICENSE`.
 
 use std::io;
 use std::path::Path;
