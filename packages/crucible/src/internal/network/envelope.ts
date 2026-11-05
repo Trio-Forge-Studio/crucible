@@ -104,6 +104,7 @@ function parse(packet: buffer): Header {
  */
 export function argumentCount(args: readonly unknown[]): number {
 	let count = 0;
+	// oxlint-disable-next-line roblox-ts/no-array-pairs -- The highest raw key is the argument count, including nil holes.
 	for (const [key] of pairs(args)) if (typeIs(key, "number") && key > count) count = key;
 	return count;
 }

@@ -54,7 +54,7 @@ fn fd_state_passed_where_plain_function_expected() {
 }
 
 #[test]
-fn explicit_boolean_coercion_raw_key_validation_and_discarded_steps_are_safe() {
+fn explicit_boolean_coercion_and_discarded_steps_are_safe() {
     let game = Game::new();
     game.main(
         r#"
@@ -73,7 +73,7 @@ export function probe(value: unknown, array: unknown[], object: Record<string, u
 "#,
     );
     let found = rules(&game);
-    assert_eq!(found.iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), [(10, 90033)]);
+    assert_eq!(found.iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), [(5, 90034), (10, 90033)]);
 }
 
 #[test]
