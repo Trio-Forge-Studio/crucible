@@ -80,9 +80,13 @@ impl Slugger {
                 _ => None,
             })
             .collect();
-        let seen = self.0.entry(base.clone()).or_insert(0);
-        let slug = if *seen == 0 { base } else { format!("{base}-{seen}") };
-        *seen += 1;
+        let mut slug = base.clone();
+        while self.0.contains_key(&slug) {
+            let count = self.0.get_mut(&base).expect("a taken slug's base is taken");
+            *count += 1;
+            slug = format!("{base}-{count}");
+        }
+        self.0.insert(slug.clone(), 0);
         slug
     }
 }
@@ -700,6 +704,13 @@ mod tests {
         let slugs: Vec<_> = page.headings.iter().map(|heading| heading.slug.as_str()).collect();
         assert_eq!(slugs, ["open-cloud", "exit-codes", "crucible-docs", "exit-codes-1"]);
         assert_eq!(text(&page.lines[page.heading("exit-codes").unwrap().line]), "Exit codes");
+    }
+
+    #[test]
+    fn a_heading_never_takes_an_anchor_a_repeat_already_took() {
+        let page = render("# Foo\n\n## Foo\n\n## Foo-1\n\n## Foo\n", 80);
+        let slugs: Vec<_> = page.headings.iter().map(|heading| heading.slug.as_str()).collect();
+        assert_eq!(slugs, ["foo", "foo-1", "foo-1-1", "foo-2"]);
     }
 
     #[test]

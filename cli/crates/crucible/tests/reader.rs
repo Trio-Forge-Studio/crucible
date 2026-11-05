@@ -37,7 +37,7 @@ fn the_reader_searches_and_quits_in_a_real_terminal() {
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_crucible"));
     command.args(["docs", "lifecycle"]);
     command.env("TERM", "xterm-256color");
-    let mut child = pty.slave.spawn_command(command).unwrap();
+    let mut child = KillOnDrop(pty.slave.spawn_command(command).unwrap());
     drop(pty.slave);
     let screen = Arc::new(Mutex::new(vt100::Parser::new(ROWS.try_into().unwrap(), COLUMNS.try_into().unwrap(), 0)));
     let mut output = pty.master.try_clone_reader().unwrap();
@@ -45,13 +45,17 @@ fn the_reader_searches_and_quits_in_a_real_terminal() {
     let (parser, replies) = (screen.clone(), input.clone());
     std::thread::spawn(move || {
         let mut buffer = [0; 8192];
+        let mut unanswered = Vec::new();
         while let Ok(read @ 1..) = output.read(&mut buffer) {
             let bytes = &buffer[..read];
             parser.lock().unwrap().process(bytes);
+            unanswered.extend_from_slice(bytes);
             // ConPTY asks for the cursor position before it draws anything and waits for the answer.
-            if bytes.windows(4).any(|window| window == b"\x1b[6n") {
+            if unanswered.windows(4).any(|window| window == b"\x1b[6n") {
                 let _ = replies.lock().unwrap().write_all(b"\x1b[1;1R");
+                unanswered.clear();
             }
+            unanswered.drain(..unanswered.len().saturating_sub(3));
         }
     });
     let mut terminal = Terminal { screen, input: Box::new(SharedWriter(input)) };
@@ -69,7 +73,7 @@ fn the_reader_searches_and_quits_in_a_real_terminal() {
 
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
+        if let Some(status) = child.0.try_wait().unwrap() {
             break status;
         }
         assert!(Instant::now() < deadline, "crucible docs did not exit after q");
@@ -101,5 +105,13 @@ impl Write for SharedWriter {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.0.lock().unwrap().flush()
+    }
+}
+
+struct KillOnDrop(Box<dyn portable_pty::Child + Send + Sync>);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
     }
 }

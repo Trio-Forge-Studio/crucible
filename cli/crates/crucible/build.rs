@@ -1,3 +1,4 @@
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use std::path::Path;
 
 /// The reader picks the widest of these that fits the page, so the diagrams cost no Mermaid renderer in the binary.
@@ -42,15 +43,18 @@ fn main() {
 fn mermaid_fences(markdown: &str) -> Vec<String> {
     let mut fences = Vec::new();
     let mut open: Option<String> = None;
-    for line in markdown.lines() {
-        match open.as_mut() {
-            None if line == "```mermaid" => open = Some(String::new()),
-            None => {}
-            Some(_) if line == "```" => fences.extend(open.take()),
-            Some(source) => {
-                source.push_str(line);
-                source.push('\n');
+    for event in Parser::new_ext(markdown, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH) {
+        match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) if info.as_ref() == "mermaid" => {
+                open = Some(String::new());
             }
+            Event::Text(text) => {
+                if let Some(source) = open.as_mut() {
+                    source.push_str(&text);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => fences.extend(open.take()),
+            _ => {}
         }
     }
     fences

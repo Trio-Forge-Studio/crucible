@@ -220,6 +220,7 @@ impl Reader {
 
     fn palette_key(&mut self, key: KeyEvent) -> Effect {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
         let Overlay::Palette { query, selected, hits } = &mut self.overlay else { return Effect::None };
         match key.code {
             KeyCode::Esc => self.overlay = Overlay::None,
@@ -238,7 +239,7 @@ impl Reader {
                 *hits = self.index.search(query);
                 *selected = 0;
             }
-            KeyCode::Char(c) if !ctrl => {
+            KeyCode::Char(c) if !ctrl && !alt => {
                 query.push(c);
                 *hits = self.index.search(query);
                 *selected = 0;
@@ -395,6 +396,7 @@ impl Reader {
             self.forward.push(self.location);
             self.location = previous;
             self.focused_link = None;
+            self.scroll_to(previous.scroll);
         }
     }
 
@@ -403,6 +405,7 @@ impl Reader {
             self.back.push(self.location);
             self.location = next;
             self.focused_link = None;
+            self.scroll_to(next.scroll);
         }
     }
 
@@ -678,6 +681,29 @@ mod tests {
         assert_eq!(reader.location, before);
         reader.update(Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)));
         assert_eq!(reader.topic(), "oc");
+    }
+
+    #[test]
+    fn going_back_after_a_resize_keeps_the_page_on_screen() {
+        let mut reader = reader("diagnostics");
+        reader.update(Event::Resize(40, 20));
+        reader.update(key(KeyCode::End));
+        reader.update(ctrl('k'));
+        type_text(&mut reader, "boot");
+        reader.update(key(KeyCode::Enter));
+        reader.update(Event::Resize(200, 60));
+        reader.update(key(KeyCode::Backspace));
+        assert_eq!(reader.topic(), "diagnostics");
+        let max = reader.max_scroll();
+        assert_eq!(reader.location.scroll, max);
+    }
+
+    #[test]
+    fn alt_with_a_letter_does_not_type_into_the_palette() {
+        let mut reader = reader("lifecycle");
+        reader.update(ctrl('k'));
+        reader.update(Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT)));
+        assert!(matches!(&reader.overlay, Overlay::Palette { query, .. } if query.is_empty()));
     }
 
     #[test]

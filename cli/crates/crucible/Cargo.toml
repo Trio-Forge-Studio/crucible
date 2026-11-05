@@ -30,6 +30,7 @@ unicode-width = "0.2"
 
 [build-dependencies]
 mermaid-text = "0.58"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
