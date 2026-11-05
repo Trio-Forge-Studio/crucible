@@ -1,4 +1,5 @@
 mod declarations;
+mod entities;
 mod extract;
 mod facts;
 mod lower;

@@ -73,6 +73,12 @@ fn text_is_trimmed_and_joined_by_line_and_a_pragma_picks_the_factory() {
         "local text = h(\"frame\", nil, \"Coins & gems ! left over from the last delivery, which the formatter keeps on several lines because the text is longer than one line\")",
     );
     has(shapes, "local spaced = h(\"frame\", nil, \" a \")");
+    has(
+        shapes,
+        "local entities = h(\"frame\", {
+	Name = \"© &x41; &#X41; &bogus;\",
+}, \"© © A — … € &bogus; &\")",
+    );
     has(shapes, "local empty = h(Group)");
     has(shapes, "local grouped = h(Group, nil, count())");
 }
