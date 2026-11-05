@@ -1,3 +1,4 @@
+mod classes;
 mod declarations;
 mod extract;
 mod facts;

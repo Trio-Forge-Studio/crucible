@@ -541,6 +541,7 @@ name = "crucible-compiler"
 version = "0.3.0"
 dependencies = [
  "serde_json",
+ "toml 1.1.8+spec-1.1.0",
  "tsrs_ast",
  "tsrs_checker",
  "tsrs_compiler",
