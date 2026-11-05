@@ -1,0 +1,5 @@
+{
+	"name": "@trioforge/fixture",
+	"version": "0.0.0",
+	"types": "out/index.d.ts"
+}
