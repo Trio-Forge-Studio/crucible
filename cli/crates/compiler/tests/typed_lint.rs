@@ -135,5 +135,5 @@ export function aliasIndex(array: string[]) {
 }
 "#,
     );
-    assert_eq!(rules(&game), [(4, 22, 90034), (11, 22, 90034), (18, 22, 90034)]);
+    assert_eq!(rules(&game), [(3, 22, 90034), (10, 22, 90034), (17, 22, 90034)]);
 }
