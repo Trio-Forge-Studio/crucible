@@ -72,9 +72,10 @@ pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Facts, Vec<Diagnos
     Ok(extract::extract(checked, target))
 }
 
-/// The `outDir` that `tsconfig` sets, read without building its program. `None` when it sets none or cannot be read.
-pub fn out_dir(tsconfig: &Path) -> Option<PathBuf> {
-    program::out_dir(tsconfig).map(PathBuf::from)
+/// The `outDir` that `tsconfig` sets, read without building its program, or `None` when it sets none. Fails with the
+/// diagnostics when it, or a config it extends, cannot be read or parsed.
+pub fn out_dir(tsconfig: &Path) -> Result<Option<PathBuf>, Vec<Diagnostic>> {
+    program::out_dir(tsconfig).map(|dir| dir.map(PathBuf::from))
 }
 
 #[derive(Clone, Debug)]

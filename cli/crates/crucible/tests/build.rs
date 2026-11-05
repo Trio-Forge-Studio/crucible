@@ -456,7 +456,10 @@ fn usage_errors_exit_2_before_compiling() {
 #[test]
 fn a_missing_tsconfig_or_project_exits_1_naming_it() {
     for (manifest, named) in [
-        ("[places.start]\nproject = \"default.project.json\"\ntsconfig = \"nope.json\"\n", "nope.json"),
+        (
+            "[places.start]\nproject = \"default.project.json\"\ntsconfig = \"nope.json\"\n",
+            "crucible build: place start: nope.json cannot be read",
+        ),
         ("[places.start]\nproject = \"missing.project.json\"\n", "missing.project.json"),
     ] {
         let game = Game::template_layout();
@@ -464,10 +467,7 @@ fn a_missing_tsconfig_or_project_exits_1_naming_it() {
         let out = game.build(&[]);
         let stderr = text(&out.stderr);
         assert_eq!(code(&out), 1, "{stderr}");
-        assert!(
-            stderr.contains(named) && stderr.contains("crucible build: place start: the compile failed"),
-            "{stderr}"
-        );
+        assert!(stderr.contains(named) && stderr.contains("crucible build: place start: "), "{stderr}");
         assert!(out.stdout.is_empty() && !game.path("build").exists());
     }
 }
