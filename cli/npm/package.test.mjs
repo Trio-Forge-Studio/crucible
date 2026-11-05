@@ -263,7 +263,7 @@ function launchUpgradeRegistry() {
 		"@trioforge/compiler-types": join(root, "upgrade-compiler-types"),
 		[platformName]: join(root, "staged", `crucible-cli-${host}`),
 	};
-	for (const entry of ["package.json", "out", "transformer", "server", "client", "emit"]) {
+	for (const entry of ["package.json", "out"]) {
 		cpSync(join(runtimeDir, entry), join(sources["@trioforge/crucible"], entry), {
 			recursive: true,
 			filter: (source) => !source.endsWith(".tsbuildinfo"),

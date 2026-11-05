@@ -25,7 +25,6 @@ const game = path.join(run, "sample-game-out");
 const compile = (...args) =>
 	step("cargo", [
 		"run",
-		"--release",
 		"--quiet",
 		"--locked",
 		"--manifest-path",
