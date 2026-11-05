@@ -1,5 +1,3 @@
--- Loads compiled package output in Lune. Each module gets a `script` node and a `_G` that maps every script to
--- a TS table whose `import` resolves sibling paths, which is all the compiled package uses.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")

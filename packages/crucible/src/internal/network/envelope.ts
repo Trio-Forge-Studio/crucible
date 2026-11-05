@@ -99,8 +99,6 @@ function parse(packet: buffer): Header {
 
 /**
  * @internal
- * The highest non-nil argument position. The compiler lowers `select("#", ...args)` through `unpack`, which stops at a
- * nil hole, so this walks the keys instead. A trailing nil argument carries nothing and stays invisible to it.
  */
 export function argumentCount(args: readonly unknown[]): number {
 	let count = 0;

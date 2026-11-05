@@ -146,6 +146,7 @@ eq("empty LuaTuple return in try", select("#", exceptions.emptyTupleInTry()), 0)
 
 local classes = load("classes")
 list("classes", classes.build(), { "a:leaf+3+1", 2, "leaf", "static", "Leaf" })
+list("noncolliding overrides and field-only names", classes.neighbor(), { "neighbor", "neighbor static", 9, 7, 0 })
 eq("abstract has no new", classes.Base.new, nil)
 eq("inherited static", classes.Leaf.make, classes.Base.make)
 

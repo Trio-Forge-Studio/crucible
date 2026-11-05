@@ -49,3 +49,18 @@ export function build() {
 	const leaf = new Leaf("a", 2);
 	return [leaf.describe(), leaf.end(), Leaf.label, Leaf.make(), tostring(leaf)] as const;
 }
+
+export class Neighbor extends Leaf {
+	override describe() {
+		return "neighbor";
+	}
+	static override make() {
+		return "neighbor static";
+	}
+	static same = 7;
+	same = 9;
+}
+export function neighbor() {
+	const value = new Neighbor("n", 0);
+	return [value.describe(), Neighbor.make(), value.same, Neighbor.same, value.end()] as const;
+}

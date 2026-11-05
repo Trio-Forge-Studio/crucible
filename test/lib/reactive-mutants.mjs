@@ -1,6 +1,3 @@
-// Mutation campaign for the reactive core and core edits E1 and E2. Each mutant rewrites TypeScript source in a scratch
-// copy, rebuilds the package with Crucible compiler, and runs the Lune specs named for the mutant's rules. It is killed only when
-// one of them fails. Run from the repository root: node test/lib/reactive-mutants.mjs [first index]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
