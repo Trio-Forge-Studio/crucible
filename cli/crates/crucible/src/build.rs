@@ -85,7 +85,7 @@ pub fn build(
             selected.len()
         )));
     }
-    refuse_shared_out_dirs(root, manifest)?;
+    refuse_declared_out_dir_overlaps(root, manifest)?;
     write(root, &compile_all(root, &selected)?)?;
     let mut built = Vec::new();
     for (name, place) in selected {
@@ -130,19 +130,17 @@ struct Output<'m> {
 
 impl<'m> Output<'m> {
     fn new(place: &'m str, dir: PathBuf) -> Self {
-        Self { place, key: folder_key(&dir), dir }
+        Self { place, key: case_folded_canonical(&dir), dir }
     }
 }
 
-// A build deletes the modules it no longer compiles, so a place that shares another's outDir would delete that
-// place's modules, even when `--place` leaves the other place out of the build.
-fn refuse_shared_out_dirs(root: &Path, manifest: &Manifest) -> Result<(), Error> {
+fn refuse_declared_out_dir_overlaps(root: &Path, manifest: &Manifest) -> Result<(), Error> {
     let (mut outputs, mut configs) = (Vec::new(), Vec::new());
     for (name, place) in &manifest.places {
         let tsconfig = root.join(&place.tsconfig);
         if let Some(dir) = crucible_compiler::out_dir(&tsconfig) {
             outputs.push(Output::new(name, dir));
-            configs.push(folder_key(&tsconfig));
+            configs.push(case_folded_canonical(&tsconfig));
         }
     }
     refuse_overlaps(root, &outputs, |a, b| configs[a] == configs[b])
@@ -173,8 +171,7 @@ fn refuse_overlaps(root: &Path, outputs: &[Output<'_>], same_code: impl Fn(usize
     Ok(())
 }
 
-// Case folds on every platform, so a crucible.toml that is safe on Linux is also safe where file names ignore case.
-fn folder_key(path: &Path) -> PathBuf {
+fn case_folded_canonical(path: &Path) -> PathBuf {
     let (mut existing, mut missing) = (path, Vec::new());
     let resolved = loop {
         if let Ok(resolved) = existing.canonicalize() {
@@ -198,7 +195,7 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
     let mut written: Vec<PathBuf> = Vec::new();
     for shared in compiles {
         let out = shared.compiled.out_dir.as_path();
-        if !written.contains(&folder_key(out)) {
+        if !written.contains(&case_folded_canonical(out)) {
             let changes =
                 crucible_compiler::write(out, &shared.compiled.modules).map_err(|error| failed(out, error))?;
             eprintln!(
@@ -207,7 +204,7 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
                 shared.compiled.modules.len(),
                 shown(root, out)
             );
-            written.push(folder_key(out));
+            written.push(case_folded_canonical(out));
         }
         let include = root.join(&shared.place.include);
         crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;

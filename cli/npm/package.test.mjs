@@ -209,9 +209,6 @@ const OLD_TEMPLATE = {
 	agents: (text) => `${text.trimEnd()}\n\nThe old version had this line.\n`,
 };
 
-// The next version reuses this binary, so its shim reports the next version. With
-// CRUCIBLE_TEST_OLD_TEMPLATE set, it rewrites the old template it receives to stand in
-// for an older release whose template and docs differed. Each snapshot part holds the whole rendered file.
 const NEXT_VERSION_SHIM = `#!/usr/bin/env node
 const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
@@ -426,16 +423,15 @@ test(
 	},
 );
 
-// The last release whose games build with roblox-ts. Its binary installs the upgrade without knowing the new toolchain.
-const ROBLOX_TS_RELEASE = "0.3.0";
+const LAST_ROBLOX_TS_RELEASE = "0.3.0";
 
 test(
-	`upgrade moves a game made by ${ROBLOX_TS_RELEASE} off roblox-ts, and its check passes`,
+	`upgrade moves a game made by ${LAST_ROBLOX_TS_RELEASE} off roblox-ts, and its check passes`,
 	{ skip: !supported && `no package for ${host}` },
 	async () => {
 		const setup = await startUpgradeRegistry();
 		const game = join(root, "roblox-ts-game");
-		const cli = `@trioforge/crucible-cli@${ROBLOX_TS_RELEASE}`;
+		const cli = `@trioforge/crucible-cli@${LAST_ROBLOX_TS_RELEASE}`;
 		const created = run("npx", ["--yes", cli, "create", "roblox-ts-game", game, "--no-install"], root);
 		assert.equal(created.status, 0, created.stderr);
 		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
@@ -447,7 +443,7 @@ test(
 		assert.equal(upgraded.status, 0, `${upgraded.stdout}\n${upgraded.stderr}`);
 		assert.ok(
 			upgraded.stdout.startsWith(
-				`Upgraded crucible and @trioforge/crucible from ${ROBLOX_TS_RELEASE} to ${setup.next}.\n`,
+				`Upgraded crucible and @trioforge/crucible from ${LAST_ROBLOX_TS_RELEASE} to ${setup.next}.\n`,
 			),
 			upgraded.stdout,
 		);

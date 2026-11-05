@@ -31,7 +31,6 @@ const RUNTIME: &str = "@trioforge/crucible";
 const COMPILER_TYPES: &str = "@trioforge/compiler-types";
 const RELEASED_WITH_CLI: [&str; 3] = [CLI, RUNTIME, COMPILER_TYPES];
 const GROUPS: [&str; 2] = ["dependencies", "devDependencies"];
-// A game that `crucible create` made before the compiler toolchain lists these to build with roblox-ts.
 const ROBLOX_TS_TOOLCHAIN: [&str; 3] = ["roblox-ts", "typescript", "@rbxts/compiler-types"];
 const RBXTSC_HEADER: &[u8] = b"-- Compiled with roblox-ts";
 
@@ -392,7 +391,7 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<String
         .map(|(topic, _)| topic.as_str())
         .collect();
     let manager = detect_manager(root, &std::env::var("npm_config_user_agent").unwrap_or_default());
-    let migration = migrate(root, &to, manager);
+    let migration = move_off_roblox_ts(root, &to, manager);
 
     let mut report = if *from == to {
         format!("Reinstalled crucible and {RUNTIME} at {to}.\n")
@@ -613,7 +612,7 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
             let Some(spec) = expected.get_mut(group).and_then(|packages| packages.get_mut(package)) else { continue };
             let Some(old) = spec.as_str() else { continue };
             for entry in entries(&result, package, old).into_iter().rev() {
-                result.replace_range(entry.end - quoted(old).len()..entry.end, &quoted(version));
+                result.replace_range(entry.value, &quoted(version));
             }
             *spec = version.into();
         }
@@ -630,8 +629,12 @@ fn quoted(text: &str) -> String {
     serde_json::to_string(text).expect("strings serialize")
 }
 
-/// Every `"key": "value"` in the text, from the key's opening quote to the value's closing quote.
-fn entries(text: &str, key: &str, value: &str) -> Vec<Range<usize>> {
+struct Entry {
+    start: usize,
+    value: Range<usize>,
+}
+
+fn entries(text: &str, key: &str, value: &str) -> Vec<Entry> {
     let (key, value) = (quoted(key), quoted(value));
     let mut found = Vec::new();
     let mut from = 0;
@@ -641,7 +644,7 @@ fn entries(text: &str, key: &str, value: &str) -> Vec<Range<usize>> {
         from = match tail {
             Some(tail) => {
                 let end = text.len() - tail.len() + value.len();
-                found.push(start..end);
+                found.push(Entry { start, value: end - value.len()..end });
                 end
             }
             None => start + key.len(),
@@ -656,8 +659,7 @@ struct Migration {
     left: Vec<String>,
 }
 
-// The old binary installed this version without knowing its toolchain, so this binary moves the game onto it.
-fn migrate(root: &Path, to: &Version, manager: Manager) -> Migration {
+fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration {
     let mut migration = Migration::default();
     move_toolchain(root, to, manager, &mut migration);
     let places = crate::manifest::Manifest::read(root).ok().flatten().unwrap_or_default().places;
@@ -715,7 +717,6 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
     }
 }
 
-// Edits the entries in place, like `bump`, and gives up when the result does not parse to the intended manifest.
 fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], added: Option<&str>) -> Option<String> {
     let mut expected = manifest.clone();
     let mut result = text.to_owned();
@@ -736,25 +737,22 @@ fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], ad
         let [cli] = found.as_slice() else { return None };
         let separator = &result[result[..cli.start].trim_end().len()..cli.start];
         let entry = format!(",{separator}{}: {}", quoted(COMPILER_TYPES), quoted(version));
-        result.insert_str(cli.end, &entry);
+        result.insert_str(cli.value.end, &entry);
         expected[group][COMPILER_TYPES] = version.into();
     }
     (serde_json::from_str::<serde_json::Value>(&result).ok()? == expected).then_some(result)
 }
 
-// Takes the comma that separates the entry from the next one, or from the previous one when it is last.
-fn remove_entry(text: &mut String, entry: Range<usize>) {
-    let before = text[..entry.start].trim_end().len();
-    let rest = text[entry.end..].trim_start().strip_prefix(',').map(str::len);
+fn remove_entry(text: &mut String, entry: Entry) {
+    let (before, end) = (text[..entry.start].trim_end().len(), entry.value.end);
+    let rest = text[end..].trim_start().strip_prefix(',').map(str::len);
     match rest {
         Some(rest) => text.replace_range(before..text.len() - rest, ""),
-        None if text[..before].ends_with(',') => text.replace_range(before - 1..entry.end, ""),
-        None => text.replace_range(before..entry.end, ""),
+        None if text[..before].ends_with(',') => text.replace_range(before - 1..end, ""),
+        None => text.replace_range(before..end, ""),
     }
 }
 
-// rbxtsc's output lacks the compiler's header, so `crucible build` never deletes it, and Rojo would keep serving
-// modules whose sources are gone.
 fn clear_rbxtsc_output(root: &Path, tsconfig: &Path, migration: &mut Migration) {
     let Some(out) = crucible_compiler::out_dir(&root.join(tsconfig)) else { return };
     let shown = out.strip_prefix(root).unwrap_or(&out).to_string_lossy().replace('\\', "/");
@@ -795,10 +793,8 @@ fn remove_rbxtsc_modules(dir: &Path) -> io::Result<usize> {
 }
 
 type CompilerOptions = serde_json::Map<String, serde_json::Value>;
-type Applies = fn(&CompilerOptions, bool) -> bool;
+type Applies = fn(&CompilerOptions, extends_nothing: bool) -> bool;
 
-// The TypeScript 7 table in design/compiler.md, plus the skipLibCheck that the table assumes. A tsconfig that extends
-// another can inherit a setting, so one that is missing counts only in a tsconfig that extends nothing.
 const TYPESCRIPT_7: [(Applies, &str); 8] = [
     (
         |options, _| {
@@ -814,18 +810,18 @@ const TYPESCRIPT_7: [(Applies, &str); 8] = [
     (|options, _| options.contains_key("downlevelIteration"), r#"Remove "downlevelIteration"."#),
     (|options, _| options.contains_key("typeRoots"), r#"Remove "typeRoots"."#),
     (
-        |options, whole| match options.get("types").and_then(serde_json::Value::as_array) {
+        |options, extends_nothing| match options.get("types").and_then(serde_json::Value::as_array) {
             Some(types) => !types.iter().any(|name| name == "@trioforge/compiler-types"),
-            None => whole,
+            None => extends_nothing,
         },
         r#"Set "types" to ["@trioforge/compiler-types", "@rbxts/types"], and name any other type package in full."#,
     ),
     (
-        |options, whole| whole && !options.contains_key("rootDir"),
+        |options, extends_nothing| extends_nothing && !options.contains_key("rootDir"),
         r#"Set "rootDir" to the source folder, such as "src"."#,
     ),
     (
-        |options, whole| options.get("skipLibCheck").map_or(whole, |value| *value != true),
+        |options, extends_nothing| options.get("skipLibCheck").map_or(extends_nothing, |value| *value != true),
         r#"Set "skipLibCheck" to true."#,
     ),
     (
@@ -836,9 +832,15 @@ const TYPESCRIPT_7: [(Applies, &str); 8] = [
 
 fn typescript_7_changes(text: &str) -> Option<Vec<&'static str>> {
     let config = jsonc_parser::parse_to_serde_value(text, &Default::default()).ok()??;
-    let whole = config.get("extends").is_none();
+    let extends_nothing = config.get("extends").is_none();
     let options = config.get("compilerOptions").and_then(serde_json::Value::as_object).cloned().unwrap_or_default();
-    Some(TYPESCRIPT_7.iter().filter(|(applies, _)| applies(&options, whole)).map(|&(_, change)| change).collect())
+    Some(
+        TYPESCRIPT_7
+            .iter()
+            .filter(|(applies, _)| applies(&options, extends_nothing))
+            .map(|&(_, change)| change)
+            .collect(),
+    )
 }
 
 fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
