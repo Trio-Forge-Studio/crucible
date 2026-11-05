@@ -424,10 +424,11 @@ test(
 );
 
 const LAST_ROBLOX_TS_RELEASE = "0.3.0";
+const LAST_ROBLOX_TS_HOSTS = ["linux-x64", "win32-x64"];
 
 test(
 	`upgrade moves a game made by ${LAST_ROBLOX_TS_RELEASE} off roblox-ts, and its check passes`,
-	{ skip: !supported && `no package for ${host}` },
+	{ skip: !LAST_ROBLOX_TS_HOSTS.includes(host) && `${LAST_ROBLOX_TS_RELEASE} has no package for ${host}` },
 	async () => {
 		const setup = await startUpgradeRegistry();
 		const game = join(root, "roblox-ts-game");
