@@ -879,7 +879,10 @@ mod tests {
     fn bump_edits_only_the_crucible_versions() {
         let text = "{\n\t\"name\": \"crucible-game\",\n\t\"scripts\": { \"@trioforge/crucible-cli\": \"^0.1.0\" },\n\t\"dependencies\": {\n\t\t\"@trioforge/crucible\": \"0.1.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"@trioforge/crucible-cli\" :  \"^0.1.0\",\n\t\t\"@trioforge/compiler-types\": \"0.1.0\",\n\t\t\"@rbxts/types\": \"1.0.959\"\n\t}\n}\n";
         let bumped = bump(text, "0.2.0");
-        assert!(bumped.is_err(), "an ambiguous script entry is not rewritten silently");
+        assert!(
+            matches!(bumped, Err(Error::Failed(message)) if message.contains(COMPILER_TYPES)),
+            "an ambiguous script entry is not rewritten silently, and the message names every package to set"
+        );
         let text = text.replace("{ \"@trioforge/crucible-cli\": \"^0.1.0\" }", "{}");
         let bumped = bump(&text, "0.2.0").unwrap();
         assert_eq!(bumped, text.replace("\"0.1.0\"", "\"0.2.0\"").replace("\"^0.1.0\"", "\"0.2.0\""));
@@ -902,12 +905,15 @@ mod tests {
             "latest",
             "next",
         ] {
-            let manifest =
-                serde_json::json!({ "dependencies": { RUNTIME: "0.1.0" }, "devDependencies": { CLI: spec } });
-            assert!(
-                matches!(read_pins(&manifest), Err(Error::Usage(message)) if message.contains(spec)),
-                "{spec} is refused with a usage error naming it"
-            );
+            for package in [CLI, COMPILER_TYPES] {
+                let mut manifest =
+                    serde_json::json!({ "dependencies": { RUNTIME: "0.1.0" }, "devDependencies": { CLI: "0.1.0" } });
+                manifest["devDependencies"][package] = spec.into();
+                assert!(
+                    matches!(read_pins(&manifest), Err(Error::Usage(message)) if message.contains(spec) && message.contains(package)),
+                    "{package} {spec} is refused with a usage error naming it"
+                );
+            }
         }
         let manifest =
             serde_json::json!({ "dependencies": { RUNTIME: "~0.1.0" }, "devDependencies": { CLI: "^0.1.0" } });
