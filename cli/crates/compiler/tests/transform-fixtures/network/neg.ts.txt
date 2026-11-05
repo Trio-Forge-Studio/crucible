@@ -1,0 +1,36 @@
+import { toServer, toClient, askServer, receive, receiveV1, ClientReady, ServerNetwork, ClientNetwork, ToServer } from "./net";
+declare const player: Player;
+declare const door: Model;
+const Analytics = toServer<"Upgrades" | "SkinShop">("Analytics.ScreenOpened");
+const Codes = toClient<"Ok" | "Invalid" | "Expired">("Codes.Result");
+const Num = toClient<1 | 2 | 3>("X.Num");
+const Pick = askServer<"a" | "b", number>("X.Pick");
+const DoorToggle = toServer<{ readonly door: Model; readonly open: boolean }>("Doors.Toggle");
+const StandUp = toServer<undefined>("Seating.Stand");
+const Prof = askServer<{ readonly userId: number }, { name: string } | undefined>("PlayerCard.Profile");
+// --- K1 negatives (line 12 on)
+ClientNetwork.send(Analytics, "Nope");                                   // N1  L12
+ServerNetwork.send(player, Num, 4);                                      // N2  L13
+ClientNetwork.ask(Pick, "c");                                            // N3  L14
+ClientNetwork.send(Codes, "Ok");                                         // N4  L15 wrong direction
+ServerNetwork.send(player, DoorToggle as never as typeof Analytics, "Upgrades"); // N4b L16 wrong direction: the cast still yields a ToServer token
+ClientNetwork.send(DoorToggle, { door, open: 1 });                       // N5  L17
+ClientNetwork.send(StandUp, undefined);                                  // N6  L18 no-payload message takes no argument
+declare const wide: ToServer<{ x: number | string }>;
+const narrow: ToServer<{ x: number }> = wide;                            // N7  L20 invariance
+// --- K16: same wrong callbacks under v2 (single signature) and v1 (overloads)
+export class V2 {
+	readonly a = receive(Prof, (p, { userId }) => { print(userId); });   // N8  L23 request callback with no return
+	readonly b = receive(ClientReady, (p) => 5);                         // N9  L24 ClientReady non-function return
+	readonly c = receive(DoorToggle, (p, payload: string) => {});         // N10 L25 wrong payload annotation
+	readonly d = receive(Codes, (p: Player, r) => {});                    // N11 L26 client callback given a player
+	readonly e = receive(Pick, (p, which) => "one");                     // N12 L27 wrong response type
+	readonly f = receive(5 as unknown as number, () => {});               // N13 L28 not a target
+}
+export class V1 {
+	readonly a = receiveV1(Prof, (p, { userId }) => { print(userId); }); // L31
+	readonly b = receiveV1(ClientReady, (p) => 5);                       // L32
+	readonly c = receiveV1(DoorToggle, (p, payload: string) => {});       // L33
+	readonly d = receiveV1(Codes, (p: Player, r) => {});                  // L34
+	readonly e = receiveV1(Pick, (p, which) => "one");                   // L35
+}

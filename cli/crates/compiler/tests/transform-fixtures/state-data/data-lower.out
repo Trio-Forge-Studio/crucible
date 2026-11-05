@@ -1,0 +1,216 @@
+FD origin/master 4cc913897; TypeScript 5.5.3; FD's compiler options, baseUrl at FD's extracted src.
+TypeScript diagnostics in cases/: 0
+TypeScript diagnostics inside FD's own files reached by the imports (not this probe's): 9
+  fd/src/core/CameraPath/shared/camera-path.ts TS2307 Cannot find module '@trioforge/spline' or its corresponding type declarations.
+  fd/src/core/Commands/server/command.ts TS2307 Cannot find module '@trioforge/brigadier' or its corresponding type declarations.
+  fd/src/core/Commands/server/command.ts TS7006 Parameter 'context' implicitly has an 'any' type.
+  fd/src/core/Commands/server/command.ts TS18046 'err' is of type 'unknown'.
+  (+5 more)
+
+ok  cases/data.ts:24 FD.Profiles.Explicit profileStore<PlayerData>: lowers
+      99 nodes: { analytics: { codesRedeemed: number, lastSeen: undefined | number, playTime: number, sessionJobs: number, timesJoined: number }, career: { firstJoined: number, houseJobs: { [string]: number }, jobs: { coins: number, difficulty: undefined | string, endedAt: number, houseId: string, id: string, items: { [string]: number }, partyUserIds: number[], seconds: number, specialIds: string[], xp: number }[] }, currency: number, dailyReward: { claims: number, lastClaimDay: number, streak: number }, entrance: { jobText: string, message: boolean, music: boolean, musicId: number, warehouseText: string }, equippedNameColor: string, equippedSkin: string, equippedTitle: string, firstPurchaseLogged: boolean, ftueStep: number, mastery: { [string]: { level: number, tasks: number } }, ownedSkins: { [string]: boolean }, pendingRewards: { currency: number, xp: number }, redeemedCodes: { [string]: number }, referral: { referredBy: number, rewarded: number }, settings: { buttonPrompts: "Auto" | "PlayStation" | "Xbox", debugInfo: boolean, freeCursor: "Hold" | "Toggle", graphics: "Auto" | "High" | "Low" | "Medium", keybinds: { Carry: undefined | string, Interact: undefined | string, Throw: undefined | string }, reduceBlur: boolean, vibration: boolean, volume: { Game: number, Interface: number, Music: number } }, stats: { currencyEarned: number, itemsBroken: number, itemsDelivered: number, jobsCompleted: number, specialJobsCompleted: number }, upgrades: { [string]: number }, xp: number }
+ok  cases/data.ts:25 Analytics.Played replicatedPerPlayer<PlayedAnchor | undefined>: lowers
+      5 nodes: undefined | { savedSeconds: number, sessionStartedAt: number }
+ok  cases/data.ts:26 Probe.Keybinds profileMessage<{ readonly keybinds: Keybinds }>: lowers
+      11 nodes: { keybinds: { Carry: undefined | string, Interact: undefined | string, Throw: undefined | string } }
+ok  cases/data.ts:40 FD.CommandLog dataStore<{ readonly entries: readonly MigratedEntry[] }>: lowers
+      19 nodes: { entries: { At: number, Id: undefined | string, Name: string, Ok: boolean, Place: string, TargetUserId: undefined | number, TargetUserIds: undefined | number[], Text: string, UserId: number }[] }
+ok  cases/data.ts:41 FD.Party dataStore<{ readonly key: string }>: lowers
+      2 nodes: { key: string }
+ok  cases/data.ts:42 Game.Counters dataStore<Readonly<Record<string, number>>>: lowers
+      2 nodes: { [string]: number }
+ok  cases/data.ts:45 Admin.Edit profileMessage<{
+	readonly Command: string;
+	readonly Values: readonly (string | number | boolean)[];
+	readonly By: string;
+}>: lowers
+      8 nodes: { By: string, Command: string, Values: boolean | number | string[] }
+ok  cases/data.ts:56 GlobalEvent config<GlobalEvent>: lowers
+      7 nodes: { endsAt: number, multipliers: { coins: number, xp: number }, name: string, startsAt: number }
+ok  cases/data.ts:57 Shop.WelcomeDiscount playerConfig<number>: lowers
+      1 nodes: number
+ok  cases/data.ts:58 Game.Mode config<"Walk" | "Drive">: lowers
+      3 nodes: "Drive" | "Walk"
+ok  cases/data.ts:60 Game.Phases profileStore<{ readonly phase: Phase; readonly note?: { readonly text: string } }>: lowers
+      11 nodes: { note: undefined | { text: string }, phase: { kind: "Idle", ...{  } } | { kind: "Running", ...{ startedAt: number } } }
+ok  cases/data.ts:63 Probe.Pose replicated<{ readonly at: Vector3 }>: lowers
+      2 nodes: { at: vector3 }
+ok  cases/data.ts:66 N.1.Vector3 profileStore<{ readonly at: Vector3 }>: rejected
+      CRU019 N.1.Vector3 value.at: Vector3 cannot be saved: a save holds JSON; store its components
+ok  cases/data.ts:67 N.2.Color3 profileStore<{ readonly tint: Color3 }>: rejected
+      CRU019 N.2.Color3 value.tint: Color3 cannot be saved: a save holds JSON; store its components
+ok  cases/data.ts:68 N.3.CFrame dataStore<{ readonly spawn: CFrame }>: rejected
+      CRU019 N.3.CFrame value.spawn: CFrame cannot be saved: a save holds JSON; store its components
+ok  cases/data.ts:69 N.4.Instance profileStore<{ readonly owner: Player }>: rejected
+      CRU019 N.4.Instance value.owner: Instances cannot be stored or replicated state; replicate a stable id
+ok  cases/data.ts:70 N.5.Unknown profileStore<{ readonly blob: unknown }>: rejected
+      CRU019 N.5.Unknown value.blob: unknown cannot be stored or replicated state; give the value a declared type
+ok  cases/data.ts:71 N.6.NumericKeys profileStore<{ readonly slots: Record<number, string> }>: rejected
+      CRU019 N.6.NumericKeys value.slots: numeric keys cannot be replicated; key the record by a string
+ok  cases/data.ts:72 N.7.ScalarRoot dataStore<string>: rejected
+      CRU019 N.7.ScalarRoot value: a store's value is a record; wrap a string in an object
+ok  cases/data.ts:73 N.8.ArrayRoot dataStore<readonly string[]>: rejected
+      CRU019 N.8.ArrayRoot value: a store's value is a record; wrap a string[] in an object
+ok  cases/data.ts:74 N.9.FdAdminEdit profileMessage<AdminEdit>: rejected
+      CRU019 N.9.FdAdminEdit value.Values: tuples are fixed length, with no optional or rest elements
+      CRU019 N.9.FdAdminEdit value: two union members of one runtime kind (table) are ambiguous
+ok  cases/data.ts:75 N.10.SerioBrand dataStore<{ readonly entries: readonly SavedEntry[] }>: rejected
+      CRU019 N.10.SerioBrand value.entries[].TargetUserIds[]: only a Crucible width brand may intersect number; this brand is foreign
+ok  cases/data.ts:79 N.11.Recursive profileStore<Tree>: rejected
+      CRU019 N.11.Recursive value.children[]: a recursive type cannot be replicated
+ok  cases/data.ts:80 N.12.NoDiscriminant config<{ readonly a: number } | { readonly b: string }>: rejected
+      CRU019 N.12.NoDiscriminant value: union members have no discriminant; give each a distinct literal property
+ok  cases/data.ts:81 N.13.UndefinedElements profileStore<{ readonly ids: readonly (string | undefined)[] }>: rejected
+      CRU019 N.13.UndefinedElements value.ids[]: array elements cannot admit undefined
+ok  cases/handles.ts:20 FD.Players profileStore<inferred Fields>: lowers
+      persist 99 nodes; serverOnly: [{ "analytics" }, { "redeemedCodes" }]; replica 89 nodes; 18 view declarations
+ok  cases/handles.ts:25 Probe.FdClientType replicatedPerPlayer<ClientProfile<typeof PlayerData>>: lowers
+ok  cases/handles.ts:29 FD.Players.Plus profileStore<inferred Omit<PlayerData, "purchaseIds" | "redeemedCodes" | "analytic>: lowers
+      persist 100 nodes; serverOnly: [{ "analytics" }, { "redeemedCodes" }]; replica 90 nodes; 19 view declarations
+ok  cases/handles.ts:31 FD.Players.Secret profileStore<inferred Omit<PlayerData, "purchaseIds" | "redeemedCodes" | "analytic>: lowers
+      persist 100 nodes; serverOnly: [{ "analytics" }, { "redeemedCodes" }, { "secret" }]; replica 89 nodes; 18 view declarations
+ok  cases/handles.ts:35 Game.Hidden profileStore<inferred { coins: number; secret: { a: ServerOnly<number>; b: { c: Se>: lowers
+      persist 9 nodes; serverOnly: [{ "mixed", "hidden" }, { "secret", "a" }, { "secret", "b", "c" }]; replica 4 nodes; 3 view declarations
+ok  cases/handles.ts:42 Probe.HiddenClientType replicatedPerPlayer<ClientProfile<typeof Hidden>>: lowers
+ok  cases/handles.ts:44 Game.AllHidden profileStore<inferred { a: ServerOnly<number>; b: { c: ServerOnly<number>; }; }>: lowers
+      persist 4 nodes; serverOnly: [{ "a" }, { "b", "c" }]; replica 1 nodes; 1 view declarations
+ok  cases/handles.ts:48 Game.Collide profileStore<inferred { n: { a: { b: number; }; }; }>: lowers
+      persist 4 nodes; serverOnly: []; replica 4 nodes; 2 view declarations
+ok  cases/handles.ts:49 Game.Collide.Plus profileStore<inferred { n: { a: { b: number; }; "a.b": number; }; }>: lowers
+      persist 5 nodes; serverOnly: []; replica 5 nodes; 2 view declarations
+ok  cases/handles.ts:50 Game.Collide.Marks profileStore<inferred { coins: number; n: { a: { b: ServerOnly<number>; }; "a.b": >: lowers
+      persist 7 nodes; serverOnly: [{ "n", "a", "b" }, { "n", "a.b" }]; replica 4 nodes; 3 view declarations
+ok  cases/handles.ts:54 Game.Markers profileStore<inferred { m: Record<string, { x: number; }>; o: { "*": { x: number; >: lowers
+      persist 7 nodes; serverOnly: []; replica 7 nodes; 3 view declarations
+ok  cases/handles.ts:58 Game.DottedSecret profileStore<inferred { coins: number; "a.b": ServerOnly<number>; }>: lowers
+      persist 3 nodes; serverOnly: [{ "a.b" }]; replica 2 nodes; 2 view declarations
+ok  cases/handles.ts:66 Game.Inline profileStore<inferred { currency: number; upgrades: Record<string, number>; questP>: lowers
+      persist 21 nodes; serverOnly: [{ "analytics" }, { "purchaseIds" }]; replica 14 nodes; 6 view declarations
+      { analytics (serverOnly): { lastSeen: undefined | number, timesJoined: number }, currency: number, purchaseIds (serverOnly): string[], questProgress: number[], settings: { graphics: "Auto" | "Low", vibration: boolean }, title: undefined | string, upgrades: { [string]: number } }
+ok  cases/handles.ts:80 N.14.ReservedRoot profileStore<inferred { coins: number; update: number; }>: rejected
+      CRU026 N.14.ReservedRoot value.update: `update` is a handle method name (set, update, insert, remove); rename the field
+ok  cases/handles.ts:82 N.15.ReservedNested profileStore<inferred { settings: { remove: boolean; }; }>: rejected
+      CRU026 N.15.ReservedNested value.settings.remove: `remove` is a handle method name (set, update, insert, remove); rename the field
+ok  cases/handles.ts:84 N.16.ReservedInElement profileStore<inferred { log: { set: number; }[]; }>: rejected
+      CRU026 N.16.ReservedInElement value.log[].set: `set` is a handle method name (set, update, insert, remove); rename the field
+ok  cases/handles.ts:85 N.17.UntypedArray profileStore<inferred { quests: never[]; }>: rejected
+      CRU019 N.17.UntypedArray value.quests[]: an empty array has no element type; annotate it: [] as string[]
+ok  cases/handles.ts:86 N.18.UntypedRecord profileStore<inferred { upgrades: {}; }>: rejected
+      CRU019 N.18.UntypedRecord value.upgrades: an empty object type accepts anything; annotate an empty template table: {} as Record<string, number>
+ok  cases/handles.ts:87 N.19.ServerOnlyElement profileStore<inferred { jobs: ServerOnly<number>[]; }>: rejected
+      CRU019 N.19.ServerOnlyElement value.jobs[]: serverOnly marks a field on an object path from the template root, never an array element, a map value or a union member
+ok  cases/handles.ts:88 N.20.ServerOnlyTwice profileStore<inferred { a: ServerOnly<{ b: ServerOnly<number>; }>; }>: rejected
+      CRU019 N.20.ServerOnlyTwice value.a.b: this field is already inside a serverOnly field
+ok  cases/handles.ts:89 N.21.ServerOnlyRecord dataStore<{ readonly key: ServerOnly<string> }>: rejected
+      CRU019 N.21.ServerOnlyRecord value.key: serverOnly marks a profileStore template field; it means nothing here
+ok  cases/handles.ts:90 N.22.ServerOnlyReplicated replicated<{ readonly x: ServerOnly<number> }>: rejected
+      CRU019 N.22.ServerOnlyReplicated value.x: serverOnly marks a profileStore template field; it means nothing here
+ok  cases/handles.ts:91 N.23.AlwaysUndefined profileStore<inferred { note: undefined; }>: rejected
+      CRU019 N.23.AlwaysUndefined value.note: a position that is always undefined; annotate it: undefined as string | undefined
+ok  cases/handles.ts:92 N.24.ServerOnlyMapValue profileStore<inferred { m: Record<string, ServerOnly<number>>; }>: rejected
+      CRU019 N.24.ServerOnlyMapValue value.m[key]: serverOnly marks a field on an object path from the template root, never an array element, a map value or a union member
+ok  cases/handles.ts:94 N.25.ViewNameDotted profileStore<inferred { coins: number; "a.b": number; }>: rejected
+      CRU018 N.25.ViewNameDotted value["a.b"]: a field the owner's client receives is named by one declaration segment, [A-Za-z][A-Za-z0-9_]*; rename it or mark it serverOnly
+ok  cases/handles.ts:95 N.26.ViewNameLong.Abcdefghijklmnopqrstuv profileStore<inferred { specialJobsCompleted: number; }>: rejected
+      CRU018 N.26.ViewNameLong.Abcdefghijklmnopqrstuv value.specialJobsCompleted: its view name Crucible.Data.N.26.ViewNameLong.Abcdefghijklmnopqrstuv.specialJobsCompleted is 75 bytes, over 64; this store allows field names of at most 9 bytes; rename the field, shorten the store name, or mark it serverOnly
+
+ok  FD.Players replica (persist minus serverOnly and emptied objects) equals ClientProfile<typeof PlayerData> lowered in state position
+ok  Game.Hidden replica (persist minus serverOnly and emptied objects) equals ClientProfile<typeof Hidden> lowered in state position
+ok  Game.Hidden: `secret` (every descendant serverOnly) has no declaration and no path; fields [coins, mixed]; paths { "coins" } { "mixed" } { "mixed", "shown" }
+ok  Game.AllHidden: no public field, so 0 field declarations; only Crucible.Live.Game.AllHidden
+ok  FD.Players declares 18 replicated declarations of reactive's 256 per realm: Crucible.Live.FD.Players and 17 field views; longest Crucible.Data.FD.Players.firstPurchaseLogged (44 of 64 bytes)
+ok  guard/data-replicated-fields.luau lists exactly FD.Players' 63 replicated paths, as segment arrays
+ok  guard: one unmarked field adds [{ "mood" }], so the spec fails; one serverOnly field adds [], so it passes
+ok  collision: adding literal n["a.b"] beside n.a.b leaves v3's dotted set unchanged (n, n.a, n.a.b) but adds { "n", "a.b" } as segments
+ok  serverOnly paths keep the two apart too: { "n", "a", "b" } and { "n", "a.b" }; as dotted strings both are "n.a.b"
+ok  markers: a map value is "*", a literal "*" key is "\*": { "m" } { "m", "*", "x" } { "o" } { "o", "\\*" } { "o", "\\*", "x" }
+
+FD.Players view declarations (18):
+  Crucible.Live.FD.Players (24)
+  Crucible.Data.FD.Players.career (31)
+  Crucible.Data.FD.Players.currency (33)
+  Crucible.Data.FD.Players.dailyReward (36)
+  Crucible.Data.FD.Players.entrance (33)
+  Crucible.Data.FD.Players.equippedNameColor (42)
+  Crucible.Data.FD.Players.equippedSkin (37)
+  Crucible.Data.FD.Players.equippedTitle (38)
+  Crucible.Data.FD.Players.firstPurchaseLogged (44)
+  Crucible.Data.FD.Players.ftueStep (33)
+  Crucible.Data.FD.Players.mastery (32)
+  Crucible.Data.FD.Players.ownedSkins (35)
+  Crucible.Data.FD.Players.pendingRewards (39)
+  Crucible.Data.FD.Players.referral (33)
+  Crucible.Data.FD.Players.settings (33)
+  Crucible.Data.FD.Players.stats (30)
+  Crucible.Data.FD.Players.upgrades (33)
+  Crucible.Data.FD.Players.xp (27)
+
+FD.Players replicated paths (replicatedPaths(PlayerData), 63):
+  { "career" }
+  { "career", "firstJoined" }
+  { "career", "houseJobs" }
+  { "career", "jobs" }
+  { "career", "jobs", "[]", "coins" }
+  { "career", "jobs", "[]", "difficulty" }
+  { "career", "jobs", "[]", "endedAt" }
+  { "career", "jobs", "[]", "houseId" }
+  { "career", "jobs", "[]", "id" }
+  { "career", "jobs", "[]", "items" }
+  { "career", "jobs", "[]", "partyUserIds" }
+  { "career", "jobs", "[]", "seconds" }
+  { "career", "jobs", "[]", "specialIds" }
+  { "career", "jobs", "[]", "xp" }
+  { "currency" }
+  { "dailyReward" }
+  { "dailyReward", "claims" }
+  { "dailyReward", "lastClaimDay" }
+  { "dailyReward", "streak" }
+  { "entrance" }
+  { "entrance", "jobText" }
+  { "entrance", "message" }
+  { "entrance", "music" }
+  { "entrance", "musicId" }
+  { "entrance", "warehouseText" }
+  { "equippedNameColor" }
+  { "equippedSkin" }
+  { "equippedTitle" }
+  { "firstPurchaseLogged" }
+  { "ftueStep" }
+  { "mastery" }
+  { "mastery", "*", "level" }
+  { "mastery", "*", "tasks" }
+  { "ownedSkins" }
+  { "pendingRewards" }
+  { "pendingRewards", "currency" }
+  { "pendingRewards", "xp" }
+  { "referral" }
+  { "referral", "referredBy" }
+  { "referral", "rewarded" }
+  { "settings" }
+  { "settings", "buttonPrompts" }
+  { "settings", "debugInfo" }
+  { "settings", "freeCursor" }
+  { "settings", "graphics" }
+  { "settings", "keybinds" }
+  { "settings", "keybinds", "Carry" }
+  { "settings", "keybinds", "Interact" }
+  { "settings", "keybinds", "Throw" }
+  { "settings", "reduceBlur" }
+  { "settings", "vibration" }
+  { "settings", "volume" }
+  { "settings", "volume", "Game" }
+  { "settings", "volume", "Interface" }
+  { "settings", "volume", "Music" }
+  { "stats" }
+  { "stats", "currencyEarned" }
+  { "stats", "itemsBroken" }
+  { "stats", "itemsDelivered" }
+  { "stats", "jobsCompleted" }
+  { "stats", "specialJobsCompleted" }
+  { "upgrades" }
+  { "xp" }
+
+Emitted declaration for FD.Players (the transformer's rewrite of the migrated template.ts):
+export const PlayerData = __crucible.profileStore("FD.Players", { template: DataTemplate }, __crucible.n.object([["analytics", __crucible.n.object([["codesRedeemed", __crucible.n.f64], ["lastSeen", __crucible.n.union([__crucible.n.nil, __crucible.n.f64])], ["playTime", __crucible.n.f64], ["sessionJobs", __crucible.n.f64], ["timesJoined", __crucible.n.f64]])], ["career", __crucible.n.object([["firstJoined", __crucible.n.f64], ["houseJobs", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["jobs", __crucible.n.array(__crucible.n.object([["coins", __crucible.n.f64], ["difficulty", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["endedAt", __crucible.n.f64], ["houseId", __crucible.n.string], ["id", __crucible.n.string], ["items", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["partyUserIds", __crucible.n.array(__crucible.n.f64)], ["seconds", __crucible.n.f64], ["specialIds", __crucible.n.array(__crucible.n.string)], ["xp", __crucible.n.f64]]))]])], ["currency", __crucible.n.f64], ["dailyReward", __crucible.n.object([["claims", __crucible.n.f64], ["lastClaimDay", __crucible.n.f64], ["streak", __crucible.n.f64]])], ["entrance", __crucible.n.object([["jobText", __crucible.n.string], ["message", __crucible.n.bool], ["music", __crucible.n.bool], ["musicId", __crucible.n.f64], ["warehouseText", __crucible.n.string]])], ["equippedNameColor", __crucible.n.string], ["equippedSkin", __crucible.n.string], ["equippedTitle", __crucible.n.string], ["firstPurchaseLogged", __crucible.n.bool], ["ftueStep", __crucible.n.f64], ["mastery", __crucible.n.map(__crucible.n.string, __crucible.n.object([["level", __crucible.n.f64], ["tasks", __crucible.n.f64]]))], ["ownedSkins", __crucible.n.map(__crucible.n.string, __crucible.n.bool)], ["pendingRewards", __crucible.n.object([["currency", __crucible.n.f64], ["xp", __crucible.n.f64]])], ["redeemedCodes", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["referral", __crucible.n.object([["referredBy", __crucible.n.f64], ["rewarded", __crucible.n.f64]])], ["settings", __crucible.n.object([["buttonPrompts", __crucible.n.union([__crucible.n.literal("Auto"), __crucible.n.literal("PlayStation"), __crucible.n.literal("Xbox")])], ["debugInfo", __crucible.n.bool], ["freeCursor", __crucible.n.union([__crucible.n.literal("Hold"), __crucible.n.literal("Toggle")])], ["graphics", __crucible.n.union([__crucible.n.literal("Auto"), __crucible.n.literal("High"), __crucible.n.literal("Low"), __crucible.n.literal("Medium")])], ["keybinds", __crucible.n.object([["Carry", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["Interact", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["Throw", __crucible.n.union([__crucible.n.nil, __crucible.n.string])]])], ["reduceBlur", __crucible.n.bool], ["vibration", __crucible.n.bool], ["volume", __crucible.n.object([["Game", __crucible.n.f64], ["Interface", __crucible.n.f64], ["Music", __crucible.n.f64]])]])], ["stats", __crucible.n.object([["currencyEarned", __crucible.n.f64], ["itemsBroken", __crucible.n.f64], ["itemsDelivered", __crucible.n.f64], ["jobsCompleted", __crucible.n.f64], ["specialJobsCompleted", __crucible.n.f64]])], ["upgrades", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["xp", __crucible.n.f64]]), __crucible.n.object([["career", __crucible.n.object([["firstJoined", __crucible.n.f64], ["houseJobs", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["jobs", __crucible.n.array(__crucible.n.object([["coins", __crucible.n.f64], ["difficulty", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["endedAt", __crucible.n.f64], ["houseId", __crucible.n.string], ["id", __crucible.n.string], ["items", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["partyUserIds", __crucible.n.array(__crucible.n.f64)], ["seconds", __crucible.n.f64], ["specialIds", __crucible.n.array(__crucible.n.string)], ["xp", __crucible.n.f64]]))]])], ["currency", __crucible.n.f64], ["dailyReward", __crucible.n.object([["claims", __crucible.n.f64], ["lastClaimDay", __crucible.n.f64], ["streak", __crucible.n.f64]])], ["entrance", __crucible.n.object([["jobText", __crucible.n.string], ["message", __crucible.n.bool], ["music", __crucible.n.bool], ["musicId", __crucible.n.f64], ["warehouseText", __crucible.n.string]])], ["equippedNameColor", __crucible.n.string], ["equippedSkin", __crucible.n.string], ["equippedTitle", __crucible.n.string], ["firstPurchaseLogged", __crucible.n.bool], ["ftueStep", __crucible.n.f64], ["mastery", __crucible.n.map(__crucible.n.string, __crucible.n.object([["level", __crucible.n.f64], ["tasks", __crucible.n.f64]]))], ["ownedSkins", __crucible.n.map(__crucible.n.string, __crucible.n.bool)], ["pendingRewards", __crucible.n.object([["currency", __crucible.n.f64], ["xp", __crucible.n.f64]])], ["referral", __crucible.n.object([["referredBy", __crucible.n.f64], ["rewarded", __crucible.n.f64]])], ["settings", __crucible.n.object([["buttonPrompts", __crucible.n.union([__crucible.n.literal("Auto"), __crucible.n.literal("PlayStation"), __crucible.n.literal("Xbox")])], ["debugInfo", __crucible.n.bool], ["freeCursor", __crucible.n.union([__crucible.n.literal("Hold"), __crucible.n.literal("Toggle")])], ["graphics", __crucible.n.union([__crucible.n.literal("Auto"), __crucible.n.literal("High"), __crucible.n.literal("Low"), __crucible.n.literal("Medium")])], ["keybinds", __crucible.n.object([["Carry", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["Interact", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["Throw", __crucible.n.union([__crucible.n.nil, __crucible.n.string])]])], ["reduceBlur", __crucible.n.bool], ["vibration", __crucible.n.bool], ["volume", __crucible.n.object([["Game", __crucible.n.f64], ["Interface", __crucible.n.f64], ["Music", __crucible.n.f64]])]])], ["stats", __crucible.n.object([["currencyEarned", __crucible.n.f64], ["itemsBroken", __crucible.n.f64], ["itemsDelivered", __crucible.n.f64], ["jobsCompleted", __crucible.n.f64], ["specialJobsCompleted", __crucible.n.f64]])], ["upgrades", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["xp", __crucible.n.f64]]), [["analytics"],["redeemedCodes"]]);
+
+mismatches: 0; case diagnostics: 0

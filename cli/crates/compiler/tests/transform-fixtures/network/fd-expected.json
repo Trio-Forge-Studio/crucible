@@ -1,0 +1,101 @@
+{
+	"Admin.Announcement": ["__crucible.n.object([[\"text\", __crucible.n.string]])"],
+	"Admin.CommandTree": ["__crucible.n.nil", "__crucible.n.dynamic", "undefined"],
+	"Admin.Entrance": [
+		"__crucible.n.object([[\"musicId\", __crucible.n.union([__crucible.n.nil, __crucible.n.f64])], [\"text\", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], [\"userId\", __crucible.n.f64]])"
+	],
+	"Admin.Record": [
+		"__crucible.n.object([[\"Currency\", __crucible.n.f64], [\"DisplayName\", __crucible.n.string], [\"JoinedAt\", __crucible.n.union([__crucible.n.nil, __crucible.n.f64])], [\"LastSeen\", __crucible.n.union([__crucible.n.nil, __crucible.n.f64])], [\"Name\", __crucible.n.string], [\"Online\", __crucible.n.bool], [\"Place\", __crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"Job\"), __crucible.n.literal(\"Warehouse\")])], [\"Role\", __crucible.n.union([__crucible.n.literal(\"Admin\"), __crucible.n.literal(\"Owner\"), __crucible.n.literal(\"Player\")])], [\"Skins\", __crucible.n.u32], [\"Upgrades\", __crucible.n.array(__crucible.n.object([[\"Id\", __crucible.n.string], [\"Tiers\", __crucible.n.u32]]))], [\"UserId\", __crucible.n.f64], [\"Xp\", __crucible.n.f64]])"
+	],
+	"Admin.RunCommand": ["__crucible.n.dynamic", "__crucible.n.dynamic", "undefined"],
+	"Admin.WatchRecord": [
+		"__crucible.n.object([[\"userId\", __crucible.n.union([__crucible.n.nil, __crucible.n.f64])]])"
+	],
+	"Analytics.PurchasePrompted": ["__crucible.n.f64"],
+	"Analytics.ScreenOpened": [
+		"__crucible.n.union([__crucible.n.literal(\"SkinShop\"), __crucible.n.literal(\"Upgrades\")])"
+	],
+	"Appearance.BuySkin": ["__crucible.n.string"],
+	"Appearance.EquipSkin": ["__crucible.n.string"],
+	"Appearance.RevealSkin": [
+		"__crucible.n.object([[\"PreviewAs\", __crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"Common\"), __crucible.n.literal(\"Divine\"), __crucible.n.literal(\"Epic\"), __crucible.n.literal(\"Legendary\"), __crucible.n.literal(\"Limited\"), __crucible.n.literal(\"Mythic\"), __crucible.n.literal(\"Rare\")])], [\"Short\", __crucible.n.bool], [\"Skin\", __crucible.n.string], [\"Source\", __crucible.n.string]])"
+	],
+	"Carry.BeginThrow": ["__crucible.n.nil"],
+	"Carry.Drop": ["__crucible.n.nil"],
+	"Carry.PickUp": ["__crucible.n.instance([\"Model\"])"],
+	"Carry.Throw": ["__crucible.n.vector3"],
+	"Ceo.GoTo": ["__crucible.n.nil"],
+	"CodeDoor.KeypadAnswer": [
+		"__crucible.n.object([[\"keypad\", __crucible.n.union([__crucible.n.nil, __crucible.n.instance([\"BasePart\"])])], [\"result\", __crucible.n.union([__crucible.n.literal(\"Closed\"), __crucible.n.literal(\"Right\"), __crucible.n.literal(\"Wait\"), __crucible.n.literal(\"Wrong\")])]])"
+	],
+	"CodeDoor.KeypadTry": [
+		"__crucible.n.object([[\"code\", __crucible.n.string], [\"keypad\", __crucible.n.instance([\"BasePart\"])]])"
+	],
+	"Codes.Redeem": ["__crucible.n.string"],
+	"Codes.Result": [
+		"__crucible.n.union([__crucible.n.literal(\"AlreadyRedeemed\"), __crucible.n.literal(\"Expired\"), __crucible.n.literal(\"NotEligible\"), __crucible.n.literal(\"RateLimited\"), __crucible.n.literal(\"Redeemed\"), __crucible.n.literal(\"Unknown\")])"
+	],
+	"Contracts.Request": [
+		"__crucible.n.object([[\"Contract\", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], [\"Kind\", __crucible.n.union([__crucible.n.literal(\"Accept\"), __crucible.n.literal(\"Cancel\")])]])"
+	],
+	"Device.Report": [
+		"__crucible.n.union([__crucible.n.literal(\"Keyboard\"), __crucible.n.literal(\"PlayStation\"), __crucible.n.literal(\"Touch\"), __crucible.n.literal(\"VR\"), __crucible.n.literal(\"Xbox\")])"
+	],
+	"Doorbell.Rang": [
+		"__crucible.n.object([[\"button\", __crucible.n.union([__crucible.n.nil, __crucible.n.instance([\"BasePart\"])])], [\"chime\", __crucible.n.vector3], [\"houseId\", __crucible.n.union([__crucible.n.nil, __crucible.n.string])]])"
+	],
+	"Doorbell.Ring": ["__crucible.n.instance([\"BasePart\"])"],
+	"Doors.Toggle": [
+		"__crucible.n.object([[\"door\", __crucible.n.instance([\"Model\"])], [\"open\", __crucible.n.bool]])"
+	],
+	"Hatches.Open": ["__crucible.n.instance([\"BasePart\"])"],
+	"Intro.SkipVote": ["__crucible.n.nil"],
+	"Lifts.Call": [
+		"__crucible.n.object([[\"button\", __crucible.n.instance([\"BasePart\"])], [\"expectedStop\", __crucible.n.u8]])"
+	],
+	"Lifts.Move": [
+		"__crucible.n.object([[\"button\", __crucible.n.instance([\"BasePart\"])], [\"expectedStop\", __crucible.n.u8]])"
+	],
+	"Loading.Loaded": ["__crucible.n.nil"],
+	"Loading.TeleportCovered": ["__crucible.n.nil"],
+	"Loading.Teleporting": [
+		"__crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"Job\"), __crucible.n.literal(\"Warehouse\")])"
+	],
+	"NameColors.Equip": ["__crucible.n.string"],
+	"Notifications.Notify": [
+		"__crucible.n.object([[\"Action\", __crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"OpenParty\")])], [\"Kind\", __crucible.n.union([__crucible.n.literal(\"Error\"), __crucible.n.literal(\"Info\"), __crucible.n.literal(\"Success\")])], [\"Text\", __crucible.n.string], [\"Title\", __crucible.n.union([__crucible.n.nil, __crucible.n.string])]])"
+	],
+	"Party.Private": [
+		"__crucible.n.object([[\"Friends\", __crucible.n.array(__crucible.n.object([[\"DisplayName\", __crucible.n.string], [\"Name\", __crucible.n.string], [\"OnJob\", __crucible.n.bool], [\"UserId\", __crucible.n.f64]]))], [\"Invites\", __crucible.n.array(__crucible.n.object([[\"From\", __crucible.n.f64], [\"FromName\", __crucible.n.string], [\"PartySize\", __crucible.n.u8], [\"Until\", __crucible.n.f64]]))]])"
+	],
+	"Party.Request": [
+		"__crucible.n.union([__crucible.n.variant(\"Kind\", \"Cancel\", __crucible.n.object([[\"UserId\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Decline\", __crucible.n.object([[\"From\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Invite\", __crucible.n.object([[\"UserId\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Join\", __crucible.n.object([[\"From\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Leave\", __crucible.n.object([])), __crucible.n.variant(\"Kind\", \"Remove\", __crucible.n.object([[\"UserId\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Watch\", __crucible.n.object([[\"On\", __crucible.n.bool]]))])"
+	],
+	"PlayerCard.Profile": [
+		"__crucible.n.object([[\"profile\", __crucible.n.union([__crucible.n.nil, __crucible.n.object([[\"currencyEarned\", __crucible.n.f64], [\"equippedSkin\", __crucible.n.string], [\"equippedTitle\", __crucible.n.string], [\"houseJobs\", __crucible.n.array(__crucible.n.object([[\"count\", __crucible.n.u32], [\"houseId\", __crucible.n.string]]))], [\"itemsDelivered\", __crucible.n.f64], [\"jobs\", __crucible.n.array(__crucible.n.object([[\"coins\", __crucible.n.f64], [\"difficulty\", __crucible.n.string], [\"endedAt\", __crucible.n.f64], [\"houseId\", __crucible.n.string], [\"id\", __crucible.n.string], [\"items\", __crucible.n.array(__crucible.n.object([[\"count\", __crucible.n.u32], [\"id\", __crucible.n.string]]))], [\"partyUserIds\", __crucible.n.array(__crucible.n.f64)], [\"seconds\", __crucible.n.f64], [\"specialIds\", __crucible.n.array(__crucible.n.string)], [\"xp\", __crucible.n.f64]]))], [\"jobsCompleted\", __crucible.n.f64], [\"mastery\", __crucible.n.string], [\"savedSeconds\", __crucible.n.f64], [\"sessionStartedAt\", __crucible.n.f64], [\"xp\", __crucible.n.f64]])])], [\"userId\", __crucible.n.f64]])"
+	],
+	"PlayerCard.RequestProfile": ["__crucible.n.object([[\"userId\", __crucible.n.f64]])"],
+	"Progression.ClaimDailyReward": ["__crucible.n.nil"],
+	"Progression.ClaimRewards": ["__crucible.n.nil"],
+	"Progression.LevelUp": [
+		"__crucible.n.object([[\"From\", __crucible.n.u16], [\"Player\", __crucible.n.instance([\"Player\"])], [\"To\", __crucible.n.u16]])"
+	],
+	"Progression.PurchaseUpgrade": ["__crucible.n.string"],
+	"Progression.RewardGranted": [
+		"__crucible.n.object([[\"Currency\", __crucible.n.f64], [\"Source\", __crucible.n.union([__crucible.n.literal(\"Code\"), __crucible.n.literal(\"DailyReward\"), __crucible.n.literal(\"JobPayout\"), __crucible.n.literal(\"Referral\"), __crucible.n.literal(\"Refund\")])], [\"Xp\", __crucible.n.f64]])"
+	],
+	"Replication.StateSync": ["__crucible.n.dynamic"],
+	"Seating.Sit": ["__crucible.n.instance([\"Seat\"])"],
+	"Seating.Stand": ["__crucible.n.nil"],
+	"Settings.Save": ["__crucible.n.dynamic"],
+	"Titles.Equip": ["__crucible.n.string"],
+	"Vehicles.Drive": ["__crucible.n.instance([\"Model\"])"],
+	"Vehicles.GetOff": [
+		"__crucible.n.union([__crucible.n.nil, __crucible.n.object([[\"look\", __crucible.n.vector3], [\"position\", __crucible.n.vector3]])])"
+	],
+	"Admin.TypedTree": [
+		"__crucible.n.nil",
+		"__crucible.n.object([[\"commands\", __crucible.n.array(__crucible.n.object([[\"category\", __crucible.n.union([__crucible.n.literal(\"Data\"), __crucible.n.literal(\"Job\"), __crucible.n.literal(\"Moderation\"), __crucible.n.literal(\"Movement\"), __crucible.n.literal(\"Self\"), __crucible.n.literal(\"Server\")])], [\"destructive\", __crucible.n.union([__crucible.n.nil, __crucible.n.bool])], [\"help\", __crucible.n.string], [\"name\", __crucible.n.string], [\"place\", __crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"Job\"), __crucible.n.literal(\"Warehouse\")])], [\"reads\", __crucible.n.union([__crucible.n.nil, __crucible.n.bool])], [\"role\", __crucible.n.union([__crucible.n.literal(\"Admin\"), __crucible.n.literal(\"Owner\"), __crucible.n.literal(\"Player\")])]]))], [\"nodes\", __crucible.n.array(__crucible.n.object([[\"argument\", __crucible.n.union([__crucible.n.nil, __crucible.n.variant(\"type\", \"amount\", __crucible.n.object([[\"max\", __crucible.n.f64], [\"min\", __crucible.n.f64]])), __crucible.n.variant(\"type\", \"choice\", __crucible.n.object([[\"options\", __crucible.n.array(__crucible.n.string)], [\"repeats\", __crucible.n.bool]])), __crucible.n.variant(\"type\", \"duration\", __crucible.n.object([])), __crucible.n.variant(\"type\", \"player\", __crucible.n.object([[\"many\", __crucible.n.bool], [\"skip\", __crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"Caller\"), __crucible.n.literal(\"Outranked\")])]])), __crucible.n.variant(\"type\", \"text\", __crucible.n.object([[\"greedy\", __crucible.n.bool], [\"maxLength\", __crucible.n.f64]])), __crucible.n.variant(\"type\", \"toggle\", __crucible.n.object([])), __crucible.n.variant(\"type\", \"user\", __crucible.n.object([[\"many\", __crucible.n.bool], [\"skip\", __crucible.n.union([__crucible.n.nil, __crucible.n.literal(\"Caller\"), __crucible.n.literal(\"Outranked\")])]]))])], [\"children\", __crucible.n.array(__crucible.n.f64)], [\"executable\", __crucible.n.bool], [\"name\", __crucible.n.string]]))]])",
+		"undefined"
+	]
+}

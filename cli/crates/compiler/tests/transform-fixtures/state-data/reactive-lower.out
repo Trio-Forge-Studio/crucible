@@ -1,0 +1,128 @@
+FD origin/master 9d4c8b449; TypeScript 5.5.3; FD's compiler options, baseUrl at FD's extracted src.
+TypeScript diagnostics in cases/: 0
+TypeScript diagnostics inside FD's own files reached by the imports (not this probe's): 15
+  fd/src/core/CameraPath/shared/camera-path.ts TS2307 Cannot find module '@trioforge/spline' or its corresponding type declarations.
+  fd/src/core/Contracts/shared/tasks.ts TS2307 Cannot find module '@trioforge/random' or its corresponding type declarations.
+  fd/src/core/Contracts/shared/tasks.ts TS7006 Parameter '_' implicitly has an 'any' type.
+  fd/src/core/Contracts/shared/tasks.ts TS7006 Parameter 'index' implicitly has an 'any' type.
+  (+11 more)
+
+ok  cases/fd.ts:19 Data.Owner replicatedPerPlayer<OwnerData | undefined>: lowers
+      95 nodes: undefined | { career: { firstJoined: number, houseJobs: { [string]: number }, jobs: { coins: number, difficulty: undefined | string, endedAt: number, houseId: string, id: string, items: { [string]: number }, partyUserIds: number[], seconds: number, specialIds: string[], xp: number }[] }, currency: number, dailyReward: { claims: number, lastClaimDay: number, streak: number }, entrance: { jobText: string, message: boolean, music: boolean, musicId: number, warehouseText: string }, equippedNameColor: string, equippedSkin: string, equippedTitle: string, firstPurchaseLogged: boolean, ftueStep: number, mastery: { [string]: { level: number, tasks: number } }, ownedSkins: { [string]: boolean }, pendingRewards: { currency: number, xp: number }, played: { savedSeconds: number, sessionStartedAt: number }, referral: { referredBy: number, rewarded: number }, settings: { buttonPrompts: "Auto" | "PlayStation" | "Xbox", debugInfo: boolean, freeCursor: "Hold" | "Toggle", graphics: "Auto" | "High" | "Low" | "Medium", keybinds: { Carry: undefined | string, Interact: undefined | string, Throw: undefined | string }, reduceBlur: boolean, vibration: boolean, volume: { Game: number, Interface: number, Music: number } }, stats: { currencyEarned: number, itemsBroken: number, itemsDelivered: number, jobsCompleted: number, specialJobsCompleted: number }, upgrades: { [string]: number }, version: number, xp: number }
+ok  cases/fd.ts:21 Probe.WholeProfile replicatedPerPlayer<PlayerData | undefined>: lowers
+      104 nodes: undefined | { analytics: { codesRedeemed: number, lastSeen: undefined | number, playTime: number, sessionJobs: number, timesJoined: number }, career: { firstJoined: number, houseJobs: { [string]: number }, jobs: { coins: number, difficulty: undefined | string, endedAt: number, houseId: string, id: string, items: { [string]: number }, partyUserIds: number[], seconds: number, specialIds: string[], xp: number }[] }, currency: number, dailyReward: { claims: number, lastClaimDay: number, streak: number }, entrance: { jobText: string, message: boolean, music: boolean, musicId: number, warehouseText: string }, equippedNameColor: string, equippedSkin: string, equippedTitle: string, firstPurchaseLogged: boolean, ftueStep: number, mastery: { [string]: { level: number, tasks: number } }, ownedSkins: { [string]: boolean }, pendingRewards: { currency: number, xp: number }, purchaseIds: string[], redeemedCodes: { [string]: number }, referral: { referredBy: number, rewarded: number }, settings: { buttonPrompts: "Auto" | "PlayStation" | "Xbox", debugInfo: boolean, freeCursor: "Hold" | "Toggle", graphics: "Auto" | "High" | "Low" | "Medium", keybinds: { Carry: undefined | string, Interact: undefined | string, Throw: undefined | string }, reduceBlur: boolean, vibration: boolean, volume: { Game: number, Interface: number, Music: number } }, stats: { currencyEarned: number, itemsBroken: number, itemsDelivered: number, jobsCompleted: number, specialJobsCompleted: number }, upgrades: { [string]: number }, version: number, xp: number }
+ok  cases/fd.ts:24 Job.Phase replicated<JobPhase | undefined>: lowers
+      8 nodes: undefined | "Countdown" | "Intro" | "Resetting" | "Running" | "Settling" | "Waiting"
+ok  cases/fd.ts:25 Job.Contract replicated<string | undefined>: lowers
+      3 nodes: undefined | string
+ok  cases/fd.ts:26 Job.Score replicated<Score | undefined>: lowers
+      7 nodes: undefined | { damageFees: number, damaged: boolean, deliveredValue: number, missed: number }
+ok  cases/fd.ts:27 Job.ItemCounts replicated<ItemCounts | undefined>: lowers
+      7 nodes: undefined | { broken: number, cracked: number, delivered: number, left: number }
+ok  cases/fd.ts:28 Job.Highlights replicated<HighlightsResult | undefined>: lowers
+      26 nodes: undefined | { awards: { fees: undefined | number, id: "BigTicket" | "Butterfingers" | "Clutch" | "FirstIn" | "GentleTouch" | "GoldenMover" | "HeavyLifter" | "LongHaul" | "PatchJob" | "Workhorse", item: undefined | string, name: string, userId: number, value: number }[], notAScratch: boolean }
+ok  cases/fd.ts:29 Job.Tasks replicated<readonly TaskState[]>: lowers
+      16 nodes: { Id: "Careful" | "Fragile" | "Gentle" | "Haul" | "Heavy" | "Prized" | "Quota", Progress: string, Status: "Done" | "Failed" | "Open", Text: string }[]
+ok  cases/fd.ts:30 Job.ReturnsToWarehouse replicated<boolean>: lowers
+      1 nodes: boolean
+ok  cases/fd.ts:31 Job.PlayerPayouts replicated<ReadonlyMap<string, PlayerPayout>>: lowers
+      23 nodes: { [string]: { base: number, buyIn: number, currency: number, deliveryPay: number, deliveryPayPercent: number, friend: number, friendCount: number, mastery: undefined | { counted: number, difficulty: string, eligible: boolean, mastered: boolean, needed: number, unlocked: undefined | string }, rush: number, tip: number, xp: number } }
+ok  cases/fd.ts:32 Party.Parties replicated<Parties>: lowers
+      29 nodes: { [string]: { Coming: { JoinedAt: undefined | number, Until: number, UserId: number }[], Contract: undefined | { BuyIn: number, Id: string, Payer: number, RushPay: number, Truck: number, Until: number }, Id: string, Invited: { [string]: number }, Members: { JoinedAt: number, UserId: number }[], Trip: undefined | "Leaving" | "Left" } }
+ok  cases/fd.ts:33 Leaderboard.Boards replicated<Leaderboards>: lowers
+      22 nodes: { Jobs: undefined | { Name: string, UserId: number, Value: number }[], Money: undefined | { Name: string, UserId: number, Value: number }[], PlayTime: undefined | { Name: string, UserId: number, Value: number }[] }
+ok  cases/fd.ts:34 Mood.Current replicated<MoodSession | undefined>: lowers
+      75 nodes: undefined | { FadeSeconds: number, From: { Atmosphere: { Color: color3, Decay: color3, Density: number, Glare: number, Haze: number, Offset: number }, BloomEffect: { Enabled: boolean, Intensity: number, Size: number, Threshold: number }, ColorCorrectionEffect: { Brightness: number, Contrast: number, Enabled: boolean, Saturation: number, TintColor: color3 }, DepthOfFieldEffect: { Enabled: boolean, FarIntensity: number, FocusDistance: number, InFocusRadius: number, NearIntensity: number }, Lighting: { Ambient: color3, Brightness: number, ClockTime: number, ColorShift_Bottom: color3, ColorShift_Top: color3, EnvironmentDiffuseScale: number, EnvironmentSpecularScale: number, ExposureCompensation: number, GeographicLatitude: number, GlobalShadows: boolean, OutdoorAmbient: color3, ShadowSoftness: number }, Sky: { CelestialBodiesShown: boolean, MoonAngularSize: number, MoonTextureId: string, SkyboxBk: string, SkyboxDn: string, SkyboxFt: string, SkyboxLf: string, SkyboxOrientation: vector3, SkyboxRt: string, SkyboxUp: string, StarCount: number, SunAngularSize: number, SunTextureId: string }, SunRaysEffect: { Enabled: boolean, Intensity: number, Spread: number } }, Mood: "ChaletDay" | "ChaletNight" | "Dusk" | "GoldenHour" | "ManorNight" | "Midday" | "Morning" | "Night" | "Warehouse", Seed: number, StartedAt: number, Weather: "Clear" | "Snowfall" }
+ok  cases/fd.ts:35 Intro.Skips replicated<readonly number[]>: lowers
+      2 nodes: number[]
+ok  cases/fd.ts:37 Departure.Countdowns replicated<ReadonlyMap<string, Countdown>>: lowers
+      6 nodes: { [string]: { EndsAt: number, Members: number[], Party: string } }
+ok  cases/merge-a.ts:12 N.30 replicated<Merged>: rejected
+      CRU010 N.30 value: `Merged` is declared in more than one file or globally; declare it in one module
+ok  cases/shapes.ts:18 P.1 replicated<number | undefined>: lowers
+ok  cases/shapes.ts:19 P.2 replicated<Score>: lowers
+ok  cases/shapes.ts:20 P.3 replicated<ReadonlyMap<string, Countdown>>: lowers
+ok  cases/shapes.ts:21 P.4 replicated<readonly { readonly id: string; readonly at?: Vector3 }[]>: lowers
+ok  cases/shapes.ts:22 P.5 replicated<"walk" | "drive">: lowers
+ok  cases/shapes.ts:23 P.6 replicated<{ readonly kind: "a"; readonly x: number } | { readonly kind: "b" }>: lowers
+ok  cases/shapes.ts:24 P.7 replicated<Record<string, number>>: lowers
+ok  cases/shapes.ts:25 P.8 replicated<readonly [number, string]>: lowers
+ok  cases/shapes.ts:26 P.9 replicated<{ readonly [key: string]: Countdown }>: lowers
+ok  cases/shapes.ts:28 P.10 replicated<{ readonly cf: CFrame; readonly c: Color3; readonly tag: string }>: lowers
+ok  cases/shapes.ts:32 P.11 replicated<{ readonly y: { readonly z: L11 } }>: lowers
+ok  cases/shapes.ts:35 P.12 replicated<{ readonly "01": number }>: lowers
+ok  cases/shapes.ts:37 P.13 replicated<Readonly<Partial<Record<string, number>>>>: lowers
+ok  cases/shapes.ts:38 P.14 replicated<ReadonlyMap<string, number | undefined>>: lowers
+ok  cases/shapes.ts:40 P.15 replicated<{ readonly a: number } & { readonly b?: string }>: lowers
+ok  cases/shapes.ts:42 P.16 replicated<Readonly<Record<"Game" | "Music", number>>>: lowers
+ok  cases/shapes.ts:43 P.17 replicated<ReadonlyMap<"Money" | "Jobs", number>>: lowers
+ok  cases/shapes.ts:46 N.1 replicated<{ readonly "1": number }>: rejected
+      CRU019 N.1 value.1: numeric property names are not supported; use a string-keyed map
+ok  cases/shapes.ts:47 N.2 replicated<{ readonly 2: number }>: rejected
+      CRU019 N.2 value.2: numeric property names are not supported; use a string-keyed map
+ok  cases/shapes.ts:52 N.3 replicated<Record<Slot, number>>: rejected
+      CRU019 N.3 value.0: numeric property names are not supported; use a string-keyed map
+      CRU019 N.3 value.1: numeric property names are not supported; use a string-keyed map
+ok  cases/shapes.ts:53 N.4 replicated<{ readonly "-1": number }>: rejected
+      CRU019 N.4 value.-1: numeric property names are not supported; use a string-keyed map
+ok  cases/shapes.ts:54 N.5 replicated<{ readonly "2.5": number }>: rejected
+      CRU019 N.5 value.2.5: numeric property names are not supported; use a string-keyed map
+ok  cases/shapes.ts:55 N.6 replicated<{}>: rejected
+      CRU019 N.6 value: an empty object type accepts anything; use undefined for no value
+ok  cases/shapes.ts:57 N.7 replicated<Empty>: rejected
+      CRU019 N.7 value: an empty object type accepts anything; use undefined for no value
+ok  cases/shapes.ts:58 N.8 replicated<Record<never, number>>: rejected
+      CRU019 N.8 value: an empty object type accepts anything; use undefined for no value
+ok  cases/shapes.ts:63 N.9 replicated<Tree>: rejected
+      CRU019 N.9 value.children[]: a recursive type cannot be replicated
+ok  cases/shapes.ts:65 N.10 replicated<Json>: rejected
+      CRU019 N.10 value[]: a recursive type cannot be replicated
+      CRU019 N.10 value[][key]: a recursive type cannot be replicated
+      CRU019 N.10 value[][key]: two union members of one runtime kind (table) are ambiguous
+      (+6 more)
+ok  cases/shapes.ts:69 N.11 replicated<Node2>: rejected
+      CRU019 N.11 value.next: a recursive type cannot be replicated
+ok  cases/shapes.ts:71 N.12 replicated<Readonly<Record<number, Countdown>>>: rejected
+      CRU019 N.12 value: numeric keys cannot be replicated; key the record by a string
+ok  cases/shapes.ts:72 N.13 replicated<ReadonlyMap<number, string>>: rejected
+      CRU019 N.13 value[key]: replicated maps are keyed by string or a union of string literals
+ok  cases/shapes.ts:73 N.14 replicated<readonly (string | undefined)[]>: rejected
+      CRU019 N.14 value[]: array elements cannot admit undefined
+ok  cases/shapes.ts:74 N.15 replicated<readonly [number, string?]>: rejected
+      CRU019 N.15 value: tuples are fixed length, with no optional or rest elements
+ok  cases/shapes.ts:76 N.16 replicated<{ readonly door?: Model }>: rejected
+      CRU019 N.16 value.door: Instances cannot be replicated state; replicate a stable id
+ok  cases/shapes.ts:78 N.17 replicated<{ readonly by: Player }>: rejected
+      CRU019 N.17 value.by: Instances cannot be replicated state; replicate a stable id
+ok  cases/shapes.ts:79 N.18 replicated<{ readonly run: () => void }>: rejected
+      CRU019 N.18 value.run: functions cannot be replicated
+ok  cases/shapes.ts:80 N.19 replicated<unknown>: rejected
+      CRU019 N.19 value: unknown cannot be replicated state; give the value a declared type
+ok  cases/shapes.ts:82 N.20 replicated<any>: rejected
+      CRU019 N.20 value: any cannot be replicated state; give the value a type
+ok  cases/shapes.ts:83 N.21 replicated<UDim2>: rejected
+      CRU019 N.21 value: UDim2 is not supported in v1
+ok  cases/shapes.ts:84 N.22 replicated<Enum.KeyCode>: rejected
+      CRU019 N.22 value: None is not supported in v1
+      CRU019 N.22 value: Backspace is not supported in v1
+      CRU019 N.22 value: Tab is not supported in v1
+      (+281 more)
+ok  cases/shapes.ts:85 N.23 replicated<object>: rejected
+      CRU019 N.23 value: cannot encode object
+ok  cases/shapes.ts:88 N.24 replicated<{ readonly [brand]: number; readonly x: number }>: rejected
+      CRU019 N.24 value: symbol keys cannot be replicated
+ok  cases/shapes.ts:89 N.25 replicated<ReadonlySet<string>>: rejected
+      CRU019 N.25 value: ReadonlySet<string> cannot be replicated; use a string-keyed map
+ok  cases/shapes.ts:90 N.26 replicated<{ readonly a: number } | { readonly a: number; readonly b: string }>: rejected
+      CRU019 N.26 value: union members have no discriminant; give each a distinct literal property
+ok  cases/shapes.ts:91 N.27 replicated<{ readonly a: number } & { run(): void }>: rejected
+      CRU019 N.27 value.run: functions cannot be replicated
+ok  cases/shapes.ts:92 N.28 replicated<ReadonlyMap<string, readonly number[]> | readonly string[]>: rejected
+      CRU019 N.28 value: two union members of one runtime kind (table) are ambiguous
+ok  cases/shapes.ts:94 N.29 replicated<T>: rejected
+      CRU019 N.29 value: a type parameter cannot be checked; replicate a concrete type
+
+Emitted declaration for Data.Owner (the transformer's rewrite of cases/fd.ts line 19):
+export const OwnerProfile = __crucible.replicatedPerPlayer<OwnerData | undefined>("Data.Owner", undefined, __crucible.n.union([__crucible.n.nil, __crucible.n.object([["career", __crucible.n.object([["firstJoined", __crucible.n.f64], ["houseJobs", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["jobs", __crucible.n.array(__crucible.n.object([["coins", __crucible.n.f64], ["difficulty", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["endedAt", __crucible.n.f64], ["houseId", __crucible.n.string], ["id", __crucible.n.string], ["items", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["partyUserIds", __crucible.n.array(__crucible.n.f64)], ["seconds", __crucible.n.f64], ["specialIds", __crucible.n.array(__crucible.n.string)], ["xp", __crucible.n.f64]]))]])], ["currency", __crucible.n.f64], ["dailyReward", __crucible.n.object([["claims", __crucible.n.f64], ["lastClaimDay", __crucible.n.f64], ["streak", __crucible.n.f64]])], ["entrance", __crucible.n.object([["jobText", __crucible.n.string], ["message", __crucible.n.bool], ["music", __crucible.n.bool], ["musicId", __crucible.n.f64], ["warehouseText", __crucible.n.string]])], ["equippedNameColor", __crucible.n.string], ["equippedSkin", __crucible.n.string], ["equippedTitle", __crucible.n.string], ["firstPurchaseLogged", __crucible.n.bool], ["ftueStep", __crucible.n.f64], ["mastery", __crucible.n.map(__crucible.n.string, __crucible.n.object([["level", __crucible.n.f64], ["tasks", __crucible.n.f64]]))], ["ownedSkins", __crucible.n.map(__crucible.n.string, __crucible.n.bool)], ["pendingRewards", __crucible.n.object([["currency", __crucible.n.f64], ["xp", __crucible.n.f64]])], ["played", __crucible.n.object([["savedSeconds", __crucible.n.f64], ["sessionStartedAt", __crucible.n.f64]])], ["referral", __crucible.n.object([["referredBy", __crucible.n.f64], ["rewarded", __crucible.n.f64]])], ["settings", __crucible.n.object([["buttonPrompts", __crucible.n.union([__crucible.n.literal("Auto"), __crucible.n.literal("PlayStation"), __crucible.n.literal("Xbox")])], ["debugInfo", __crucible.n.bool], ["freeCursor", __crucible.n.union([__crucible.n.literal("Hold"), __crucible.n.literal("Toggle")])], ["graphics", __crucible.n.union([__crucible.n.literal("Auto"), __crucible.n.literal("High"), __crucible.n.literal("Low"), __crucible.n.literal("Medium")])], ["keybinds", __crucible.n.object([["Carry", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["Interact", __crucible.n.union([__crucible.n.nil, __crucible.n.string])], ["Throw", __crucible.n.union([__crucible.n.nil, __crucible.n.string])]])], ["reduceBlur", __crucible.n.bool], ["vibration", __crucible.n.bool], ["volume", __crucible.n.object([["Game", __crucible.n.f64], ["Interface", __crucible.n.f64], ["Music", __crucible.n.f64]])]])], ["stats", __crucible.n.object([["currencyEarned", __crucible.n.f64], ["itemsBroken", __crucible.n.f64], ["itemsDelivered", __crucible.n.f64], ["jobsCompleted", __crucible.n.f64], ["specialJobsCompleted", __crucible.n.f64]])], ["upgrades", __crucible.n.map(__crucible.n.string, __crucible.n.f64)], ["version", __crucible.n.f64], ["xp", __crucible.n.f64]])]));
+
+mismatches: 0; case diagnostics: 0

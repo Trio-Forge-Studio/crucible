@@ -1,0 +1,102 @@
+[
+	{
+		"file": "src/core/Admin/shared/admin-types.ts",
+		"declarations": ["AdminSnapshot"],
+		"sha256": "da016c55d6a7f73ca4ec8c9706d6662946b44435bb49b0b7da98eed7453448a1"
+	},
+	{
+		"file": "src/core/Admin/shared/upgrade-snapshot.ts",
+		"declarations": ["UpgradeSnapshot"],
+		"sha256": "66dbec67caa82068c9a2e6addf9857384dfb37994d17182df749e45ff2316abe"
+	},
+	{
+		"file": "src/core/Admin/shared/messages.ts",
+		"declarations": ["WatchRecordRequest", "EntranceArrival", "AnnouncementMessage"],
+		"sha256": "6c38c5b843f77d29e42a8a1764986bb16c99b3ff21223fd253a9027f5850613d"
+	},
+	{
+		"file": "src/core/Commands/shared/roles.ts",
+		"declarations": ["Role"],
+		"sha256": "b121f8dac0b575d5588632b4588d6e10d1b64fc7562159044d8b19011ebbd47e"
+	},
+	{
+		"file": "src/core/Commands/shared/command-tree.ts",
+		"declarations": ["Category", "CommandInfo", "WireNode", "WireTree"],
+		"sha256": "6e02f9907f141b334d27d649f5be06c0eac1364386571da2fe476f478e2c69c0"
+	},
+	{
+		"file": "src/core/Commands/shared/command-arguments.ts",
+		"declarations": ["Skip", "TargetSpec", "ArgumentSpec"],
+		"sha256": "c27f50d3cf20ddd72fd7d98c32fe6afbb545770007ad9c84d645f5e9d4c01bc3"
+	},
+	{
+		"file": "src/core/Place/shared/environments.ts",
+		"declarations": ["PlaceName"],
+		"sha256": "092ffec244c467ef29758a2d6d78e30ab4405d90ffcc3dc6f59d6041a529a942"
+	},
+	{
+		"file": "src/core/Party/shared/model.ts",
+		"declarations": ["ReceivedInvite", "FriendElsewhere", "PartyPrivate", "PartyRequest"],
+		"sha256": "d143d6bdb7ea47658478eee9486b7ddf6e373c6112a2dfb6ca7408164d7ba143"
+	},
+	{
+		"file": "src/core/Notifications/shared/notification.ts",
+		"declarations": ["NotificationKind", "NotificationAction", "Notification"],
+		"sha256": "0da136ea3070251e43ee96a65beeeac79f7fcf4097a39c421edc08104d81c34b"
+	},
+	{
+		"file": "src/core/Contracts/shared/messages.ts",
+		"declarations": ["ContractRequest"],
+		"sha256": "d9c8ff303857c8174e005134df4aa6c68cdf441ee66314fbc1b5cfb121f6f62f"
+	},
+	{
+		"file": "src/core/Device/shared/messages.ts",
+		"declarations": ["NameplateDevice"],
+		"sha256": "c7f4e92c4f949a1be6007bf1967fe6ea55363c145da8f29b6275d739b2ac55e7"
+	},
+	{
+		"file": "src/core/Appearance/shared/messages.ts",
+		"declarations": ["SkinReveal"],
+		"sha256": "558ed65ab9f7cc5ca8ab2ea59cbbdffbbca23a9bf9948b9471385311dc322b53"
+	},
+	{
+		"file": "src/core/Appearance/shared/skin-catalog.ts",
+		"declarations": ["Rarity"],
+		"sha256": "fcd2299afa7f40e04085373ae668d26d95eced124d5435e00585618f7c6943dc"
+	},
+	{
+		"file": "src/core/Progression/shared/rewards.ts",
+		"declarations": ["RewardSource"],
+		"sha256": "b4dee359aa81badd4d5fa7b442df31ae507dbae2ffc5efec2062d031a635f3d7"
+	},
+	{
+		"file": "src/job/CodeDoor/shared/code-door.ts",
+		"declarations": ["KeypadResult"],
+		"sha256": "742011f6cf80773670c8eb06d3ce6cc05342c6bddb6a6ad99e04d6760af230c2"
+	},
+	{
+		"file": "src/job/Lifts/shared/messages.ts",
+		"declarations": ["LiftPress"],
+		"sha256": "ceb12a197b079f97e09e3b44ad5abfe1f2ba37ba5003d27fe58c2a59674b06f0"
+	},
+	{
+		"file": "src/warehouse/Codes/shared/codes.ts",
+		"declarations": ["CodeResult"],
+		"sha256": "d489742629f034b1dbec7851b8888285bb43aa0dce2c49389a1b3886ac9c0937"
+	},
+	{
+		"file": "src/warehouse/PlayerCard/shared/messages.ts",
+		"declarations": ["ProfileReply", "ProfileRequest"],
+		"sha256": "fd568cb169abc0dc48f4863973f1d59f0c50ec773f747497e79e7e6e199e8cb5"
+	},
+	{
+		"file": "src/warehouse/PlayerCard/shared/public-profile.ts",
+		"declarations": ["ItemCountWire", "HouseCountWire", "JobRecordWire", "PublicProfileWire"],
+		"sha256": "ceccc088f7d75c011894fa817b308ac7e5fa501f0456ea773c19bf54a6096c1e"
+	},
+	{
+		"file": "src/warehouse/Vehicles/shared/parking.ts",
+		"declarations": ["ParkingPose"],
+		"sha256": "7afe4e6efa3592cff05923eb807237b7cc08ab8113562c5ba94c9c3e1d0c6644"
+	}
+]
