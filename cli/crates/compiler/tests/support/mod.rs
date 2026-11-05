@@ -46,7 +46,7 @@ impl Game {
         let dir = scratch.join(ancestor).join("game");
         let installed = dir.join("node_modules/@trioforge/crucible");
         let package = repo().join("packages/crucible");
-        for entry in ["out", "server", "client", "emit", "vide", "util", "maths"] {
+        for entry in ["out", "server", "client", "emit", "vide", "ui", "util", "maths"] {
             copy_declarations(&package.join(entry), &installed.join(entry));
         }
         copy_declarations(&package.join("node_modules/@rbxts/vide"), &dir.join("node_modules/@rbxts/vide"));

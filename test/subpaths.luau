@@ -83,6 +83,32 @@ return {
 		assert(spline.loaded[spline.crucible.server] == nil, "spline does not load the server")
 		spline.place:Destroy()
 	end,
+	["no other entry loads the ui subpath, and it resolves"] = function()
+		local function uiLoaded(h): boolean
+			for module in h.loaded do
+				if module == h.crucible.ui or module:IsDescendantOf(h.crucible.ui) then
+					return true
+				end
+			end
+			return false
+		end
+		local server = loadPlace()
+		server.import(server.crucible)
+		server.import(server.crucible.server)
+		server.import(server.crucible.emit)
+		assert(not uiLoaded(server), "the root, server and emit entries never load ui")
+		local client = loadPlace(true)
+		client.import(client.crucible)
+		client.import(client.crucible.client)
+		client.import(client.crucible.vide)
+		assert(not uiLoaded(client), "the client and vide entries never load ui")
+		local ui = client.import(client.crucible.ui)
+		for _, name in { "mount", "Show", "For", "bind", "append" } do
+			assert(type(ui[name]) == "function", `the ui subpath exports {name}`)
+		end
+		client.place:Destroy()
+		server.place:Destroy()
+	end,
 	["no entry but the testing subpath loads it, and the subpath resolves"] = function()
 		local function testingLoaded(h): boolean
 			for module in h.loaded do
