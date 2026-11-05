@@ -89,11 +89,23 @@ impl ParseConfigHost for ConfigHost {
     }
 }
 
-pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {
+fn config_host() -> Result<ConfigHost, Vec<Diagnostic>> {
     let fs: Arc<dyn FS> = Arc::new(bundled::wrap_fs(osvfs::fs()));
     let cwd = std::env::current_dir().map_err(|e| vec![plain(&format!("cannot read the current directory: {e}"))])?;
-    let cwd = tspath::normalize_path(&cwd.to_string_lossy());
-    let host = ConfigHost { fs: Arc::clone(&fs), cwd: cwd.clone() };
+    Ok(ConfigHost { fs, cwd: tspath::normalize_path(&cwd.to_string_lossy()) })
+}
+
+pub(crate) fn out_dir(tsconfig: &Path) -> Option<String> {
+    let host = config_host().ok()?;
+    let path = tspath::get_normalized_absolute_path(&tsconfig.to_string_lossy(), &host.cwd);
+    let (config, _) = tsoptions::get_parsed_command_line_of_config_file(&path, None, None, &host, None);
+    let options = config?.compiler_options()?;
+    (!options.out_dir.is_empty()).then(|| options.out_dir.replace('\\', "/"))
+}
+
+pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {
+    let host = config_host()?;
+    let (fs, cwd) = (Arc::clone(&host.fs), host.cwd.clone());
     let path = tspath::get_normalized_absolute_path(&tsconfig.to_string_lossy(), &cwd);
     // One checker keeps type and symbol identity across every query, and it is the cheapest in memory and CPU when
     // several builds share a machine.

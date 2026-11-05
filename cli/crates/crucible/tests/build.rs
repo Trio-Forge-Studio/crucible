@@ -321,6 +321,66 @@ fn places_sharing_a_tsconfig_compile_once_or_refuse_to_mix_their_code() {
 }
 
 #[test]
+fn separate_tsconfigs_refuse_one_out_dir_in_any_case_even_when_one_place_builds() {
+    let game = Game::template_layout();
+    game.write("src/server/start-only.ts", "export const only = 1;\n");
+    let mut arena = game::ts7_config();
+    arena["exclude"] = json!(["src/server/start-only.ts"]);
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"]["TS"]["$path"] = "OUT/shared".into();
+    project["tree"]["ServerScriptService"]["TS"]["$path"] = "OUT/server".into();
+    game.json("arena.project.json", &project);
+    game.write(
+        "crucible.toml",
+        "[places.start]\nproject = \"default.project.json\"\n[places.arena]\nproject = \"arena.project.json\"\ntsconfig = \"tsconfig.arena.json\"\n",
+    );
+    for out_dir in ["OUT", "out/arena"] {
+        arena["compilerOptions"]["outDir"] = out_dir.into();
+        game.json("tsconfig.arena.json", &arena);
+        for args in [&[][..], &["--place", "start"][..]] {
+            let out = game.build(args);
+            let stderr = text(&out.stderr);
+            assert_eq!(code(&out), 1, "{out_dir} {args:?}: {stderr}");
+            let refused = if out_dir == "OUT" {
+                "places arena and start compile different code into OUT. Give each a tsconfig with its own outDir"
+            } else {
+                "places arena and start compile into out/arena and out, one inside the other"
+            };
+            assert!(stderr.contains(refused), "{out_dir} {args:?}: {stderr}");
+            assert!(!game.path("out").exists() && !game.path("OUT").exists(), "nothing compiled or written");
+        }
+    }
+
+    arena["compilerOptions"]["outDir"] = "out-arena".into();
+    game.json("tsconfig.arena.json", &arena);
+    project["tree"]["ReplicatedStorage"]["TS"]["$path"] = "out-arena/shared".into();
+    project["tree"]["ServerScriptService"]["TS"]["$path"] = "out-arena/server".into();
+    game.json("arena.project.json", &project);
+    let out = game.build(&["--place", "start"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    let out = game.build(&["--place", "arena"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.path("out/server/start-only.luau").is_file(), "arena's build leaves start's modules alone");
+}
+
+#[test]
+fn a_deeply_nested_source_compiles() {
+    let game = Game::template_layout();
+    game.write("src/shared/sum.ts", &format!("export const sum = 0{};\n", " + 0".repeat(500)));
+    let arms: String = (1..=1000).map(|n| format!(" else if (n === {n}) {{\n\t\treturn {n};\n\t}}")).collect();
+    game.write(
+        "src/shared/pick.ts",
+        &format!(
+            "export function pick(n: number): number {{\n\tif (n === 0) {{\n\t\treturn 0;\n\t}}{arms}\n\treturn -1;\n}}\n"
+        ),
+    );
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.read("out/shared/sum.luau").contains(&" + 0".repeat(500)));
+    assert!(game.read("out/shared/pick.luau").contains("1000"));
+}
+
+#[test]
 fn usage_errors_exit_2_before_compiling() {
     let game = Game::template_layout();
     game.write("crucible.toml", TWO_PLACES);

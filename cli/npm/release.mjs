@@ -18,7 +18,7 @@ if (process.env.GITHUB_EVENT_NAME === "pull_request") {
 	assert.ok(process.env.GITHUB_RUN_ID, "pull request staging needs GITHUB_RUN_ID");
 	version = `${release}-pr.${process.env.GITHUB_RUN_ID}`;
 }
-for (const required of ["rojo ", "tsrs NOTICE", "roblox-ts 3.0.0 runtime library"]) {
+for (const required of ["rojo ", "tsrs NOTICE", "roblox-ts 3.0.0 runtime library", "Copyright (c) 2019 Eryn L. K."]) {
 	assert.ok(readFileSync(notices, "utf8").includes(required), `generated notices must include ${required.trim()}`);
 }
 const output = resolve(outputDirectory);

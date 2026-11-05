@@ -34,8 +34,10 @@ function handlers(): LuaTuple<[() => string, () => string]> {
 }
 
 export function tuples() {
+	// oxlint-disable-next-line roblox-ts/misleading-lua-tuple-checks -- Exercises the lowering of this otherwise rejected form.
 	const values = triple();
 	values[0] = 10;
+	// oxlint-disable-next-line roblox-ts/misleading-lua-tuple-checks -- Exercises the lowering of this otherwise rejected form.
 	const calls = handlers();
 	return [values[0], values[1], calls[0](), calls?.[1]()];
 }

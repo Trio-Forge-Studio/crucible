@@ -85,6 +85,7 @@ pub fn build(
             selected.len()
         )));
     }
+    refuse_declared_out_dir_overlaps(root, manifest)?;
     write(root, &compile_all(root, &selected)?)?;
     let mut built = Vec::new();
     for (name, place) in selected {
@@ -115,29 +116,54 @@ fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<
         let compiled = compile(root, place).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
         compiles.push(SharedCompile { place, names: vec![name], compiled });
     }
-    refuse_mixed_out_dirs(root, &compiles)?;
+    let outputs: Vec<_> =
+        compiles.iter().map(|shared| Output::new(shared.names[0], shared.compiled.out_dir.clone())).collect();
+    refuse_overlaps(root, &outputs, |a, b| compiles[a].compiled.modules == compiles[b].compiled.modules)?;
     Ok(compiles)
 }
 
-fn refuse_mixed_out_dirs(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
-    for (index, a) in compiles.iter().enumerate() {
-        for b in &compiles[index + 1..] {
-            let (x, y) = (&a.compiled.out_dir, &b.compiled.out_dir);
-            if x == y && a.compiled.modules != b.compiled.modules {
+struct Output<'m> {
+    place: &'m str,
+    dir: PathBuf,
+    key: PathBuf,
+}
+
+impl<'m> Output<'m> {
+    fn new(place: &'m str, dir: PathBuf) -> Self {
+        Self { place, key: case_folded_canonical(&dir), dir }
+    }
+}
+
+fn refuse_declared_out_dir_overlaps(root: &Path, manifest: &Manifest) -> Result<(), Error> {
+    let (mut outputs, mut configs) = (Vec::new(), Vec::new());
+    for (name, place) in &manifest.places {
+        let tsconfig = root.join(&place.tsconfig);
+        if let Some(dir) = crucible_compiler::out_dir(&tsconfig) {
+            outputs.push(Output::new(name, dir));
+            configs.push(case_folded_canonical(&tsconfig));
+        }
+    }
+    refuse_overlaps(root, &outputs, |a, b| configs[a] == configs[b])
+}
+
+fn refuse_overlaps(root: &Path, outputs: &[Output<'_>], same_code: impl Fn(usize, usize) -> bool) -> Result<(), Error> {
+    for (a, x) in outputs.iter().enumerate() {
+        for (b, y) in outputs.iter().enumerate().skip(a + 1) {
+            if x.key == y.key && !same_code(a, b) {
                 return Err(Error::Failed(format!(
                     "places {} and {} compile different code into {}. Give each a tsconfig with its own outDir",
-                    a.names[0],
-                    b.names[0],
-                    shown(root, x)
+                    x.place,
+                    y.place,
+                    shown(root, &x.dir)
                 )));
             }
-            if x != y && (x.starts_with(y) || y.starts_with(x)) {
+            if x.key != y.key && (x.key.starts_with(&y.key) || y.key.starts_with(&x.key)) {
                 return Err(Error::Failed(format!(
                     "places {} and {} compile into {} and {}, one inside the other. Give each an outDir outside the other's",
-                    a.names[0],
-                    b.names[0],
-                    shown(root, x),
-                    shown(root, y)
+                    x.place,
+                    y.place,
+                    shown(root, &x.dir),
+                    shown(root, &y.dir)
                 )));
             }
         }
@@ -145,13 +171,31 @@ fn refuse_mixed_out_dirs(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<
     Ok(())
 }
 
+fn case_folded_canonical(path: &Path) -> PathBuf {
+    let (mut existing, mut missing) = (path, Vec::new());
+    let resolved = loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            break resolved;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name);
+                existing = parent;
+            }
+            _ => break existing.to_path_buf(),
+        }
+    };
+    let full = missing.iter().rev().fold(resolved, |full, name| full.join(name));
+    full.to_string_lossy().to_lowercase().into()
+}
+
 fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
     let failed =
         |path: &Path, error: std::io::Error| Error::Failed(format!("cannot write {}: {error}", shown(root, path)));
-    let mut written: Vec<&Path> = Vec::new();
+    let mut written: Vec<PathBuf> = Vec::new();
     for shared in compiles {
         let out = shared.compiled.out_dir.as_path();
-        if !written.contains(&out) {
+        if !written.contains(&case_folded_canonical(out)) {
             let changes =
                 crucible_compiler::write(out, &shared.compiled.modules).map_err(|error| failed(out, error))?;
             eprintln!(
@@ -160,7 +204,7 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
                 shared.compiled.modules.len(),
                 shown(root, out)
             );
-            written.push(out);
+            written.push(case_folded_canonical(out));
         }
         let include = root.join(&shared.place.include);
         crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;
@@ -202,9 +246,23 @@ fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
     Ok(Compiled { out_dir: child.out_dir, modules })
 }
 
+// The checker recurses as deep as the source nests, so the compile gets the stack tsrs's own command line gives it.
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
     child::exit_with_parent();
-    match crucible_compiler::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
+    match std::thread::Builder::new()
+        .stack_size(512 << 20)
+        .spawn(move || compile_and_send(&tsconfig, &project, &include))
+    {
+        Ok(compile) => compile.join().unwrap_or(ExitCode::from(101)),
+        Err(error) => {
+            eprintln!("crucible build: cannot start the compile thread: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn compile_and_send(tsconfig: &Path, project: &Path, include: &Path) -> ExitCode {
+    match crucible_compiler::compile(tsconfig, Target::Game { project, include }) {
         Ok(compiled) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
             let child = ChildModules { out_dir: compiled.out_dir, modules };
