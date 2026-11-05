@@ -1,6 +1,6 @@
 import { createBinding } from "../internal/reactive/flush";
 import { createRootScope } from "../internal/reactive/ownership";
-import { onCleanup, own, scope, state, untracked, type Readable, type State } from "../reactive";
+import { computed, onCleanup, own, scope, state, untracked, type Readable, type State } from "../reactive";
 
 export type { EventProps, IntrinsicProps, PropertyProps } from "./jsx-runtime";
 
@@ -177,4 +177,171 @@ export function For<T>(props: ForProps<T>): Node {
 		parent = target;
 		for (const [, row] of rows) append(target, row.node);
 	});
+}
+
+/** The device the player used last: keyboard and mouse, touch, or a gamepad. */
+export type InputMode = "mouse" | "touch" | "gamepad";
+
+/** `landscape` while the viewport is at least as wide as it is tall. */
+export type Orientation = "portrait" | "landscape";
+
+/** The client-wide state that the `md:`, `portrait:`, `touch:` and `dark:` class variants read. */
+export interface Environment {
+	/** `workspace.CurrentCamera.ViewportSize`, following a change of `CurrentCamera`. */
+	readonly viewport: Readable<Vector2>;
+	readonly orientation: Readable<Orientation>;
+	/** From `UserInputService.LastInputTypeChanged`. An input type of no mode keeps the previous mode. */
+	readonly input: Readable<InputMode>;
+	/** What `dark:` reads. The game sets it, and it starts false. */
+	readonly dark: State<boolean>;
+}
+
+function modeOf(inputType: Enum.UserInputType): InputMode | undefined {
+	switch (inputType) {
+		case Enum.UserInputType.Keyboard:
+		case Enum.UserInputType.MouseButton1:
+		case Enum.UserInputType.MouseButton2:
+		case Enum.UserInputType.MouseButton3:
+		case Enum.UserInputType.MouseMovement:
+		case Enum.UserInputType.MouseWheel:
+			return "mouse";
+		case Enum.UserInputType.Touch:
+			return "touch";
+		case Enum.UserInputType.Gamepad1:
+		case Enum.UserInputType.Gamepad2:
+		case Enum.UserInputType.Gamepad3:
+		case Enum.UserInputType.Gamepad4:
+		case Enum.UserInputType.Gamepad5:
+		case Enum.UserInputType.Gamepad6:
+		case Enum.UserInputType.Gamepad7:
+		case Enum.UserInputType.Gamepad8:
+			return "gamepad";
+	}
+	return undefined;
+}
+
+let viewportSize: State<Vector2> | undefined;
+let inputMode: State<InputMode> | undefined;
+
+function start() {
+	if (viewportSize !== undefined) return;
+	const input = game.GetService("UserInputService");
+	const workspace = game.GetService("Workspace");
+	viewportSize = state(workspace.CurrentCamera?.ViewportSize ?? Vector2.zero);
+	inputMode = state(
+		modeOf(input.GetLastInputType()) ??
+			(input.TouchEnabled && !input.MouseEnabled
+				? "touch"
+				: input.GamepadEnabled && !input.KeyboardEnabled
+					? "gamepad"
+					: "mouse"),
+	);
+	let resized: RBXScriptConnection | undefined;
+	const follow = (camera: Camera | undefined) => {
+		resized?.Disconnect();
+		resized = camera
+			?.GetPropertyChangedSignal("ViewportSize")
+			.Connect(() => viewportSize!.set(camera.ViewportSize));
+	};
+	follow(workspace.CurrentCamera);
+	workspace.GetPropertyChangedSignal("CurrentCamera").Connect(() => {
+		const camera = workspace.CurrentCamera;
+		follow(camera);
+		viewportSize!.set(camera?.ViewportSize ?? Vector2.zero);
+	});
+	input.LastInputTypeChanged.Connect((inputType) => {
+		const mode = modeOf(inputType);
+		if (mode !== undefined) inputMode!.set(mode);
+	});
+}
+
+const viewport = () => {
+	start();
+	return viewportSize!();
+};
+
+/**
+ * The client's viewport, orientation, input mode and dark flag. The first read of `viewport`, `orientation` or
+ * `input` connects to the camera and `UserInputService` for the rest of the session, so a game installs nothing.
+ */
+export const environment: Environment = {
+	viewport,
+	orientation: computed(() => {
+		const size = viewport();
+		return size.X >= size.Y ? "landscape" : "portrait";
+	}),
+	input: () => {
+		start();
+		return inputMode!();
+	},
+	dark: state(false),
+};
+
+/** Whether the pointer is over an element, presses it, or it has focus. The `hover:`, `active:` and `focus:` variants read these. */
+export interface Interaction {
+	readonly hover: Readable<boolean>;
+	/** True from a left click or touch that starts on the element until that input ends, wherever it ends. */
+	readonly press: Readable<boolean>;
+	/** True while the element is the selected GuiObject, or while a TextBox has the keyboard. */
+	readonly focus: Readable<boolean>;
+}
+
+const interactions = setmetatable(new Map<GuiObject, Interaction>(), { __mode: "k" });
+
+/**
+ * The interaction state of `instance`, made on the first call and shared by every later one. It follows the
+ * instance's events until the instance is destroyed. A press in progress stops listening for its release when the
+ * owner of the first call ends. The first call needs an owner and throws without one.
+ */
+export function interaction(instance: GuiObject): Interaction {
+	const known = interactions.get(instance);
+	if (known !== undefined) return known;
+	const hover = state(false);
+	const press = state(false);
+	const focus = state(false);
+	instance.MouseEnter.Connect(() => hover.set(true));
+	instance.MouseLeave.Connect(() => hover.set(false));
+	let pressing: InputObject | undefined;
+	let release: RBXScriptConnection | undefined;
+	const ended = (input: InputObject) => {
+		if (input !== pressing) return;
+		pressing = undefined;
+		release?.Disconnect();
+		release = undefined;
+		press.set(false);
+	};
+	instance.InputBegan.Connect((input) => {
+		const kind = input.UserInputType;
+		if (pressing !== undefined) return;
+		if (kind !== Enum.UserInputType.MouseButton1 && kind !== Enum.UserInputType.Touch) return;
+		pressing = input;
+		press.set(true);
+		release = game.GetService("UserInputService").InputEnded.Connect(ended);
+	});
+	instance.InputEnded.Connect(ended);
+	onCleanup(() => release?.Disconnect());
+	let selected = false;
+	let typing = false;
+	const refocus = () => focus.set(selected || typing);
+	instance.SelectionGained.Connect(() => {
+		selected = true;
+		refocus();
+	});
+	instance.SelectionLost.Connect(() => {
+		selected = false;
+		refocus();
+	});
+	if (instance.IsA("TextBox")) {
+		instance.Focused.Connect(() => {
+			typing = true;
+			refocus();
+		});
+		instance.FocusLost.Connect(() => {
+			typing = false;
+			refocus();
+		});
+	}
+	const made: Interaction = { hover, press, focus };
+	interactions.set(instance, made);
+	return made;
 }

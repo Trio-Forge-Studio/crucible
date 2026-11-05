@@ -442,13 +442,18 @@ A profile store call runs on the wrong side. `store()` and `store.loaded()` with
 ```text
 CRU028: `<token>` is not a class. Did you mean `<name>`?
 CRU028: `<token>` is not a class. No theme.toml is beside the tsconfig.
-CRU028: variants such as `hover:` are not supported yet
+CRU028: `<variant>:` is not a variant. Did you mean `<name>:`?
+CRU028: `<variant>:` repeats `<variant>:`
+CRU028: `<variant>:` and `<variant>:` can never hold together
+CRU028: `group` takes no variants
+CRU028: `<token>` reads a group, but no element around it in this JSX has class `group/<name>`
+CRU028: `<token>` never applies: `<later token>` comes later and sets <property>
 CRU028: <n> px is not a whole-pixel offset in range
 CRU028: opacity must be a whole number from 0 to 100
 CRU028: <message> (class `<token>`, byte <n>)
 ```
 
-A `className` token does not resolve to a class. It is unknown, uses a variant prefix, gives a spacing step that lands on a fraction of a pixel, or gives an opacity outside 0 to 100. An inline class reports at the token. A class read from a constant reports at the use and names the token and its byte offset in the string. To fix it, use a class from `crucible docs ui`, add the missing name to `theme.toml`, or pick a step that gives whole pixels.
+A `className` token does not resolve to a class, or its variants cannot apply. It is unknown, names a variant that is neither built in nor a `[breakpoint]` key, repeats a variant, stacks two that never hold together such as `portrait:landscape:`, gives a spacing step that lands on a fraction of a pixel, or gives an opacity outside 0 to 100. A `group-*` variant fails when no element around it in the same JSX has the matching `group` class. A variant class fails when a later class on the same property always overrides it, such as `hover:bg-brand bg-white`. An inline class reports at the token. A class read from a constant reports at the use and names the token and its byte offset in the string. To fix it, use a class or variant from `crucible docs ui`, add the missing name to `theme.toml`, pick a step that gives whole pixels, add the `group` class to an enclosing element, or move the variant class after the class it should override.
 
 ## CRU029
 
@@ -465,10 +470,12 @@ The compiler cannot read a `className` as one string at build time, or the attri
 ```text
 CRU030: cannot read theme.toml: <reason>
 CRU030: two definitions make class `<token>`
-CRU030: unknown section `<section>`; expected spacing, color, text or radius
+CRU030: unknown section `<section>`; expected spacing, color, text, radius or breakpoint
 CRU030: a color must be #rrggbb
 CRU030: text size must be from 1 to 100 pixels
 CRU030: expected a finite number
+CRU030: a breakpoint must be a whole number of pixels from 1 to 100000
+CRU030: `<name>` is a built-in variant or a group, not a breakpoint name
 ```
 
 The `theme.toml` beside the tsconfig cannot be read, is not valid TOML, or holds a value the theme does not accept. It also fails when two names make the same class, such as a color and a text size both called `label`. The error points at the key or value in `theme.toml`. While the theme is broken, the compiler skips class resolution, so one theme error does not also report every class. To fix it, correct the entry at the reported line.
