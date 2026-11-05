@@ -292,32 +292,34 @@ fn place_filter_compiles_only_that_place_and_output_renames_the_file() {
 #[test]
 fn places_sharing_a_tsconfig_compile_once_or_refuse_to_mix_their_code() {
     let game = Game::template_layout();
-    game.write("crucible.toml", TWO_PLACES);
-    fs::copy(game.path("default.project.json"), game.path("arena.project.json")).unwrap();
+    game.write("crucible.toml", &TWO_PLACES.replace("arena.project.json", "default.project.json"));
     let out = game.build(&[]);
     let stderr = text(&out.stderr);
     assert_eq!(code(&out), 0, "{stderr}");
     assert_eq!(printed(&out), ["build/arena.rbxl", "build/start.rbxl"]);
     assert_eq!(stderr.matches("modules to out").count(), 1, "one write for the shared outDir: {stderr}");
 
-    let mut arena: Value = serde_json::from_str(&game.read("arena.project.json")).unwrap();
+    game.write("crucible.toml", TWO_PLACES);
+    let mut arena: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
     let shared = arena["tree"]["ReplicatedStorage"]["TS"].take();
     arena["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("TS");
     arena["tree"]["ReplicatedStorage"]["Shared"] = shared;
     game.json("arena.project.json", &arena);
     fs::remove_dir_all(game.path("build")).unwrap();
     let before = game.snapshot(&["out"]);
-    let out = game.build(&[]);
-    let stderr = text(&out.stderr);
-    assert_eq!(code(&out), 1, "{stderr}");
-    assert!(
-        stderr.contains(
-            "places arena and start compile different code into out. Give each a tsconfig with its own outDir"
-        ),
-        "{stderr}"
-    );
-    assert_eq!(game.snapshot(&["out"]), before);
-    assert!(!game.path("build").exists());
+    for args in [&[][..], &["--place", "start"][..], &["--place", "arena"][..]] {
+        let out = game.build(args);
+        let stderr = text(&out.stderr);
+        assert_eq!(code(&out), 1, "{args:?}: {stderr}");
+        assert!(
+            stderr.contains(
+                "places arena and start compile different code into out. Give each a tsconfig with its own outDir"
+            ),
+            "{args:?}: {stderr}"
+        );
+        assert_eq!(game.snapshot(&["out"]), before, "{args:?} leaves the shared outDir alone");
+        assert!(!game.path("build").exists(), "{args:?}");
+    }
 }
 
 #[test]

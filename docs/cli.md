@@ -24,7 +24,7 @@ Run `npx crucible build` from the game's root. It compiles every place in `cruci
 - When any selected place fails to compile, the build writes nothing and builds no place file. Places compile one after another, and the first failure stops the build.
 - The build writes the compiled Luau into the tsconfig's `outDir` and skips each file whose bytes already match. It deletes the files it compiled earlier that no longer have a source, and keeps every other file there.
 - It writes roblox-ts 3.0.0's `RuntimeLib.lua` and `Promise.lua` into the place's `include` folder, which the project must map. A file whose bytes already match is left alone, and other files there stay.
-- Places that name the same `tsconfig`, `project`, and `include` compile once. Before anything compiles, the build reads the `outDir` of every place in `crucible.toml`, including places `--place` leaves out. Two places with different tsconfigs and the same `outDir`, or with one `outDir` inside the other, exit 1. Folder names that differ only in case count as the same folder on every platform. Places that share a tsconfig but compile different code into its `outDir`, because their projects differ, exit 1 before anything is written.
+- Places that name the same `tsconfig`, `project`, and `include` compile once. Before anything compiles, the build reads the `outDir` of every place in `crucible.toml`, including places `--place` leaves out. Two places that share an `outDir` but differ in `tsconfig`, `project`, or `include` exit 1, because their code would overwrite each other's. Two places with one `outDir` inside the other also exit 1. Folder names that differ only in case count as the same folder on every platform.
 - Each place compiles in its own process, so a build's peak memory is that of its largest place.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.
@@ -32,7 +32,7 @@ Run `npx crucible build` from the game's root. It compiles every place in `cruci
 
 `crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `tsconfig.json`, `default.project.json`, and the `include` folder at the root.
 
-A place names its Rojo `project`. `tsconfig` defaults to `tsconfig.json` and `include` defaults to `include`. All three paths are relative to the game's root. A place with its own tsconfig needs an `outDir` that no other place writes.
+A place names its Rojo `project`. `tsconfig` defaults to `tsconfig.json` and `include` defaults to `include`. All three paths are relative to the game's root. A place with its own tsconfig, project, or include needs a tsconfig whose `outDir` no other place writes.
 
 ```toml
 [places.start]
@@ -134,7 +134,7 @@ npx crucible upgrade 0.2.0
 - The latest version comes from `npm view @trioforge/crucible-cli version` in the game's root, so the registry and credentials in `.npmrc` apply. A game where either package is already newer, such as a prerelease, exits 0 and changes nothing.
 - Both packages move to the same exact version in `package.json`, and so does `@trioforge/compiler-types` when the game pins it. Only their version strings change, so the file keeps its formatting and line endings. A `workspace:`, `file:`, `link:`, `npm:` alias, Git, URL, path, or tag spec exits 2, because only a registry version or range can be rewritten. Any npm range is accepted, such as `^0.1.0 || ^0.2.0`, `>=0.1.0 <0.2.0`, or `0.1.0 - 0.2.0`.
 - The game's package manager installs them. The nearest lockfile in the game's root or a parent directory picks the manager, so a workspace member installs with its workspace's manager: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, or `package-lock.json`. Without one, `npm_config_user_agent` picks it, with npm as the default. pnpm runs with `--no-frozen-lockfile` and Yarn Berry with `--no-immutable`, because under CI both refuse a changed `package.json` by default.
-- A version older than either installed package exits 2 unless you pass `--allow-downgrade`. When both pins and both installed packages are already at the version, it exits 0 and changes nothing. Otherwise it installs again, so a retry after a failed install finishes the job.
+- A version older than either installed package exits 2 unless you pass `--allow-downgrade`. When both pins and both installed packages are already at the version, it exits 0 and changes nothing, unless `package.json` still lists `roblox-ts` or `@rbxts/compiler-types`. Then it finishes [the move off roblox-ts](#upgrading-from-roblox-ts) without reinstalling crucible. Otherwise it installs again, so a retry after a failed install finishes the job.
 - After install, both installed packages and the installed binary must report the new version, or the command exits 1 with the versions it found.
 - The template owns `tsconfig.json`, `default.project.json`, `vite.config.ts`, `.gitignore`, `.gitattributes`, `LICENSE`, and the `## Crucible` section of `AGENTS.md`. A file or section that still matches the old version's template takes the new version's content and keeps the file's line endings. One that differs is listed and left alone. A deleted one is listed and not recreated. A part the new template no longer includes is listed for you to delete. The comparison ignores CRLF line endings. `package.json` belongs to the game, and the upgrade changes only the entries this section and [Upgrading from roblox-ts](#upgrading-from-roblox-ts) name. `crucible.toml` and `src` are never changed.
 - `LICENSE` is never written, because changing a game's license text has legal effect. When the new template's license differs, an untouched `LICENSE` is listed for you to review.
@@ -148,7 +148,7 @@ Games made by `crucible create` 0.3.0 and earlier build with roblox-ts. The old 
 
 - When `package.json` lists `roblox-ts` or `@rbxts/compiler-types`, the upgrade removes `roblox-ts`, `typescript`, and `@rbxts/compiler-types`, adds `@trioforge/compiler-types` at the new version beside `@trioforge/crucible-cli`, and installs again. Only those entries change, so the file keeps its formatting. When they cannot be edited in place, `package.json` is left alone and the report names the edit and the install to run. If the game's own scripts import `typescript`, add it back.
 - It deletes the modules rbxtsc compiled into each place's `outDir`, the `.luau` and `.lua` files that start with `-- Compiled with roblox-ts`, and the folders that leaves empty. `crucible build` deletes only modules it compiled, so it never removes these. Every other file stays.
-- An untouched `tsconfig.json` takes the new template, like any other template file. An edited one is never rewritten. The report lists each change from this table that it still needs, and `crucible build` fails with `TS5102`, `TS5108`, or `TS2688` until the changes are made.
+- An untouched `tsconfig.json` takes the new template, like any other template file. An edited one is never rewritten. The report lists each change from this table that it still needs, and `crucible build` fails with `TS5102`, `TS5108`, or `TS2688` until the changes are made. The report follows `extends` through relative paths and packages in `node_modules`, and names the file that holds each setting, so a setting a base tsconfig holds is listed with that base. A base it cannot find or parse is listed for you to check by hand.
 
 | TypeScript 5 setting | TypeScript 7 change |
 |---|---|
@@ -161,11 +161,26 @@ Games made by `crucible create` 0.3.0 and earlier build with roblox-ts. The old 
 | no `skipLibCheck` | Set `skipLibCheck` to `true`. |
 | `plugins` | Remove it. The compiler applies Crucible's transform itself. |
 
-The report asks for a missing `types`, `rootDir`, or `skipLibCheck` only in a tsconfig that extends nothing, because a base tsconfig can supply them. It asks only in a game moving off roblox-ts, because a newer game chose its own settings. After the changes, run `npm run check`.
+The report asks for a missing `types`, `rootDir`, or `skipLibCheck` only when it read every tsconfig in the chain, because a base it cannot read can supply them, and it names the place's own tsconfig for each. It asks only in a game moving off roblox-ts, because a newer game chose its own settings. After the changes, run `npm run check`.
+
+The 0.3.0 binary starts the upgrade, so two of its limits need a step first.
+
+On Windows with Yarn, Yarn cannot replace `crucible.exe` while it runs, so `npx crucible upgrade` fails with `EPERM` and leaves `node_modules/@trioforge/crucible-cli` empty. Run a copy of the binary from outside `node_modules` instead. It hands off to the new version as usual. In PowerShell, write `$env:TEMP` for `%TEMP%`.
+
+```console
+copy node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe %TEMP%\crucible-0.3.0.exe
+%TEMP%\crucible-0.3.0.exe upgrade
+```
+
+If the upgrade already failed this way, `yarn install --no-immutable` alone does not relink the CLI. Delete `node_modules/.yarn-state.yml`, run `yarn install --no-immutable`, then run the copy.
+
+When every package is in `devDependencies` and `package.json` has no `dependencies` field, 0.3.0 exits 1 with "cannot update package.json automatically". Add `"dependencies": {}` to `package.json`, then run `npx crucible upgrade`. You can delete the empty field afterwards.
 
 ### When install fails
 
 A failed install restores `package.json` and exits 1. `node_modules` can still hold a mix of versions, so the message names the install command that returns it to the restored pins, such as `npm install` or `pnpm install --no-frozen-lockfile`. Run it, then upgrade again. If the restore itself fails, the message names the temporary file beside `package.json` that holds the original.
+
+The new version's binary runs a second install when it moves the game off roblox-ts. When that install fails, it restores `package.json` to the new version with the roblox-ts packages still listed, prints the report of the template files it already refreshed, and exits 1. Run the install command the message names, then run `npx crucible upgrade` again. Crucible is then already at the new version, so the upgrade only finishes the move. An upgrade started from 0.3.0 also prints that the template was not refreshed, because that binary cannot tell this failure from a failed refresh. The report above that line lists what was refreshed.
 
 An interrupted install, such as a closed terminal, leaves `package.json` at the new version. Restore `package.json` from version control, run the install command, then upgrade again. Running `npx crucible upgrade <version>` straight away also finishes the install, but it can skip or only list template changes, because the old template is no longer known.
 
