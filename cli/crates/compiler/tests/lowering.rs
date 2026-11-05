@@ -30,14 +30,24 @@ fn every_source_file_becomes_a_module_and_index_becomes_init() {
     let mut paths: Vec<&str> = MODULES.iter().map(|m| m.path.as_str()).collect();
     paths.sort_unstable();
     let expected = [
+        "assignment.luau",
         "classes.luau",
         "control.luau",
+        "default-star.luau",
+        "default-use.luau",
+        "default-value.luau",
         "exceptions.luau",
+        "fd.luau",
         "macros.luau",
         "modules.luau",
         "nested/init.luau",
+        "only-types.luau",
         "operators.luau",
+        "optional-receivers.luau",
         "patterns.luau",
+        "star.luau",
+        "type-star-only.luau",
+        "type-star.luau",
         "util.luau",
     ];
     assert_eq!(paths, expected);
@@ -233,10 +243,55 @@ fn out_of_scope_constructs_are_errors_at_their_location() {
         "7:1 export let is not supported; export a const",
         "10:9 loose equality is not supported; use === or !==",
         "14:8 `table` cannot be a Luau local name",
-        "19:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
-        "25:9 instanceof is not supported",
+        "20:13 binding a whole step of a LuaTuple iterator whose length is not fixed is not supported",
+        "26:9 instanceof requires a TypeScript class",
+        "29:9 in requires an object, record or class instance",
+        "32:9 in requires an object, record or class instance",
+        "35:9 in requires an object, record or class instance",
+        "38:9 in requires an object, record or class instance",
+        "41:9 delete on an array or tuple is not supported",
     ];
     assert_eq!(found, expected);
+}
+
+#[test]
+fn instanceof_uses_runtime_class_ancestry() {
+    has("fd.luau", &["TS.instanceof(leaf, Base)", "TS.instanceof(leaf, Leaf)"]);
+}
+
+#[test]
+fn delete_clears_the_member_and_returns_true() {
+    has("fd.luau", &["object.a = nil", "local removed = true", "local again = true"]);
+}
+
+#[test]
+fn in_tests_presence_even_when_the_value_is_false() {
+    has("fd.luau", &["local before = object.b ~= nil", "object.a ~= nil"]);
+}
+
+#[test]
+fn optional_method_calls_save_the_receiver_and_guard_the_arguments() {
+    has("fd.luau", &["local _0 = get()", "local _1 = _0.run", "_1 = _1(_0, arg())", "_3(_2, arg())"]);
+}
+
+#[test]
+fn promise_construction_calls_the_runtime_constructor() {
+    has("fd.luau", &["TS.Promise.new(function(resolve)"]);
+}
+
+#[test]
+fn satisfies_keeps_the_checked_expression() {
+    has("fd.luau", &["value = 7", "}).value"]);
+}
+
+#[test]
+fn export_assignment_returns_the_module_value() {
+    has("assignment.luau", &["return story"]);
+}
+
+#[test]
+fn star_exports_import_and_forward_members() {
+    has("star.luau", &["TS.import(", "own = 12", "for "]);
 }
 
 #[test]

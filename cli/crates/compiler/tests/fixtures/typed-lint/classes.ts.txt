@@ -1,0 +1,35 @@
+import { CrucibleBehaviour, Subsystem } from "@trioforge/crucible";
+class Janitor {}
+const RunService = game.GetService("RunService");
+import { Releasing, Store, Zone } from "./bases";
+declare function step(): void;
+declare function janitorFor(player: Player): Janitor;
+class Plain { constructor() { RunService.PreSimulation.Connect(step); } }
+class Direct extends Subsystem { start() { RunService.Heartbeat.Connect(step); } } // fires frame-hooks
+class Through extends Zone<"A"> { start() { RunService.Stepped.Connect(step); } } // fires frame-hooks
+class ThroughOnce extends Zone<"B"> { awake() { RunService.PreRender.Once(step); } } // fires frame-hooks
+class Unstored extends Zone<"C"> { private c?: RBXScriptConnection; start() { this.c = RunService.Heartbeat.Connect(step); } } // fires frame-hooks
+class Own extends Zone<"D"> {
+	private stepping?: RBXScriptConnection;
+	start() { this.stepping = RunService.Stepped.Connect(step); }
+	onDestroy() { this.stepping?.Disconnect(); this.stepping = undefined; }
+}
+class Inherited extends Releasing<"E"> {
+	start() { this.stepping = RunService.Stepped.Connect(step); }
+}
+class WrongField extends Releasing<"F"> {
+	private other?: RBXScriptConnection;
+	start() { this.other = RunService.Stepped.Connect(step); } // fires frame-hooks
+}
+class Scoped extends Zone<"G"> { start() { effect(() => RunService.Heartbeat.Connect(step)); RunService.BindToRenderStep("x", 1, step); } }
+class Other extends CrucibleBehaviour<"H"> { open() { RunService.PreRender.Connect(step); } }
+declare function effect(callback: () => void): void;
+class Janitorial extends Store {
+	private janitor = new Janitor(); // fires session-lifetime
+	destroy() {} // fires session-lifetime
+	onShutdown() {}
+}
+class PerPlayer extends Store { private janitor = janitorFor(undefined as never); awake() {} }
+class Behaviour extends Zone<"I"> { private janitor = new Janitor(); destroy() {} }
+class Loose { private janitor = new Janitor(); destroy() {} }
+export { Direct, Through, ThroughOnce, Unstored, Own, Inherited, WrongField, Scoped, Other, Janitorial, PerPlayer, Behaviour, Loose, Plain };

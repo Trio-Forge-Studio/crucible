@@ -236,6 +236,7 @@ function dense(value: unknown, path: string): unknown[] {
 	tableValue(value, path);
 	const array = value as unknown[];
 	let count = 0;
+	// oxlint-disable-next-line roblox-ts/no-array-pairs -- Validate raw table keys for dense one-based storage.
 	for (const [key] of pairs(array)) {
 		count++;
 		if (!typeIs(key, "number") || key % 1 !== 0 || key < 1 || key > array.size())

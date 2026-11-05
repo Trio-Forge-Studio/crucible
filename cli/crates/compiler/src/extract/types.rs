@@ -295,7 +295,7 @@ impl Extractor {
         falsy
     }
 
-    fn is_defined_type(&mut self, t: P<Type>) -> bool {
+    pub(super) fn is_defined_type(&mut self, t: P<Type>) -> bool {
         t.flags() == TypeFlags::Object
             && self.checker.get_properties_of_type_exported(t).is_empty()
             && self.checker.get_signatures_of_type_exported(t, SignatureKind::Call).is_empty()
@@ -329,7 +329,7 @@ impl Extractor {
         x.globals.iterable_function.is_some() && t.symbol() == x.globals.iterable_function
     }
 
-    fn is_lua_tuple_iterable_function(x: &mut Extractor, t: P<Type>) -> bool {
+    pub(super) fn is_lua_tuple_iterable_function(x: &mut Extractor, t: P<Type>) -> bool {
         Self::is_iterable_function(x, t)
             && t.object_flags().intersects(ObjectFlags::Reference)
             && x.checker.get_type_arguments_exported(t).first().is_some_and(|&step| x.is_lua_tuple(step))

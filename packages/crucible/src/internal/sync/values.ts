@@ -439,6 +439,7 @@ function admitArray(
 		if (plan.kind === "tuple" && count !== plan.elements.size()) a.reject(path, "tuple length");
 		a.charge(1 + varuintSize(count), count, 1, path);
 		let seen = 0;
+		// oxlint-disable-next-line roblox-ts/no-array-pairs -- Validate raw table keys for dense one-based storage.
 		for (const [key] of pairs(source)) {
 			a.step(path);
 			seen += 1;

@@ -42,6 +42,32 @@ function TS.import(_caller, base, ...)
 	return load(path)
 end
 
+function TS.instanceof(value, class)
+	if type(value) ~= "table" then
+		return false
+	end
+	local current = getmetatable(value)
+	while current do
+		if current == class then
+			return true
+		end
+		current = getmetatable(current)
+		if current then
+			current = current.__index
+		end
+	end
+	return false
+end
+TS.Promise = {
+	new = function(executor)
+		local result
+		executor(function(value)
+			result = value
+		end)
+		return { value = result }
+	end,
+}
+
 local failures = 0
 local function eq(label: string, actual: any, expected: any)
 	if actual ~= expected then
@@ -210,6 +236,48 @@ list("destructure", patterns.destructure({ 1, 2, nil, 4, 5 }, { a = 9 }), { 1, "
 eq("parameters", patterns.parameters({ x = 1 }, { 3, 4 }, 7, 8), 12)
 list("assign patterns", patterns.assign({ 5, 6 }), { 5, 6, 1 })
 list("LuaTuple elements", patterns.tuples(), { 10, 2, "first", "second" })
+
+local fd = load("fd")
+eq("a call with no results is one macro argument", fd.pushMissing(function() end), 0)
+list("class ancestry", fd.instances(), { true, true, false })
+list("delete and in", fd.members(), { true, true, true, false })
+list("optional method retains receiver", fd.optional(true), { 7, 2, 2 })
+list("optional method skips arguments", fd.optional(false), { -1, 2, 0 })
+eq("satisfies keeps its value", fd.checked(), 7)
+eq("Promise constructor", fd.promise().value, 9)
+eq("export assignment", load("assignment").value, 11)
+eq("star export", load("star").greeting, "hi")
+eq("explicit export with star", load("star").own, 12)
+
+list("default expression and named exports", load("default-use").run(), { 3, "N" })
+eq("star keeps named exports beside a default expression", load("default-star").named, "N")
+eq("star excludes default expression", load("default-star").default, nil)
+eq("star of only types with a value", load("type-star").value, 42)
+load("type-star-only")
+local optional = load("optional-receivers")
+local function method(self, value)
+	return self.tag + value
+end
+list(
+	"nested optional method receivers",
+	optional.run({
+		tag = 10,
+		m = method,
+		b = { tag = 20, m = method },
+		control = {
+			buttonAUp = function(value)
+				return value * 3
+			end,
+		},
+	}),
+	{ 12, 12, 22, 6, 5 }
+)
+list(
+	"optional functions skip arguments",
+	optional.run({ tag = 10, b = { tag = 20 }, control = {} }),
+	{ -1, -1, -1, -1, 0 }
+)
+list("optional holder skips arguments", optional.run(nil), { -1, -1, -1, -1, 0 })
 
 if failures > 0 then
 	print(`{failures} failed`)
