@@ -16,8 +16,8 @@ use std::path::Path;
 pub use declarations::DeclarationKind;
 pub use facts::{
     Attribute, Callee, Check, Class, ClassKind, Constant, Crucible, Declaration, Dependency, Fact, Facts, Falsy, Field,
-    FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Reason, Receiver, RuntimeLib, Schema, Site,
-    Span, Tail, Unanswered,
+    FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Prop, Reason, Receiver, RuntimeLib, Schema,
+    Site, Span, Tail, Unanswered,
 };
 pub use lower::Error;
 use lower::ImportBase;

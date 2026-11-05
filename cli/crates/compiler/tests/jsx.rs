@@ -86,7 +86,12 @@ fn jsx_needs_the_react_setting_and_a_factory() {
         panic!("JSX without a factory fails the compile");
     };
     let found: Vec<String> = errors.iter().map(|e| format!("{}:{} {}", e.line, e.column, e.message)).collect();
-    assert_eq!(found, ["8:21 JSX without `jsx: \"react\"` and a `jsxFactory` is not supported"]);
+    assert_eq!(
+        found,
+        [
+            "8:21 JSX without `jsx: \"react\"` and a `jsxFactory`, or `jsx: \"react-jsx\"` and `jsxImportSource: \"@trioforge/crucible/ui\"` is not supported"
+        ]
+    );
 }
 
 #[test]
@@ -106,4 +111,113 @@ fn the_vide_lowering_mounts_updates_and_connects_through_vide() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(result.status.success(), "{stdout}{}", String::from_utf8_lossy(&result.stderr));
     assert!(stdout.contains("vide fixtures pass"), "{stdout}");
+}
+
+fn ui_game() -> Game {
+    let game = Game::new();
+    game.config(|c| {
+        c["compilerOptions"]["jsx"] = "react-jsx".into();
+        c["compilerOptions"]["jsxImportSource"] = "@trioforge/crucible/ui".into();
+    });
+    for entry in std::fs::read_dir(fixture("ui")).expect("the UI fixtures exist") {
+        let path = entry.expect("the entry is readable").path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        game.write(&format!("src/client/{name}"), &std::fs::read_to_string(&path).unwrap());
+    }
+    game
+}
+
+static UI: LazyLock<(Game, Vec<Module>)> = LazyLock::new(|| {
+    let game = ui_game();
+    let modules = game.compile();
+    (game, modules)
+});
+
+fn ui(path: &str) -> &'static str {
+    &UI.1.iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} is emitted")).source
+}
+
+#[test]
+fn an_intrinsic_element_sets_fixed_props_binds_readables_and_connects_events() {
+    has(
+        ui("client/counter.luau"),
+        "local _0 = Instance.new(\"TextButton\")\n\t_0.Name = \"Counter\"\n\t__ui.bind(_0, \"Text\", function()\n\t\treturn `Coins {props.coins()}`\n\tend)\n\t_0.TextSize = 18\n\t_0.Activated:Connect(props.onBuy)\n\treturn _0",
+    );
+    has(ui("client/panel.luau"), "__ui.bind(_3, \"Text\", title)");
+    has(ui("client/list.luau"), "_3.Text = item\n\t\t\t\t__ui.bind(_3, \"LayoutOrder\", index)");
+}
+
+#[test]
+fn compiled_jsx_imports_the_ui_entry_from_the_place() {
+    has(
+        ui("client/counter.luau"),
+        "local __ui = TS.import(script, game:GetService(\"ReplicatedStorage\"), \"rbxts_include\", \"node_modules\", \"@trioforge\", \"crucible\", \"out\", \"ui\")",
+    );
+}
+
+#[test]
+fn children_parent_an_element_and_append_any_other_node() {
+    has(
+        ui("client/list.luau"),
+        "local _2 = Instance.new(\"UIListLayout\")\n\t\t_2.Name = \"Layout\"\n\t\t_2.Parent = _1\n\t\t__ui.append(_1, For({",
+    );
+    has(ui("client/cards.luau"), "_0.Name = props.title\n\t__ui.append(_0, props.children)");
+}
+
+#[test]
+fn a_component_takes_a_props_table_with_its_children_and_a_fragment_is_an_array() {
+    has(ui("client/cards.luau"), "_2.children = _1\n\t\treturn { Card(_2), Card({\n\t\t\ttitle = \"B\",\n\t\t}) }");
+    has(ui("client/panel.luau"), "Show({\n\t\t\twhen = open,\n\t\t\tfallback = function()");
+}
+
+#[test]
+fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
+    let game = ui_game();
+    game.write(
+        "src/client/mixed.tsx",
+        "import type { Readable } from \"@trioforge/crucible\";\nexport const mixed = (text: string | Readable<string>, maybe?: Readable<string>) => [\n\t<textlabel Text={text} />,\n\t<textlabel Text={maybe} />,\n\t<textlabel {...{ Text: \"x\" }} />,\n];\n",
+    );
+    let Err(Failure::Lower(errors)) = crucible_compiler::compile(&game.dir.join("tsconfig.json")) else {
+        panic!("the refused props fail the compile");
+    };
+    let mut found: Vec<String> = errors
+        .iter()
+        .filter(|e| e.path.ends_with("/mixed.tsx"))
+        .map(|e| format!("{}:{} {}", e.line, e.column, e.message))
+        .collect();
+    found.sort();
+    let expected = [
+        "3:13 the type facts cannot answer this Jsx site (Mixed)",
+        "3:13 the type facts do not say how this attribute lowers",
+        "4:13 the type facts cannot answer this Jsx site (Mixed)",
+        "4:13 the type facts do not say how this attribute lowers",
+        "5:17 a spread attribute on an intrinsic element is not supported",
+    ];
+    assert_eq!(found, expected);
+}
+
+#[test]
+#[ignore = "runs the emitted Luau in Lune, which must be on PATH"]
+fn the_compiled_lowering_mounts_updates_and_unmounts_on_the_compiler_built_runtime() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jsx-ui");
+    let _ = std::fs::remove_dir_all(&root);
+    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"))
+        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"));
+    let installed = root.join("ReplicatedStorage/rbxts_include/node_modules/@trioforge/crucible/out");
+    crucible_compiler::write(&installed, &runtime).expect("the runtime is written");
+    let client: Vec<Module> =
+        UI.1.iter()
+            .filter_map(|m| Some(Module { path: m.path.strip_prefix("client/")?.to_owned(), source: m.source.clone() }))
+            .collect();
+    crucible_compiler::write(&root.join("StarterPlayer/StarterPlayerScripts/TS"), &client).expect("the UI is written");
+    let result = std::process::Command::new("lune")
+        .current_dir(fixture(""))
+        .arg("run")
+        .arg("ui.luau")
+        .arg(&root)
+        .output()
+        .expect("lune runs");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(result.status.success(), "{stdout}{}", String::from_utf8_lossy(&result.stderr));
+    assert!(stdout.contains("ui specs pass"), "{stdout}");
 }

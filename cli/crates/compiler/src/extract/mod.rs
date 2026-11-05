@@ -12,18 +12,21 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use tsrs_ast::{Kind, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
+use tsrs_checker::SignatureKind;
 use tsrs_checker::{EmitResolver, Type};
 use tsrs_compiler::CheckerHandle;
-use tsrs_core::{JsxEmit, P, jsnum};
+use tsrs_core::{CompilerOptions, JsxEmit, P, jsnum};
 
 use crate::Diagnostic;
 use crate::facts::{
-    Callee, Fact, Facts, Falsy, FileFacts, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
+    Callee, Fact, Facts, Falsy, FileFacts, Import, Jsx, Prop, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
 };
 use crate::macros::Macro;
 use crate::program::Checked;
 use crate::project::{Game, absolute, installed_module};
 use crucible::Code;
+
+const UI_ENTRY: &str = "@trioforge/crucible/ui";
 
 pub(crate) fn extract(checked: Checked) -> Facts {
     let root = checked.source_root();
@@ -31,7 +34,7 @@ pub(crate) fn extract(checked: Checked) -> Facts {
     let dir = checked.config_dir();
     let Checked { program, mut checker, host } = checked;
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
-    let jsx_react = program.options().jsx == JsxEmit::REACT;
+    let options = program.options();
     let globals = types::Globals::new(&mut checker);
     let crucible = crucible::Api::new(program, &mut checker, host);
     let mut facts = Facts::default();
@@ -56,6 +59,10 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         facts.place.crucible_emit =
             crucible.emit.as_deref().and_then(|emit| game.module(emit)).and_then(|r| absolute(&r));
     }
+    facts.place.crucible_ui = crucible.ui.as_deref().and_then(|ui| match &game {
+        Some(game) => game.module(ui).and_then(|r| absolute(&r)),
+        None => installed_module(&ui.to_string_lossy().replace('\\', "/")),
+    });
     let mut x = Extractor {
         checker,
         resolver,
@@ -71,8 +78,9 @@ pub(crate) fn extract(checked: Checked) -> Facts {
         pending: Vec::new(),
         modules: Vec::new(),
         reported: HashSet::new(),
-        jsx_react,
+        options,
         jsx: None,
+        instance_classes: None,
     };
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
@@ -178,8 +186,10 @@ struct Extractor {
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
     reported: HashSet<(String, u32, Code)>,
-    jsx_react: bool,
+    options: P<CompilerOptions>,
     jsx: Option<Jsx>,
+    /// `CreatableInstances`'s classes by their lowercase name, read at the first intrinsic element.
+    instance_classes: Option<HashMap<String, P<Symbol>>>,
 }
 
 impl Extractor {
@@ -288,8 +298,13 @@ impl Extractor {
                 }
             }
             Kind::JsxSpreadAttribute => self.object_spread(n.as_jsx_spread_attribute().expression),
-            Kind::JsxElement | Kind::JsxSelfClosingElement | Kind::JsxFragment if self.jsx.is_none() => {
-                self.jsx = Some(self.jsx_lowering(n));
+            Kind::JsxElement | Kind::JsxSelfClosingElement | Kind::JsxFragment => {
+                if self.jsx.is_none() {
+                    self.jsx = Some(self.jsx_lowering(n));
+                }
+                if self.jsx == Some(Jsx::Crucible) && kind != Kind::JsxFragment {
+                    self.intrinsic_element(n);
+                }
             }
             Kind::ReturnStatement => {
                 if let Some(expression) = n.expression() {
@@ -803,7 +818,12 @@ impl Extractor {
     }
 
     fn jsx_lowering(&mut self, n: P<Node>) -> Jsx {
-        if !self.jsx_react {
+        let jsx = self.options.jsx;
+        if jsx == JsxEmit::REACT_JSX || jsx == JsxEmit::REACT_JSX_DEV {
+            let source = tsrs_ast::get_jsx_implicit_import_base(&self.options, tsrs_ast::get_source_file_of_node(n));
+            return if source == UI_ENTRY { Jsx::Crucible } else { Jsx::Unsupported };
+        }
+        if jsx != JsxEmit::REACT {
             return Jsx::Unsupported;
         }
         let name = |entity: P<Node>| tsrs_ast::entity_name_to_string(entity, None).into_boxed_str();
@@ -813,6 +833,93 @@ impl Extractor {
                 fragment: self.resolver.get_jsx_fragment_factory_entity(&mut self.checker, n).map(name),
             },
             None => Jsx::Unsupported,
+        }
+    }
+
+    /// Stores the class an intrinsic element creates and how each of its attributes lowers.
+    fn intrinsic_element(&mut self, n: P<Node>) {
+        let (tag, attributes) = match n.kind() {
+            Kind::JsxElement => {
+                let opening = n.as_jsx_element().opening_element.as_jsx_opening_element();
+                (opening.tag_name, opening.attributes)
+            }
+            _ => {
+                let element = n.as_jsx_self_closing_element();
+                (element.tag_name, element.attributes)
+            }
+        };
+        if tag.kind() != Kind::Identifier || !tsrs_scanner::is_intrinsic_jsx_name(tag.text()) {
+            return;
+        }
+        self.site();
+        let Some(class) = self.instance_class(tag.text()) else { return };
+        let span = self.span(tag);
+        self.table.store(span, Site::Jsx, |f| &mut f.instance_class, class.name().into());
+        let instance = self.checker.get_type_of_symbol_exported(class);
+        for &attribute in attributes.as_jsx_attributes().properties().nodes() {
+            if attribute.kind() != Kind::JsxAttribute {
+                continue;
+            }
+            self.site();
+            match self.prop(instance, attribute) {
+                Ok(prop) => {
+                    let span = self.span(attribute);
+                    self.table.store(span, Site::Jsx, |f| &mut f.prop, prop);
+                }
+                Err(reason) => self.unanswered(attribute, Site::Jsx, reason),
+            }
+        }
+    }
+
+    fn instance_class(&mut self, tag: &str) -> Option<P<Symbol>> {
+        if self.instance_classes.is_none() {
+            let mut classes = HashMap::new();
+            if let Some(creatable) = self.globals.creatable_instances {
+                let t = self.checker.get_declared_type_of_symbol_exported(creatable);
+                for &class in self.checker.get_properties_of_type_exported(t) {
+                    classes.insert(class.name().to_ascii_lowercase(), class);
+                }
+            }
+            self.instance_classes = Some(classes);
+        }
+        self.instance_classes.as_ref()?.get(tag).copied()
+    }
+
+    /// An event by the instance's declared property, and otherwise a `Readable` when every member of the value's type
+    /// is callable. A value that may be nil, or that mixes callable and plain members, has no answer.
+    fn prop(&mut self, instance: P<Type>, attribute: P<Node>) -> Result<Prop, Reason> {
+        let jsx = attribute.as_jsx_attribute();
+        let name = tsrs_ast::entity_name_to_string(jsx.name, None);
+        if name == "children" {
+            return Ok(Prop::Children);
+        }
+        if let Some(property) = self.checker.get_property_of_type_exported(instance, &name) {
+            let declared = self.checker.get_type_of_symbol_exported(property);
+            if declared.symbol().is_some() && declared.symbol() == self.globals.signal {
+                return Ok(Prop::Event);
+            }
+        }
+        let value = match jsx.initializer {
+            Some(v) if v.kind() == Kind::JsxExpression => v.as_jsx_expression().expression,
+            value => value,
+        };
+        let Some(value) = value.filter(|v| v.kind() != Kind::StringLiteral) else { return Ok(Prop::Fixed) };
+        let t = self.type_of(value);
+        if types::is_any(t) {
+            return Err(Reason::Any);
+        }
+        let nullable = self.falsy(t).contains(Falsy::NIL);
+        let t = self.checker.get_non_nullable_type(t);
+        let mut parts = Vec::new();
+        self.walk_types(t, &mut parts);
+        let callable = parts
+            .iter()
+            .filter(|&&part| !self.checker.get_signatures_of_type_exported(part, SignatureKind::Call).is_empty())
+            .count();
+        match callable {
+            0 => Ok(Prop::Fixed),
+            n if n == parts.len() && !nullable => Ok(Prop::Reactive),
+            _ => Err(Reason::Mixed),
         }
     }
 

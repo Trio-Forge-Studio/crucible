@@ -33,6 +33,10 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 		[...files.keys()].some((file) => file.includes("/vide-block-") && file.endsWith(".tsx")),
 		"the vide guide has tsx blocks",
 	);
+	assert.ok(
+		[...files.keys()].some((file) => file.includes("/ui-block-") && file.endsWith(".tsx")),
+		"the ui guide has tsx blocks",
+	);
 	for (const guide of ["random", "spline"])
 		assert.ok(
 			[...files.keys()].some((file) => file.includes(`/${guide}-block-`)),
@@ -47,32 +51,37 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 				assert.fail(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
 		},
 	);
-	const options = {
-		...config.options,
-		noEmit: true,
-		incremental: false,
-		tsBuildInfoFile: undefined,
-		plugins: [],
-		// tsx blocks are Vide components, as a roblox-ts game compiles them.
-		jsx: ts.JsxEmit.React,
-		jsxFactory: "Vide.jsx",
-		jsxFragmentFactory: "Vide.Fragment",
-	};
-	const host = ts.createCompilerHost(options);
-	const { fileExists, readFile, getSourceFile } = host;
-	host.fileExists = (file) => files.has(file) || fileExists(file);
-	host.readFile = (file) => files.get(file) ?? readFile(file);
-	host.getSourceFile = (file, language, ...rest) =>
-		files.has(file) ? ts.createSourceFile(file, files.get(file), language) : getSourceFile(file, language, ...rest);
-	const program = ts.createProgram([...files.keys()], options, host);
-	const diagnostics = [...files.keys()].flatMap((file) =>
-		ts.getPreEmitDiagnostics(program, program.getSourceFile(file)),
-	);
-	assert.equal(
-		diagnostics.length,
-		0,
-		ts.formatDiagnostics(diagnostics, { ...host, getNewLine: () => "\n", getCanonicalFileName: (file) => file }),
-	);
+	const base = { ...config.options, noEmit: true, incremental: false, tsBuildInfoFile: undefined, plugins: [] };
+	// The ui guide's blocks use Crucible UI's JSX, and every other tsx block is a Vide component.
+	const ui = new Map([...files].filter(([file]) => file.includes("/ui-block-")));
+	const rest = new Map([...files].filter(([file]) => !ui.has(file)));
+	for (const [blocks, jsx] of [
+		[rest, { jsx: ts.JsxEmit.React, jsxFactory: "Vide.jsx", jsxFragmentFactory: "Vide.Fragment" }],
+		[ui, { jsx: ts.JsxEmit.ReactJSX, jsxImportSource: "@trioforge/crucible/ui" }],
+	]) {
+		const options = { ...base, ...jsx };
+		const host = ts.createCompilerHost(options);
+		const { fileExists, readFile, getSourceFile } = host;
+		host.fileExists = (file) => blocks.has(file) || fileExists(file);
+		host.readFile = (file) => blocks.get(file) ?? readFile(file);
+		host.getSourceFile = (file, language, ...rest) =>
+			blocks.has(file)
+				? ts.createSourceFile(file, blocks.get(file), language)
+				: getSourceFile(file, language, ...rest);
+		const program = ts.createProgram([...blocks.keys()], options, host);
+		const diagnostics = [...blocks.keys()].flatMap((file) =>
+			ts.getPreEmitDiagnostics(program, program.getSourceFile(file)),
+		);
+		assert.equal(
+			diagnostics.length,
+			0,
+			ts.formatDiagnostics(diagnostics, {
+				...host,
+				getNewLine: () => "\n",
+				getCanonicalFileName: (file) => file,
+			}),
+		);
+	}
 });
 
 const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");

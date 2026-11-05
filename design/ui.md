@@ -126,6 +126,8 @@ These are settled.
 - **No runtime class parser.** Every class resolves at build time. The runtime only applies and merges precompiled styles.
 - **Compiler only.** Crucible UI is never built by `rbxtsc`.
 - **No re-renders.** Components run once, as in Vide.
+- **Opt-in.** A file gets the compiled lowering with `jsx: "react-jsx"` and `jsxImportSource: "@trioforge/crucible/ui"`, or the `@jsxImportSource` pragma. TypeScript 5 and 7 both read the JSX types from `@trioforge/crucible/ui/jsx-runtime`, so the editor checks each prop against `T | Readable<T>` and each event against its handler. A file with `jsx: "react"` and a `jsxFactory` gets the Vide lowering. Any other setting is a compile error.
+- **Tests.** `pnpm check` builds the sample game with `rbxtsc`, which cannot build this JSX. Phase 2's Lune specs run in the compiler's ignored tests instead, on a fixture game in `cli/crates/compiler/tests/jsx/ui` and the compiler-built runtime.
 
 ## Open questions
 
