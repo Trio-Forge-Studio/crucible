@@ -24,7 +24,7 @@ Run `npx crucible build` from the game's root. It compiles every place in `cruci
 - When any selected place fails to compile, the build writes nothing and builds no place file. Places compile one after another, and the first failure stops the build.
 - The build writes the compiled Luau into the tsconfig's `outDir` and skips each file whose bytes already match. It deletes the files it compiled earlier that no longer have a source, and keeps every other file there.
 - It writes roblox-ts 3.0.0's `RuntimeLib.lua` and `Promise.lua` into the place's `include` folder, which the project must map. A file whose bytes already match is left alone, and other files there stay.
-- Places that name the same `tsconfig`, `project`, and `include` compile once. Before anything compiles, the build reads the `outDir` of every place in `crucible.toml`, including places `--place` leaves out. Two places that share an `outDir` but differ in `tsconfig`, `project`, or `include` exit 1, because their code would overwrite each other's. Two places with one `outDir` inside the other also exit 1. Folder names that differ only in case count as the same folder on every platform.
+- Places that name the same `tsconfig`, `project`, and `include` compile once. Before anything compiles, the build reads the `outDir` of every place in `crucible.toml`, including places `--place` leaves out. When a place's tsconfig, or a config it extends, cannot be read or parsed, or it sets no `outDir`, the build exits 1 and names the place and the file. Two places that share an `outDir` but differ in `tsconfig`, `project`, or `include` exit 1, because their code would overwrite each other's. Two places with one `outDir` inside the other also exit 1. Folder names that differ only in case count as the same folder on every platform.
 - Each place compiles in its own process, so a build's peak memory is that of its largest place.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.
@@ -70,14 +70,30 @@ Run `npm run check` to lint, check formatting, compile, and build `build/start.r
 
 ## crucible docs
 
-Prints a guide as Markdown. Read the guide for a module before you write code that uses it.
+Prints a guide as Markdown, or opens it in a reader at a terminal. Read the guide for a module before you write code that uses it.
 
 ```console
 npx crucible docs
 npx crucible docs logging
+npx crucible docs logging --plain
 ```
 
-Without a topic, `crucible docs` prints one line per topic with its name and summary. With a topic, it prints that guide to stdout. An unknown topic exits 2 and lists the valid topics on stderr. The guides are compiled into the binary, so `crucible docs` needs no network.
+When stdin or stdout is not a terminal, `crucible docs` prints Markdown. Without a topic, it prints one line per topic with its name and summary. With a topic, it prints that guide to stdout. `--plain` and `TERM=dumb` print the same bytes at a terminal. An unknown topic exits 2 and lists the valid topics on stderr. The guides are compiled into the binary, so `crucible docs` needs no network.
+
+When stdin and stdout are both a terminal, `crucible docs` opens a reader instead. Without a topic, it opens on the list of topics. With a topic, it opens that guide. The reader highlights code, draws tables and Mermaid diagrams, and shows the topic, section, and main keys on the bottom line. A terminal at least 90 columns wide also shows the topics in a sidebar. Click a topic or a link to open it. A link to another guide opens in the reader, and a web link opens in the browser. Quitting restores the terminal.
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓`, `j` `k`, mouse wheel | Scroll. |
+| `PageUp` `PageDown` `Space` | Scroll a page. |
+| `g` `G`, `Home` `End` | Go to the top or the bottom. |
+| `Tab`, `Shift+Tab` | Focus the next or previous link. |
+| `Enter` | Follow the focused link. |
+| `Backspace`, `Alt+←` | Go back. |
+| `Alt+→` | Go forward. |
+| `Ctrl+K`, `/` | Search every guide. Type to filter, `↑` `↓` to choose, `Enter` to open the section, and `Esc` to close. |
+| `?` | Show the keys. |
+| `q`, `Esc`, `Ctrl+C` | Quit. |
 
 ## crucible oc
 
@@ -165,11 +181,25 @@ The report asks for a missing `types`, `rootDir`, or `skipLibCheck` only when it
 
 The 0.3.0 binary starts the upgrade, so two of its limits need a step first.
 
-On Windows with Yarn, Yarn cannot replace `crucible.exe` while it runs, so `npx crucible upgrade` fails with `EPERM` and leaves `node_modules/@trioforge/crucible-cli` empty. Run a copy of the binary from outside `node_modules` instead. It hands off to the new version as usual. In PowerShell, write `$env:TEMP` for `%TEMP%`.
+On Windows with Yarn, Yarn cannot replace `crucible.exe` while it runs, so `npx crucible upgrade` fails with `EPERM` and leaves `node_modules/@trioforge/crucible-cli` empty. Run a copy of the binary from outside `node_modules` instead. It hands off to the new version as usual. In Command Prompt:
 
 ```console
 copy node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe %TEMP%\crucible-0.3.0.exe
 %TEMP%\crucible-0.3.0.exe upgrade
+```
+
+In PowerShell:
+
+```powershell
+Copy-Item node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe "$env:TEMP\crucible-0.3.0.exe"
+& "$env:TEMP\crucible-0.3.0.exe" upgrade
+```
+
+In Git Bash:
+
+```sh
+cp node_modules/@trioforge/crucible-cli-win32-x64/crucible.exe "$TEMP/crucible-0.3.0.exe"
+"$TEMP/crucible-0.3.0.exe" upgrade
 ```
 
 If the upgrade already failed this way, `yarn install --no-immutable` alone does not relink the CLI. Delete `node_modules/.yarn-state.yml`, run `yarn install --no-immutable`, then run the copy.

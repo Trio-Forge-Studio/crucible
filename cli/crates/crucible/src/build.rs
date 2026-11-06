@@ -129,11 +129,23 @@ fn refuse_declared_out_dir_overlaps(root: &Path, manifest: &Manifest) -> Result<
     let mut outputs = Vec::new();
     for (name, place) in &manifest.places {
         let tsconfig = root.join(&place.tsconfig);
-        if let Some(dir) = crucible_compiler::out_dir(&tsconfig) {
-            let inputs = [&tsconfig, &root.join(&place.project), &root.join(&place.include)]
-                .map(|path| case_folded_canonical(path));
-            outputs.push(Output { place: name, key: case_folded_canonical(&dir), dir, inputs });
-        }
+        let unknown = |why: &str, details: String| {
+            Error::Failed(format!(
+                "place {name}: {} {why}, so the build cannot tell where it writes. Nothing was compiled{details}",
+                shown(root, &tsconfig)
+            ))
+        };
+        let dir = match crucible_compiler::out_dir(&tsconfig) {
+            (Some(dir), errors) if errors.is_empty() => dir,
+            (None, errors) if errors.is_empty() => return Err(unknown("sets no outDir", String::new())),
+            (_, errors) => {
+                let details = errors.iter().map(|d| format!("\n  {d}")).collect();
+                return Err(unknown("cannot be read", details));
+            }
+        };
+        let inputs =
+            [&tsconfig, &root.join(&place.project), &root.join(&place.include)].map(|path| case_folded_canonical(path));
+        outputs.push(Output { place: name, key: case_folded_canonical(&dir), dir, inputs });
     }
     for (a, x) in outputs.iter().enumerate() {
         for y in &outputs[a + 1..] {

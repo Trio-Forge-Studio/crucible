@@ -95,12 +95,17 @@ fn config_host() -> Result<ConfigHost, Vec<Diagnostic>> {
     Ok(ConfigHost { fs, cwd: tspath::normalize_path(&cwd.to_string_lossy()) })
 }
 
-pub(crate) fn out_dir(tsconfig: &Path) -> Option<String> {
-    let host = config_host().ok()?;
+pub(crate) fn out_dir(tsconfig: &Path) -> (Option<String>, Vec<Diagnostic>) {
+    let host = match config_host() {
+        Ok(host) => host,
+        Err(errors) => return (None, errors),
+    };
     let path = tspath::get_normalized_absolute_path(&tsconfig.to_string_lossy(), &host.cwd);
-    let (config, _) = tsoptions::get_parsed_command_line_of_config_file(&path, None, None, &host, None);
-    let options = config?.compiler_options()?;
-    (!options.out_dir.is_empty()).then(|| options.out_dir.replace('\\', "/"))
+    let (config, errors) = tsoptions::get_parsed_command_line_of_config_file(&path, None, None, &host, None);
+    let errors = errors.iter().chain(config.iter().flat_map(|config| &config.errors)).map(convert).collect();
+    let options = config.and_then(|config| config.compiler_options());
+    let dir = options.filter(|options| !options.out_dir.is_empty()).map(|options| options.out_dir.replace('\\', "/"));
+    (dir, errors)
 }
 
 pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {

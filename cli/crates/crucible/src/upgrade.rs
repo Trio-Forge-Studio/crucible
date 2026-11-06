@@ -802,7 +802,7 @@ fn remove_entry(text: &mut String, entry: Entry) {
 }
 
 fn clear_rbxtsc_output(root: &Path, tsconfig: &Path, migration: &mut Migration) {
-    let Some(out) = crucible_compiler::out_dir(&root.join(tsconfig)) else { return };
+    let (Some(out), _) = crucible_compiler::out_dir(&root.join(tsconfig)) else { return };
     let shown = out.strip_prefix(root).unwrap_or(&out).to_string_lossy().replace('\\', "/");
     match remove_rbxtsc_modules(&out) {
         Ok(0) => {}

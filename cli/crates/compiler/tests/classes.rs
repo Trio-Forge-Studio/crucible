@@ -201,3 +201,199 @@ fn a_constant_export_does_not_allow_a_call_in_its_receiver() {
     g.write("src/client/view.tsx", "import * as names from './names';\ndeclare function getNames(): typeof names;\nexport const view = <frame className={getNames().card} />;");
     assert_eq!(g.found_columns(), ["CRU029@src/client/view.tsx:3:39"]);
 }
+
+const BRAND: &str = "Color3.fromRGB(37, 99, 235)";
+
+#[test]
+fn each_variant_binds_its_property_to_the_state_it_reads() {
+    let bind = |instance: &str, property: &str, value: &str| {
+        format!("__ui.bind({instance}, \"{property}\", function()\n\treturn {value}\nend)")
+    };
+    let rows: Vec<(&str, String)> = vec![
+        (
+            "<frame className=\"hover:bg-brand\" />",
+            format!(
+                "local _1 = __ui.interaction(_0)\nlocal _2 = _0.BackgroundColor3\n{}",
+                bind("_0", "BackgroundColor3", &format!("if _1.hover() then {BRAND} else _2"))
+            ),
+        ),
+        (
+            "<frame className=\"active:bg-brand\" />",
+            bind("_0", "BackgroundColor3", &format!("if _1.press() then {BRAND} else _2")),
+        ),
+        (
+            "<textbox className=\"focus:bg-brand\" />",
+            bind("_0", "BackgroundColor3", &format!("if _1.focus() then {BRAND} else _2")),
+        ),
+        (
+            "<frame className=\"bg-white md:bg-brand\" />",
+            format!(
+                "local _0 = Instance.new(\"Frame\")\n_0.BackgroundTransparency = 0\n{}",
+                bind(
+                    "_0",
+                    "BackgroundColor3",
+                    &format!("if __ui.environment.viewport().X >= 768 then {BRAND} else Color3.fromRGB(255, 255, 255)")
+                )
+            ),
+        ),
+        (
+            "<textlabel className=\"portrait:text-lg\" />",
+            format!(
+                "local _1 = _0.TextSize\n{}",
+                bind("_0", "TextSize", "if __ui.environment.orientation() == \"portrait\" then 18 else _1")
+            ),
+        ),
+        (
+            "<textlabel className=\"landscape:text-lg\" />",
+            bind("_0", "TextSize", "if __ui.environment.orientation() == \"landscape\" then 18 else _1"),
+        ),
+        (
+            "<frame className=\"touch:bg-brand\" />",
+            bind("_0", "BackgroundColor3", &format!("if __ui.environment.input() == \"touch\" then {BRAND} else _1")),
+        ),
+        (
+            "<frame className=\"mouse:bg-brand\" />",
+            bind("_0", "BackgroundColor3", &format!("if __ui.environment.input() == \"mouse\" then {BRAND} else _1")),
+        ),
+        (
+            "<frame className=\"gamepad:bg-brand\" />",
+            bind("_0", "BackgroundColor3", &format!("if __ui.environment.input() == \"gamepad\" then {BRAND} else _1")),
+        ),
+        (
+            "<frame className=\"dark:bg-brand\" />",
+            bind("_0", "BackgroundColor3", &format!("if __ui.environment.dark() then {BRAND} else _1")),
+        ),
+        (
+            "<frame className=\"group\"><frame className=\"group-hover:bg-brand\" /></frame>",
+            format!(
+                "local _1 = __ui.interaction(_0)\nlocal _2 = Instance.new(\"Frame\")\nlocal _3 = _2.BackgroundColor3\n{}",
+                bind("_2", "BackgroundColor3", &format!("if _1.hover() then {BRAND} else _3"))
+            ),
+        ),
+        (
+            "<frame className=\"group/card\"><frame className=\"group\"><frame className=\"group-active/card:bg-brand\" /></frame></frame>",
+            format!(
+                "local _3 = __ui.interaction(_2)\nlocal _4 = Instance.new(\"Frame\")\nlocal _5 = _4.BackgroundColor3\n{}",
+                bind("_4", "BackgroundColor3", &format!("if _1.press() then {BRAND} else _5"))
+            ),
+        ),
+        (
+            "<frame className=\"md:hover:bg-brand\" />",
+            bind(
+                "_0",
+                "BackgroundColor3",
+                &format!("if _1.hover() and __ui.environment.viewport().X >= 768 then {BRAND} else _2"),
+            ),
+        ),
+        (
+            "<frame className=\"w-full h-4 hover:w-1/2\" />",
+            bind("_0", "Size", "UDim2.new(if _1.hover() then UDim.new(0.5, 0) else UDim.new(1, 0), UDim.new(0, 16))"),
+        ),
+        (
+            "<frame className=\"md:w-1/2\" />",
+            format!(
+                "local _1 = _0.Size\n{}",
+                bind(
+                    "_0",
+                    "Size",
+                    "UDim2.new(if __ui.environment.viewport().X >= 768 then UDim.new(0.5, 0) else _1.X, _1.Y)"
+                )
+            ),
+        ),
+        (
+            "<frame className=\"hover:rounded-md\" />",
+            format!(
+                "local _2 = Instance.new(\"UICorner\")\nlocal _3 = _2.CornerRadius\n{}\n{}",
+                bind("_2", "CornerRadius", "if _1.hover() then UDim.new(0, 6) else _3"),
+                bind("_2", "Parent", "if _1.hover() then _0 else nil")
+            ),
+        ),
+        (
+            "<frame className=\"border-white focus:border-2\" />",
+            format!(
+                "_2.Color = Color3.fromRGB(255, 255, 255)\n_2.Transparency = 0\n{}\n_2.Parent = _0",
+                bind("_2", "Thickness", "if _1.focus() then 2 else 1")
+            ),
+        ),
+    ];
+    let g = game();
+    for (i, (element, _)) in rows.iter().enumerate() {
+        g.write(&format!("src/client/v{i}.tsx"), &format!("export const view = {element};\n"));
+    }
+    let modules = g.compile();
+    for (i, (element, expected)) in rows.iter().enumerate() {
+        let path = format!("client/v{i}.luau");
+        let source = &modules.iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} is emitted")).source;
+        assert!(source.contains(expected.as_str()), "{element}\n--- expected\n{expected}\n--- in\n{source}");
+    }
+}
+
+#[test]
+fn bad_variants_report_cru028_at_the_token() {
+    let g = game();
+    g.write("src/client/bad.tsx", include_str!("classes/variants-bad.tsx"));
+    let facts = g.facts();
+    let found: Vec<String> = facts
+        .diagnostics
+        .iter()
+        .map(|d| format!("{}@{}:{} {}", support::code(d), d.line, d.column, d.message))
+        .collect();
+    let expected = [
+        "CRU028@1:37 CRU028: `group-hover:flex` reads a group, but no element around it in this JSX has class `group` (byte 0)",
+        "CRU028@3:20 CRU028: `hovr:` is not a variant. Did you mean `hover:`? (class `hovr:flex`, byte 0)",
+        "CRU028@4:20 CRU028: `xl:` is not a variant. Did you mean `lg:`? (class `xl:flex`, byte 0)",
+        "CRU028@5:20 CRU028: `hover:` repeats `hover:` (class `hover:hover:flex`, byte 0)",
+        "CRU028@6:20 CRU028: `portrait:` and `landscape:` can never hold together (class `portrait:landscape:flex`, byte 0)",
+        "CRU028@7:20 CRU028: `touch:` and `gamepad:` can never hold together (class `touch:gamepad:flex`, byte 0)",
+        "CRU028@8:20 CRU028: `group-hover:flex` reads a group, but no element around it in this JSX has class `group` (byte 0)",
+        "CRU028@10:21 CRU028: `group-hover/card:flex` reads a group, but no element around it in this JSX has class `group/card` (byte 0)",
+        "CRU028@12:20 CRU028: `group-hover:flex` reads a group, but no element around it in this JSX has class `group` (byte 0)",
+        "CRU028@18:20 CRU028: `hover:bg-brand` never applies: `bg-white` comes later and sets BackgroundColor3",
+        "CRU028@19:20 CRU028: `lg:bg-brand` never applies: `md:bg-white` comes later and sets BackgroundColor3",
+        "CRU028@20:20 CRU028: `group` takes no variants (class `hover:group`, byte 0)",
+    ];
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn a_modifier_conflict_counts_variant_tokens() {
+    let g = game();
+    g.write("src/client/view.tsx", "export const view = <frame className=\"hover:rounded\"><uicorner /></frame>;");
+    assert_eq!(g.found_columns(), ["CRU031@src/client/view.tsx:1:55"]);
+}
+
+#[test]
+fn each_bad_breakpoint_reports_cru030_at_its_key_or_value() {
+    for (entry, column) in [
+        ("md = '768'", 6),
+        ("md = 767.5", 6),
+        ("md = 0", 6),
+        ("md = -768", 6),
+        ("hover = 768", 1),
+        ("group2 = 768", 1),
+        ("Md = 768", 1),
+    ] {
+        let g = game();
+        g.write("theme.toml", &format!("spacing = 4\n\n[breakpoint]\n{entry}\n"));
+        g.write("src/client/view.tsx", "export const view = <frame className=\"md:flex\" />;");
+        assert_eq!(g.found_columns(), [format!("CRU030@theme.toml:4:{column}")], "{entry}");
+    }
+}
+
+#[test]
+fn the_guide_examples_compile_against_the_guide_theme() {
+    let guide = include_str!("../../../../docs/ui.md");
+    let block = |lang: &str| -> Vec<&str> {
+        guide.split(&format!("```{lang}\n")).skip(1).map(|b| b.split("```").next().unwrap()).collect()
+    };
+    let g = Game::ui();
+    g.write("theme.toml", block("toml").first().expect("the guide has a starter theme"));
+    let sources = block("tsx");
+    assert!(sources.iter().any(|s| s.contains("group-hover:") && s.contains("md:")), "{sources:?}");
+    for (i, source) in sources.into_iter().enumerate() {
+        g.write(&format!("src/client/guide{i}.tsx"), source);
+    }
+    let facts = g.facts();
+    assert!(facts.diagnostics.is_empty(), "{}", support::lines(&facts.diagnostics));
+    g.compile();
+}

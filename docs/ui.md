@@ -66,9 +66,9 @@ export function Card(props: { title: string; children?: Node }) {
 
 ## Style with classes
 
-`className` on a GuiObject intrinsic resolves at build time. Fixed classes emit assignments and modifier children. They add no runtime class parser, style table, binding, or UI import.
+`className` on a GuiObject intrinsic resolves at build time. Fixed classes emit assignments and modifier children. They add no runtime class parser, style table, binding, or UI import. A class with a variant, such as `hover:bg-brand`, emits one binding for each property it changes, as [Vary a class](#vary-a-class) describes.
 
-Place `theme.toml` beside the tsconfig you invoke. The file owns the whole theme. There are no built-in theme values, overlays, or upward searches. This starter defines a spacing step, colors, text sizes, and corner radii.
+Place `theme.toml` beside the tsconfig you invoke. The file owns the whole theme. There are no built-in theme values, overlays, or upward searches. This starter defines a spacing step, colors, text sizes, corner radii, and breakpoints.
 
 ```toml
 spacing = 4
@@ -92,9 +92,14 @@ lg = 18
 DEFAULT = 4
 md = 6
 lg = 8
+
+[breakpoint]
+sm = 640
+md = 768
+lg = 1024
 ```
 
-Names start with a lowercase letter and contain lowercase letters and digits. Color shade names also allow a leading digit. `DEFAULT` is allowed only in `[radius]`. Colors use `#rrggbb`. Spacing is a positive finite number at most 1,000,000. Text sizes are numbers from 1 to 100. Radii are nonnegative whole pixels. Duplicate names, class collisions, unknown sections, and invalid values fail with CRU030 at the theme key or value. A broken theme skips class resolution to avoid further unknown-class errors.
+Names start with a lowercase letter and contain lowercase letters and digits. Color shade names also allow a leading digit. `DEFAULT` is allowed only in `[radius]`. Colors use `#rrggbb`. Spacing is a positive finite number at most 1,000,000. Text sizes are numbers from 1 to 100. Radii are nonnegative whole pixels. A breakpoint is the minimum viewport width in whole pixels, from 1 to 100,000, at which its variant applies. A breakpoint name cannot be a built-in variant or start with `group`. Duplicate names, class collisions, unknown sections, and invalid values fail with CRU030 at the theme key or value. A broken theme skips class resolution to avoid further unknown-class errors.
 
 ```tsx
 export function BuyButton() {
@@ -107,7 +112,7 @@ export function BuyButton() {
 }
 ```
 
-Later tokens win for each target. `size-16 w-64` sets width to 256 px and height to 64 px with the starter theme. `p-4 px-6` sets top and bottom padding to 16 px and left and right padding to 24 px. Explicit JSX properties beat classes in either attribute order, including reactive props. An explicit prop whose value may be `undefined` beats the class only when it has a value, so the class is its fallback. An explicit `Size` owns both axes. A width or height class alone preserves the instance's other axis.
+Later tokens win for each target. `size-16 w-64` sets width to 256 px and height to 64 px with the starter theme. `p-4 px-6` sets top and bottom padding to 16 px and left and right padding to 24 px. Explicit JSX properties beat classes in either attribute order, including reactive props. An explicit prop whose value may be `undefined` beats the class only when it has a value, so the class is its fallback. An explicit `Size` owns both axes. A width or height class alone preserves the instance's other axis. `Instance.new` starts every GuiObject at `{0, 0}, {0, 0}`, so a lone `h-6` renders 0 px wide. Pair it with a width class, such as `w-full h-6`.
 
 The value accepts a string literal, a template without substitutions, or a const name or readonly property of a const whose type is one string literal. Calls, getters, mutable names, widened strings, unions, and reactive class strings fail with CRU029. Components cannot accept a `className` attribute yet. Their intrinsic elements can use fixed classes.
 
@@ -131,14 +136,74 @@ In the table, `c` names a theme color, `n` is a nonnegative number, and `a` is a
 
 Each color class also sets its transparency to 0, or `(100 - a) / 100` for a suffix. `bg-transparent bg-brand` therefore shows the opaque brand color. Every modifier is configured before it is parented, before authored children. A direct authored child of the same modifier kind fails with CRU031. Opaque runtime children are not inspected.
 
-Without a theme, keywords such as `flex`, `border`, and `w-full` still work. Theme-backed tokens fail with CRU028 and a note that no theme file is beside the tsconfig. Variants, breakpoints, component forwarding, font and alignment helpers, arbitrary values, AutomaticSize, constraints, gradients, position, and anchor classes are deferred.
+Without a theme, keywords such as `flex`, `border`, and `w-full` still work. Theme-backed tokens fail with CRU028 and a note that no theme file is beside the tsconfig. Component forwarding, `disabled:`, font and alignment helpers, arbitrary values, AutomaticSize, constraints, gradients, position, and anchor classes are deferred.
 
 | Diagnostic | Meaning and location |
 | --- | --- |
-| CRU028 | Unknown token, unsupported variant, fractional pixel offset, or invalid alpha. Reports at the token, with a nearby-name suggestion within edit distance 2. Indirect values report at their use and name the token and its byte offset. |
+| CRU028 | Unknown token or variant, a variant repeated or contradicted in one token, a group variant with no matching group around it, a variant rule that a later class always overrides, fractional pixel offset, or invalid alpha. Reports at the token, with a nearby-name suggestion within edit distance 2. Indirect values report at their use and name the token and its byte offset. |
 | CRU029 | Unsupported className value or component attribute. Reports at the value, or the attribute name when bare. TypeScript can reject a wrong-kind value first. |
-| CRU030 | Unreadable, malformed, invalid, or conflicting theme. Reports in theme.toml at the key or value, with line and column. |
-| CRU031 | A class does not fit the element, or duplicates a direct modifier child. Reports at the token or the child's tag. |
+| CRU030 | Unreadable, malformed, invalid, or conflicting theme, including a reserved breakpoint name. Reports in theme.toml at the key or value, with line and column. |
+| CRU031 | A class does not fit the element, or duplicates a direct modifier child, with or without a variant. Reports at the token or the child's tag. |
+
+## Vary a class
+
+Prefix a class with variants, separated by colons, to apply it only while each of them holds. Variants stack in any order, so `md:hover:bg-brand` and `hover:md:bg-brand` both apply while the viewport is at least `md` wide and the pointer is over the element.
+
+| Variant | Applies while |
+| --- | --- |
+| `hover:` | The pointer is over the element. |
+| `active:` | A left click or touch that began on the element has not ended, wherever it ends. |
+| `focus:` | The element is the selected GuiObject for gamepad or keyboard navigation, or it is a TextBox with the keyboard. |
+| `<[breakpoint] key>:`, such as `md:` | `environment.viewport().X` is at least the breakpoint's width. |
+| `portrait:`, `landscape:` | The viewport is taller than wide, or at least as wide as tall. |
+| `touch:`, `mouse:`, `gamepad:` | `environment.input()` is that mode. Keyboard and mouse input is `mouse`. |
+| `dark:` | `environment.dark()` is true. The game sets it. |
+| `group-hover:`, `group-active:`, `group-focus:` | The nearest element around this one with the `group` class is hovered, pressed, or focused. |
+| `group-hover/<name>:`, and the same for active and focus | The nearest element around this one with the `group/<name>` class is hovered, pressed, or focused. |
+
+```tsx
+import { environment } from "@trioforge/crucible/ui";
+
+export function setDark(dark: boolean) {
+	environment.dark.set(dark);
+}
+
+export function ShopItem() {
+	return (
+		<textbutton className="group bg-slate-800 hover:bg-slate-600 active:bg-slate-900 w-full md:w-1/2 h-16" Text="Buy">
+			<textlabel className="text-white/50 group-hover:text-white dark:text-slate-600" Text="100 coins" />
+		</textbutton>
+	);
+}
+```
+
+For each property, the class that comes last and whose variants all hold wins, and a class without variants is the fallback. A property that no class without variants sets falls back to the value the instance had before its classes applied. Explicit JSX properties still own their properties, variants included. A variant class that a later class always overrides is a CRU028 error, because it could never apply. `hover:bg-brand bg-slate-800` fails, and `bg-slate-800 hover:bg-brand` works. `lg:` overrides `md:` the same way, because every viewport at least `lg` wide is at least `md` wide.
+
+`group` and `group/<name>` set nothing. They make the element a group that descendants read. A descendant must be inside the group's element in the same JSX, including inside a `Show` or `For` callback written there. `group-hover:` reads the nearest element with a bare `group` class, and `group-hover/card:` reads the nearest with `group/card`. A component that receives the element as `props.children` from elsewhere does not see a group around it in its own JSX.
+
+A modifier that only variant classes create, such as the UIStroke of `hover:border-white`, is configured with the element and parented only while one of its variants holds. `hover:rounded` therefore leaves no UICorner behind when the pointer leaves.
+
+`disabled:` is not a variant yet.
+
+### The environment
+
+The breakpoint, orientation, input and `dark:` variants read `environment`, exported from `@trioforge/crucible/ui`. The first read of `viewport`, `orientation` or `input` connects to the current camera and `UserInputService` for the rest of the session. A game installs and boots nothing for it.
+
+- `viewport` is `workspace.CurrentCamera.ViewportSize`, and it follows a change of `CurrentCamera`.
+- `orientation` is `"landscape"` while the viewport is at least as wide as it is tall, and `"portrait"` otherwise.
+- `input` is `"mouse"`, `"touch"` or `"gamepad"`, from `UserInputService.LastInputTypeChanged`. An input type of no mode keeps the previous mode. It starts from `GetLastInputType()`, or from the enabled devices when that type has no mode.
+- `dark` is a `State<boolean>` that starts false. Set it to switch every `dark:` class.
+
+```ts
+import { effect } from "@trioforge/crucible";
+import { environment } from "@trioforge/crucible/ui";
+
+export function logInputMode() {
+	effect(() => print(`input mode ${environment.input()}`));
+}
+```
+
+`interaction(instance)` returns the `hover`, `press` and `focus` readables that the element's own and group variants read. The first call for an instance creates them, and every later call returns the same ones. They follow the instance's events until it is destroyed. A press in progress stops listening for its release when the owner of the first call ends. The first call needs an owner and throws without one.
 
 ## Mount a component
 

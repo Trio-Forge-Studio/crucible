@@ -366,6 +366,51 @@ fn separate_tsconfigs_refuse_one_out_dir_in_any_case_even_when_one_place_builds(
 }
 
 #[test]
+fn an_unreadable_tsconfig_of_a_place_left_out_stops_the_build_before_it_writes() {
+    let game = Game::template_layout();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    let shared = project["tree"]["ReplicatedStorage"]["TS"].take();
+    project["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("TS");
+    project["tree"]["ReplicatedStorage"]["Shared"] = shared;
+    game.json("beta.project.json", &project);
+    game.json("tsconfig.beta.json", &game::ts7_config());
+    game.write("crucible.toml", "[places.beta]\nproject = \"beta.project.json\"\ntsconfig = \"tsconfig.beta.json\"\n");
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    let before = game.snapshot(&["out"]);
+
+    game.write(
+        "crucible.toml",
+        "[places.start]\nproject = \"default.project.json\"\n[places.beta]\nproject = \"beta.project.json\"\ntsconfig = \"tsconfig.beta.json\"\n",
+    );
+    let mut no_out_dir = game::ts7_config();
+    no_out_dir["compilerOptions"].as_object_mut().unwrap().remove("outDir");
+    let extends = |base: &str| json!({ "extends": base }).to_string();
+    for (beta, base, named) in [
+        (Some("{ invalid json".to_owned()), None, "tsconfig.beta.json"),
+        (None, None, "tsconfig.beta.json"),
+        (Some(extends("./missing-base.json")), None, "missing-base.json"),
+        (Some(extends("./base.json")), Some("{ invalid json"), "base.json"),
+        (Some(no_out_dir.to_string()), None, "tsconfig.beta.json"),
+    ] {
+        let _ = fs::remove_file(game.path("tsconfig.beta.json"));
+        let _ = fs::remove_file(game.path("base.json"));
+        if let Some(beta) = &beta {
+            game.write("tsconfig.beta.json", beta);
+        }
+        if let Some(base) = base {
+            game.write("base.json", base);
+        }
+        let out = game.build(&["--place", "start"]);
+        let stderr = text(&out.stderr);
+        assert_eq!(code(&out), 1, "{beta:?}: {stderr}");
+        assert!(stderr.contains("place beta") && stderr.contains(named), "{beta:?} names place and file: {stderr}");
+        assert_eq!(game.snapshot(&["out"]), before, "{beta:?} leaves beta's output alone");
+        assert!(out.stdout.is_empty() && !game.path("build/start.rbxl").exists(), "{beta:?}");
+    }
+}
+
+#[test]
 fn a_deeply_nested_source_compiles() {
     let game = Game::template_layout();
     game.write("src/shared/sum.ts", &format!("export const sum = 0{};\n", " + 0".repeat(500)));
@@ -411,7 +456,10 @@ fn usage_errors_exit_2_before_compiling() {
 #[test]
 fn a_missing_tsconfig_or_project_exits_1_naming_it() {
     for (manifest, named) in [
-        ("[places.start]\nproject = \"default.project.json\"\ntsconfig = \"nope.json\"\n", "nope.json"),
+        (
+            "[places.start]\nproject = \"default.project.json\"\ntsconfig = \"nope.json\"\n",
+            "crucible build: place start: nope.json cannot be read",
+        ),
         ("[places.start]\nproject = \"missing.project.json\"\n", "missing.project.json"),
     ] {
         let game = Game::template_layout();
@@ -419,10 +467,7 @@ fn a_missing_tsconfig_or_project_exits_1_naming_it() {
         let out = game.build(&[]);
         let stderr = text(&out.stderr);
         assert_eq!(code(&out), 1, "{stderr}");
-        assert!(
-            stderr.contains(named) && stderr.contains("crucible build: place start: the compile failed"),
-            "{stderr}"
-        );
+        assert!(stderr.contains(named) && stderr.contains("crucible build: place start: "), "{stderr}");
         assert!(out.stdout.is_empty() && !game.path("build").exists());
     }
 }

@@ -1,11 +1,33 @@
 -- A fake Instance for the JSX specs. An Instance is a userdata proxy, as on Roblox, because Vide tells children from
--- property tables by `type`. Properties live in the proxy's metatable. `Parent` keeps a child set, and `Destroy`
--- unparents the subtree, locks its Parent and disconnects its connections. The names in EVENTS read as signals, and
--- `fire` runs their handlers at once.
+-- property tables by `type`. Properties live in the proxy's metatable and start at the DEFAULTS Roblox gives the
+-- properties the specs read. `Parent` keeps a child set, and `Destroy` unparents the subtree, locks its Parent and
+-- disconnects its connections. The names in EVENTS read as signals, `GetPropertyChangedSignal` fires after an
+-- assignment changes the property, and `fire` runs a signal's handlers at once.
 local fake = {}
 local roblox = require("@lune/roblox")
 
-local EVENTS = { Activated = true, MouseEnter = true, MouseLeave = true }
+local EVENTS = {
+	Activated = true,
+	MouseEnter = true,
+	MouseLeave = true,
+	InputBegan = true,
+	InputEnded = true,
+	SelectionGained = true,
+	SelectionLost = true,
+	Focused = true,
+	FocusLost = true,
+	LastInputTypeChanged = true,
+}
+
+local DEFAULTS = {
+	Size = roblox.UDim2.new(0, 0, 0, 0),
+	BackgroundColor3 = roblox.Color3.fromRGB(163, 162, 165),
+	BackgroundTransparency = 0,
+}
+local CLASS_DEFAULTS = {
+	UIStroke = { Color = roblox.Color3.new(0, 0, 0), Thickness = 1, Transparency = 0 },
+	UICorner = { CornerRadius = roblox.UDim.new(0, 8) },
+}
 
 local methods = {}
 local signals = setmetatable({}, { __mode = "k" })
@@ -78,6 +100,15 @@ local function signalOf(own, name: string)
 	return signal
 end
 
+function methods.IsA(instance, className: string): boolean
+	local own = getmetatable(instance).ClassName
+	return own == className or className == "Instance" or (className == "GuiObject" and own ~= "ScreenGui")
+end
+
+function methods.GetPropertyChangedSignal(instance, property: string)
+	return signalOf(getmetatable(instance), `Changed {property}`)
+end
+
 local function index(instance, key)
 	local method = methods[key]
 	if method ~= nil then
@@ -96,7 +127,15 @@ local function newindex(instance, key, value)
 	else
 		assert(not EVENTS[key], `{key} is an event`)
 		assert(value ~= nil, `Unable to assign property {key}. Property expected, got nil`)
-		getmetatable(instance)[key] = value
+		local own = getmetatable(instance)
+		local previous = own[key]
+		own[key] = value
+		local changed = own.__signals[`Changed {key}`]
+		if changed ~= nil and previous ~= value then
+			for _, handler in table.clone(changed.handlers) do
+				handler()
+			end
+		end
 	end
 end
 
@@ -114,7 +153,12 @@ function fake.new(className: string): any
 	meta.__signals = {}
 	meta.ClassName = className
 	meta.Name = className
-	meta.Size = roblox.UDim2.new(0, 100, 0, 100)
+	for key, value in DEFAULTS do
+		meta[key] = value
+	end
+	for key, value in CLASS_DEFAULTS[className] or {} do
+		meta[key] = value
+	end
 	return instance
 end
 
