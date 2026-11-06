@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "crucible"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "clap 4.6.7",
  "crucible-compiler",
@@ -678,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-compiler"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "toml 1.1.8+spec-1.1.0",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "oc-registry"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4731,7 +4731,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "oc-registry",
  "serde",
