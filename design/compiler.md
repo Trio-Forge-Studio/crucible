@@ -12,30 +12,30 @@ A phase passes when the stack's own tests pass and the compiler meets these budg
 
 | Budget | Target | Today on FD |
 |---|---|---|
-| `crucible build`, warehouse and job places, type check included | 3 s | 39.7 s and 36.9 s |
-| The same build after editing one file | 3 s | 42.4 s |
-| Peak memory of one build | 250 MB | 1,040 MB |
+| `crucible build`, warehouse and job places, type check included | 3 s | 3.24 s and 3.33 s |
+| The same build after editing one file | 3 s | 3.12 s and 3.10 s |
+| Peak working set of the compile child | 250 MB | 133.3 MB and 129.1 MB |
 
 Correctness comes from the stack's tests, not from roblox-ts. These are Crucible's `pnpm check` with its Lune specs and compiler tests, FD's `lune run test`, and a Studio smoke run.
 
 ## Phase 5 verification on FD
 
-On 2026-11-05, FD at `dd1ad9716` compiled both places from TypeScript 7 configs with zero errors. Warehouse emitted 598 modules and job emitted 579. The detached verification checkout used an explicit `Instance | undefined` annotation in `house-previews.ts` for TS7022 and a local copy of `@trioforge/compiler-types`.
+On 2026-11-06, `crucible build` compiled both FD places at `dd1ad9716` with zero errors. Warehouse emitted 598 modules and job emitted 579. The checkout used FD PR 537's TypeScript 7 configs and `crucible.toml`, plus FD PR 536's TS7022 annotation in `house-previews.ts`.
 
 FD's completed roblox-ts build passed all 997 Lune specs. Replacing only each place's output with the compiler's modules and running `lune run test --compiled` passed the same 997 named specs. There were no pre-existing spec failures. The original include folders supplied RuntimeLib and Promise. This verifies the compiled modules through FD's Lune loader, without a Studio smoke run.
 
-The release `compile` example was measured on `LAPTOP-HEZAERD`, Windows, AMD Ryzen 9 5900HS, 16 logical processors, and 16 GiB of installed memory. Each row is the median of five runs, interleaving warehouse and job. These are fresh processes with filesystem caches left warm. Full builds write every module into a fresh output directory. Edit builds append a newline to `core/Commands/shared/command-tree.ts`, compile again, and restore the original bytes. They still check and lower every module, then compare unchanged output bytes.
+Measurements used a release `crucible` built at `9793ce7b`, with the runtime and compiler-types packed from the same head. The machine was `LAPTOP-HEZAERD`, Windows, AMD Ryzen 9 5900HS, with 16 logical processors. Only T3 Code was running. The table gives medians of five rounds interleaving warehouse and job, with ranges in parentheses. Build times include type checking.
 
-| Place | Full build, including output | After one-file edit | Full-build peak working set | Budget result |
-|---|---|---|---|---|
-| Warehouse | 4.708 s, range 4.018 to 10.126 s | 5.126 s, range 4.501 to 8.483 s | 158.0 MB | Time misses 3 s; memory passes 250 MB. |
-| Job | 5.432 s, range 3.477 to 6.702 s | 4.822 s, range 3.295 to 8.004 s | 153.9 MB | Time misses 3 s; memory passes 250 MB. |
+| Place | Build from no prior output | After one-file edit | No-change rebuild | `__compile` child alone | Child peak working set |
+|---|---|---|---|---|---|
+| Warehouse | 3.24 s (3.10 to 5.80) | 3.12 s (2.86 to 4.18) | 2.97 s | 2.45 s (2.38 to 2.51) | 133.3 MB |
+| Job | 3.33 s (3.21 to 3.66) | 3.10 s (2.98 to 3.42) | 3.10 s | 2.40 s (2.24 to 4.83) | 129.1 MB |
 
-The timed region includes process startup, type checking, fact extraction, lowering, and output writing. Every run exited zero and retained all 598 or 579 modules. Full runs wrote every module; edit runs wrote zero changed modules. Peak memory comes from Windows `GetProcessMemoryInfo` on a retained process handle after exit, using the operating system's peak working set rather than sampling. MB means 1,000,000 bytes.
+The edit appends a newline to `core/Commands/shared/command-tree.ts` and restores the original bytes afterward. Peak memory comes from Windows `GetProcessMemoryInfo` on a retained process handle after exit. MB means 1,000,000 bytes. Memory passes 250 MB. Full and edit builds miss 3 s by 0.10 to 0.33 s.
 
-The runs overlapped Rust builds and repository checks on the shared machine. Their wide ranges prevent an idle-machine performance claim. The compiler example's median compile phase alone took 4.275 s for warehouse and 4.758 s for job on full builds, so output writing alone does not explain the misses. The 3 s time budget remains unmet in this measurement. An idle-machine run and a profile of checking, facts, and lowering are follow-up work before choosing an optimization or the phase 7 cache.
+The compile child takes about 2.4 s. The remaining roughly 0.8 s covers the Rojo place build and the module hand-off from the child, inferred by subtraction rather than profiling. Inside the compile, the tsrs type check is the largest part. Possible levers are a compile-only mode so FD's check loop skips Rojo, `--fast` with four checkers, and phase 7's cache. None is in this stack.
 
-Reproduce the measurement from the repository root after building the release example with `cargo build --release -p crucible-compiler --example compile` in `cli`. Run `cli/crates/compiler/tests/fd-benchmark.ps1 -Compiler <compile.exe> -Fd <detached-FD-checkout> -Report <results.json>`. FD must already have the generated TypeScript 7 configs and Rojo projects described above. The script records every run, verifies emitted module counts and exit status, and restores the edited source in `finally`.
+Reproduce from the repository root after `cargo build --release -p crucible` in `cli`. Run `cli/crates/compiler/tests/fd-benchmark.ps1 -Crucible <absolute-path-to-crucible.exe> -Fd <absolute-path-to-FD-checkout> -Report <results.json>`. FD needs the configs, `crucible.toml`, annotation, and packed packages described above. The script records every run, checks exit status and emitted modules, and restores the edited source in `finally`. Raw rows are in `C:/Users/Admin/.hstack/orchestrate/crucible-compiler-p5-p6/budget/bench-results.json`.
 
 ## Where the time goes today
 
@@ -140,7 +140,7 @@ Each phase ends in a budget check and a test run that a reviewer can repeat.
 2. **Build the front end.** Add a compiler crate to the `cli` workspace that builds the tsrs program from a tsconfig, checks it, and fills the fact table, and writes nothing yet. Move the Rust pin to tsrs's version. The check is every site answered on Crucible's runtime and sample game in `cargo test`, and the whole run under 2.5 s and 250 MB on FD's TypeScript 7 copy.
 3. **Lower Crucible's runtime.** Implement the lowering for the features Crucible's runtime uses. The check is Crucible's Lune specs passing on the compiler's output.
 4. **Add the Crucible transform.** Port `transformer-src` into the compiler crates. The check is the sample game passing `pnpm check`, with the transformer tests ported to `cargo test` and passing.
-5. **Cover FD's feature set.** Add JSX, `export =`, merged declarations, and `satisfies`. Try with throw landed in phase 3, because the runtime's data module throws. The check is FD's tests passing and every budget in the pass bar met on FD.
+5. **Cover FD's feature set. Correctness verified, time budget unmet.** Add JSX, `export =`, merged declarations, and `satisfies`. Try with throw landed in phase 3, because the runtime's data module throws. The check is FD's tests passing and every budget in the pass bar met on FD.
 6. **Move the stack. Crucible complete, FD pending release.** Switch `crucible build` from `rbxtsc` to the in-process compiler. Remove `roblox-ts` and `typescript` from the template and the sample, delete `transformer-src`, and drop the physical `server`, `client`, and `emit` folders if `exports` resolution passes. The check is green CI on Crucible and FD.
 7. **Add a cache, only if needed.** If the full build misses its budget, or agents need a faster edit loop, key each file's output by its content and the declarations it imports. A changed merged declaration invalidates every file. The check is an edit build under 500 ms with FD's tests still passing.
 
