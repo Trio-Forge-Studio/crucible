@@ -113,7 +113,7 @@ function placeFor(variant, out, libmp, label) {
 			ReplicatedStorage: {
 				$className: "ReplicatedStorage",
 				TS: { $path: path.join(out, "shared") },
-				rbxts_include: { $path: path.join(root, "node_modules/roblox-ts/include") },
+				rbxts_include: { $path: path.join(root, "cli/crates/compiler/roblox-ts") },
 				LibMP: { $path: libmp },
 			},
 			ServerScriptService: { $className: "ServerScriptService", TS: { $path: path.join(out, "server") } },
