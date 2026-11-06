@@ -1,0 +1,281 @@
+{
+	"runs": 15,
+	"failed": [],
+	"cpuLoadPercent": {
+		"median": 25,
+		"range": [10, 63]
+	},
+	"disagreements": [],
+	"rows": [
+		{
+			"workload": "loop",
+			"variant": "rbxtsc",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 259.1582564287478,
+				"range": [250.5566656146243, 265.55273496450127]
+			},
+			"clockMicros": {
+				"median": 259.10000113071874,
+				"range": [250.09999990288634, 263.69999977760017]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 1
+		},
+		{
+			"workload": "construct",
+			"variant": "rbxtsc",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 679.0399634205073,
+				"range": [672.7930873959167, 692.9081272960218]
+			},
+			"clockMicros": {
+				"median": 679.2000003770227,
+				"range": [676.1999993614154, 691.6000002092915]
+			},
+			"kilobytesPerCall": null,
+			"vsRbxtsc": 1
+		},
+		{
+			"workload": "map",
+			"variant": "rbxtsc",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 38.91514530062068,
+				"range": [37.048744205037565, 39.453914855073435]
+			},
+			"clockMicros": {
+				"median": 38.70000000461005,
+				"range": [36.6000003850786, 39.200000173877925]
+			},
+			"kilobytesPerCall": 32,
+			"vsRbxtsc": 1
+		},
+		{
+			"workload": "vector",
+			"variant": "rbxtsc",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 38.273907067036816,
+				"range": [36.44005948470408, 39.53363199309479]
+			},
+			"clockMicros": {
+				"median": 38.2999987778021,
+				"range": [36.100000215810724, 39.399999877787195]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 1
+		},
+		{
+			"workload": "pairs",
+			"variant": "rbxtsc",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 92.3920816625241,
+				"range": [87.87304905959559, 94.64731681967464]
+			},
+			"clockMicros": {
+				"median": 92.19999992637895,
+				"range": [88.90000026440248, 93.90000013809185]
+			},
+			"kilobytesPerCall": 156,
+			"vsRbxtsc": 1
+		},
+		{
+			"workload": "numeric",
+			"variant": "rbxtsc",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 475.45073218952894,
+				"range": [439.2380876435027, 480.6440840253572]
+			},
+			"clockMicros": {
+				"median": 475.7000006065937,
+				"range": [437.7000004751608, 482.2999999305466]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 1
+		},
+		{
+			"workload": "loop",
+			"variant": "compiler",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 421.1112458247044,
+				"range": [408.12546083031975, 443.74324560675404]
+			},
+			"clockMicros": {
+				"median": 420.20000000775326,
+				"range": [407.6999994140351, 442.5999995874008]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 1.62491927375844
+		},
+		{
+			"workload": "construct",
+			"variant": "compiler",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 672.1989889574616,
+				"range": [661.8237176596153, 692.0301261716304]
+			},
+			"clockMicros": {
+				"median": 670.6999993184581,
+				"range": [660.4999998671701, 698.499999998603]
+			},
+			"kilobytesPerCall": null,
+			"vsRbxtsc": 0.9899255200996037
+		},
+		{
+			"workload": "map",
+			"variant": "compiler",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 38.716189875685814,
+				"range": [38.243691503652144, 42.009530910320336]
+			},
+			"clockMicros": {
+				"median": 38.70000000461005,
+				"range": [38.100000892882235, 42.499999835854396]
+			},
+			"kilobytesPerCall": 32,
+			"vsRbxtsc": 0.9948874551694995
+		},
+		{
+			"workload": "vector",
+			"variant": "compiler",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 38.23358272029509,
+				"range": [37.48376457684799, 39.22425793319917]
+			},
+			"clockMicros": {
+				"median": 37.89999936998356,
+				"range": [37.19999949680641, 40.40000021632295]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 0.998946427218128
+		},
+		{
+			"workload": "pairs",
+			"variant": "compiler",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 91.87480964556016,
+				"range": [87.8091989358154, 106.72204227444126]
+			},
+			"clockMicros": {
+				"median": 91.30000034929253,
+				"range": [87.80000098340679, 122.20000098750461]
+			},
+			"kilobytesPerCall": 156,
+			"vsRbxtsc": 0.9944013382136647
+		},
+		{
+			"workload": "numeric",
+			"variant": "compiler",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 512.7455979531987,
+				"range": [492.6595082809513, 527.5286980732403]
+			},
+			"clockMicros": {
+				"median": 512.3999999341322,
+				"range": [492.19999891647603, 531.8999992596218]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 1.078441073361946
+		},
+		{
+			"workload": "loop",
+			"variant": "compiler-native",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 197.9798504725636,
+				"range": [193.4794156284454, 340.456639607396]
+			},
+			"clockMicros": {
+				"median": 198.69999960064888,
+				"range": [193.19999955769163, 341.40000025217887]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 0.7639341813792284
+		},
+		{
+			"workload": "construct",
+			"variant": "compiler-native",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 667.5069843421397,
+				"range": [627.8091907060457, 1222.60762765535]
+			},
+			"clockMicros": {
+				"median": 667.7999990643002,
+				"range": [627.0000012591481, 1236.0000000626314]
+			},
+			"kilobytesPerCall": null,
+			"vsRbxtsc": 0.9830157579823832
+		},
+		{
+			"workload": "map",
+			"variant": "compiler-native",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 21.59033337221672,
+				"range": [20.178221411413233, 36.74936309300847]
+			},
+			"clockMicros": {
+				"median": 21.300000298651867,
+				"range": [19.90000055229757, 36.499999623629265]
+			},
+			"kilobytesPerCall": 32,
+			"vsRbxtsc": 0.5548054158716546
+		},
+		{
+			"workload": "vector",
+			"variant": "compiler-native",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 45.424859169202136,
+				"range": [43.10229641311025, 85.77291108792906]
+			},
+			"clockMicros": {
+				"median": 45.29999932856299,
+				"range": [43.000000005122274, 85.89999924879521]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 1.1868362195069455
+		},
+		{
+			"workload": "pairs",
+			"variant": "compiler-native",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 85.62996720758065,
+				"range": [71.30506543447268, 151.9668318960612]
+			},
+			"clockMicros": {
+				"median": 83.99999933317304,
+				"range": [70.50000021990854, 150.6000007793773]
+			},
+			"kilobytesPerCall": 156,
+			"vsRbxtsc": 0.9268106710741393
+		},
+		{
+			"workload": "numeric",
+			"variant": "compiler-native",
+			"runs": 5,
+			"libmpMicros": {
+				"median": 200.3425195435966,
+				"range": [196.63245949374186, 242.4104174480135]
+			},
+			"clockMicros": {
+				"median": 200.2000001084525,
+				"range": [196.40000027720816, 242.3999994789483]
+			},
+			"kilobytesPerCall": 0,
+			"vsRbxtsc": 0.42137387952056843
+		}
+	]
+}
