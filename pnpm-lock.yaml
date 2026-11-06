@@ -176,6 +176,15 @@ importers:
         specifier: 1.3.0
         version: 1.3.0(@vitest/ui@5.0.5)
 
+  examples/bench:
+    devDependencies:
+      '@rbxts/types':
+        specifier: 1.0.959
+        version: 1.0.959
+      '@trioforge/compiler-types':
+        specifier: workspace:*
+        version: link:../../packages/compiler-types
+
   examples/sample-game:
     dependencies:
       '@trioforge/crucible':

@@ -1,0 +1,8 @@
+{
+	"name": "@trioforge/crucible-bench",
+	"private": true,
+	"devDependencies": {
+		"@rbxts/types": "1.0.959",
+		"@trioforge/compiler-types": "workspace:*"
+	}
+}
