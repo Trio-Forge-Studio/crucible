@@ -33,7 +33,6 @@ pub const FILES: &[(&str, &str)] = template![
     ".gitattributes",
     "src/server/main.server.ts",
     "src/client/main.client.ts",
-    "src/shared/game.ts",
 ];
 
 pub fn main(args: Args) -> ExitCode {

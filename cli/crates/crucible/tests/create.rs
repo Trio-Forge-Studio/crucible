@@ -30,18 +30,13 @@ fn creates_default_and_explicit_targets_without_installing() {
             "vite.config.ts",
             "src/server/main.server.ts",
             "src/client/main.client.ts",
-            "src/shared/game.ts",
         ] {
             let content = fs::read_to_string(root.join(file)).unwrap();
             assert!(!content.contains("__NAME__") && !content.contains("__VERSION__"), "{file}");
         }
         let project: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(root.join("default.project.json")).unwrap()).unwrap();
-        assert_eq!(project["tree"]["ReplicatedStorage"]["TS"]["$path"], "out/shared");
-        assert_eq!(
-            fs::read_to_string(root.join("src/shared/game.ts")).unwrap().trim(),
-            format!("export const GAME_NAME = \"{}\";", args[0])
-        );
+        assert_eq!(project["tree"]["ReplicatedStorage"]["TS"]["$path"]["optional"], "out/shared");
         assert!(!root.join("node_modules").exists());
     }
 }
