@@ -1560,6 +1560,30 @@ mod tests {
         assert!(!dir.path().join("late.txt").exists(), "the grandchild was killed with the child");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn an_exited_middle_process_does_not_release_its_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("grandchild.cmd"),
+            "@ping -n 6 127.0.0.1 >nul\r\n@echo late>late.txt\r\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("middle.cmd"), "@start \"\" /b cmd /d /c .\\grandchild.cmd\r\n").unwrap();
+        fs::write(
+            dir.path().join("parent.cmd"),
+            "@cmd /d /c .\\middle.cmd\r\n@echo exited>exited.txt\r\n@ping -n 30 127.0.0.1 >nul\r\n",
+        )
+        .unwrap();
+        let mut command = Command::new("cmd");
+        command.args(["/d", "/c", ".\\parent.cmd"]).current_dir(dir.path());
+        let result = finish_within(command, None, "orphan", Duration::from_secs(2));
+        assert!(matches!(result, Err(Error::Failed(message)) if message.contains("did not finish")));
+        assert!(dir.path().join("exited.txt").exists(), "the intermediate shell exited before timeout");
+        thread::sleep(Duration::from_secs(6));
+        assert!(!dir.path().join("late.txt").exists(), "the orphaned grandchild was killed");
+    }
+
     fn installed(root: &Path, crucible: &str, runtime: &str, bin: &str) {
         fs::create_dir_all(root.join("node_modules/@trioforge/crucible-cli")).unwrap();
         fs::create_dir_all(root.join("node_modules/@trioforge/crucible")).unwrap();
