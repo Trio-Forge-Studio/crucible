@@ -30,7 +30,7 @@ The Lune loader supplies only the engine behavior needed to execute the sample i
 
 ## Cleanup
 
-Every Cargo build writes `cli/target` in its own worktree, and each one grows to several gigabytes. Before you hand back a task that ran Cargo, run `cargo clean` from `cli`, whether the task passed, failed, or stopped. Leave the worktree itself in place, because the thread that owns it may resume. Never clean another agent's worktree.
+Every Cargo build writes `cli/target` in its own worktree, and each one grows to several gigabytes. Do not set `CARGO_TARGET_DIR` or clone the repository into another folder, such as `C:\build` or a temporary directory, because nothing cleans those up. Before you hand back a task that ran Cargo, run `cargo clean` from `cli`, whether the task passed, failed, or stopped. Leave the worktree itself in place, because the thread that owns it may resume. Never clean another agent's worktree.
 
 ## Conventions
 
