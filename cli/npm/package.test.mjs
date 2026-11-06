@@ -175,9 +175,17 @@ test(
 			{},
 			"the game installs no TypeScript or roblox-ts",
 		);
+		mkdirSync(join(game, "src", "shared"));
+		writeFileSync(join(game, "src", "shared", "coins.ts"), "export const coins = 1;\n");
+		const serverEntry = join(game, "src", "server", "main.server.ts");
+		writeFileSync(
+			serverEntry,
+			`import { coins } from "../shared/coins";\n${readFileSync(serverEntry, "utf8")}\nprint(coins);\n`,
+		);
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
 		assert.match(checked.stdout, /vp check/);
+		assert.ok(existsSync(join(game, "out", "shared", "coins.luau")), "the build emits the shared module");
 		assert.ok(
 			readFileSync(join(game, "build", "start.rbxl"))
 				.subarray(0, 8)

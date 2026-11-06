@@ -1,31 +1,95 @@
 # Crucible
 
-Crucible is Trio Forge's roblox-ts game framework. This workspace contains a runtime package, a sample game that proves package resolution, and the `crucible` command line in `cli`. The tag-triggered release workflow stages the CLI, the runtime, and `@trioforge/compiler-types` together for npm with provenance.
+Crucible is a TypeScript game framework for Roblox, built by Trio Forge Studio.
 
-## Check the workspace
+You write a game as Subsystems, which are classes that `boot` constructs on the server and the client. Crucible connects them with typed messages and replicated state, saves player data, and builds UI from JSX. It checks the framework's rules when the game compiles, so a `boot` glob that matches no module fails the build instead of leaving a Subsystem unbooted in Studio.
 
-Install Node.js 24, pnpm 12.15.0, Rokit, and rustup. `rust-toolchain.toml` pins the Rust toolchain. Run these commands from the repository root.
+## See it in code
 
-```sh
-pnpm install --pm-on-fail=download
-rokit install
-pnpm check
+Declare a message and a replicated value once, in shared code.
+
+```ts
+// src/shared/coins.ts
+import { replicated, toServer } from "@trioforge/crucible";
+import type { u8 } from "@trioforge/crucible";
+
+export const Collect = toServer<{ readonly size: u8 }>("Coins.Collect");
+export const TotalCoins = replicated<number>("Coins.Total", 0);
 ```
 
-`pnpm check` checks formatting and lint, compiles the runtime, builds the sample with `crucible build` into `build/sample-game.rbxl`, and runs the Lune specs against that place. CI runs the same command with the shared Trio Forge setup action. It omits the reusable workflow's changeset job because releases use the version-tag workflow. See `cli/README.md` for operator setup.
+The server receives the message and writes the value.
 
-Run `pnpm build` to build the sample place without the checks. Run `pnpm fmt` to fix formatting.
+```ts
+// src/server/systems/wallet.ts
+import { receive, Subsystem } from "@trioforge/crucible";
+import { publish } from "@trioforge/crucible/server";
+import { Collect, TotalCoins } from "../../shared/coins";
 
-## Command line
+export class Wallet extends Subsystem {
+	private readonly total = publish(TotalCoins);
 
-`cli` holds the `crucible` binary, written in Rust. `npx crucible docs cli` lists every command. See `docs/cli.md` for the commands and `cli/README.md` for building and testing the CLI.
+	private readonly collect = receive(Collect, (_player, { size }) => {
+		this.total.update((total) => total + size);
+	});
+}
+```
 
-## Package entries
+Every client reads the value and reruns the effect when it changes.
 
-The sample server imports `@trioforge/crucible` and `@trioforge/crucible/server`. The sample client imports the root and `@trioforge/crucible/client`. Both scripts store the imported placeholders as attributes so the specs can assert their values.
+```ts
+// src/client/systems/hud.ts
+import { effect, Subsystem } from "@trioforge/crucible";
+import { Network } from "@trioforge/crucible/client";
+import { Collect, TotalCoins } from "../../shared/coins";
 
-The root stays shared-safe. Requiring it must never load server or client code. The package keeps physical subpath folders because roblox-ts 3.0.0 does not resolve an exports-only remap. The Rojo project maps the package's `out` folder under `ReplicatedStorage.rbxts_include.node_modules.@trioforge.crucible`.
+export class Hud extends Subsystem {
+	protected override start() {
+		effect(() => print(`Total coins: ${TotalCoins()}`));
+		Network.send(Collect, { size: 1 });
+	}
+}
+```
 
-Two shared-safe subpaths carry the code of the retired `@trioforge/random` and `@trioforge/spline` packages. `@trioforge/crucible/util/random` exports the seeded `Rng`, and `@trioforge/crucible/maths/spline` exports the Catmull-Rom, cubic Bezier and uniform B-spline curves. Neither has dependencies, and no other entry loads them. `npx crucible docs random` and `npx crucible docs spline` print their guides.
+The server entry script starts its Subsystems with `boot`.
 
-The sample replicates the package's files to prove resolution. Subpath names do not enforce client access restrictions. The Lune loader runs the compiled imports with a small engine adapter, not a Roblox game simulation.
+```ts
+// src/server/main.server.ts
+import { boot } from "@trioforge/crucible/server";
+
+boot({ load: ["src/server/systems/**"] });
+```
+
+The client entry does the same with `@trioforge/crucible/client` and `src/client/systems/**`.
+
+## Start a game
+
+You need Node.js and Roblox Studio. The CLI bundles Rojo.
+
+```sh
+npx @trioforge/crucible-cli create my-game
+cd my-game
+npx crucible build
+```
+
+Open `build/start.rbxl` in Studio. [The sample game](examples/sample-game) uses a message, a replicated value, a profile store, and a config together, and [its guide](docs/sample-game.md) walks through it.
+
+Crucible is at version 0.3, so a minor release can change the API.
+
+## Read the guides
+
+The `crucible` CLI carries every guide. `npx crucible docs` lists them, and `npx crucible docs <topic>` opens one. The same files are in [`docs`](docs):
+
+- Structure a game with [boot](docs/boot.md), [lifecycle](docs/lifecycle.md), [reactive state](docs/reactive.md), and [logging](docs/logging.md).
+- Talk between the server and clients with [networking](docs/networking.md) and [replicated state](docs/replicated.md).
+- Save and load data with [profile stores](docs/profile-stores.md), [data stores](docs/data-stores.md), and [configs](docs/configs.md).
+- Build UI with [Crucible UI](docs/ui.md) or [Vide](docs/vide.md).
+- Draw seeded numbers and curves with [random](docs/random.md) and [spline](docs/spline.md).
+- Build, test, and ship with the [CLI](docs/cli.md), [Open Cloud](docs/oc.md), [testing](docs/testing.md), and the [compile errors](docs/diagnostics.md).
+
+## Contribute
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) to set up the workspace and open a pull request. Everyone in the project follows the [code of conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+Crucible is under the [MIT license](LICENSE).
