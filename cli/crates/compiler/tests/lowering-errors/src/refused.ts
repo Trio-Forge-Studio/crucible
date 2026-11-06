@@ -16,6 +16,7 @@ export function shadow() {
 }
 
 export function whole(steps: IterableFunction<LuaTuple<number[]>>) {
+	// oxlint-disable-next-line roblox-ts/misleading-lua-tuple-checks -- Exercises the unsupported variable-length iterator step.
 	for (const step of steps) {
 		print(step.size());
 	}

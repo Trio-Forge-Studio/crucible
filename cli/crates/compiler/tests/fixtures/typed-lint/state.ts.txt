@@ -1,0 +1,17 @@
+import { computed, state, type Readable, type State } from "@trioforge/crucible";
+declare function plain(read: () => boolean): void;
+declare function readable(read: Readable<boolean>): void;
+declare function writable(value: State<boolean>): void;
+declare function either(value: boolean | (() => boolean)): void;
+const open = state(false);
+const shown = computed(() => open());
+plain(open); // fires
+plain(() => open());
+plain(shown);
+readable(open);
+writable(open);
+either(open); // fires
+const props: { open: () => boolean } = { open: open }; // fires
+const wrapped: { open: Readable<boolean> } = { open };
+open.set(!open());
+export { props, wrapped };

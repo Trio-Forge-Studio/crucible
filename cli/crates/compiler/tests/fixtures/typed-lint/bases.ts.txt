@@ -1,0 +1,7 @@
+import { CrucibleBehaviour, Subsystem } from "@trioforge/crucible";
+export abstract class Zone<Tag extends string> extends CrucibleBehaviour<Tag, BasePart> {}
+export abstract class Releasing<Tag extends string> extends CrucibleBehaviour<Tag, BasePart> {
+	protected stepping?: RBXScriptConnection;
+	onDestroy() { this.stepping?.Disconnect(); }
+}
+export abstract class Store extends Subsystem {}

@@ -7,6 +7,7 @@ mod classes;
 mod crucible;
 mod data;
 mod network;
+mod typed_lint;
 mod types;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -267,6 +268,7 @@ impl Extractor {
         {
             return;
         }
+        self.typed_lint(n);
         match kind {
             Kind::CallExpression => self.call(n),
             Kind::TaggedTemplateExpression => self.tagged_template(n),

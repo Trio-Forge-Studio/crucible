@@ -1,0 +1,21 @@
+declare function tuple(): LuaTuple<[boolean, string]>;
+declare function rows(): IterableFunction<LuaTuple<[number, string]>>;
+export function probe<T>(count: number | undefined, label: string, flag: boolean, part: BasePart | undefined, value: T, list: Array<number>, map: Map<string, number>) {
+	if (count) {}
+	if (label !== "") {}
+	if (flag || part) {}
+	if (value) {}
+	const negated = !(count);
+	if (count ?? label) {}
+	if (tuple()) {}
+	const whole = tuple();
+	const [ok] = tuple();
+	for (const row of rows()) {}
+	for (const [index, name] of rows()) {}
+	for (const [key] of pairs(list)) {}
+	for (const [key] of ipairs(list)) {}
+	for (const [key] of pairs(map)) {}
+	// oxlint-disable-next-line roblox-ts/lua-truthiness
+	if (label) {}
+	return [negated, whole, ok];
+}

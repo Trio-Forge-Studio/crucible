@@ -1,8 +1,8 @@
 # Diagnostics
 
-Find what each Crucible compile error from CRU001 to CRU031 means and how to fix it.
+Find what each Crucible compile error from CRU001 to CRU037 means and how to fix it.
 
-Crucible's transformer checks game code while roblox-ts compiles it. The transformer is the `@trioforge/crucible/transformer` entry in the tsconfig's `plugins`. `rbxtsc` runs it, and `crucible build` runs `rbxtsc`, so a game made from the template reports these errors in `npm run build` and `npm run check`. Plain `tsc` and the editor's TypeScript service do not run transformer plugins, so they never report them. Code that type-checks in the editor can still fail the build.
+Crucible's transformer checks game code while roblox-ts compiles it. The transformer is the `@trioforge/crucible/transformer` entry in the tsconfig's `plugins`. `rbxtsc` runs it, and `crucible build` runs `rbxtsc`, so a game made from the template reports CRU001 to CRU027 in `npm run build` and `npm run check`. Plain `tsc` and the editor's TypeScript service do not run transformer plugins, so they never report them. Code that type-checks in the editor can still fail the build.
 
 CRU028 to CRU031 check `className` and `theme.toml`. Only the Crucible compiler reports them, because only it builds Crucible UI. `crucible docs ui` describes the classes.
 
@@ -489,3 +489,33 @@ CRU031: <modifier> is both created by classes and authored as a direct child
 ```
 
 A class sets a property the element's instance class does not have, such as `text-white` on a `frame`, or an element has a class that creates a modifier and also a direct child of the same modifier kind. Roblox would throw on the first and keep two modifiers on the second. To fix it, move the class to an element that has the property, or keep either the class or the authored child.
+
+## Type-aware rules
+
+Only the Crucible compiler reports CRU032 to CRU037. It checks these rules in its fact pass. Each diagnostic is an error and stops compilation. These checks also apply outside registered Crucible classes, except for the lifecycle rules that require Crucible ancestry.
+
+| Code | Rule | Message |
+| --- | --- | --- |
+| CRU032 | Lua truthiness | 0, NaN, and "" are falsy in TS. Compare explicitly, because Luau treats them as truthy. |
+| CRU033 | Misleading LuaTuple checks | Unexpected LuaTuple in conditional expression. Add [0]. |
+| CRU033 | LuaTuple declarations | Unexpected LuaTuple in declaration, use array destructuring. |
+| CRU034 | Array pairs | Do not use Array<T> with pairs(). Key values will not be shifted from 1-indexed to 0-indexed. |
+| CRU034 | Array ipairs | Do not use Array<T> with ipairs(). Key values will not be shifted from 1-indexed to 0-indexed. |
+| CRU035 | Frame connections | This `<signal>` connection lasts the object's whole life. Implement Crucible's update, fixedUpdate, lateUpdate or preRender instead. |
+| CRU036 | Subsystem destruction | Crucible never destroys a subsystem. Do last writes in onShutdown, and give other lifetimes their own owner. |
+| CRU036 | Subsystem Janitor | A subsystem lives for the whole session. Put the Janitor on the lifetime that ends. |
+| CRU037 | State as a function | A Crucible State is a callable table, not a function, so code that tests type(x) == "function", such as Vide, treats it as a constant. Pass () => state(), or type the receiver as Readable. |
+
+CRU032 checks conditions, negation, and the left operand of `&&` and `||`. In an `if` condition using `??`, it checks the right operand. Numeric and string literals that cannot be zero or empty are allowed. Explicit boolean coercion with `!!` is allowed because the compiler preserves JavaScript truthiness. Generic constraints, unions, intersections, `any`, `unknown`, and empty object types participate in the check.
+
+CRU033 checks LuaTuple values in conditions, logical operands, equality operands, and iteration. A single variable cannot capture a LuaTuple return or iterator step. Array destructuring is allowed. An unused `_` iterator binding discards the step and is allowed. Direct iteration over a LuaTuple is allowed because the compiler packs the returned values into an array.
+
+CRU034 checks arrays passed to `pairs` and `ipairs`. Maps and unconstrained values are allowed.
+
+CRU035 checks direct `RunService` frame signal connections from a constructor, `awake`, or `start` in a Subsystem or CrucibleBehaviour, including inherited abstract bases. It covers `Connect`, `Once`, and `ConnectParallel` on `Heartbeat`, `PostSimulation`, `Stepped`, `PreSimulation`, `RenderStepped`, `PreRender`, and `PreAnimation`. Nested callbacks and other methods are allowed. A behaviour may assign a connection to `this.field` when its own or an inherited `onDestroy` calls `this.field.Disconnect()` or `this.field?.Disconnect()`.
+
+CRU036 rejects a `destroy` method and a field initialized by `Janitor()` or `new Janitor()` on a Subsystem. Other lifetime owners and Janitors returned by another function are allowed.
+
+CRU037 checks a Crucible `State` passed where a plain callable type is expected, including unions and object properties. Calling the State, accessing its methods, wrapping it in a function, or passing it to a Crucible `Readable` or `State` receiver is allowed. A computed readable is also allowed.
+
+During migration, these six rules retain the matching `oxlint-disable-next-line` directives from `roblox-ts/lua-truthiness`, `roblox-ts/misleading-lua-tuple-checks`, `roblox-ts/no-array-pairs`, `fragile-delivery/frame-hooks`, `fragile-delivery/session-lifetime`, and `fragile-delivery/state-as-function`.
