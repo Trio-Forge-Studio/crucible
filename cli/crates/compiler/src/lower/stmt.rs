@@ -11,10 +11,32 @@ impl Lower<'_> {
         self.statements(statements);
         let mut body = std::mem::take(&mut self.current_block);
         let exports = std::mem::take(&mut self.exports);
-        let value = if exports.is_empty() {
+        let value = if let Some(value) = self.export_assignment.take() {
+            value
+        } else if exports.is_empty() && self.export_stars.is_empty() {
             Expr::Nil
         } else {
             Expr::Table(exports.into_iter().map(|(name, value)| Field::Keyed(Expr::String(name), value)).collect())
+        };
+        let value = if self.export_stars.is_empty() {
+            value
+        } else {
+            let name = self.temp();
+            body.push(Stmt::Local(vec![name.clone()], vec![value]));
+            for module in std::mem::take(&mut self.export_stars) {
+                let (key, item) = (self.temp(), self.temp());
+                let k = Expr::Name(key.clone());
+                let target = Expr::Name(name.clone()).index(k.clone());
+                let condition = k
+                    .binary(BinOp::Ne, Expr::string("default"))
+                    .binary(BinOp::And, target.clone().binary(BinOp::Eq, Expr::Nil));
+                body.push(Stmt::GenericFor(
+                    vec![key, item.clone()],
+                    vec![module],
+                    vec![Stmt::If(condition, vec![Stmt::Assign(vec![target], vec![Expr::Name(item)])], None)],
+                ));
+            }
+            Expr::Name(name)
         };
         body.push(Stmt::Return(vec![value]));
         if self.uses_crucible {
@@ -106,7 +128,13 @@ impl Lower<'_> {
                 self.unsupported(s, "a labeled statement");
             }
             Kind::ExportAssignment => {
-                self.unsupported(s, "export assignment");
+                let value = self.expr(s.expression());
+                if s.is_export_equals() {
+                    self.export_assignment = Some(value);
+                } else {
+                    let value = self.push_temp(value);
+                    self.exports.push((Cow::Borrowed("default"), value));
+                }
             }
             Kind::ImportEqualsDeclaration => {
                 self.unsupported(s, "import assignment");
@@ -1027,7 +1055,14 @@ impl Lower<'_> {
             return;
         }
         let Some(clause) = s.export_clause() else {
-            self.unsupported(s, "export *");
+            if let Some(specifier) = s.module_specifier() {
+                if !self.import_fact(specifier).kept() {
+                    return;
+                }
+                let module = self.import_call(specifier);
+                let module = self.push_temp(module);
+                self.export_stars.push(module);
+            }
             return;
         };
         if clause.kind() != Kind::NamedExports {

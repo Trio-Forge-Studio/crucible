@@ -1,0 +1,5 @@
+{
+	"name": "@fixture/main",
+	"types": "index.d.ts",
+	"main": "src/init.lua"
+}

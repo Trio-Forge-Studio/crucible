@@ -620,6 +620,10 @@ impl Node {
         self.n.modifier_flags().contains(ModifierFlags::Export)
     }
 
+    pub fn is_export_equals(&self) -> bool {
+        self.n.as_export_assignment().is_export_equals
+    }
+
     pub fn is_default(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Default)
     }

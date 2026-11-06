@@ -61,6 +61,8 @@ pub(crate) fn lower(
         closure_assigned: closure_assigned(file.root()),
         hoisted_name_starts: HashSet::new(),
         exports: Vec::new(),
+        export_assignment: None,
+        export_stars: Vec::new(),
         namespace: None,
         breakables: Vec::new(),
         groups: Vec::new(),
@@ -128,6 +130,8 @@ pub(crate) struct Lower<'a> {
     closure_assigned: HashSet<&'static str>,
     hoisted_name_starts: HashSet<u32>,
     exports: Vec<(Name, Expr)>,
+    export_assignment: Option<Expr>,
+    export_stars: Vec<Expr>,
     namespace: Option<Name>,
     breakables: Vec<Breakable>,
     /// The group names and `interaction` local of each group element whose children are being lowered, outermost

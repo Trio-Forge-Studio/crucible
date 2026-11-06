@@ -18,6 +18,25 @@ A phase passes when the stack's own tests pass and the compiler meets these budg
 
 Correctness comes from the stack's tests, not from roblox-ts. These are Crucible's `pnpm check` with its Lune specs and transformer tests, FD's `lune run test`, and a Studio smoke run.
 
+## Phase 5 verification on FD
+
+On 2026-11-05, FD at `dd1ad9716` compiled both places from TypeScript 7 configs with zero errors. Warehouse emitted 598 modules and job emitted 579. The detached verification checkout used an explicit `Instance | undefined` annotation in `house-previews.ts` for TS7022 and a local copy of `@trioforge/compiler-types`.
+
+FD's completed roblox-ts build passed all 997 Lune specs. Replacing only each place's output with the compiler's modules and running `lune run test --compiled` passed the same 997 named specs. There were no pre-existing spec failures. The original include folders supplied RuntimeLib and Promise. This verifies the compiled modules through FD's Lune loader, without a Studio smoke run.
+
+The release `compile` example was measured on `LAPTOP-HEZAERD`, Windows, AMD Ryzen 9 5900HS, 16 logical processors, and 16 GiB of installed memory. Each row is the median of five runs, interleaving warehouse and job. These are fresh processes with filesystem caches left warm. Full builds write every module into a fresh output directory. Edit builds append a newline to `core/Commands/shared/command-tree.ts`, compile again, and restore the original bytes. They still check and lower every module, then compare unchanged output bytes.
+
+| Place | Full build, including output | After one-file edit | Full-build peak working set | Budget result |
+|---|---|---|---|---|
+| Warehouse | 4.708 s, range 4.018 to 10.126 s | 5.126 s, range 4.501 to 8.483 s | 158.0 MB | Time misses 3 s; memory passes 250 MB. |
+| Job | 5.432 s, range 3.477 to 6.702 s | 4.822 s, range 3.295 to 8.004 s | 153.9 MB | Time misses 3 s; memory passes 250 MB. |
+
+The timed region includes process startup, type checking, fact extraction, lowering, and output writing. Every run exited zero and retained all 598 or 579 modules. Full runs wrote every module; edit runs wrote zero changed modules. Peak memory comes from Windows `GetProcessMemoryInfo` on a retained process handle after exit, using the operating system's peak working set rather than sampling. MB means 1,000,000 bytes.
+
+The runs overlapped Rust builds and repository checks on the shared machine. Their wide ranges prevent an idle-machine performance claim. The compiler example's median compile phase alone took 4.275 s for warehouse and 4.758 s for job on full builds, so output writing alone does not explain the misses. The 3 s time budget remains unmet in this measurement. An idle-machine run and a profile of checking, facts, and lowering are follow-up work before choosing an optimization or the phase 7 cache.
+
+Reproduce the measurement from the repository root after building the release example with `cargo build --release -p crucible-compiler --example compile` in `cli`. Run `cli/crates/compiler/tests/fd-benchmark.ps1 -Compiler <compile.exe> -Fd <detached-FD-checkout> -Report <results.json>`. FD must already have the generated TypeScript 7 configs and Rojo projects described above. The script records every run, verifies emitted module counts and exit status, and restores the edited source in `finally`.
+
 ## Where the time goes today
 
 A spike measured roblox-ts 3.0.0 on FD at `c7ef7706` on an 8 vCPU, 23 GiB VPS. FD's warehouse place compiles 599 source files, 739 with declarations. Numbers are medians of 5 runs.
@@ -79,14 +98,15 @@ Every build compiles every file. A per-file output cache would cut the edit buil
 
 FD's runtime packages ship precompiled Luau that calls roblox-ts's `TS.import`. These include Flamework, janitor, log, message-templates, tether, serio, anvil, brigadier, and spline. The compiler keeps roblox-ts's `RuntimeLib` in `rbxts_include` for them. Those packages cost nothing at compile time beyond reading their declarations.
 
-Compiled code reaches `RuntimeLib` only through `TS.import`, `TS.getModule` and `TS.Promise`. A package finds another installed package with `TS.getModule`, as roblox-ts emits it, such as the runtime's `vide` entry importing `@rbxts/vide`. `throw` lowers to `error(value, 0)`, so a thrown string reaches `catch` without a position prefix. `try` lowers inline to `pcall`, not to roblox-ts's `TS.try`. The `finally` body then runs inline after the `pcall`, so its own `return`, `break` or throw replaces a pending one without a closure or exit codes of its own.
+Compiled code reaches `RuntimeLib` only through `TS.import`, `TS.getModule`, `TS.Promise`, and `TS.instanceof`. `instanceof` uses RuntimeLib's metatable class-chain check, including classes from precompiled packages. A package finds another installed package with `TS.getModule`, as roblox-ts emits it, such as the runtime's `vide` entry importing `@rbxts/vide`. `throw` lowers to `error(value, 0)`, so a thrown string reaches `catch` without a position prefix. `try` lowers inline to `pcall`, not to roblox-ts's `TS.try`. The `finally` body then runs inline after the `pcall`, so its own `return`, `break` or throw replaces a pending one without a closure or exit codes of its own.
 
 ## Features in scope
 
 These counts come from the spike's collector. FD has 117,409 type-dependent sites, and Crucible has 5,520.
 
 - **Calls, indexing, operators, and loops.** Macro, method, and function callees. Array, Map, Set, and String receivers. LuaTuple returns. String `+` versus numeric `+`. Truthiness, `??`, numeric `for` loops, and `for..of` over arrays, maps, sets, and `pairs()`.
-- **Classes and modules.** Classes, enums, `export =`, and `declare module` merging.
+- **Classes and modules.** Classes, enums, default and named exports, `export =`, star exports, and `declare module` merging. Type-only star exports are elided. `instanceof` requires a TypeScript or Crucible class; Roblox constructors are compile errors.
+- **Object membership.** `in` supports objects, records, and class instances. Arrays, tuples, Maps, Sets, strings, and iterator receivers are compile errors. `delete` supports object and record members; deleting an array or tuple element is a compile error.
 - **Other syntax.** `satisfies` and try with throw.
 - **JSX for Vide.** 2,106 elements, of which only the 17 spread attributes need a fact.
 - **Crucible's transform.** Registration, `attribute()`, `inject<T>()`, `boot()`, `receive()`, the network, replicated, data and config declaration macros, the emit import, and the CRU lint rules.

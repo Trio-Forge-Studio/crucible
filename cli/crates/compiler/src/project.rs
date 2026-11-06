@@ -213,7 +213,7 @@ impl Game {
     /// The instance that the module compiled from, or declared by, `file` becomes.
     pub fn module(&self, file: &Path) -> Option<RbxPath> {
         let out = match self.through_node_modules(file) {
-            Some(path) => luau_path(&path, true)?,
+            Some(path) => luau_path(&runtime_path(&path), true)?,
             None => self.out_path(file)?,
         };
         self.rojo.rbx_path(&out)
@@ -266,6 +266,22 @@ fn real_path(path: &Path) -> Option<PathBuf> {
     }
 }
 
+fn runtime_path(file: &Path) -> PathBuf {
+    let Some(package) = file.parent().and_then(package_dir) else { return file.to_path_buf() };
+    let Some(manifest) = std::fs::read(package.join("package.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    else {
+        return file.to_path_buf();
+    };
+    let types = manifest.get("types").or_else(|| manifest.get("typings")).and_then(|v| v.as_str());
+    let main = manifest.get("main").and_then(|v| v.as_str());
+    match (types, main) {
+        (Some(types), Some(main)) if normalize(&package.join(types)) == normalize(file) => package.join(main),
+        _ => file.to_path_buf(),
+    }
+}
+
 /// How a package reaches `file` when it is in a scoped package under a `node_modules` folder: the package that
 /// `TS.getModule` finds by scope and name, then the module's folders and name inside it. The declaration
 /// `src/index.d.ts` names the module `src`.
@@ -274,7 +290,11 @@ pub(crate) fn installed_module(file: &str) -> Option<ModulePath> {
     let mut parts = inside.splitn(3, '/');
     let scope = parts.next().filter(|s| s.starts_with('@') && s.len() > 1)?;
     let name = parts.next().filter(|n| !n.is_empty())?;
-    let module = luau_path(Path::new(parts.next()?), true)?;
+    let relative = parts.next()?;
+    let runtime = runtime_path(Path::new(file)).to_string_lossy().replace('\\', "/");
+    let relative =
+        if runtime != file { runtime.rsplit_once("/node_modules/")?.1.splitn(3, '/').nth(2)? } else { relative };
+    let module = luau_path(Path::new(relative), true)?;
     let mut path: Vec<Box<str>> =
         module.with_extension("").components().map(|c| c.as_os_str().to_string_lossy().into()).collect();
     if path.last().is_some_and(|last| &**last == "init") {
@@ -286,6 +306,9 @@ pub(crate) fn installed_module(file: &str) -> Option<ModulePath> {
 /// A TypeScript file's Luau module path: `.ts` and `.tsx` become `.luau`, and an `index` module is its folder's
 /// `init`. A declaration also maps to the module it declares when `declaration` is set.
 fn luau_path(file: &Path, declaration: bool) -> Option<PathBuf> {
+    if declaration && matches!(extension(file), Some("lua" | "luau")) {
+        return Some(file.with_extension("luau"));
+    }
     let name = file.file_name()?.to_str()?;
     let stem = name.strip_suffix(".tsx").or_else(|| name.strip_suffix(".ts"))?;
     let stem = match stem.strip_suffix(".d") {
@@ -374,6 +397,14 @@ mod tests {
             name: name.into(),
             path: path.iter().map(|&p| p.into()).collect(),
         })
+    }
+
+    #[test]
+    fn package_types_entry_resolves_to_its_runtime_main() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/package-main");
+        assert_eq!(runtime_path(&root.join("index.d.ts")), root.join("src/init.lua"));
+        assert_eq!(runtime_path(&root.join("other.d.ts")), root.join("other.d.ts"));
+        assert_eq!(luau_path(&runtime_path(&root.join("index.d.ts")), true), Some(root.join("src/init.luau")));
     }
 
     #[test]

@@ -271,6 +271,12 @@ impl Extractor {
             Kind::CallExpression => self.call(n),
             Kind::TaggedTemplateExpression => self.tagged_template(n),
             Kind::NewExpression => self.new_expression(n),
+            Kind::DeleteExpression => {
+                let target = types::skip_downwards(n.expression().unwrap());
+                if matches!(target.kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression) {
+                    self.element_receiver(target.expression().unwrap());
+                }
+            }
             Kind::PropertyAccessExpression => self.constant_ref(n),
             Kind::ElementAccessExpression => {
                 let object = n.as_element_access_expression().expression;
@@ -485,6 +491,15 @@ impl Extractor {
         let binary = n.as_binary_expression();
         let (left, right) = (binary.left, binary.right());
         match binary.operator_token.kind() {
+            Kind::InKeyword => self.element_receiver(right),
+            Kind::InstanceOfKeyword => {
+                self.site();
+                let t = self.type_of(right);
+                let class = t.symbol().is_some_and(|s| self.checker.get_symbol_flags(s).intersects(SymbolFlags::Class))
+                    && !self.possibly_roblox(t);
+                let span = self.span(right);
+                self.table.store(span, Site::InstanceOfClass, |f| &mut f.class_constructor, class);
+            }
             Kind::PlusToken | Kind::PlusEqualsToken => self.plus(left, right),
             Kind::AmpersandAmpersandToken | Kind::BarBarToken => {
                 self.truthy(left);
@@ -958,7 +973,33 @@ impl Extractor {
             return;
         }
         let declaration = n.as_export_declaration();
-        let Some(clause) = declaration.export_clause else { return };
+        let Some(clause) = declaration.export_clause else {
+            if let Some(specifier) = declaration.module_specifier {
+                self.site();
+                let module = self.checker.get_symbol_at_location_exported(specifier);
+                let value = module.is_some_and(|m| {
+                    self.checker.get_exports_of_module_exported(m).into_iter().any(|symbol| {
+                        let target = if self.checker.get_symbol_flags(symbol).intersects(SymbolFlags::Alias) {
+                            self.checker.get_aliased_symbol(symbol)
+                        } else {
+                            symbol
+                        };
+                        self.checker.get_symbol_flags(target).intersects(SymbolFlags::Value)
+                    })
+                });
+                let span = self.span(specifier);
+                self.table.store(
+                    span,
+                    Site::Import,
+                    |f| &mut f.import,
+                    if value { Import::Keep } else { Import::Elide },
+                );
+                if value {
+                    self.modules.push(ModuleUse { specifier, kept: Kept::Always });
+                }
+            }
+            return;
+        };
         if clause.kind() != Kind::NamedExports {
             return;
         }
