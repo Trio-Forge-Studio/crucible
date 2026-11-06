@@ -39,6 +39,15 @@ two-face = { version = "0.5", default-features = false, features = ["syntect-fan
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+	"Win32_Foundation",
+	"Win32_Security",
+	"Win32_System_Diagnostics_ToolHelp",
+	"Win32_System_JobObjects",
+	"Win32_System_Threading",
+] }
+
 [dev-dependencies]
 httpmock = "0.8"
 rmp-serde = "1"

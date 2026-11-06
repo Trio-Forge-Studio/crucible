@@ -1117,6 +1117,10 @@ fn finish_within(
     command.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    #[cfg(windows)]
+    let (mut child, job) = crate::child::job::Job::spawn(&mut command)
+        .map_err(|error| Error::Failed(format!("cannot run {label}: {error}")))?;
+    #[cfg(not(windows))]
     let mut child = command.spawn().map_err(|error| Error::Failed(format!("cannot run {label}: {error}")))?;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         thread::spawn(move || stdin.write_all(input.as_bytes()));
@@ -1134,12 +1138,16 @@ fn finish_within(
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
+                #[cfg(windows)]
+                let _ = job.terminate();
                 kill_tree(&mut child);
                 return Err(Error::Failed(format!("{label} did not finish within {} seconds", timeout.as_secs())));
             }
             Err(error) => return Err(Error::Failed(format!("cannot wait for {label}: {error}"))),
         }
     };
+    #[cfg(windows)]
+    drop(job);
     let stdout = reader.map(|reader| reader.join().unwrap_or_default()).unwrap_or_default();
     Ok(Finished { status, stdout })
 }
@@ -1150,13 +1158,6 @@ fn kill_tree(child: &mut Child) {
     unsafe {
         libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
     }
-    #[cfg(windows)]
-    let _ = Command::new("taskkill")
-        .args(["/T", "/F", "/PID", &child.id().to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -1564,11 +1565,7 @@ mod tests {
     #[test]
     fn an_exited_middle_process_does_not_release_its_descendants() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("grandchild.cmd"),
-            "@ping -n 6 127.0.0.1 >nul\r\n@echo late>late.txt\r\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("grandchild.cmd"), "@ping -n 6 127.0.0.1 >nul\r\n@echo late>late.txt\r\n").unwrap();
         fs::write(dir.path().join("middle.cmd"), "@start \"\" /b cmd /d /c .\\grandchild.cmd\r\n").unwrap();
         fs::write(
             dir.path().join("parent.cmd"),
