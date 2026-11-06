@@ -28,6 +28,10 @@ For changes under `cli`, run `pnpm build` from the repository root before the np
 
 The Lune loader supplies only the engine behavior needed to execute the sample imports. A passing Lune spec does not prove gameplay behavior in Studio.
 
+## Cleanup
+
+Every Cargo build writes `cli/target` in its own worktree, and each one grows to several gigabytes. Before you hand back a task that ran Cargo, run `cargo clean` from `cli`, whether the task passed, failed, or stopped. Leave the worktree itself in place, because the thread that owns it may resume. Never clean another agent's worktree.
+
 ## Conventions
 
 - Use Conventional Commits with a scope, such as `chore(repo): scaffold the workspace`.
