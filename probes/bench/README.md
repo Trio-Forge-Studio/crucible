@@ -32,6 +32,6 @@ Each launch writes `results/<variant>-r<rep>.json`. The run writes `results/summ
 ## Reading the numbers
 
 - Native code runs only in server scripts and on Android clients, so the workloads run on the server.
-- The `KB per call` column is the heap change across a call from `gcinfo()`. When a garbage collection step runs inside a call the heap shrinks, so a workload that ever shows a negative change reads `GC inside calls` instead of a number.
+- The `KB per call` column is the heap change across a call from `gcinfo()`. When a garbage collection step runs inside a call the heap shrinks, so a workload whose 10th-percentile change is negative in any launch reads `GC inside calls` instead of a number. Rarer collections can still lower the median, and a positive change is a lower bound on what the call allocated.
 - Studio numbers include the editor and the profiler. Compare them only with Studio runs on the same machine.
 - A laptop lowers the clock of a busy core when other cores are busy. If `vector` differs between `rbxtsc` and `compiler`, the machine changed, not the code.
