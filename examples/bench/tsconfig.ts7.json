@@ -1,0 +1,8 @@
+{
+	"extends": "../../tsconfig.ts7.json",
+	"compilerOptions": {
+		"rootDir": "src",
+		"outDir": "out"
+	},
+	"include": ["src"]
+}
