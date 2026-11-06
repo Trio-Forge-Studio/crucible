@@ -1,0 +1,21 @@
+{
+	"name": "Crucible bench",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"$className": "ReplicatedStorage",
+			"TS": {
+				"$path": "out/shared"
+			},
+			"rbxts_include": {
+				"$path": "include"
+			}
+		},
+		"ServerScriptService": {
+			"$className": "ServerScriptService",
+			"TS": {
+				"$path": "out/server"
+			}
+		}
+	}
+}
