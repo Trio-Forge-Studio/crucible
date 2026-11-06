@@ -1,5 +1,3 @@
-//! The diagnostics equal the ones `packages/crucible/transformer-src/network.cjs` reports.
-
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

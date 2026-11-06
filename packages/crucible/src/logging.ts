@@ -52,7 +52,6 @@ let emitting = false;
 function derive(added?: Registration) {
 	const entries = new Array<Registration>();
 	minimum = LogLevel.Off;
-	// roblox-ts Maps compile to unordered Luau tables. The array owns delivery order.
 	for (const registration of snapshot) {
 		if (!registration.connected) continue;
 		entries.push(registration);

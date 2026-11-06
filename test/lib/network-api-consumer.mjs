@@ -3,9 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const ansi = new RegExp(String.fromCharCode(27) + String.raw`\[[0-9;]*m`, "g");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-network-api-"));
@@ -20,7 +18,12 @@ function compile(name, file) {
 		"junction",
 	);
 	fs.mkdirSync(path.join(root, "node_modules/@rbxts"));
-	for (const types of ["compiler-types", "types"])
+	fs.symlinkSync(
+		path.join(repo, "packages/compiler-types"),
+		path.join(root, "node_modules/@trioforge/compiler-types"),
+		"junction",
+	);
+	for (const types of ["types"])
 		fs.symlinkSync(
 			fs.realpathSync(path.join(repo, "packages/crucible/node_modules/@rbxts", types)),
 			path.join(root, "node_modules/@rbxts", types),
@@ -30,22 +33,21 @@ function compile(name, file) {
 	fs.writeFileSync(
 		path.join(root, "tsconfig.json"),
 		JSON.stringify({
-			extends: path.join(repo, "tsconfig.rbxts.json"),
+			extends: path.join(repo, "tsconfig.json"),
 			compilerOptions: {
 				rootDir: "src",
 				outDir: "out",
-				typeRoots: ["node_modules/@rbxts", "node_modules/@trioforge"],
-				types: ["compiler-types", "types"],
+
+				types: ["@trioforge/compiler-types", "@rbxts/types"],
 			},
 			include: ["src"],
 		}),
 	);
 	fs.copyFileSync(path.join(repo, "test/lib", file), path.join(root, "src/index.ts"));
-	const result = spawnSync(
-		process.execPath,
-		[require.resolve("roblox-ts/out/CLI/cli.js"), "--type", "package", "-p", root],
-		{ cwd: repo, encoding: "utf8" },
-	);
+	const result = spawnSync(process.execPath, [path.join(repo, "test/lib/compile.mjs"), root, "--check"], {
+		cwd: repo,
+		encoding: "utf8",
+	});
 	return { status: result.status, output: (result.stdout + result.stderr).replace(ansi, "") };
 }
 
@@ -54,7 +56,7 @@ try {
 	assert.equal(accepted.status, 0, accepted.output);
 	const rejected = compile("rejected", "network-api-rejected.ts");
 	assert.notEqual(rejected.status, 0, "rejected forms must not type-check");
-	const lines = [...rejected.output.matchAll(/index\.ts:(\d+):\d+ - error TS\d+/g)].map(([, line]) => Number(line));
+	const lines = [...rejected.output.matchAll(/index\.ts\((\d+),\d+\): error TS\d+/g)].map(([, line]) => Number(line));
 	const source = fs.readFileSync(path.join(repo, "test/lib/network-api-rejected.ts"), "utf8").split("\n");
 	const from = source.indexOf("// REJECTED") + 1;
 	const starts = source.flatMap((text, i) => (i >= from && text.startsWith("export ") ? [i + 1] : []));

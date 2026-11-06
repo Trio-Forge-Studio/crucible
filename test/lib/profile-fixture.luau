@@ -1,6 +1,6 @@
--- An FD-shaped profile store, emitted by hand as the transformer would: the template, the persist descriptor, the
+-- An FD-shaped profile store, emitted by hand as the compiler would: the template, the persist descriptor, the
 -- replica (ClientData: no serverOnly field and no object left with no field) and the serverOnly paths. Field names are
--- in byte order, as the transformer emits them.
+-- in byte order, as the compiler emits them.
 local fixture = {}
 
 fixture.STORE = "FD.Players"

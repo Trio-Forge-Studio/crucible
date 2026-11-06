@@ -50,7 +50,7 @@ export type ReceiveCallback<T extends ReceiveTarget> =
 				? (...payload: PayloadArgs<P>) => void
 				: (player: Player) => (() => void) | void;
 
-const UNTRANSFORMED = "Crucible networking needs the @trioforge/crucible/transformer plugin";
+const UNTRANSFORMED = "Crucible networking was not compiled by the Crucible compiler; use crucible build";
 
 export function toServer<P>(_name: string): ToServer<P> {
 	error(UNTRANSFORMED);

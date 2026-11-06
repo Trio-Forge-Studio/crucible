@@ -12,7 +12,7 @@ const root = path.resolve(import.meta.dirname, "../..");
 const bench = path.join(root, "examples/bench");
 const build = path.join(root, "build/bench");
 const results = path.join(import.meta.dirname, "results");
-const VARIANTS = ["rbxtsc", "compiler", "compiler-native"];
+const VARIANTS = ["compiler", "compiler-native"];
 const WARMUP_FRAMES = 300;
 
 const args = process.argv.slice(2);
@@ -76,17 +76,11 @@ function digest(dir) {
 }
 
 const BUILDERS = {
-	rbxtsc(out) {
-		// rbxtsc compiles a scoped package name as a package unless told otherwise.
-		const cli = path.join(root, "node_modules/roblox-ts/out/CLI/cli.js");
-		execFileSync(process.execPath, [cli, "-p", bench, "--type", "game"], { stdio: "inherit" });
-		fs.cpSync(path.join(bench, "out"), out, { recursive: true, filter: (from) => !from.endsWith(".tsbuildinfo") });
-	},
 	compiler(out) {
 		const compile = path.join(root, "cli/target/release/examples/compile.exe");
 		if (!fs.existsSync(compile))
 			throw Error("Build the compiler first: cargo build --release -p crucible-compiler --example compile");
-		execFileSync(compile, [path.join(bench, "tsconfig.ts7.json"), out], { stdio: "inherit" });
+		execFileSync(compile, [path.join(bench, "tsconfig.json"), out], { stdio: "inherit" });
 	},
 	"compiler-native"(out) {
 		fs.cpSync(path.join(build, "compiler"), out, { recursive: true });
@@ -119,7 +113,7 @@ function placeFor(variant, out, libmp, label) {
 			ReplicatedStorage: {
 				$className: "ReplicatedStorage",
 				TS: { $path: path.join(out, "shared") },
-				rbxts_include: { $path: path.join(root, "node_modules/roblox-ts/include") },
+				rbxts_include: { $path: path.join(root, "cli/crates/compiler/roblox-ts") },
 				LibMP: { $path: libmp },
 			},
 			ServerScriptService: { $className: "ServerScriptService", TS: { $path: path.join(out, "server") } },

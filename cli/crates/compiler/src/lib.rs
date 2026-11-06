@@ -115,6 +115,18 @@ impl fmt::Display for Failure {
 
 /// Any diagnostic, Crucible rule or lowering error fails the whole compile, and no module is returned.
 pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
+    // tsrs's checker recurses with the source, so every caller needs the stack its CLI uses.
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(512 << 20)
+            .spawn_scoped(scope, || compile_on_thread(tsconfig, target))
+            .expect("cannot start the compiler thread")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+fn compile_on_thread(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
     let files = checked.files();
     let paths: Vec<String> = files.iter().map(|f| f.path()).collect();

@@ -50,18 +50,6 @@ const mutants = [
 		() => node(["--test", "test/studio/verification.test.mjs"]),
 	],
 	[
-		"fixture real declaration copy deleted",
-		"packages/crucible/transformer-src/tests/transformer.test.cjs",
-		'["out", "server", "client", "emit", "package.json"]',
-		'["server", "client", "emit", "package.json"]',
-		() =>
-			node([
-				"--test",
-				"--test-name-pattern=fixture uses every real",
-				"packages/crucible/transformer-src/tests/transformer.test.cjs",
-			]),
-	],
-	[
 		"owned PID place guard deleted",
 		"test/studio/session.mjs",
 		"&& args.includes(place.toLowerCase())",
@@ -81,30 +69,6 @@ const mutants = [
 		"await wait(60000);",
 		"{}",
 		() => node(["--test", "test/studio/verification.test.mjs"]),
-	],
-	[
-		"fixture paired manifest copy skipped",
-		"packages/crucible/transformer-src/tests/transformer.test.cjs",
-		'["out", "server", "client", "emit", "package.json"]',
-		'["out", "server", "client", "emit"]',
-		() =>
-			node([
-				"--test",
-				"--test-name-pattern=fixture uses every real",
-				"packages/crucible/transformer-src/tests/transformer.test.cjs",
-			]),
-	],
-	[
-		"fixture same typed side destinations swapped",
-		"packages/crucible/transformer-src/tests/transformer.test.cjs",
-		"path.join(installed, entry), { recursive: true }",
-		'path.join(installed, entry === "server" ? "client" : entry === "client" ? "server" : entry), { recursive: true }',
-		() =>
-			node([
-				"--test",
-				"--test-name-pattern=fixture uses every real",
-				"packages/crucible/transformer-src/tests/transformer.test.cjs",
-			]),
 	],
 	[
 		"owned session ambiguity check short circuited",

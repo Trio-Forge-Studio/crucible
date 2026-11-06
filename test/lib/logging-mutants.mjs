@@ -3,8 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-logging-mutants-"));
 const mutants = [
@@ -298,9 +296,12 @@ function run(command, args) {
 try {
 	fs.mkdirSync(path.join(scratch, "build"), { recursive: true });
 	fs.copyFileSync(path.join(repo, "build/sample-game.rbxl"), path.join(scratch, "build/sample-game.rbxl"));
-	for (const name of ["tsconfig.rbxts.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
+	fs.cpSync(path.join(repo, "cli/crates/compiler/roblox-ts"), path.join(scratch, "cli/crates/compiler/roblox-ts"), {
+		recursive: true,
+	});
 	fs.cpSync(path.join(repo, "test"), path.join(scratch, "test"), { recursive: true });
 	fs.cpSync(path.join(repo, "packages/crucible"), path.join(scratch, "packages/crucible"), {
 		recursive: true,
@@ -313,14 +314,7 @@ try {
 		"junction",
 	);
 	const originals = new Map(mutants.map(([, file]) => [file, fs.readFileSync(path.join(scratch, file), "utf8")]));
-	const build = () =>
-		run(process.execPath, [
-			require.resolve("roblox-ts/out/CLI/cli.js"),
-			"--type",
-			"package",
-			"-p",
-			"packages/crucible",
-		]);
+	const build = () => run(process.execPath, [path.join(repo, "test/lib/compile.mjs"), "packages/crucible"]);
 	assert.equal(build().status, 0, "baseline build");
 	const baseline = run("lune", ["run", "test", "logging"]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);

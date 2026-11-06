@@ -1,14 +1,9 @@
-// Mutation campaign for the reactive core and core edits E1 and E2. Each mutant rewrites TypeScript source in a scratch
-// copy, rebuilds the package with rbxtsc, and runs the Lune specs named for the mutant's rules. It is killed only when
-// one of them fails. Run from the repository root: node test/lib/reactive-mutants.mjs [first index]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-reactive-mutants-"));
 
@@ -898,9 +893,12 @@ function names(rule) {
 }
 
 try {
-	for (const name of ["tsconfig.rbxts.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
+	fs.cpSync(path.join(repo, "cli/crates/compiler/roblox-ts"), path.join(scratch, "cli/crates/compiler/roblox-ts"), {
+		recursive: true,
+	});
 	fs.cpSync(path.join(repo, "test"), path.join(scratch, "test"), { recursive: true });
 	fs.cpSync(path.join(repo, "packages/crucible"), path.join(scratch, "packages/crucible"), {
 		recursive: true,
@@ -914,14 +912,7 @@ try {
 	);
 	const files = new Set(mutants.map((mutant) => mutant[3]));
 	const originals = new Map([...files].map((file) => [file, fs.readFileSync(path.join(scratch, file), "utf8")]));
-	const build = () =>
-		run(process.execPath, [
-			require.resolve("roblox-ts/out/CLI/cli.js"),
-			"--type",
-			"package",
-			"-p",
-			"packages/crucible",
-		]);
+	const build = () => run(process.execPath, [path.join(repo, "test/lib/compile.mjs"), "packages/crucible"]);
 	assert.equal(build().status, 0, "baseline build");
 	const baseline = run("lune", ["run", "test", "reactive"]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);

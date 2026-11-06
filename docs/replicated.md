@@ -24,7 +24,7 @@ export const Phase = replicated<JobPhase | undefined>("Job.Phase", undefined);
 export const Coins = replicatedPerPlayer<number>("Data.Coins", 0);
 ```
 
-Both are transformer macros. Write each one as the initializer of an exported top-level `const` in a shared module, with an explicit type argument and a string literal name. The build rejects any other form.
+Both are compiler macros. Write each one as the initializer of an exported top-level `const` in a shared module, with an explicit type argument and a string literal name. The build rejects any other form.
 
 - The name is the value's identity on the wire and in diagnostics. It follows the message name rules: 1 to 64 bytes of dot-separated segments, each `[A-Za-z][A-Za-z0-9_]*`. The first segment cannot be `Crucible`. Each name belongs to one declaration in the game.
 - The type must describe plain data: booleans, numbers, strings, `Vector3`, `Color3`, `CFrame`, objects, arrays, tuples, string-keyed maps and unions the networking lowering accepts. Instances, `unknown`, functions and numeric map keys are build errors. Replicate a stable id instead of an Instance.

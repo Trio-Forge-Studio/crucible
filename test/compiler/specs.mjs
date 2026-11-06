@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 
 const repo = process.cwd();
-const run = path.join(repo, "build/compiler-specs");
+const run = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-compiler-specs-"));
 const place = path.join(repo, "build/sample-game.rbxl");
 const declarations = path.join(repo, "packages/crucible/out");
 if (!fs.existsSync(place) || !fs.existsSync(path.join(declarations, "index.d.ts"))) {
@@ -25,7 +26,6 @@ const game = path.join(run, "sample-game-out");
 const compile = (...args) =>
 	step("cargo", [
 		"run",
-		"--release",
 		"--quiet",
 		"--locked",
 		"--manifest-path",
@@ -37,7 +37,7 @@ const compile = (...args) =>
 		"--",
 		...args,
 	]);
-compile("packages/crucible/tsconfig.ts7.json", out);
+compile("packages/crucible/tsconfig.json", out);
 compile(
 	"examples/sample-game/tsconfig.json",
 	game,

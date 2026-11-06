@@ -1,5 +1,3 @@
-//! The diagnostics equal the ones `packages/crucible/transformer-src/data.cjs` reports.
-
 use tsrs_ast::{Kind, Node, SourceFile};
 use tsrs_core::P;
 

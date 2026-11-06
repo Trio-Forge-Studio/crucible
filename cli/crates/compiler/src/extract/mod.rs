@@ -275,6 +275,7 @@ impl Extractor {
         }
         self.typed_lint(n);
         match kind {
+            Kind::ClassDeclaration | Kind::ClassExpression => self.class_collisions(n),
             Kind::CallExpression => self.call(n),
             Kind::TaggedTemplateExpression => self.tagged_template(n),
             Kind::NewExpression => self.new_expression(n),

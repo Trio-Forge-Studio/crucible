@@ -1,9 +1,3 @@
-//! Crucible's network, replicated, data and config declarations and `receive`, ported from
-//! `transformer-src/tests/network.test.cjs`, `network-types.test.cjs`, `replicated.test.cjs` and `data.test.cjs`. Each
-//! expected descriptor is the JavaScript test's own `__crucible.n.*` text, compared with the emitted Luau's call tree. A
-//! case whose source TypeScript 7 rejects asserts the type error at the line its rule would report, because the
-//! compiler stops before the Crucible pass.
-
 mod support;
 
 use std::collections::{BTreeSet, HashMap};
@@ -31,7 +25,7 @@ fn fresh() -> Game {
 }
 
 fn fixture(path: &str) -> String {
-    let file = repo().join("packages/crucible/transformer-src/tests/fixtures").join(path);
+    let file = repo().join("cli/crates/compiler/tests/transform-fixtures").join(path);
     std::fs::read_to_string(&file).unwrap_or_else(|_| panic!("{} exists", file.display())).replace('\r', "")
 }
 
@@ -3083,7 +3077,7 @@ export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, v
 fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let scratch = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("declarations");
     let _ = std::fs::remove_dir_all(&scratch);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"), Target::Package)
+    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
         .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
         .modules;
     crucible_compiler::write(&scratch.join("runtime"), &runtime).expect("the runtime is written");
@@ -3109,4 +3103,26 @@ fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(result.status.success(), "{stdout}{}", String::from_utf8_lossy(&result.stderr));
     assert!(stdout.contains("declarations load"), "{stdout}");
+}
+
+#[test]
+fn the_fd_catalogue_lowers_all_fifty_payloads_and_the_typed_wire_tree() {
+    let game = fresh();
+    game.write("src/shared/fd.ts", &fixture("network/fd.ts"));
+    game.write("src/shared/messages.ts", &fixture("network/fd-messages.ts"));
+    let luau = game.luau("shared/messages.luau");
+    let actual = calls(&luau, &["toServer", "toClient", "askServer"]);
+    let expected: HashMap<String, Vec<String>> = serde_json::from_str(&fixture("network/fd-expected.json")).unwrap();
+    assert_eq!(expected.len(), 51);
+    assert_eq!(actual.len(), 52);
+    for (name, descriptors) in expected {
+        let found = &actual[&name][1..];
+        for (actual, expected) in found.iter().zip(&descriptors) {
+            same(actual, expected, &name);
+        }
+        assert_eq!(found.len(), descriptors.len(), "{name}");
+    }
+    assert!(actual["Admin.FullRecord"][1].contains("DailyClaims"));
+    assert!(actual["Admin.FullRecord"][1].contains("JobsCompleted"));
+    assert!(actual["Admin.FullRecord"][1].contains("PlayTime"));
 }

@@ -54,7 +54,7 @@ The two streams above are unrelated, and drawing from one never changes the othe
 | `shuffle(items)` | A shuffled copy. The array you pass stays as it was |
 | `sample(items, count)` | `count` distinct items, in the order they were drawn |
 
-Indices are 0-based, as everywhere in roblox-ts. Weights must be finite and non-negative, with a positive total. A zero weight is never chosen.
+Indices are 0-based. Weights must be finite and non-negative, with a positive total. A zero weight is never chosen.
 
 ```ts
 import { Rng } from "@trioforge/crucible/util/random";

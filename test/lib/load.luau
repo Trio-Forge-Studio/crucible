@@ -1,5 +1,3 @@
--- Loads roblox-ts package output in Lune. Each module gets a `script` node and a `_G` that maps every script to
--- a TS table whose `import` resolves sibling paths, which is all the compiled package uses.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
@@ -51,7 +49,7 @@ end
 -- roblox-ts emits `TS.Promise` for the Promise global; the RuntimeLib's copy needs only a Heartbeat to load. Its
 -- source is read here because Lune's readFile yields, and `TS.Promise` resolves inside a metamethod. Scratch copies
 -- without node_modules never reach it.
-local PROMISE_PATH = "node_modules/roblox-ts/include/Promise.lua"
+local PROMISE_PATH = "cli/crates/compiler/roblox-ts/Promise.lua"
 local PROMISE_SOURCE = if fs.isFile(PROMISE_PATH) then fs.readFile(PROMISE_PATH) else nil
 local promise
 local function Promise()

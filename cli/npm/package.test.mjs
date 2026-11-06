@@ -142,9 +142,9 @@ test(
 		for (const file of [
 			"out/init.luau",
 			"out/index.d.ts",
-			"transformer/index.js",
-			"server/package.json",
-			"client/package.json",
+			"out/server/init.luau",
+			"out/client/init.luau",
+			"out/testing/init.luau",
 		]) {
 			assert.ok(files.includes(file), `runtime tarball includes ${file}`);
 		}
@@ -192,6 +192,17 @@ test(
 				.equals(Buffer.from("<roblox!")),
 		);
 		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
+		const listing = run("npm", ["ls", "--all", "--json"], game);
+		assert.equal(listing.status, 0, listing.stderr);
+		const pending = [JSON.parse(listing.stdout)];
+		while (pending.length > 0) {
+			for (const [name, dependency] of Object.entries(pending.pop().dependencies ?? {})) {
+				if (["roblox-ts", "typescript"].includes(name)) {
+					assert.deepEqual(dependency, {}, `${name} must not be installed`);
+				}
+				pending.push(dependency);
+			}
+		}
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);
@@ -266,7 +277,7 @@ function launchUpgradeRegistry() {
 		"@trioforge/compiler-types": join(root, "upgrade-compiler-types"),
 		[platformName]: join(root, "staged", `crucible-cli-${host}`),
 	};
-	for (const entry of ["package.json", "out", "transformer", "server", "client", "emit"]) {
+	for (const entry of ["package.json", "out"]) {
 		cpSync(join(runtimeDir, entry), join(sources["@trioforge/crucible"], entry), {
 			recursive: true,
 			filter: (source) => !source.endsWith(".tsbuildinfo"),

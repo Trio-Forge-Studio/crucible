@@ -1,6 +1,3 @@
-//! Crucible's declaration macros and the limits their values obey, as `packages/crucible/transformer-src/declarations.cjs`
-//! and the runtime's `limits.ts` files state them.
-
 use crate::macros::Macro;
 
 pub const MESSAGE_NAME_MAX_BYTES: usize = 64;

@@ -21,7 +21,7 @@ node --test probes/bench/verification.test.mjs
 
 `run.mjs` builds three variants of the same source:
 
-- `rbxtsc` compiles `examples/bench` with roblox-ts as a game.
+- `rbxtsc` is a recorded baseline. Its results in `results/rbxtsc-r*.json` came from roblox-ts 3.0.0 compiling `examples/bench` as a game at 838a4b2, before roblox-ts left the repository. `run.mjs` no longer builds it.
 - `compiler` compiles it with `crucible-compiler`.
 - `compiler-native` is the `compiler` output with `--!native` at the top of every workload module.
 

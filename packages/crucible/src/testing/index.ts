@@ -14,7 +14,10 @@ export { n } from "../internal/network/schema";
 function recordFor(klass: object): ClassRecord {
 	return (
 		recordOf(klass) ??
-		error(`${tostring(klass)} is not a registered Crucible class; compile it with the Crucible transformer`, 0)
+		error(
+			`${tostring(klass)} is not a registered Crucible class; compile it with the Crucible compiler through crucible build`,
+			0,
+		)
 	);
 }
 
@@ -124,7 +127,7 @@ export function sealMessages(): readonly string[] {
 	return catalog === "" ? [] : catalog.split("\n");
 }
 
-/** What the transformer registered for a class. */
+/** What the compiler registered for a class. */
 export function registration(
 	klass: object,
 ):

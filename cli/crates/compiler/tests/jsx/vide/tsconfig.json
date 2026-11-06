@@ -1,5 +1,5 @@
 {
-	"extends": "../../../../../../tsconfig.ts7.json",
+	"extends": "../../../../../../tsconfig.json",
 	"compilerOptions": {
 		"rootDir": "src",
 		"jsx": "react",

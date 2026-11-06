@@ -3,9 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const src = "packages/crucible/src/";
 const S = src + "internal/network/session.ts";
@@ -737,7 +735,7 @@ function specRun(cwd, extra = []) {
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-session-mutants-"));
 try {
-	for (const name of ["tsconfig.rbxts.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	for (const name of [".lune", "test"])
 		fs.cpSync(path.join(repo, name), path.join(scratch, name), { recursive: true });
@@ -748,14 +746,7 @@ try {
 	for (const name of ["node_modules", "packages/crucible/node_modules", "build"])
 		fs.symlinkSync(path.join(repo, name), path.join(scratch, name), "junction");
 	const originals = new Map(mutants.map(([, file]) => [file, fs.readFileSync(path.join(scratch, file), "utf8")]));
-	const build = () =>
-		run(scratch, process.execPath, [
-			require.resolve("roblox-ts/out/CLI/cli.js"),
-			"--type",
-			"package",
-			"-p",
-			"packages/crucible",
-		]);
+	const build = () => run(scratch, process.execPath, [path.join(repo, "test/lib/compile.mjs"), "packages/crucible"]);
 	let built = build();
 	assert.equal(built.status, 0, built.stdout + built.stderr);
 	const baseline = specRun(scratch, [...new Set(mutants.flatMap(([, , , , extra]) => extra))]);

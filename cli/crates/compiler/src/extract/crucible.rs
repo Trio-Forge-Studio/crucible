@@ -1,6 +1,3 @@
-//! Crucible's class metadata, macros and rules. Type ids must equal the ones `packages/crucible/transformer-src`
-//! writes, because packages built by either compiler register classes with each other.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;

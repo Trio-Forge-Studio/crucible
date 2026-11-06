@@ -3,7 +3,7 @@ local World = require("./lib/profile-world")
 local fixture = require("./lib/profile-fixture")
 local spec = require("./lib/load")
 
-local UNTRANSFORMED = "Crucible data needs the @trioforge/crucible/transformer plugin"
+local UNTRANSFORMED = "Crucible data was not compiled by the Crucible compiler; use crucible build"
 
 -- A module set with no server entry, as a client or a guard spec loads it. Any service lookup throws.
 local function moduleSet()
@@ -44,7 +44,7 @@ local function crucibleNames(r): { string }
 end
 
 return {
-	["1 untransformed profileStore and profileMessage throw the transformer message"] = function()
+	["1 untransformed profileStore and profileMessage throw the compiler message"] = function()
 		local r = moduleSet()
 		throws(function()
 			r.api.profileStore("FD.Players", { template = {} })

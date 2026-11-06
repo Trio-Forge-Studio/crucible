@@ -666,14 +666,14 @@ tests["92 2 3 names follow the grammar, length, duplicate and count limits"] = f
 	end, "limit of 1000", "count")
 end
 
-tests["1 92 untransformed macros throw the transformer message"] = function()
+tests["1 92 untransformed macros throw the compiler message"] = function()
 	local w = world()
 	throws(function()
 		w.server.config("A", 1)
-	end, "Crucible configs need the @trioforge/crucible/transformer plugin", "config")
+	end, "Crucible configs were not compiled by the Crucible compiler; use crucible build", "config")
 	throws(function()
 		w.server.playerConfig("A", 1)
-	end, "Crucible configs need the @trioforge/crucible/transformer plugin", "playerConfig")
+	end, "Crucible configs were not compiled by the Crucible compiler; use crucible build", "playerConfig")
 end
 
 tests["3 104 the registry seals at activation and not on a rolled-back boot"] = function()

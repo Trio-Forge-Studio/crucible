@@ -30,7 +30,7 @@ export interface CommandLog {
 export const CommandLogStore = dataStore<CommandLog>("FD.CommandLog", { defaults: { entries: [] } });
 ```
 
-`dataStore` is a compiler macro. The transformer plugin checks the declaration and adds the type's descriptor. Without the plugin's data support, a declaration throws "Crucible data needs the @trioforge/crucible/transformer plugin" when its module loads.
+`dataStore` is a compiler macro. The Crucible compiler checks the declaration and adds the type's descriptor through `crucible build`. If the code was not compiled by it, a declaration throws "Crucible data was not compiled by the Crucible compiler; use crucible build" when its module loads.
 
 The record is an object or a string-keyed record at its root. Wrap a bare string or number in an object so a later field is a default and not a migration.
 

@@ -2,7 +2,6 @@
 	"name": "@trioforge/crucible-bench",
 	"private": true,
 	"devDependencies": {
-		"@rbxts/compiler-types": "3.0.0-types.0",
 		"@rbxts/types": "1.0.959",
 		"@trioforge/compiler-types": "workspace:*"
 	}

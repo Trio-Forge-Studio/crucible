@@ -22,7 +22,7 @@ export interface ReplicatedPerPlayer<T> extends Readable<T> {
 	readonly [replicatedKind]: { readonly audience: "player"; readonly value: (value: T) => T };
 }
 
-const UNTRANSFORMED = "Crucible replicated state needs the @trioforge/crucible/transformer plugin";
+const UNTRANSFORMED = "Crucible replicated state was not compiled by the Crucible compiler; use crucible build";
 
 /**
  * Declares a value every client receives. Write it as the initializer of an exported top-level const in a shared

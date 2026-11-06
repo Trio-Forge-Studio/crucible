@@ -57,14 +57,18 @@ local function registry()
 end
 
 return {
-	["40 an untransformed declaration throws at evaluation naming the transformer plugin"] = function()
+	["40 an untransformed declaration throws at evaluation naming the Crucible compiler"] = function()
 		local api = World.new({ declare = declare }).server.api
 		rejects(function()
 			api.replicated("Job.Phase", nil)
-		end, "Crucible replicated state needs the @trioforge/crucible/transformer plugin", "replicated")
-		rejects(function()
-			api.replicatedPerPlayer("Data.Owner", nil)
-		end, "Crucible replicated state needs the @trioforge/crucible/transformer plugin", "replicatedPerPlayer")
+		end, "Crucible replicated state was not compiled by the Crucible compiler; use crucible build", "replicated")
+		rejects(
+			function()
+				api.replicatedPerPlayer("Data.Owner", nil)
+			end,
+			"Crucible replicated state was not compiled by the Crucible compiler; use crucible build",
+			"replicatedPerPlayer"
+		)
 	end,
 	["41 the runtime re-checks each name, its duplicates and the realm's count, naming the name"] = function()
 		local declarations, n = registry()

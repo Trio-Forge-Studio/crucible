@@ -44,7 +44,7 @@ export interface DataStore<T> {
  * with `T` explicit. `T` is an object or a string-keyed record at its root.
  */
 export function dataStore<T extends object>(_name: string, _options: StoreOptions<NoInfer<T>>): DataStore<T> {
-	error("Crucible data needs the @trioforge/crucible/transformer plugin");
+	error("Crucible data was not compiled by the Crucible compiler; use crucible build");
 }
 
 /** A fresh operation identity. Create it once per logical operation and reuse it for that operation's retries. */
@@ -57,5 +57,5 @@ export function operationId(): OperationId {
  * with the payload type explicit. A payload type changes only by adding optional fields.
  */
 export function profileMessage<P>(_name: string): ProfileMessage<P> {
-	error("Crucible data needs the @trioforge/crucible/transformer plugin");
+	error("Crucible data was not compiled by the Crucible compiler; use crucible build");
 }

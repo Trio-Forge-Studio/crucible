@@ -44,43 +44,26 @@
 		"./testing": {
 			"types": "./out/testing/index.d.ts",
 			"default": "./out/testing/init.luau"
-		},
-		"./transformer": "./transformer/index.js"
+		}
 	},
 	"scripts": {
-		"build": "rbxtsc --type package",
-		"build:transformer": "node transformer-src/build.mjs",
-		"test:transformer": "node --test transformer-src/tests/*.test.cjs"
+		"build": "node ../../test/compiler/package.mjs ."
 	},
 	"devDependencies": {
-		"@rbxts/compiler-types": "3.0.0-types.0",
 		"@rbxts/types": "1.0.959",
 		"@rbxts/vide": "0.6.1",
 		"@trioforge/compiler-types": "workspace:*"
 	},
 	"peerDependencies": {
-		"typescript": "5.5.3",
 		"@rbxts/vide": "^0.6.1"
 	},
 	"peerDependenciesMeta": {
-		"typescript": {
-			"optional": true
-		},
 		"@rbxts/vide": {
 			"optional": true
 		}
 	},
 	"files": [
 		"out",
-		"transformer",
-		"server",
-		"client",
-		"emit",
-		"vide",
-		"ui",
-		"util",
-		"maths",
-		"testing",
 		"LICENSE"
 	],
 	"repository": {

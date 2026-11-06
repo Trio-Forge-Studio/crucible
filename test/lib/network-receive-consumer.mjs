@@ -3,9 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
 const repo = process.cwd();
 const ansi = new RegExp(String.fromCharCode(27) + String.raw`\[[0-9;]*m`, "g");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-network-receive-"));
@@ -33,11 +31,7 @@ const accepted = {
 };
 // Expected diagnostics are the TypeScript errors the root receive's declared types give each callback (K2, K9).
 const rejected = {
-	"src/server/typed.ts": [
-		"receive(Typed, () => {})",
-		2345,
-		"Argument of type '() => void' is not assignable to parameter of type '(player: Player) => string | undefined'.",
-	],
+	"src/server/typed.ts": ["receive(Typed, () => 42)", 2322, "Type 'number' is not assignable to type 'string'."],
 	"src/server/event.ts": [
 		"receive(Event, (p: Player, s: number) => {})",
 		2345,
@@ -57,7 +51,7 @@ const rejected = {
 	"src/client/codes.ts": [
 		"receive(Codes, (result: number) => {})",
 		2345,
-		"Argument of type '(result: number) => void' is not assignable to parameter of type '(payload: \"Ok\" | \"Invalid\") => void'.",
+		"Argument of type '(result: number) => void' is not assignable to parameter of type '(payload: \"Invalid\" | \"Ok\") => void'.",
 	],
 };
 
@@ -74,7 +68,12 @@ function build(name, fields) {
 		"junction",
 	);
 	fs.mkdirSync(path.join(game, "node_modules/@rbxts"));
-	for (const types of ["compiler-types", "types"])
+	fs.symlinkSync(
+		path.join(repo, "packages/compiler-types"),
+		path.join(game, "node_modules/@trioforge/compiler-types"),
+		"junction",
+	);
+	for (const types of ["types"])
 		fs.symlinkSync(
 			fs.realpathSync(path.join(repo, "packages/crucible/node_modules/@rbxts", types)),
 			path.join(game, "node_modules/@rbxts", types),
@@ -105,20 +104,19 @@ function build(name, fields) {
 		},
 	});
 	write("tsconfig.json", {
-		extends: path.join(repo, "tsconfig.rbxts.json"),
+		extends: path.join(repo, "tsconfig.json"),
 		compilerOptions: {
 			rootDir: "src",
 			outDir: "out",
 			declaration: false,
-			typeRoots: ["node_modules/@rbxts", "node_modules/@trioforge"],
-			types: ["compiler-types", "types"],
-			plugins: [{ transform: "@trioforge/crucible/transformer" }],
+
+			types: ["@trioforge/compiler-types", "@rbxts/types"],
 		},
 		include: ["src"],
 	});
 	write("src/shared/messages.ts", messages);
 	for (const [file, field] of Object.entries(fields)) write(file, receiver(field));
-	const result = spawnSync(process.execPath, [require.resolve("roblox-ts/out/CLI/cli.js"), "-p", game], {
+	const result = spawnSync(process.execPath, [path.join(repo, "test/lib/compile.mjs"), game], {
 		cwd: game,
 		encoding: "utf8",
 	});
@@ -133,14 +131,14 @@ try {
 	const good = build("accepted", accepted);
 	assert.equal(good.status, 0, good.output);
 	const emitted = fs.readFileSync(path.join(good.game, "out/server/event.luau"), "utf8");
-	assert.match(emitted, /\.receive\(self, "r", /, `the transformer rewrote receive to the emit form\n${emitted}`);
+	assert.match(emitted, /\.receive\(self, "r", /, `the compiler rewrote receive to the emit form\n${emitted}`);
 	const bad = build("rejected", Object.fromEntries(Object.entries(rejected).map(([file, [field]]) => [file, field])));
-	assert.equal(bad.status, 1, `the rbxtsc build rejects every wrong callback\n${bad.output}`);
+	assert.equal(bad.status, 1, `the Crucible compiler build rejects every wrong callback\n${bad.output}`);
 	assert.equal(bad.output.match(/ error TS/g)?.length, Object.keys(rejected).length, bad.output);
 	for (const [file, [, code, message]] of Object.entries(rejected)) {
-		const at = bad.output.indexOf(`${file}:`);
+		const at = bad.output.indexOf(`${file}(`);
 		assert.ok(at >= 0, `${file} fails the build\n${bad.output}`);
-		const reported = bad.output.slice(at).replace(/^\S+ - /, "");
+		const reported = bad.output.slice(at).replace(/^.*?\): /, "");
 		assert.ok(reported.startsWith(`error TS${code}: ${message}`), `${file}\n${bad.output}`);
 	}
 	console.log(`the transformed build accepts typed callbacks and rejects ${Object.keys(rejected).length} wrong ones`);

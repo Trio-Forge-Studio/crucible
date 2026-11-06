@@ -78,10 +78,10 @@ for (const directory of packages) {
 		for (const required of [
 			"out/init.luau",
 			"out/index.d.ts",
-			"transformer/index.js",
-			"server/package.json",
-			"client/package.json",
-			"emit/package.json",
+			"out/emit/init.luau",
+			"out/server/init.luau",
+			"out/client/init.luau",
+			"out/testing/init.luau",
 		]) {
 			assert.ok(files.includes(required), `runtime must pack ${required}`);
 		}

@@ -64,7 +64,7 @@ export const PlayerData = profileStore("FD.Players", {
 export type PlayerData = Profile<typeof PlayerData>;
 ```
 
-`profileStore` is a compiler macro. Without the transformer plugin, a declaration throws "Crucible data needs the @trioforge/crucible/transformer plugin" when its module loads.
+`profileStore` is a compiler macro. Compile it with the Crucible compiler through `crucible build`. If the code was not compiled by it, a declaration throws "Crucible data was not compiled by the Crucible compiler; use crucible build" when its module loads.
 
 - Literals widen: `0` is a `number`, `"Mover"` a `string`. Give an empty collection its type with `as`, such as `[] as string[]` or `{} as Record<string, number>`. An optional field is `undefined as V | undefined`, absent in a new profile. A literal union needs `as` too.
 - The root is an object with declared fields. Vector3, Color3, CFrame, Instances and numbers with a brand other than Crucible's widths cannot be saved.

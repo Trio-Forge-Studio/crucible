@@ -70,7 +70,7 @@ fn class(facts: &Facts, file: &str) -> Class {
 
 #[test]
 fn runtime_checks_and_every_site_is_answered() {
-    let facts = analyze("packages/crucible/tsconfig.ts7.json", Target::Package);
+    let facts = analyze("packages/crucible/tsconfig.json", Target::Package);
     assert_complete(&facts, "packages/crucible/src");
     let array = Fact { receiver: Some(Receiver::Array), falsy: Some(Falsy::NONE), ..Fact::default() };
     for (file, context) in [
@@ -114,7 +114,7 @@ fn sample_game_checks_and_every_site_is_answered() {
 
 #[test]
 fn the_runtime_lowers_to_one_module_per_source_file() {
-    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.ts7.json"), Target::Package)
+    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
         .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"))
         .modules;
     let src = repo().join("packages/crucible/src").to_string_lossy().replace('\\', "/");

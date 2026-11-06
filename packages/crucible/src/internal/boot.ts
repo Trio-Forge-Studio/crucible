@@ -85,7 +85,7 @@ export function shutdownProgress(subsystem: Subsystem): ShutdownProgress | undef
 /** @internal */
 export function parsePattern(pattern: string): readonly string[] {
 	if (pattern.sub(1, PATTERN_PREFIX.size()) !== PATTERN_PREFIX)
-		error(`Crucible load needs the transformer: ${pattern}`);
+		error(`Crucible load was not compiled by the Crucible compiler; use crucible build: ${pattern}`);
 	const segments = pattern.sub(PATTERN_PREFIX.size() + 1).split("/");
 	if (segments.some((s) => s === "" || s === "." || s === "..")) error(`Invalid Crucible load pattern: ${pattern}`);
 	return segments;
