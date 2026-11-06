@@ -14,6 +14,7 @@ Before using a module, read `npx crucible docs <topic>`, such as `npx crucible d
 `@trioforge/crucible` is shared-safe. Shared code must never import or re-export `/server` or `/client`, including transitively.
 Only server code imports `@trioforge/crucible/server`. Only client code imports `@trioforge/crucible/client`.
 Keep entries in `src/server` and `src/client`. Call the matching side's `boot` with system file globs in `load`.
+Put modules used by both sides in `src/shared`, which Rojo maps to `ReplicatedStorage.TS`.
 For example, the server entry can load systems with the literal source glob below. The client entry uses `@trioforge/crucible/client` and `src/client/systems/**`.
 
 ```typescript
