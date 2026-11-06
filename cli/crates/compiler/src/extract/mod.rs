@@ -30,7 +30,7 @@ use crucible::Code;
 
 const UI_ENTRY: &str = "@trioforge/crucible/ui";
 
-pub(crate) fn extract(checked: Checked) -> Facts {
+pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -48,11 +48,16 @@ pub(crate) fn extract(checked: Checked) -> Facts {
             None
         }
     };
-    let game = match Game::load(Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
-        Ok(game) => game,
-        Err(message) => {
-            facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code: 0, message });
-            None
+    let game = match target {
+        crate::Target::Package => None,
+        crate::Target::Game { project, include } => {
+            match Game::load(project, include, Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
+                Ok(game) => Some(game),
+                Err(message) => {
+                    facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code: 0, message });
+                    None
+                }
+            }
         }
     };
     if let Some(game) = &game {

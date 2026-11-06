@@ -5,6 +5,7 @@ on:
     paths:
       - "cli/**"
       - "packages/crucible/**"
+      - "packages/compiler-types/**"
       - "docs/**"
       - "pnpm-lock.yaml"
       - "package.json"

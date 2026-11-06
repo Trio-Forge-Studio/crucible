@@ -63,6 +63,9 @@
 		"@rbxts/vide": "^0.6.1"
 	},
 	"peerDependenciesMeta": {
+		"typescript": {
+			"optional": true
+		},
 		"@rbxts/vide": {
 			"optional": true
 		}

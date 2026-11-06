@@ -22,7 +22,7 @@ fs.mkdirSync(path.join(run, "build"));
 
 const out = path.join(run, "packages/crucible/out");
 const game = path.join(run, "sample-game-out");
-const compile = (tsconfig, to) =>
+const compile = (...args) =>
 	step("cargo", [
 		"run",
 		"--release",
@@ -35,11 +35,15 @@ const compile = (tsconfig, to) =>
 		"--example",
 		"compile",
 		"--",
-		tsconfig,
-		to,
+		...args,
 	]);
 compile("packages/crucible/tsconfig.ts7.json", out);
-compile("examples/sample-game/tsconfig.ts7.json", game);
+compile(
+	"examples/sample-game/tsconfig.json",
+	game,
+	"examples/sample-game/default.project.json",
+	"examples/sample-game/include",
+);
 
 (function copyDeclarations(dir) {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -53,7 +57,9 @@ compile("examples/sample-game/tsconfig.ts7.json", game);
 	}
 })(declarations);
 
-const link = (from, to) => fs.symlinkSync(from, to, "junction");
+// A Windows junction can only name a folder, so files are copied.
+const link = (from, to) =>
+	fs.statSync(from).isDirectory() ? fs.symlinkSync(from, to, "junction") : fs.copyFileSync(from, to);
 for (const name of fs.readdirSync(repo)) {
 	if (!["packages", "build", ".git"].includes(name)) link(path.join(repo, name), path.join(run, name));
 }

@@ -6,7 +6,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Facts, Failure, Literal};
+use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Facts, Failure, Literal, Target};
 use serde_json::{Value, json};
 use support::{Game, copy_declarations, has, lines, project, repo, slashes};
 
@@ -412,7 +412,7 @@ fn cru007_and_cru008_reject_engine_type_lookalikes_and_allow_engine_aliases() {
 fn a_malformed_macro_input_fails_the_compile_with_its_rule_and_no_panic() {
     let game = Game::new();
     game.main("import { boot } from \"@trioforge/crucible/server\";\nconst glob = \"src/server/**/*.ts\";\nboot({load: [glob]});");
-    match crucible_compiler::compile(&game.dir.join("tsconfig.json")) {
+    match game.try_compile() {
         Err(Failure::Crucible(diagnostics)) => {
             assert!(diagnostics.iter().any(|d| d.code == 90006 && d.line == 3), "{}", lines(&diagnostics));
             assert!(lines(&diagnostics).contains("CRU006: load entry must be a string literal."));
@@ -607,13 +607,12 @@ fn a_load_glob_that_matches_no_module_reports_cru006_and_a_glob_that_finds_a_mod
     }
 }
 
-/// Points a Rojo project in `gen/place` at the game's folders, leaving `include` where the compiler looks for it.
-fn up(value: &mut Value) {
+fn rebase_two_folders_up(value: &mut Value) {
     if let Value::Object(map) = value {
         for (key, entry) in map.iter_mut() {
             match entry {
-                Value::String(path) if key == "$path" && path != "include" => *path = format!("../../{path}"),
-                other => up(other),
+                Value::String(path) if key == "$path" => *path = format!("../../{path}"),
+                other => rebase_two_folders_up(other),
             }
         }
     }
@@ -623,7 +622,7 @@ fn up(value: &mut Value) {
 fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     let game = Game::new();
     let mut tree = project();
-    up(&mut tree);
+    rebase_two_folders_up(&mut tree);
     game.json("gen/place/default.project.json", &tree);
     game.json(
         "gen/place/tsconfig.json",
@@ -634,21 +633,15 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
         }),
     );
     let place = game.dir.join("gen/place/tsconfig.json");
-    let compile = |glob: &str| {
-        game.main(&format!("import {{ boot }} from \"@trioforge/crucible/server\"; boot({{load: [\"{glob}\"]}});"));
-        crucible_compiler::compile(&place)
-    };
-    let modules = compile("src/server/**").unwrap_or_else(|f| {
-        panic!(
-            "the place compiles:
-{f}"
-        )
-    });
-    let main = modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
+    let (project, include) = (game.dir.join("gen/place/default.project.json"), game.include());
+    let target = Target::Game { project: &project, include: &include };
+    game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});");
+    let modules = crucible_compiler::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
+    let main = modules.modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
     has(&main.source, "crucible-path:ServerScriptService/TS/**");
 
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"../../src/server/**\"]});");
-    let facts = game.analyze_at("gen/place/tsconfig.json").expect("the place type-checks");
+    let facts = crucible_compiler::analyze(&place, target).expect("the place type-checks");
     assert!(
         facts
             .diagnostics
@@ -979,7 +972,7 @@ fn every_rule_reports_together_without_a_panic() {
     let game = Game::new();
     game.main("import { Subsystem, inject } from \"@trioforge/crucible\";\nimport \"@trioforge/crucible/emit\";\ninterface Promise<T> { value: T; }\ninterface Generic<T = string> { value: T; }\nexport class Concrete extends Subsystem { protected override preRender() {} onInit() {} field = inject<Subsystem>(); protected override start(): Promise<void> | undefined { return undefined; } }\nconst Alias = Concrete;\nexport class Derived extends Alias implements Generic { value = \"value\"; }");
     game.write("src/client/negative.ts", "import { Subsystem } from \"@trioforge/crucible\"; export class Bad extends Subsystem { protected override onShutdown() {} }");
-    let Err(Failure::Crucible(diagnostics)) = crucible_compiler::compile(&game.dir.join("tsconfig.json")) else {
+    let Err(Failure::Crucible(diagnostics)) = game.try_compile() else {
         panic!("the rules fail the compile");
     };
     let text = lines(&diagnostics);
@@ -1237,7 +1230,8 @@ fn package_sides_without_a_package_search_the_whole_path() {
         "include": ["server"],
     });
     std::fs::write(dir.join("tsconfig.json"), serde_json::to_string(&config).unwrap()).unwrap();
-    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json")).unwrap_or_else(|d| panic!("{}", lines(&d)));
+    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json"), Target::Package)
+        .unwrap_or_else(|d| panic!("{}", lines(&d)));
     let found: Vec<(i32, u32)> = facts.diagnostics.iter().map(|d| (d.code, d.line)).collect();
     assert_eq!(found, [(90011, 2)]);
     let _ = std::fs::remove_dir_all(&dir);

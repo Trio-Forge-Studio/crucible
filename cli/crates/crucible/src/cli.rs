@@ -14,7 +14,7 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 pub enum Command {
-    /// Compile the game with roblox-ts, then build each place in crucible.toml with Rojo.
+    /// Compile each place in crucible.toml with Crucible's compiler, then build it with Rojo.
     Build(crate::build::Args),
     /// Create a game and install its dependencies.
     Create(crate::create::Args),
@@ -34,6 +34,16 @@ pub enum Command {
     Publish(crate::publish::Args),
     /// Upgrade crucible and @trioforge/crucible, then refresh template files this project has not edited.
     Upgrade(crate::upgrade::Args),
+    /// Compile one place. crucible build runs this in a child process.
+    #[command(name = crate::build::COMPILE, hide = true)]
+    Compile {
+        /// The tsconfig.
+        tsconfig: PathBuf,
+        /// The Rojo project that lays out the place.
+        project: PathBuf,
+        /// The folder the project maps for the runtime library.
+        include: PathBuf,
+    },
     /// Build one Rojo project. crucible build runs this in a child process.
     #[command(name = crate::build::ROJO_BUILD, hide = true)]
     RojoBuild {

@@ -1,15 +1,16 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use crucible_compiler::{Failure, Module, Written};
+use crucible_compiler::{Failure, Module, Target, Written};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join(name)
 }
 
 static MODULES: LazyLock<Vec<Module>> = LazyLock::new(|| {
-    crucible_compiler::compile(&fixture("lowering/tsconfig.json"))
+    crucible_compiler::compile(&fixture("lowering/tsconfig.json"), Target::Package)
         .unwrap_or_else(|failure| panic!("the lowering fixtures compile (run pnpm build first):\n{failure}"))
+        .modules
 });
 
 fn luau(path: &str) -> &'static str {
@@ -223,7 +224,9 @@ fn a_lua_tuple_iterator_step_binds_as_a_whole() {
 
 #[test]
 fn out_of_scope_constructs_are_errors_at_their_location() {
-    let Err(Failure::Lower(errors)) = crucible_compiler::compile(&fixture("lowering-errors/tsconfig.json")) else {
+    let Err(Failure::Lower(errors)) =
+        crucible_compiler::compile(&fixture("lowering-errors/tsconfig.json"), Target::Package)
+    else {
         panic!("the refused constructs fail the compile");
     };
     let found: Vec<String> = errors

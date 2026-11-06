@@ -52,18 +52,17 @@ boot({ load: ["src/server/systems/*Service.ts"] });
 
 ## Resolve paths
 
-Globs resolve from the package root. That is the nearest folder at or above the tsconfig's folder that holds a `package.json`, which is the folder rbxtsc takes `node_modules` from. When no folder above holds one, globs resolve from the tsconfig's folder.
+Globs resolve from the package root. That is the nearest folder at or above the tsconfig's folder that holds a `package.json`, which is also the folder the compiler takes `node_modules` from. When no folder above holds one, globs resolve from the tsconfig's folder.
 
 This rule lets a build compile through a generated tsconfig. A tsconfig at `build/typescript/warehouse/tsconfig.json` that extends the game's own config uses the same globs as the game, such as `src/core/Admin/server/**`.
 
-The transformer reads the Rojo project that its `rojo` plugin option names. The option also resolves from the package root. Without the option, the transformer uses the project that rbxtsc finds in the tsconfig's folder. When rbxtsc gets `--rojo`, give the transformer the same project.
+A glob maps through the Rojo project that its place names in `crucible.toml`, which `crucible docs cli` describes. The project can sit anywhere in the game, such as a generated `warehouse.generated.project.json` at the root.
 
-```json
-{
-	"compilerOptions": {
-		"plugins": [{ "transform": "@trioforge/crucible/transformer", "rojo": "warehouse.generated.project.json" }]
-	}
-}
+```toml
+[places.warehouse]
+tsconfig = "tsconfig.warehouse.json"
+project = "warehouse.generated.project.json"
+include = "places/warehouse/include"
 ```
 
 The Rojo project can map the glob's folder with one `$path`, or map each file in it with its own `$path`, as a generator does before the outputs exist. In the second form, each mapped file names the instance of the folder that holds it. The compile fails with `CRU006` when those files sit under different instances.

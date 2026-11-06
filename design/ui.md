@@ -107,7 +107,7 @@ The compiler lowers JSX two ways while FD moves off Vide.
 
 The Vide lowering is deleted when the last FD screen moves.
 
-`crucible build` uses `rbxtsc` until phase 6 of the [compiler design](compiler.md), and phase 6 deletes `transformer-src`. Building the class compiler a second time as an `rbxtsc` transformer would be thrown away within one phase. So a game that uses Crucible UI builds with the Crucible compiler. The sample game already does, through `pnpm run test:compiler`.
+Crucible UI has no `rbxtsc` transformer. Phase 6 of the [compiler design](compiler.md) moves `crucible build` onto the Crucible compiler and deletes `transformer-src`, so a second build of the class compiler as a transformer would have been thrown away within one phase. A game that uses Crucible UI builds with `crucible build`.
 
 ## Phases
 
@@ -129,7 +129,7 @@ These are settled.
 - **Compiler only.** Crucible UI is never built by `rbxtsc`.
 - **No re-renders.** Components run once, as in Vide.
 - **Opt-in.** A file gets the compiled lowering with `jsx: "react-jsx"` and `jsxImportSource: "@trioforge/crucible/ui"`, or the `@jsxImportSource` pragma. TypeScript 5 and 7 both read the JSX types from `@trioforge/crucible/ui/jsx-runtime`, so the editor checks each prop against `T | Readable<T>` and each event against its handler. A file with `jsx: "react"` and a `jsxFactory` gets the Vide lowering. Any other setting is a compile error.
-- **Tests.** `pnpm check` builds the sample game with `rbxtsc`, which cannot build this JSX. Phase 2's Lune specs run in the compiler's ignored tests instead, on a fixture game in `cli/crates/compiler/tests/jsx/ui` and the compiler-built runtime.
+- **Tests.** Phase 2's Lune specs run in the compiler's ignored tests, on a fixture game in `cli/crates/compiler/tests/jsx/ui` and the compiler-built runtime. The sample game that `pnpm check` builds uses no Crucible UI JSX.
 
 - **Theme ownership.** `theme.toml` beside the invoked tsconfig is the game's complete theme. No defaults, overlays, or upward search. `spacing` is pixels per step, `[color]` holds flat colors or one level of shades, `[text]` holds TextSize values from 1 to 100, `[radius]` holds whole-pixel radii, and `[breakpoint]` holds minimum viewport widths in whole pixels, mobile first. Unknown sections fail. A breakpoint named like a built-in variant or starting with `group` fails.
 - **Fixed className.** GuiObject intrinsics accept `className?: string`. The compiler requires a literal, a template without substitutions, or a const name or readonly property of a const with one string-literal type. Calls, mutable names, reactive strings, unions, and component forwarding wait for later work. Typed writes derive their targets. One private style owns the ordered rules for each target. Later tokens win, and explicit properties own their properties regardless of attribute order.

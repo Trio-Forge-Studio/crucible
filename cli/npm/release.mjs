@@ -18,7 +18,9 @@ if (process.env.GITHUB_EVENT_NAME === "pull_request") {
 	assert.ok(process.env.GITHUB_RUN_ID, "pull request staging needs GITHUB_RUN_ID");
 	version = `${release}-pr.${process.env.GITHUB_RUN_ID}`;
 }
-assert.ok(readFileSync(notices, "utf8").includes("rojo "), "generated notices are required");
+for (const required of ["rojo ", "tsrs NOTICE", "roblox-ts 3.0.0 runtime library", "Copyright (c) 2019 Eryn L. K."]) {
+	assert.ok(readFileSync(notices, "utf8").includes(required), `generated notices must include ${required.trim()}`);
+}
 const output = resolve(outputDirectory);
 const packages = stage(
 	join(output, "packages"),
@@ -31,21 +33,27 @@ const packages = stage(
 	resolve(notices),
 	version,
 );
-const runtime = join(output, "packages", "runtime");
-mkdirSync(runtime);
-const source = join(root, "packages", "crucible");
-const manifest = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
-assert.equal(manifest.private, undefined);
-assert.equal(manifest.version, release, "runtime and CLI versions must match");
-manifest.version = version;
-delete manifest.scripts;
-delete manifest.devDependencies;
-for (const entry of manifest.files) {
-	if (entry !== "LICENSE") cpSync(join(source, entry), join(runtime, entry), { recursive: true });
+// The compiler types keep roblox-ts's license, because they are a copy of its compiler types.
+for (const [folder, license] of [
+	["crucible", join(root, "LICENSE")],
+	["compiler-types", join(root, "packages", "compiler-types", "LICENSE")],
+]) {
+	const staged = join(output, "packages", folder === "crucible" ? "runtime" : folder);
+	mkdirSync(staged);
+	const source = join(root, "packages", folder);
+	const manifest = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+	assert.equal(manifest.private, undefined);
+	assert.equal(manifest.version, release, `${manifest.name} and CLI versions must match`);
+	manifest.version = version;
+	delete manifest.scripts;
+	delete manifest.devDependencies;
+	for (const entry of manifest.files) {
+		if (entry !== "LICENSE") cpSync(join(source, entry), join(staged, entry), { recursive: true });
+	}
+	copyFileSync(license, join(staged, "LICENSE"));
+	writeFileSync(join(staged, "package.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
+	packages.push(staged);
 }
-copyFileSync(join(root, "LICENSE"), join(runtime, "LICENSE"));
-writeFileSync(join(runtime, "package.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
-packages.push(runtime);
 const tarballs = join(output, "tarballs");
 rmSync(tarballs, { recursive: true, force: true });
 mkdirSync(tarballs, { recursive: true });
@@ -76,6 +84,10 @@ for (const directory of packages) {
 			"emit/package.json",
 		]) {
 			assert.ok(files.includes(required), `runtime must pack ${required}`);
+		}
+	} else if (pkg.name === "@trioforge/compiler-types") {
+		for (const required of ["types/core.d.ts", "types/Iterable.d.ts"]) {
+			assert.ok(files.includes(required), `compiler types must pack ${required}`);
 		}
 	} else if (pkg.os) {
 		assert.ok(files.includes("THIRD_PARTY_NOTICES"), `${pkg.name} must ship notices`);

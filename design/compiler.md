@@ -1,6 +1,6 @@
 # Crucible compiler design
 
-The Crucible compiler is a proposed replacement for roblox-ts that compiles Roblox games written in TypeScript to Luau. It lives in this repository as crates in the `cli` workspace and runs inside the `crucible` binary, so `crucible build` compiles in process with no Node and no separate command. Its one overriding requirement is the speed and footprint of the compiler itself, so that many agents can build separate worktrees of one game on one machine. The quality of the emitted Luau is secondary, and matching roblox-ts output is not a goal. This document records the measurements taken on 2026-11-01, the design they lead to, and the phases that each end in a budget check. Phases 0 to 4 are merged. `crucible build` still runs `rbxtsc` until phase 6.
+The Crucible compiler is a proposed replacement for roblox-ts that compiles Roblox games written in TypeScript to Luau. It lives in this repository as crates in the `cli` workspace and runs inside the `crucible` binary, so `crucible build` compiles in process with no Node and no separate command. Its one overriding requirement is the speed and footprint of the compiler itself, so that many agents can build separate worktrees of one game on one machine. The quality of the emitted Luau is secondary, and matching roblox-ts output is not a goal. This document records the measurements taken on 2026-11-01, the design they lead to, and the phases that each end in a budget check. Phases 0 to 4 are merged. In phase 6, `crucible build` compiles in process, and the runtime package builds with `rbxtsc` until `transformer-src` is deleted.
 
 ## Goal and pass bar
 
@@ -62,17 +62,19 @@ These figures use the system allocator. mimalloc with transparent huge pages on 
 
 Checking is the cost, and tsrs checks FD in about a second where roblox-ts takes about 20. The design spends that second once per build and avoids everything else.
 
-### One process per build
+### One process per place
 
 `crucible build` runs these steps and exits.
 
-1. Build one tsrs Program for all places in the worktree. FD has warehouse and job places, and sharing their parsed files in one process measured 206 MB against 260 MB for two processes.
+1. Build one tsrs Program for each place, in a child process of its own, one place after another.
 2. Check every file. If there are type errors, print them and write nothing, as roblox-ts does.
 3. Fill the fact table for every type-dependent site.
-4. Lower each file to Luau.
-5. Write only the output files whose bytes changed, so Rojo resyncs only those.
+4. Lower each file to Luau, and return the modules to the parent.
+5. Once every place has compiled, write only the output files whose bytes changed, so Rojo resyncs only those.
 
-The operating system frees all memory when the process exits. The compiler needs no program lifetime management, no tsrs regions, and no invalidation rules. FD's merged message guards are always fresh because every build sees every file.
+The spike proposed one Program shared by FD's warehouse and job places, which measured 206 MB against 260 MB for two processes. Phase 6 measured otherwise. tsrs leaks each Program for the life of the process, so two FD places checked in one process peaked at 270 MB working set before lowering, against 147 MB for one place (median of 5 runs on a 16-thread Windows machine, 2026-11-05). A shared Program would also merge the places' network catalogs and boot globs, which the extractor computes over every file. A child per place keeps the build's peak at its largest place.
+
+The operating system frees all memory when each process exits. The compiler needs no program lifetime management, no tsrs regions, and no invalidation rules. FD's merged message guards are always fresh because every build sees every file.
 
 How much the fact queries cost after a full check is unmeasured. The 1.85 s above ran queries without checking first, so each query did its own checking. After step 2 most answers should come from the checker's caches (inferred). Phase 2 measures the full pipeline against the 3 s budget.
 
@@ -96,7 +98,7 @@ Every build compiles every file. A per-file output cache would cut the edit buil
 
 ### Runtime interop
 
-FD's runtime packages ship precompiled Luau that calls roblox-ts's `TS.import`. These include Flamework, janitor, log, message-templates, tether, serio, anvil, brigadier, and spline. The compiler keeps roblox-ts's `RuntimeLib` in `rbxts_include` for them. Those packages cost nothing at compile time beyond reading their declarations.
+FD's runtime packages ship precompiled Luau that calls roblox-ts's `TS.import`. These include Flamework, janitor, log, message-templates, tether, serio, anvil, brigadier, and spline. The compiler crate vendors roblox-ts 3.0.0's `RuntimeLib.lua` and `Promise.lua`, and `crucible build` writes them into each place's include folder, which the place maps under `rbxts_include`. Those packages cost nothing at compile time beyond reading their declarations.
 
 Compiled code reaches `RuntimeLib` only through `TS.import`, `TS.getModule`, `TS.Promise`, and `TS.instanceof`. `instanceof` uses RuntimeLib's metatable class-chain check, including classes from precompiled packages. A package finds another installed package with `TS.getModule`, as roblox-ts emits it, such as the runtime's `vide` entry importing `@rbxts/vide`. `throw` lowers to `error(value, 0)`, so a thrown string reaches `catch` without a position prefix. `try` lowers inline to `pcall`, not to roblox-ts's `TS.try`. The `finally` body then runs inline after the `pcall`, so its own `return`, `break` or throw replaces a pending one without a closure or exit codes of its own.
 

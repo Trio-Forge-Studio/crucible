@@ -134,6 +134,7 @@ test(
 	() => {
 		const runtimeDir = join(cli, "..", "packages", "crucible");
 		const runtime = pack(runtimeDir, join(root, "tarballs"));
+		const compilerTypes = pack(join(cli, "..", "packages", "compiler-types"), join(root, "tarballs"));
 		const contents = run("npm", ["pack", "--dry-run", "--json"], runtimeDir);
 		assert.equal(contents.status, 0, contents.stderr);
 		const files = JSON.parse(contents.stdout)[0].files.map(({ path }) => path);
@@ -156,22 +157,41 @@ test(
 		const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 		assert.equal(manifest.dependencies["@trioforge/crucible"], cliVersion());
 		assert.equal(manifest.devDependencies["@trioforge/crucible-cli"], cliVersion());
+		assert.equal(manifest.devDependencies["@trioforge/compiler-types"], cliVersion());
+		for (const toolchain of ["roblox-ts", "typescript", "@rbxts/compiler-types"])
+			assert.equal(manifest.devDependencies[toolchain], undefined, `the game needs no ${toolchain}`);
 		assert.equal(manifest.scripts.check, "vp check && crucible build");
 		manifest.dependencies["@trioforge/crucible"] = runtime;
 		manifest.devDependencies["@trioforge/crucible-cli"] = shim;
+		manifest.devDependencies["@trioforge/compiler-types"] = compilerTypes;
 		manifest.devDependencies[platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host))] =
 			platform;
 		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
 		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
 		assert.equal(installed.status, 0, installed.stderr);
+		const toolchain = run("npm", ["ls", "typescript", "roblox-ts", "--all", "--json"], game);
+		assert.deepEqual(
+			JSON.parse(toolchain.stdout).dependencies ?? {},
+			{},
+			"the game installs no TypeScript or roblox-ts",
+		);
+		mkdirSync(join(game, "src", "shared"));
+		writeFileSync(join(game, "src", "shared", "coins.ts"), "export const coins = 1;\n");
+		const serverEntry = join(game, "src", "server", "main.server.ts");
+		writeFileSync(
+			serverEntry,
+			`import { coins } from "../shared/coins";\n${readFileSync(serverEntry, "utf8")}\nprint(coins);\n`,
+		);
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
 		assert.match(checked.stdout, /vp check/);
+		assert.ok(existsSync(join(game, "out", "shared", "coins.luau")), "the build emits the shared module");
 		assert.ok(
 			readFileSync(join(game, "build", "start.rbxl"))
 				.subarray(0, 8)
 				.equals(Buffer.from("<roblox!")),
 		);
+		assert.ok(existsSync(join(game, "include", "RuntimeLib.lua")), "the build writes the runtime library");
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);
@@ -197,9 +217,6 @@ const OLD_TEMPLATE = {
 	agents: (text) => `${text.trimEnd()}\n\nThe old version had this line.\n`,
 };
 
-// The next version reuses this binary, so its shim reports the next version and
-// rewrites the old template it receives to stand in for an older release whose
-// template and docs differed. Each snapshot part holds the whole rendered file.
 const NEXT_VERSION_SHIM = `#!/usr/bin/env node
 const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
@@ -213,7 +230,7 @@ if (args[0] === "--version") {
 		.map(([key, edit]) => `${key}: ${edit}`)
 		.join(", ")}};
 	let input = readFileSync(0, "utf8");
-	if (input) {
+	if (input && process.env.CRUCIBLE_TEST_OLD_TEMPLATE) {
 		const old = JSON.parse(input);
 		for (const part of old.owned) {
 			if (part.path === "tsconfig.json") part.content = OLD_TEMPLATE.tsconfig(part.content);
@@ -246,6 +263,7 @@ function launchUpgradeRegistry() {
 	const sources = {
 		"@trioforge/crucible-cli": join(root, "staged", "crucible"),
 		"@trioforge/crucible": join(root, "upgrade-runtime"),
+		"@trioforge/compiler-types": join(root, "upgrade-compiler-types"),
 		[platformName]: join(root, "staged", `crucible-cli-${host}`),
 	};
 	for (const entry of ["package.json", "out", "transformer", "server", "client", "emit"]) {
@@ -253,6 +271,15 @@ function launchUpgradeRegistry() {
 			recursive: true,
 			filter: (source) => !source.endsWith(".tsbuildinfo"),
 		});
+	}
+	for (const entry of ["package.json", "types", "LICENSE"]) {
+		cpSync(
+			join(cli, "..", "packages", "compiler-types", entry),
+			join(sources["@trioforge/compiler-types"], entry),
+			{
+				recursive: true,
+			},
+		);
 	}
 	const tarballs = join(root, "upgrade-tarballs");
 	mkdirSync(tarballs);
@@ -329,7 +356,7 @@ test(
 		assert.equal(downgrade.status, 2, downgrade.stderr);
 		assert.match(downgrade.stderr, /--allow-downgrade/);
 
-		const upgraded = run("npx", ["crucible", "upgrade"], game);
+		const upgraded = run("npx", ["crucible", "upgrade"], game, { CRUCIBLE_TEST_OLD_TEMPLATE: "1" });
 		assert.equal(upgraded.status, 0, upgraded.stderr);
 		const report = upgraded.stdout;
 		assert.match(
@@ -401,6 +428,51 @@ test(
 			/the old template is unknown, so they were left alone:\n {2}default\.project\.json\n/,
 		);
 		assertPinned(game, cliVersion());
+	},
+);
+
+const LAST_ROBLOX_TS_RELEASE = "0.3.0";
+const LAST_ROBLOX_TS_HOSTS = ["linux-x64", "win32-x64"];
+
+test(
+	`upgrade moves a game made by ${LAST_ROBLOX_TS_RELEASE} off roblox-ts, and its check passes`,
+	{ skip: !LAST_ROBLOX_TS_HOSTS.includes(host) && `${LAST_ROBLOX_TS_RELEASE} has no package for ${host}` },
+	async () => {
+		const setup = await startUpgradeRegistry();
+		const game = join(root, "roblox-ts-game");
+		const cli = `@trioforge/crucible-cli@${LAST_ROBLOX_TS_RELEASE}`;
+		const created = run("npx", ["--yes", cli, "create", "roblox-ts-game", game, "--no-install"], root);
+		assert.equal(created.status, 0, created.stderr);
+		const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
+		assert.equal(installed.status, 0, installed.stderr);
+		assert.ok(existsSync(join(game, "node_modules", "roblox-ts")), "the old template builds with roblox-ts");
+		writeFileSync(join(game, ".npmrc"), `registry=http://127.0.0.1:${setup.port}/\n`);
+
+		const upgraded = run("npx", ["crucible", "upgrade", setup.next], game);
+		assert.equal(upgraded.status, 0, `${upgraded.stdout}\n${upgraded.stderr}`);
+		assert.ok(
+			upgraded.stdout.startsWith(
+				`Upgraded crucible and @trioforge/crucible from ${LAST_ROBLOX_TS_RELEASE} to ${setup.next}.\n`,
+			),
+			upgraded.stdout,
+		);
+		assert.match(upgraded.stdout, /Refreshed from the new template:\n {2}tsconfig\.json\n/);
+		assert.match(
+			upgraded.stdout,
+			/ {2}package\.json no longer lists roblox-ts, typescript, @rbxts\/compiler-types\n {2}ran `npm install`\n/,
+		);
+		assert.doesNotMatch(upgraded.stdout, /by hand/);
+		const manifest = JSON.parse(readFileSync(join(game, "package.json"), "utf8"));
+		assert.equal(manifest.devDependencies["@trioforge/compiler-types"], setup.next);
+		const toolchain = run(
+			"npm",
+			["ls", "typescript", "roblox-ts", "@rbxts/compiler-types", "--all", "--json"],
+			game,
+		);
+		assert.deepEqual(JSON.parse(toolchain.stdout).dependencies ?? {}, {}, "no roblox-ts toolchain is left");
+		const checked = run("npm", ["run", "check"], game);
+		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
+		assert.ok(existsSync(join(game, "build", "start.rbxl")));
 	},
 );
 
