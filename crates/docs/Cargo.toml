@@ -8,3 +8,6 @@ publish.workspace = true
 [dependencies]
 nucleo-matcher = "0.3"
 pulldown-cmark = { version = "0.13", default-features = false }
+
+[dev-dependencies]
+mermaid-text = "0.58"

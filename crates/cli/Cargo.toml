@@ -31,8 +31,8 @@ open = "5"
 unicode-width = "0.2"
 
 [build-dependencies]
+crucible-docs = { path = "../docs" }
 mermaid-text = "0.58"
-pulldown-cmark = { version = "0.13", default-features = false }
 serde_json.workspace = true
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-create"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
