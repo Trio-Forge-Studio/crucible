@@ -1,0 +1,382 @@
+[
+	{
+		"id": "M1",
+		"what": "After an unknown outcome, create again in the same run",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"          /\\ SetKs(p, k, [s |-> \"unknown\", id |-> 0])",
+				"          /\\ SetKs(p, k, [s |-> \"clear\", id |-> 0])"
+			]
+		],
+		"expect": "NoBlindCreate"
+	},
+	{
+		"id": "M1i",
+		"what": "The same mutation",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"          /\\ SetKs(p, k, [s |-> \"unknown\", id |-> 0])",
+				"          /\\ SetKs(p, k, [s |-> \"clear\", id |-> 0])"
+			]
+		],
+		"only": "AtMostOneRemotePerKey",
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M2",
+		"what": "Ignore the journal at start",
+		"config": "LivenessLag.cfg",
+		"edits": [
+			["StaleIntent(p, k) == journal[p][k] # NoName /\\ Ks(p, k).s = \"todo\"", "StaleIntent(p, k) == FALSE"]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M3",
+		"what": "Adopt by name without checking the kind",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"{o \\in run[p].obs : o.kind = x /\\ o.name = name /\\ o.id \\notin LockedIds(p, x)}",
+				"{o \\in run[p].obs : o.name = name /\\ o.id \\notin LockedIds(p, x)}"
+			]
+		],
+		"expect": "LockNamesExisting"
+	},
+	{
+		"id": "M4",
+		"what": "Send `expectedCost: 100` on badge creates",
+		"config": "Provisioning.cfg",
+		"set": { "BadgeCost": "= 100" },
+		"expect": "NoPaidBadge"
+	},
+	{
+		"id": "M5",
+		"what": "Skip validation at start",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"    /\\ Valid(p)\n    /\\ run' = [run EXCEPT ![p].pc = \"listing\"]",
+				"    /\\ run' = [run EXCEPT ![p].pc = \"listing\"]"
+			]
+		],
+		"expect": "RemovedIsError"
+	},
+	{
+		"id": "M5b",
+		"what": "Skip validation and treat a removed key as retired",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"    /\\ Valid(p)\n    /\\ run' = [run EXCEPT ![p].pc = \"listing\"]",
+				"    /\\ run' = [run EXCEPT ![p].pc = \"listing\"]"
+			],
+			[
+				"DesiredSt(k) == IF cfg[k].st = \"retired\" THEN",
+				"DesiredSt(k) == IF cfg[k].st \\in {\"retired\", \"absent\"} THEN"
+			],
+			[
+				"    /\\ cfg[k].st \\in {\"managed\", \"retired\"}\n    /\\ Locked(p, k)",
+				"    /\\ cfg[k].st \\in {\"managed\", \"retired\", \"absent\"}\n    /\\ Locked(p, k)"
+			]
+		],
+		"only": "NoSilentRetire",
+		"expect": "NoSilentRetire"
+	},
+	{
+		"id": "M6",
+		"what": "Rename by dropping the old entry, so the new key creates",
+		"config": "Moves.cfg",
+		"edits": [
+			[
+				"       IN /\\ lock' = [lock EXCEPT ![p][k] = lock[p][a], ![p][a] = NoEntry]",
+				"       IN /\\ lock' = [lock EXCEPT ![p][a] = NoEntry]"
+			]
+		],
+		"expect": "JournalCoversCreates"
+	},
+	{
+		"id": "M6i",
+		"what": "The same mutation",
+		"config": "Moves.cfg",
+		"edits": [
+			[
+				"       IN /\\ lock' = [lock EXCEPT ![p][k] = lock[p][a], ![p][a] = NoEntry]",
+				"       IN /\\ lock' = [lock EXCEPT ![p][a] = NoEntry]"
+			]
+		],
+		"only": "MovedKeepsId",
+		"expect": "MovedKeepsId"
+	},
+	{
+		"id": "M7",
+		"what": "Skip the adopt check before a create",
+		"config": "LivenessLag.cfg",
+		"edits": [["    /\\ LET M == Matches(p, Kind[k], DesiredName(k))", "    /\\ LET M == {}"]],
+		"expect": "liveness"
+	},
+	{
+		"id": "M8",
+		"what": "Create without writing the intent",
+		"config": "Provisioning.cfg",
+		"edits": [["    /\\ journal' = [journal EXCEPT ![p][k] = DesiredName(k)]", "    /\\ UNCHANGED journal"]],
+		"expect": "JournalCoversCreates"
+	},
+	{
+		"id": "M9",
+		"what": "An empty listing settles an unknown create, as before this round",
+		"config": "Provisioning.cfg",
+		"edits": [["[s |-> \"unresolved\", id |-> 0]", "[s |-> \"rejected\", id |-> 0]"]],
+		"expect": "JournalCoversCreates"
+	},
+	{
+		"id": "M9i",
+		"what": "The same mutation",
+		"config": "ListLag.cfg",
+		"edits": [["[s |-> \"unresolved\", id |-> 0]", "[s |-> \"rejected\", id |-> 0]"]],
+		"only": "AtMostOneRemotePerKey",
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M10",
+		"what": "Adopt a resource another key already holds",
+		"config": "Moves.cfg",
+		"edits": [["o.name = name /\\ o.id \\notin LockedIds(p, x)}", "o.name = name}"]],
+		"expect": "LockInjective"
+	},
+	{
+		"id": "M10i",
+		"what": "The same mutation",
+		"config": "Moves.cfg",
+		"edits": [["o.name = name /\\ o.id \\notin LockedIds(p, x)}", "o.name = name}"]],
+		"only": "LockOwnsItsResource",
+		"expect": "LockOwnsItsResource"
+	},
+	{
+		"id": "M11",
+		"what": "Resolve an intent by the config's current name",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"    /\\ LET M == Matches(p, Kind[k], journal[p][k])",
+				"    /\\ LET M == Matches(p, Kind[k], DesiredName(k))"
+			]
+		],
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M12",
+		"what": "Clear the intent before writing the lock",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"    /\\ \\/ Ks(p, k).s \\in {\"adopted\", \"locked\", \"rejected\", \"deferred\"}",
+				"    /\\ \\/ Ks(p, k).s \\in {\"adopted\", \"locked\", \"rejected\", \"deferred\", \"created\"}"
+			]
+		],
+		"expect": "JournalCoversCreates"
+	},
+	{
+		"id": "M13",
+		"what": "Leave a failed update out of the finished states",
+		"config": "Provisioning.cfg",
+		"edits": [["{\"rejected\", \"deferred\", \"failed\"}", "{\"rejected\", \"deferred\"}"]],
+		"expect": "RunAdvances"
+	},
+	{
+		"id": "M14",
+		"what": "Never update",
+		"config": "LivenessLag.cfg",
+		"edits": [
+			[
+				"    /\\ lock[p][k].fp # DesiredName(k) \\/ lock[p][k].st # DesiredSt(k) \\/ NeedsIcon(p, k)",
+				"    /\\ FALSE"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M14p",
+		"what": "The same mutation",
+		"config": "Liveness.cfg",
+		"edits": [
+			[
+				"    /\\ lock[p][k].fp # DesiredName(k) \\/ lock[p][k].st # DesiredSt(k) \\/ NeedsIcon(p, k)",
+				"    /\\ FALSE"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M15",
+		"what": "Skip locked IDs of every kind, not (kind, id) identities",
+		"config": "Collision.cfg",
+		"edits": [
+			[
+				"LockedIds(p, x) == {lock[p][k].id : k \\in {j \\in Keys : Kind[j] = x}} \\ {0}",
+				"LockedIds(p, x) == {lock[p][k].id : k \\in Keys} \\ {0}"
+			]
+		],
+		"expect": "NoCreateBesideMatch"
+	},
+	{
+		"id": "M16",
+		"what": "The reviewer approves a create shown beside the key's own orphan",
+		"config": "LostLock.cfg",
+		"set": { "Careful": "= FALSE" },
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M17",
+		"what": "Retiring leaves the resource on sale",
+		"config": "LivenessLag.cfg",
+		"edits": [
+			[
+				"                          ![x][i].active = (DesiredSt(k) = \"managed\"),",
+				"                          ![x][i].active = @,"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M18",
+		"what": "Restoring leaves the resource off sale",
+		"config": "LivenessLag.cfg",
+		"edits": [
+			[
+				"                          ![x][i].active = (DesiredSt(k) = \"managed\"),",
+				"                          ![x][i].active = (@ /\\ DesiredSt(k) = \"managed\"),"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M19",
+		"what": "Skip the badge icon upload",
+		"config": "LivenessLag.cfg",
+		"edits": [
+			["           next == IF NeedsIcon(p, k) THEN \"icon\" ELSE \"updated\"", "           next == \"updated\""]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M20",
+		"what": "Count a failed icon upload as done",
+		"config": "LivenessLag.cfg",
+		"edits": [
+			[
+				"             /\\ SetKs(p, k, [s |-> \"failed\", id |-> 0])\n    /\\ UNCHANGED <<cfg, lock, journal, committed, nextId, pending, freeBadges, robux,\n                   ghosts, edits>>\n\nWriteLockUpdated",
+				"             /\\ SetKs(p, k, [s |-> \"updated\", id |-> 0])\n    /\\ UNCHANGED <<cfg, lock, journal, committed, nextId, pending, freeBadges, robux,\n                   ghosts, edits>>\n\nWriteLockUpdated"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "M21",
+		"what": "`--not-created` while the create may still commit",
+		"config": "Provisioning.cfg",
+		"edits": [["    /\\ ~InFlight(k) /\\ ~Claimed(k)\n", ""]],
+		"expect": "JournalCoversCreates"
+	},
+	{
+		"id": "M21i",
+		"what": "The same mutation",
+		"config": "Provisioning.cfg",
+		"edits": [["    /\\ ~InFlight(k) /\\ ~Claimed(k)\n", ""]],
+		"only": "AtMostOneRemotePerKey",
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M22",
+		"what": "A failed list page counts as an empty page",
+		"config": "LostLock.cfg",
+		"edits": [
+			[
+				"          \\/ /\\ Fault\n             /\\ Stop(p)",
+				"          \\/ /\\ Fault\n             /\\ run' = [run EXCEPT ![p].pages[x] = j]"
+			]
+		],
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M23",
+		"what": "Untrack drops the lock entry and gives the resource up, as before this round",
+		"config": "Provisioning.cfg",
+		"edits": [
+			[
+				"    /\\ lock' = [lock EXCEPT ![p][k].st = \"untracked\"]\n    /\\ UNCHANGED <<cfg, journal, committed, world, run, ghosts, faults, edits>>",
+				"    /\\ lock' = [lock EXCEPT ![p][k] = NoEntry]\n    /\\ remote' = [remote EXCEPT ![Kind[k]][lock[p][k].id].claim = \"\"]\n    /\\ UNCHANGED <<cfg, journal, committed, nextId, pending, freeBadges, robux, run, ghosts, faults, edits>>"
+			]
+		],
+		"expect": "NoSilentDelete"
+	},
+	{
+		"id": "M23l",
+		"what": "The same mutation",
+		"config": "ListLag.cfg",
+		"edits": [
+			[
+				"    /\\ lock' = [lock EXCEPT ![p][k].st = \"untracked\"]\n    /\\ UNCHANGED <<cfg, journal, committed, world, run, ghosts, faults, edits>>",
+				"    /\\ lock' = [lock EXCEPT ![p][k] = NoEntry]\n    /\\ remote' = [remote EXCEPT ![Kind[k]][lock[p][k].id].claim = \"\"]\n    /\\ UNCHANGED <<cfg, journal, committed, nextId, pending, freeBadges, robux, run, ghosts, faults, edits>>"
+			]
+		],
+		"only": "AtMostOneRemotePerKey",
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M23k",
+		"what": "The same mutation",
+		"config": "LostLock.cfg",
+		"edits": [
+			[
+				"    /\\ lock' = [lock EXCEPT ![p][k].st = \"untracked\"]\n    /\\ UNCHANGED <<cfg, journal, committed, world, run, ghosts, faults, edits>>",
+				"    /\\ lock' = [lock EXCEPT ![p][k] = NoEntry]\n    /\\ remote' = [remote EXCEPT ![Kind[k]][lock[p][k].id].claim = \"\"]\n    /\\ UNCHANGED <<cfg, journal, committed, nextId, pending, freeBadges, robux, run, ghosts, faults, edits>>"
+			]
+		],
+		"expect": "AtMostOneRemotePerKey"
+	},
+	{
+		"id": "M24",
+		"what": "Update without first marking the lock entry stale",
+		"config": "LivenessLag.cfg",
+		"edits": [["    /\\ Marked(p, k)\n", ""]],
+		"expect": "liveness"
+	},
+	{
+		"id": "M25",
+		"what": "Never adopt the create a later listing shows",
+		"config": "LivenessLag.cfg",
+		"edits": [["             /\\ SetKs(p, k, [s |-> \"adopted\", id |-> 0])", "             /\\ FALSE"]],
+		"expect": "liveness"
+	},
+	{
+		"id": "M26",
+		"what": "A run enters a phase the model does not name",
+		"config": "Provisioning.cfg",
+		"edits": [
+			["    /\\ run' = [run EXCEPT ![p].pc = \"listing\"]", "    /\\ run' = [run EXCEPT ![p].pc = \"started\"]"]
+		],
+		"expect": "TypeOK"
+	},
+	{
+		"id": "M27",
+		"what": "Create a moved key while its old key holds an intent",
+		"config": "Moves.cfg",
+		"edits": [
+			[
+				"    /\\ k \\in Targets => ~Locked(p, MovedFrom[k]) /\\ journal[p][MovedFrom[k]] = NoName",
+				"    /\\ k \\in Targets => ~Locked(p, MovedFrom[k])"
+			]
+		],
+		"expect": "NoBlindCreate"
+	},
+	{
+		"id": "M28",
+		"what": "Accept an old key's entry beside the new key's intent",
+		"config": "Moves.cfg",
+		"edits": [["           /\\ Locked(p, MovedFrom[t]) => journal[p][t] = NoName\n", ""]],
+		"expect": "RemovedIsError"
+	}
+]

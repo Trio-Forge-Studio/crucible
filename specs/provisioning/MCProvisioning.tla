@@ -9,6 +9,12 @@ MCBase == [k \in {"p", "p2", "b"} |-> IF k = "p2" THEN "vip2" ELSE "vip"]
 MCMoved == "p2" :> "p"
 MCNoMoves == [k \in {} |-> "p"]
 
+MCIds(products, badges) == ("product" :> products) @@ ("badge" :> badges)
+MCIds21 == MCIds(2, 1)
+MCIds22 == MCIds(2, 2)
+MCIds31 == MCIds(3, 1)
+MCIds42 == MCIds(4, 2)
+
 MCUnbounded == -1
 
 MCSymmetry == Permutations(Provs)
