@@ -1,13 +1,19 @@
 use serde_json::Value;
 use std::process::{Command, Output};
 pub const KEY: &str = "sentinel-Key_+/%=NeverPrint";
-pub fn command(origin: &str) -> Command {
+pub fn root(origin: &str) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_crucible"));
-    cmd.env("CRUCIBLE_OC_ORIGIN", origin)
-        .env("CRUCIBLE_OC_API_KEY", KEY)
-        .env("CRUCIBLE_CONFIG", "nonexistent-crucible-test-config.toml")
-        .env_remove("CRUCIBLE_OC_PROFILE")
-        .args(["oc", "--poll-interval", "0", "--retry-delay", "0"]);
+    cmd.current_dir(env!("CARGO_TARGET_TMPDIR")).env("CRUCIBLE_OC_ORIGIN", origin).env("CRUCIBLE_OC_API_KEY", KEY);
+    cmd
+}
+pub fn command(origin: &str) -> Command {
+    let mut cmd = root(origin);
+    cmd.args(["oc", "--poll-interval", "0", "--retry-delay", "0"]);
+    cmd
+}
+pub fn whoami(origin: &str) -> Command {
+    let mut cmd = root(origin);
+    cmd.arg("whoami");
     cmd
 }
 pub fn document(output: &Output) -> Value {

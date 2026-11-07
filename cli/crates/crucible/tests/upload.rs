@@ -784,7 +784,7 @@ fn cdn_failures_do_not_blame_the_selected_api_key() {
         assert_eq!(code(&out), expected, "CDN HTTP {status}");
         assert_eq!(error["kind"], kind);
         assert_eq!(error["status"], status);
-        for field in ["keySource", "requiredScopes", "scopeMetadata", "profiles"] {
+        for field in ["keySource", "requiredScopes", "scopeMetadata"] {
             assert!(error.get(field).is_none(), "a CDN error has no {field}");
         }
         assert!(!path.exists(), "failed downloads leave no output file");
@@ -806,11 +806,7 @@ fn download_retry_waits_end_at_the_deadline() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("download");
     let start = std::time::Instant::now();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_crucible"))
-        .env("CRUCIBLE_OC_ORIGIN", server.base_url())
-        .env("CRUCIBLE_OC_API_KEY", KEY)
-        .env("CRUCIBLE_CONFIG", "nonexistent-crucible-test-config.toml")
-        .env_remove("CRUCIBLE_OC_PROFILE")
+    let out = root(&server.base_url())
         .args(["oc", "--deadline", "0.05", "asset", "download", "42", "--out", path.to_str().unwrap()])
         .output()
         .unwrap();
@@ -823,7 +819,7 @@ fn download_retry_waits_end_at_the_deadline() {
 #[test]
 fn introspection_declares_an_empty_scope_requirement() {
     let server = Server::new(vec![Response::Body(401, "unauthorized".into())]);
-    let out = command(&server.origin).args(["auth", "check"]).output().unwrap();
+    let out = whoami(&server.origin).output().unwrap();
     assert_eq!(code(&out), 3);
     let error = &document(&out)["error"];
     assert_eq!(error["requiredScopes"], json!([]), "introspection needs no scopes");

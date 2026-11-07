@@ -175,55 +175,30 @@ fn public_operation_sends_no_key_and_needs_no_config() {
     m.assert_calls(1);
 }
 #[test]
-fn auth_check_posts_key_and_flattens_measured_scope_shape() {
+fn whoami_posts_key_and_flattens_measured_scope_shape() {
     let server = MockServer::start();
     let m=server.mock(|w,t|{w.method(POST).path("/api-keys/v1/introspect").json_body(json!({"apiKey":KEY})).header_missing("x-api-key");t.json_body(json!({"name":"assets-key","enabled":true,"expired":false,"scopes":[{"name":"asset","operations":["read","write"],"groupIds":["35"],"userIds":[]}]}));});
-    let out = command(&server.base_url()).args(["auth", "check", "--for", "assets.get"]).output().unwrap();
+    let out = whoami(&server.base_url()).args(["--for", "assets.get"]).output().unwrap();
     assert_eq!(code(&out), 0);
     assert_eq!(document(&out)["scopes"], json!(["asset:read", "asset:write"]));
     m.assert_calls(1);
 }
 #[test]
-fn explicit_missing_or_empty_profile_does_not_fall_through() {
-    let server = MockServer::start();
-    let m = server.mock(|_, t| {
-        t.status(200).json_body(json!({}));
-    });
-    let config = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(config.path(),"[oc]\ndefault_profile='empty'\n[oc.profiles.empty]\nkey_env='CRUCIBLE_OC_TEST_EMPTY'\n[oc.profiles.other]\nkey_env='CRUCIBLE_OC_API_KEY'").unwrap();
-    for name in ["missing", "empty"] {
-        let out = command(&server.base_url())
-            .env("CRUCIBLE_CONFIG", config.path())
-            .env("CRUCIBLE_OC_TEST_EMPTY", "")
-            .args(["--profile", name, "call", "assets.get", "assetId=42"])
-            .output()
-            .unwrap();
-        assert_eq!(code(&out), 3);
-        assert_eq!(document(&out)["error"]["kind"], "auth");
-    }
-    m.assert_calls(0);
-}
-#[test]
-fn auth_rejection_never_tries_another_profile() {
+fn auth_rejection_never_tries_the_dot_env_key() {
     let server = MockServer::start();
     let m = server.mock(|w, t| {
         w.path("/assets/v1/assets/42").header("x-api-key", KEY);
         t.status(403);
     });
-    let config = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(
-        config.path(),
-        "[oc.profiles.a]\nkey_env='CRUCIBLE_OC_API_KEY'\n[oc.profiles.b]\nkey_env='CRUCIBLE_OC_OTHER_TEST_KEY'",
-    )
-    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".env"), "CRUCIBLE_OC_API_KEY=another-key\n").unwrap();
     let out = command(&server.base_url())
-        .env("CRUCIBLE_CONFIG", config.path())
-        .env("CRUCIBLE_OC_OTHER_TEST_KEY", "another-key")
-        .args(["--profile", "a", "call", "assets.get", "assetId=42"])
+        .current_dir(dir.path())
+        .args(["call", "assets.get", "assetId=42"])
         .output()
         .unwrap();
     assert_eq!(code(&out), 3);
-    assert_eq!(document(&out)["error"]["profiles"], json!(["a", "b"]));
+    assert_eq!(document(&out)["error"]["keySource"], "CRUCIBLE_OC_API_KEY");
     m.assert_calls(1);
 }
 #[test]
@@ -332,7 +307,7 @@ fn malformed_introspection_is_a_protocol_failure() {
         w.method(POST).path("/api-keys/v1/introspect");
         t.json_body(json!({"echo":KEY}));
     });
-    let out = command(&server.base_url()).args(["auth", "check"]).output().unwrap();
+    let out = whoami(&server.base_url()).output().unwrap();
     assert_eq!(code(&out), 7);
     assert_eq!(document(&out)["error"]["kind"], "unavailable");
     m.assert_calls(1);
@@ -467,7 +442,7 @@ fn introspection_owns_its_body_key_and_rejects_caller_bodies() {
 }
 
 #[test]
-fn auth_failures_share_scope_and_profile_metadata() {
+fn auth_failures_share_scope_metadata() {
     let server = MockServer::start();
     server.mock(|w, t| {
         w.path("/assets/v1/assets/42");
@@ -483,13 +458,13 @@ fn auth_failures_share_scope_and_profile_metadata() {
         assert_eq!(code(&out), 3);
         assert_eq!(error["scopeMetadata"], "declared");
         assert!(!error["requiredScopes"].as_array().unwrap().is_empty());
-        assert_eq!(error["profiles"], json!([]));
+        assert!(error.get("profiles").is_none());
     }
     server.mock(|w, t| {
         w.path("/api-keys/v1/introspect");
         t.status(401);
     });
-    let out = command(&server.base_url()).args(["auth", "check"]).output().unwrap();
+    let out = whoami(&server.base_url()).output().unwrap();
     assert_eq!(code(&out), 3);
     assert_eq!(document(&out)["error"]["scopeMetadata"], "declared", "body-key introspection requires no scope");
 }

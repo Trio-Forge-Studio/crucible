@@ -14,7 +14,7 @@ jsonc-parser = { version = "0.27", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 toml = "1"
-dirs = "6"
+dotenvy = "0.15"
 percent-encoding = "2"
 url = "2"
 tempfile = "3"

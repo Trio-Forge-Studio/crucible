@@ -8,28 +8,17 @@ Each `crucible oc` command writes one JSON document to stdout. Progress goes to 
 
 ## Configure a key
 
-For CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Keys never belong in command arguments.
+A game has one Open Cloud key. `crucible oc`, `crucible publish`, and `crucible whoami` read it from `CRUCIBLE_OC_API_KEY`. Keys never belong in command arguments.
 
-Local profiles live in `%APPDATA%\crucible\config.toml` on Windows. On macOS, the file is `~/Library/Application Support/crucible/config.toml`. On Linux, the file is `$XDG_CONFIG_HOME/crucible/config.toml`, or `~/.config/crucible/config.toml`. `CRUCIBLE_CONFIG` selects another file.
+In CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Locally, put it in a `.env` file at the project root, which is the directory you run `crucible` from.
 
-```toml
-[oc]
-default_profile = "assets"
-
-[oc.profiles.assets]
-key_env = "ROBLOX_ASSETS_API_KEY"
-group = 35
-
-[oc.profiles.publish]
-key_env = "ROBLOX_API_KEY"
-
-[oc.profiles.luau]
-key_file = "C:/Users/Admin/.secrets/roblox-luau.key"
+```sh
+CRUCIBLE_OC_API_KEY=your-open-cloud-key
 ```
 
-Open Cloud settings live in the `[oc]` table. A profile requires exactly one of `key_env` and `key_file`. Its optional `group` or `user` sets the default asset creator.
+The variable in the process environment wins when it is set. Otherwise the key comes from `.env`. Crucible reads no other variable from `.env`, does not copy `.env` into the environment, and does not search parent directories. The file takes the usual dotenv syntax, including comments, quotes, and `export`. The template's `.gitignore` lists `.env`, so the key stays out of version control.
 
-The selection order is `--profile`, `CRUCIBLE_OC_PROFILE`, `CRUCIBLE_OC_API_KEY`, then `default_profile`. A missing or empty selected source fails with exit 3. `crucible oc` never falls through to another source or retries with another key. Public calls send no key. Auth errors include the configured profile names and the operation's declared scopes. Missing scope metadata appears as `requiredScopes: null` and `scopeMetadata: "unknown"`.
+A missing or empty key fails with exit 3, and the message names both places. A `.env` that cannot be read or parsed fails with exit 2. A missing `.env` is not an error. `crucible oc` never retries with another key. Public calls send no key and do not read `.env`. Auth errors include `keySource`, which is `CRUCIBLE_OC_API_KEY` or `.env`, and the operation's declared scopes. Missing scope metadata appears as `requiredScopes: null` and `scopeMetadata: "unknown"`.
 
 ## Find and describe operations
 
@@ -63,13 +52,7 @@ Long-running calls poll by default. `--no-wait` returns the first reply. A pendi
 
 ## Check credentials
 
-```console
-npx crucible oc auth check
-npx crucible oc auth check --for assets.get
-npx crucible oc auth profiles
-```
-
-`call api-keys.introspect` and `auth check` use the same executor path. It supplies the selected key as the `apiKey` body field and rejects caller-supplied bodies. `auth check` posts the selected key to `/api-keys/v1/introspect`. It flattens each scope's `name` and `operations` into strings such as `asset:read`. `--for` checks that the returned list contains the operation's declared scope names. Resource restrictions still apply on Roblox. `auth profiles` lists sources and whether their keys are present, without printing their values.
+Run `npx crucible whoami` to see which key a command would use and what it can do. `npx crucible whoami --for assets.get` also checks the operation's declared scopes. [`crucible whoami`](cli.md#crucible-whoami) describes the document. `call api-keys.introspect` supplies the key as the `apiKey` body field and rejects caller-supplied bodies.
 
 ## Upload an asset
 
@@ -82,12 +65,12 @@ Upload sends one create request, then polls for the asset ID. It never repeats t
 
 `--resume` accepts an operation ID or `operations/<id>` and sends GET requests only. It needs no file or creator. The default poll deadline is 300 seconds. After acceptance, a deadline, poll failure, or invalid asset receipt exits 8 with the resume command. A GET-only resume retains the read failure codes.
 
-The display name defaults to the file stem in title case. `--name` overrides it. `--type` accepts `model`, `decal`, `audio`, or `video`; the default comes from the file extension. Files must be nonempty regular files of at most 20,000,000 bytes. Supported extensions are FBX, glTF, GLB, RBXM, PNG, JPG, JPEG, BMP, TGA, OGG, MP3, WAV, FLAC, and MP4. Use `--user` for individual ownership, or configure a creator in the selected profile.
+The display name defaults to the file stem in title case. `--name` overrides it. `--type` accepts `model`, `decal`, `audio`, or `video`; the default comes from the file extension. Files must be nonempty regular files of at most 20,000,000 bytes. Supported extensions are FBX, glTF, GLB, RBXM, PNG, JPG, JPEG, BMP, TGA, OGG, MP3, WAV, FLAC, and MP4. Set `--group` or `--user` to choose the creator.
 
 ## Publish a place
 
 ```console
-npx crucible oc --profile publish place publish build/warehouse.rbxl --universe 13058 --place 1818
+npx crucible oc place publish build/warehouse.rbxl --universe 13058 --place 1818
 ```
 
 Publishing sends an `application/octet-stream` body. It retries 409 and 5xx responses for at most four attempts, with 60 seconds between attempts by default. A later success resolves earlier uncertainty. If any attempt got a 5xx or lost its response and none later succeeded, the command exits 5, including a 503 followed by a 400. `--version-type saved` saves without publishing.
@@ -118,7 +101,7 @@ Use `-` instead of a file to read UTF-8 Luau from stdin. Scripts are limited to 
 | --- | --- | --- | --- |
 | 0 | | Success. | Read the document. |
 | 2 | `usage` | Invalid arguments, input, local file, or read-result limits. | Fix the input. |
-| 3 | `auth` | Missing key, HTTP 401 or 403, or failed credential check. | Fix the selected key or profile. |
+| 3 | `auth` | Missing key, HTTP 401 or 403, or failed credential check. | Fix the key. |
 | 4 | `rejected` | Another 4xx response. | Fix the request before repeating it. |
 | 5 | `outcome_unknown` | A write may have acted. | Check the remote resource before repeating it. |
 | 6 | `remote_failure` | An operation or Luau task failed. | Inspect the error and logs. |
@@ -129,7 +112,7 @@ An unsafe request answered with 429, or one that never left the process, is sent
 
 Once an unsafe request gets a 2xx, every later failure maps to 6 for remote failure, 8 with GET-only recovery when the resource is known, or 5 with a Creations check when it is not. Repeating the original write is unsafe. GET-only resumes retain codes 3, 4, and 7. A classified failure keeps its exit code if stdout cannot be written.
 
-The global options are `--profile`, `--deadline <seconds>`, `--poll-interval <seconds>`, `--retry-delay <seconds>`, and `--verbose`. The default poll interval is 2 seconds. `--retry-delay` changes delays, without making an unsafe operation retryable.
+The global options are `--deadline <seconds>`, `--poll-interval <seconds>`, `--retry-delay <seconds>`, and `--verbose`. The default poll interval is 2 seconds. `--retry-delay` changes delays, without making an unsafe operation retryable.
 
 ## Call from Node
 

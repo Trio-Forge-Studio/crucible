@@ -8,7 +8,7 @@ Run `crucible` commands and read their output and exit codes.
 
 ## Output and exit codes
 
-Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc` and `crucible publish` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`.
+Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc`, `crucible publish`, and `crucible whoami` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`.
 
 | Exit | Meaning |
 | --- | --- |
@@ -45,7 +45,6 @@ include = "places/arena/include"
 
 [env.staging]
 universe = 1234
-profile = "publish"          # optional crucible oc profile
 places = { start = 5678, arena = 5679 }
 
 [env.production]
@@ -101,7 +100,7 @@ Calls Roblox Open Cloud. It uploads and downloads assets, publishes places, runs
 
 ```console
 npx crucible oc find data store entry
-npx crucible oc --profile publish place publish build/game.rbxl --universe 13058 --place 1818
+npx crucible oc place publish build/game.rbxl --universe 13058 --place 1818
 ```
 
 Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc --help` prints a short form.
@@ -110,9 +109,9 @@ Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc 
 
 `npx crucible publish production` builds the game, then uploads every place to the ids in `[env.production]` in `crucible.toml`. `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. Credentials load before building. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
 
-`--dry-run` builds the selected places and runs the same key and scope check as `crucible oc auth check --for universes.create-place-version`. It sends an introspection request and no upload requests. The check verifies that the key is enabled, unexpired, and has the declared operation scopes. It does not prove access to a particular universe or place.
+`--dry-run` builds the selected places and runs the same key and scope check as `crucible whoami --for universes.create-place-version`. It sends an introspection request and no upload requests. The check verifies that the key is enabled, unexpired, and has the declared operation scopes. It does not prove access to a particular universe or place.
 
-`--profile <name>` overrides credentials. Selection order is `--profile`, `CRUCIBLE_OC_PROFILE`, `CRUCIBLE_OC_API_KEY`, the environment's `profile`, then the user config's `default_profile`. A selected missing or invalid credential fails without falling through. `--verbose` writes redacted request diagnostics to stderr. `version_type` defaults to `Saved`; set `Published` in the environment to publish the new versions.
+The key comes from `CRUCIBLE_OC_API_KEY` in the environment, or from `.env` at the game's root, as [Configure a key](oc.md#configure-a-key) describes. A missing or invalid key fails without trying another. `--verbose` writes redacted request diagnostics to stderr. `version_type` defaults to `Saved`; set `Published` in the environment to publish the new versions.
 
 Publish prints exactly one JSON document on stdout. Build progress and compiler diagnostics go to stderr. It uses the [Open Cloud exit codes](oc.md#exit-codes), including usage 2, auth 3, rejected 4, outcome_unknown 5, remote_failure 6, unavailable 7, and pending 8. Build failures are unavailable, exit 7. Missing `crucible.toml` is usage 2 with an example. Unknown environments or places are usage 2 with valid names.
 
@@ -122,7 +121,7 @@ Success, exit 0, includes each confirmed upload's version number. Ids are string
 {"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"},{"name":"start","universeId":"9999","placeId":"4321","versionNumber":8,"versionType":"published"}],"failed":null,"notAttempted":[]}
 ```
 
-An upload failure keeps the existing Open Cloud error fields and puts progress under `error.publish`. `failed` names the place whose upload failed. Its outcome can be unknown. `published` contains only confirmed receipts, and `notAttempted` lists the selected places after the failed place. The exit code classifies the failed upload independently of earlier successes. `next` is a JSON array of string arguments beginning with `"crucible"`. It selects the failed place and every unattempted place with `--place=<name>` and preserves explicit `--profile` and `--verbose` flags. It does not copy environment variables. Pass `next` as argv to a process spawn API without shell parsing or joining its elements. With an installed npm package, run it through `npx` with `next` as the argument array. For example, a profile containing a space remains one argument in `["crucible","publish","production","--profile","flag space","--place=start"]`.
+An upload failure keeps the existing Open Cloud error fields and puts progress under `error.publish`. `failed` names the place whose upload failed. Its outcome can be unknown. `published` contains only confirmed receipts, and `notAttempted` lists the selected places after the failed place. The exit code classifies the failed upload independently of earlier successes. `next` is a JSON array of string arguments beginning with `"crucible"`. It selects the failed place and every unattempted place with `--place=<name>` and preserves an explicit `--verbose` flag. It does not copy environment variables, so the replay reads the key again from the environment or `.env`. Pass `next` as argv to a process spawn API without shell parsing or joining its elements. With an installed npm package, run it through `npx` with `next` as the argument array.
 
 After a partial failure, never rerun the environment without `--place`, because that uploads confirmed places again. For `outcome_unknown`, check the failed place's versions before re-uploading it. Uploads follow the [place publishing retry policy](oc.md#publish-a-place).
 
@@ -132,10 +131,10 @@ After a partial failure, never rerun the environment without `--place`, because 
 
 Credential, build, and dry-run auth failures have the same progress object, with `failed` null and all selected places in `notAttempted`. Config and target validation errors return the usual `{"error":{"kind":"usage","message":"..."}}` before building.
 
-A successful dry run exits 0 with no published receipts. `auth` is the existing auth-check result. All selected places remain unattempted.
+A successful dry run exits 0 with no published receipts. `auth` is the `crucible whoami` result. All selected places remain unattempted.
 
 ```json
-{"environment":"production","dryRun":true,"published":[],"failed":null,"notAttempted":["arena","start"],"auth":{"keySource":"profile publish","name":"publish-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}}
+{"environment":"production","dryRun":true,"published":[],"failed":null,"notAttempted":["arena","start"],"auth":{"keySource":"CRUCIBLE_OC_API_KEY","name":"publish-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}}
 ```
 
 ## crucible upgrade
@@ -219,3 +218,20 @@ An interrupted install, such as a closed terminal, leaves `package.json` at the 
 After a good install, the refresh can still fail: an installed package or the binary reports another version, or the new binary fails or does not finish within 120 seconds. The command exits 1, and `package.json` and `node_modules` stay at the new version. Running `npx crucible upgrade` again then reports the version as already installed and does not refresh the template. The message says the template was not refreshed. Fix its cause, then compare by hand. `npx crucible create <name> <empty-dir> --no-install` writes the new template. Diff its owned files against the game's and copy the changes the game wants.
 
 Stdout is the report an agent acts on: the two versions, the refreshed files, the edited, deleted, and dropped files to handle by hand, a changed `LICENSE` to review, what moved the game off roblox-ts and what is left of that move, and a `npx crucible docs <topic>` line for each topic whose content changed. Install output and progress go to stderr. `npx crucible create <name> <empty-dir> --no-install` writes the new template for a manual merge.
+
+## crucible whoami
+
+`npx crucible whoami` checks the Open Cloud key and prints one JSON document. The key comes from `CRUCIBLE_OC_API_KEY` in the environment, or from `.env` in the current directory, as [Configure a key](oc.md#configure-a-key) describes. The command posts the key to `/api-keys/v1/introspect` and sends nothing else.
+
+```console
+npx crucible whoami
+npx crucible whoami --for universes.create-place-version
+```
+
+```json
+{"keySource":".env","name":"publish-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}
+```
+
+`keySource` is `CRUCIBLE_OC_API_KEY` or `.env`. Each scope's `name` and `operations` flatten into strings such as `asset:read`. The document never contains the key.
+
+`--for <operation>` takes an operation name and checks that the returned scopes contain the operation's declared scope names. A missing scope exits 3 and names it. An unknown operation exits 2 and lists suggestions. Resource restrictions still apply on Roblox, so the check does not prove access to a particular universe or place. A missing key, a disabled or expired key, and a rejected key exit 3. `--verbose` writes redacted request diagnostics to stderr. The exit codes are the [Open Cloud exit codes](oc.md#exit-codes).

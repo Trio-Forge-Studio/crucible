@@ -2,6 +2,7 @@
 mod game;
 #[path = "support/sequence.rs"]
 mod sequence;
+#[allow(dead_code)]
 mod support;
 use sequence::{Response, Server};
 use serde_json::json;
@@ -34,12 +35,7 @@ impl Game {
     }
     fn binary(&self, origin: &str) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_crucible"));
-        command
-            .current_dir(self.0.path())
-            .env("CRUCIBLE_OC_ORIGIN", origin)
-            .env("CRUCIBLE_OC_API_KEY", KEY)
-            .env("CRUCIBLE_CONFIG", self.0.path().join("config.toml"))
-            .env_remove("CRUCIBLE_OC_PROFILE");
+        command.current_dir(self.0.path()).env("CRUCIBLE_OC_ORIGIN", origin).env("CRUCIBLE_OC_API_KEY", KEY);
         command
     }
     fn publish(&self, origin: &str, args: &[&str]) -> Output {
@@ -138,6 +134,7 @@ fn dry_run_builds_checks_scopes_and_never_uploads() {
         assert_eq!(requests.len(), 1);
         assert!(requests[0].head.starts_with("POST /api-keys/v1/introspect "));
         if expected == 0 {
+            assert_eq!(document(&out)["auth"]["keySource"], "CRUCIBLE_OC_API_KEY");
             assert_eq!(document(&out)["notAttempted"], json!(["arena", "start"]));
             assert_eq!(document(&out)["published"], json!([]));
         }
@@ -168,6 +165,8 @@ fn invalid_targets_and_arguments_are_json_usage_errors_without_requests() {
         (Some(""), vec!["production"], "No environments are configured"),
         (Some(TWO), vec!["production", "--place", "unknown"], "Places: arena, start"),
         (Some("unexpected=1"), vec!["production"], "unknown field"),
+        (Some(&TWO.replace("universe=10", "universe=10\nprofile='publish'")), vec!["production"], "unknown field"),
+        (Some(TWO), vec!["production", "--profile", "publish"], "unexpected"),
         (Some(TWO), vec![], "required"),
         (Some(TWO), vec!["production", "--invalid"], "unexpected"),
     ] {
@@ -197,13 +196,10 @@ fn build_failure_is_unavailable_and_never_uploads() {
 }
 
 #[test]
-fn dry_run_reuses_oc_auth_check_validation() {
+fn dry_run_reuses_whoami_validation() {
     let reply = json!({"name":"test","enabled":false,"expired":false,"scopes":[]});
     let server = Server::new(vec![Response::json(reply.clone()), Response::json(reply)]);
-    let oc = support::command(&server.origin)
-        .args(["auth", "check", "--for", "universes.create-place-version"])
-        .output()
-        .unwrap();
+    let oc = support::whoami(&server.origin).args(["--for", "universes.create-place-version"]).output().unwrap();
     let game = Game::new(Some(TWO));
     let publish = game.publish(&server.origin, &["production", "--dry-run"]);
     assert_eq!(code(&oc), 3);
@@ -215,28 +211,14 @@ fn dry_run_reuses_oc_auth_check_validation() {
 }
 
 #[test]
-fn credentials_follow_the_documented_precedence_without_fallthrough() {
-    let game = Game::new(Some(&TWO.replace("universe=10", "universe=10\nprofile='manifest'")));
-    fs::write(game.0.path().join("config.toml"), "[oc]\ndefault_profile='default'\n[oc.profiles.flag]\nkey_env='FLAG_KEY'\n[oc.profiles.variable]\nkey_env='VARIABLE_KEY'\n[oc.profiles.manifest]\nkey_env='MANIFEST_KEY'\n[oc.profiles.default]\nkey_env='DEFAULT_KEY'\n").unwrap();
-    for (flag, variable, direct, expected) in [
-        (Some("flag"), Some("variable"), true, "flag-key"),
-        (None, Some("variable"), true, "variable-key"),
-        (None, None, true, KEY),
-        (None, None, false, "manifest-key"),
-    ] {
+fn the_environment_key_wins_over_dot_env_and_dot_env_stands_alone() {
+    let game = Game::new(Some(TWO));
+    fs::write(game.0.path().join(".env"), "# the game's key\nexport CRUCIBLE_OC_API_KEY=\"dot-env-key\"\nOTHER=1\n")
+        .unwrap();
+    for (direct, expected) in [(true, KEY), (false, "dot-env-key")] {
         let server = Server::new(vec![Response::json(json!({"versionNumber":1}))]);
         let mut cmd = game.command(&server.origin);
-        cmd.args(["production", "--place", "start"])
-            .env("FLAG_KEY", "flag-key")
-            .env("VARIABLE_KEY", "variable-key")
-            .env("MANIFEST_KEY", "manifest-key")
-            .env("DEFAULT_KEY", "default-key");
-        if let Some(profile) = flag {
-            cmd.args(["--profile", profile]);
-        }
-        if let Some(profile) = variable {
-            cmd.env("CRUCIBLE_OC_PROFILE", profile);
-        }
+        cmd.args(["production", "--place", "start"]);
         if !direct {
             cmd.env_remove("CRUCIBLE_OC_API_KEY");
         }
@@ -244,9 +226,38 @@ fn credentials_follow_the_documented_precedence_without_fallthrough() {
         assert_eq!(code(&out), 0, "{}", document(&out));
         assert!(server.requests()[0].head.contains(&format!("x-api-key: {expected}")));
     }
+}
+
+#[test]
+fn a_dry_run_reports_the_dot_env_key_source() {
+    let game = Game::new(Some(TWO));
+    fs::write(game.0.path().join(".env"), "CRUCIBLE_OC_API_KEY=dot-env-key\n").unwrap();
+    let server = Server::new(vec![introspection(json!([{"name":"universe-places","operations":["write"]}]))]);
+    let out = game
+        .command(&server.origin)
+        .args(["production", "--dry-run"])
+        .env_remove("CRUCIBLE_OC_API_KEY")
+        .output()
+        .unwrap();
+    assert_eq!(code(&out), 0, "{}", document(&out));
+    assert_eq!(document(&out)["auth"]["keySource"], ".env");
+    assert_eq!(server.requests()[0].body, br#"{"apiKey":"dot-env-key"}"#);
+}
+
+#[test]
+fn a_missing_key_precedes_the_build_and_leaves_every_place_unattempted() {
+    let game = Game::new(Some(TWO));
+    fs::write(game.0.path().join(".env"), "OTHER=1\n").unwrap();
     let server = Server::new(vec![]);
-    let out = game.publish(&server.origin, &["production", "--profile", "missing"]);
+    let out = game.command(&server.origin).arg("production").env_remove("CRUCIBLE_OC_API_KEY").output().unwrap();
     assert_eq!(code(&out), 3);
+    assert_eq!(
+        document(&out),
+        json!({"error":{"kind":"auth","message":"set CRUCIBLE_OC_API_KEY in the environment or in .env","status":null,
+        "requiredScopes":[{"name":"universe-places:write","target":"v1"}],"scopeMetadata":"declared","keySource":null,
+        "publish":{"environment":"production","dryRun":false,"published":[],"failed":null,"notAttempted":["arena","start"]}}})
+    );
+    assert!(!game.0.path().join("out").exists());
     assert!(server.requests().is_empty());
 }
 
@@ -260,51 +271,6 @@ fn upload_error_redacts_the_key_and_signed_urls() {
     assert!(!combined.contains(KEY));
     assert!(!combined.contains("signature=secret"));
     assert_eq!(server.requests().len(), 1);
-}
-
-#[test]
-fn credential_failures_precede_build_and_leave_every_place_unattempted() {
-    for manifest_profile in [false, true] {
-        let manifest =
-            if manifest_profile { TWO.replace("universe=10", "universe=10\nprofile='missing'") } else { TWO.into() };
-        let game = Game::new(Some(&manifest));
-        let server = Server::new(vec![]);
-        let mut cmd = game.command(&server.origin);
-        cmd.arg("production").env_remove("CRUCIBLE_OC_API_KEY");
-        if !manifest_profile {
-            cmd.args(["--profile", "missing"]);
-        }
-        let out = cmd.output().unwrap();
-        assert_eq!(code(&out), 3);
-        assert_eq!(
-            document(&out),
-            json!({"error":{"kind":"auth","message":"profile missing does not exist","status":null,
-            "requiredScopes":[{"name":"universe-places:write","target":"v1"}],"scopeMetadata":"declared","keySource":null,"profiles":[],
-            "publish":{"environment":"production","dryRun":false,"published":[],"failed":null,"notAttempted":["arena","start"]}}})
-        );
-        assert!(!game.0.path().join("out").exists());
-        assert!(server.requests().is_empty());
-    }
-}
-
-#[test]
-fn user_default_profile_is_used_without_other_credentials() {
-    let game = Game::new(Some(TWO));
-    fs::write(
-        game.0.path().join("config.toml"),
-        "[oc]\ndefault_profile='default'\n[oc.profiles.default]\nkey_env='DEFAULT_KEY'",
-    )
-    .unwrap();
-    let server = Server::new(vec![Response::json(json!({"versionNumber":1}))]);
-    let out = game
-        .command(&server.origin)
-        .args(["production", "--place", "start"])
-        .env_remove("CRUCIBLE_OC_API_KEY")
-        .env("DEFAULT_KEY", "default-key")
-        .output()
-        .unwrap();
-    assert_eq!(code(&out), 0, "{}", document(&out));
-    assert!(server.requests()[0].head.contains("x-api-key: default-key"));
 }
 
 #[test]
@@ -331,9 +297,9 @@ fn stdout_failure_preserves_upload_uncertainty() {
 }
 
 #[test]
-fn recovery_replays_explicit_profile_and_verbose_without_reuploading_successes() {
+fn recovery_replays_verbose_and_reads_dot_env_again_without_reuploading_successes() {
     let game = Game::new(Some(TWO));
-    fs::write(game.0.path().join("config.toml"), "[oc.profiles.flag]\nkey_env='FLAG_KEY'\n").unwrap();
+    fs::write(game.0.path().join(".env"), "CRUCIBLE_OC_API_KEY=dot-env-key\n").unwrap();
     let server = Server::new(vec![
         Response::json(json!({"versionNumber":7})),
         Response::Body(400, "bad request".into()),
@@ -341,28 +307,15 @@ fn recovery_replays_explicit_profile_and_verbose_without_reuploading_successes()
     ]);
     let out = game
         .command(&server.origin)
-        .args(["production", "--profile", "flag", "--verbose"])
+        .args(["production", "--verbose"])
         .env_remove("CRUCIBLE_OC_API_KEY")
-        .env("FLAG_KEY", "flag-key")
         .output()
         .unwrap();
     assert_eq!(code(&out), 4, "{}", document(&out));
     let d = document(&out);
     let next: Vec<String> = serde_json::from_value(d["error"]["publish"]["next"].clone()).unwrap();
-    assert_eq!(next[0], "crucible");
-    let replay = game
-        .binary(&server.origin)
-        .args(&next[1..])
-        .env_remove("CRUCIBLE_OC_API_KEY")
-        .env("FLAG_KEY", "flag-key")
-        .output()
-        .unwrap();
-    println!(
-        "next={next:?} replay exit={} stdout={} stderr={}",
-        code(&replay),
-        String::from_utf8_lossy(&replay.stdout),
-        String::from_utf8_lossy(&replay.stderr)
-    );
+    assert_eq!(next, ["crucible", "publish", "production", "--verbose", "--place=start"]);
+    let replay = game.binary(&server.origin).args(&next[1..]).env_remove("CRUCIBLE_OC_API_KEY").output().unwrap();
     assert_eq!(code(&replay), 0, "{}", document(&replay));
     assert_eq!(document(&replay)["published"][0]["name"], "start");
     assert!(String::from_utf8_lossy(&replay.stderr).contains("POST"));
@@ -370,51 +323,7 @@ fn recovery_replays_explicit_profile_and_verbose_without_reuploading_successes()
     assert_eq!(requests.len(), 3);
     for (request, id) in requests.iter().zip(["20", "30", "30"]) {
         assert!(request.head.contains(&format!("/places/{id}/versions?")), "{}", request.head);
-        assert!(request.head.contains("x-api-key: flag-key"), "{}", request.head);
-    }
-}
-
-#[test]
-fn recovery_replays_profile_with_spaces_and_verbose_without_reuploading_successes() {
-    let game = Game::new(Some(TWO));
-    fs::write(game.0.path().join("config.toml"), "[oc.profiles.\"flag space\"]\nkey_env='FLAG_KEY'\n").unwrap();
-    let server = Server::new(vec![
-        Response::json(json!({"versionNumber":7})),
-        Response::Body(400, "bad request".into()),
-        Response::json(json!({"versionNumber":8})),
-    ]);
-    let out = game
-        .command(&server.origin)
-        .args(["production", "--profile", "flag space", "--verbose"])
-        .env_remove("CRUCIBLE_OC_API_KEY")
-        .env("FLAG_KEY", "flag-key")
-        .output()
-        .unwrap();
-    assert_eq!(code(&out), 4, "{}", document(&out));
-    let d = document(&out);
-    let next: Vec<String> = serde_json::from_value(d["error"]["publish"]["next"].clone()).unwrap();
-    assert_eq!(next[0], "crucible");
-    let replay = game
-        .binary(&server.origin)
-        .args(&next[1..])
-        .env_remove("CRUCIBLE_OC_API_KEY")
-        .env("FLAG_KEY", "flag-key")
-        .output()
-        .unwrap();
-    println!(
-        "next={next:?} replay exit={} stdout={} stderr={}",
-        code(&replay),
-        String::from_utf8_lossy(&replay.stdout),
-        String::from_utf8_lossy(&replay.stderr)
-    );
-    assert_eq!(code(&replay), 0, "{}", document(&replay));
-    assert_eq!(document(&replay)["published"][0]["name"], "start");
-    assert!(String::from_utf8_lossy(&replay.stderr).contains("POST"));
-    let requests = server.requests();
-    assert_eq!(requests.len(), 3);
-    for (request, id) in requests.iter().zip(["20", "30", "30"]) {
-        assert!(request.head.contains(&format!("/places/{id}/versions?")), "{}", request.head);
-        assert!(request.head.contains("x-api-key: flag-key"), "{}", request.head);
+        assert!(request.head.contains("x-api-key: dot-env-key"), "{}", request.head);
     }
 }
 

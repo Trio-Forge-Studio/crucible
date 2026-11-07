@@ -1,4 +1,3 @@
-use crate::auth::Profile;
 use crate::call::{BodyInput, Call, PartContent, PartInput};
 use crate::exec::Executor;
 use crate::outcome::Failure;
@@ -51,19 +50,17 @@ enum Upload {
     Create { body: BodyInput, display_name: String, asset_type: AssetType },
     Resume(String),
 }
-fn prepare(args: Args, profile: Option<&Profile>) -> Result<Upload, Failure> {
+fn prepare(args: Args) -> Result<Upload, Failure> {
     if let Some(id) = args.resume {
         return Ok(Upload::Resume(id));
     }
     let path = args.file.as_ref().expect("clap requires a file for creation");
     let (kind, media) = media(path)?;
     let kind = args.asset_type.unwrap_or(kind);
-    let creator = match (args.group, args.user, profile) {
-        (Some(id), _, _) => json!({"groupId":id}),
-        (_, Some(id), _) => json!({"userId":id}),
-        (_, _, Some(p)) if p.group.is_some_and(|id| id > 0) => json!({"groupId":p.group.unwrap().to_string()}),
-        (_, _, Some(p)) if p.user.is_some_and(|id| id > 0) => json!({"userId":p.user.unwrap().to_string()}),
-        _ => return Err(Failure::usage("set --group or --user, or configure the profile's group")),
+    let creator = match (args.group, args.user) {
+        (Some(id), _) => json!({"groupId":id}),
+        (_, Some(id)) => json!({"userId":id}),
+        _ => return Err(Failure::usage("set --group or --user")),
     };
     let name = args.name.unwrap_or_else(|| title(path.file_stem().unwrap_or_default().to_string_lossy().as_ref()));
     let request = json!({"assetType":kind,"displayName":name,"description":args.description,"creationContext":{"creator":creator}});
@@ -97,8 +94,8 @@ fn create(ex: &Executor<'_>, body: BodyInput) -> Result<String, Failure> {
         .and_then(|s| operation_id(s).ok())
         .ok_or_else(|| upload_hint(Failure::unknown("no valid operation ID")))
 }
-pub fn run(ex: &Executor<'_>, args: Args, profile: Option<&Profile>) -> Result<Value, Failure> {
-    let (id, display_name, asset_type) = match prepare(args, profile)? {
+pub fn run(ex: &Executor<'_>, args: Args) -> Result<Value, Failure> {
+    let (id, display_name, asset_type) = match prepare(args)? {
         Upload::Resume(id) => (id, None, None),
         Upload::Create { body, display_name, asset_type } => (create(ex, body)?, Some(display_name), Some(asset_type)),
     };

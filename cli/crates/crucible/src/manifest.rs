@@ -40,7 +40,6 @@ impl Place {
 #[derive(Debug, PartialEq)]
 pub struct Env {
     pub universe: NonZeroU64,
-    pub profile: Option<String>,
     pub version_type: VersionType,
     pub places: BTreeMap<String, NonZeroU64>,
 }
@@ -96,7 +95,6 @@ struct RawManifest {
 #[serde(deny_unknown_fields)]
 struct RawEnv {
     universe: NonZeroU64,
-    profile: Option<String>,
     #[serde(default)]
     version_type: VersionType,
     place: Option<NonZeroU64>,
@@ -153,8 +151,7 @@ impl Manifest {
             if let Some(place) = places.keys().find(|place| !mapping.contains_key(*place)) {
                 return Err(ManifestError::UnmappedPlace { env: name, place: place.clone() });
             }
-            let env =
-                Env { universe: env.universe, profile: env.profile, version_type: env.version_type, places: mapping };
+            let env = Env { universe: env.universe, version_type: env.version_type, places: mapping };
             envs.insert(name, env);
         }
         Ok(Self { places, envs })
@@ -193,7 +190,6 @@ mod tests {
 
             [env.staging]
             universe = 1234
-            profile = "publish"
             places = { start = 5678, arena = 5679 }
 
             [env.production]
@@ -208,13 +204,11 @@ mod tests {
             manifest.envs["staging"],
             Env {
                 universe: id(1234),
-                profile: Some("publish".into()),
                 version_type: VersionType::Saved,
                 places: BTreeMap::from([("start".into(), id(5678)), ("arena".into(), id(5679))]),
             }
         );
         assert_eq!(manifest.envs["production"].version_type, VersionType::Published);
-        assert_eq!(manifest.envs["production"].profile, None);
     }
 
     #[test]

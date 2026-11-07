@@ -91,3 +91,44 @@ fn a_failed_reinstall_off_roblox_ts_restores_package_json_and_exits_1_until_upgr
     assert_eq!(again.status.code(), Some(0));
     assert_eq!(text(&again.stdout), format!("crucible is already at {VERSION}.\n"));
 }
+
+fn apply_with_old_gitignore(gitignore: &str, old: &str) -> (String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("package.json"), "{\n\t\"name\": \"game\",\n\t\"private\": true\n}\n").unwrap();
+    let installed = root.join("node_modules/@trioforge/crucible-cli");
+    fs::create_dir_all(&installed).unwrap();
+    fs::write(installed.join("package.json"), format!("{{\"version\":\"{VERSION}\"}}")).unwrap();
+    fs::write(root.join(".gitignore"), gitignore).unwrap();
+    let snapshot = serde_json::json!({
+        "format": 1,
+        "version": VERSION,
+        "owned": [{"path": ".gitignore", "section": null, "content": old}],
+        "docs": {},
+    });
+    let mut child = Command::new(env!("CARGO_BIN_EXE_crucible"))
+        .args(["__upgrade-apply", VERSION, VERSION, VERSION])
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), snapshot.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    (fs::read_to_string(root.join(".gitignore")).unwrap(), text(&out.stdout))
+}
+
+#[test]
+fn an_untouched_gitignore_gains_dot_env_and_an_edited_one_is_left_alone() {
+    let old = "node_modules/\nout/\ninclude/\nbuild/\n";
+    let (refreshed, report) = apply_with_old_gitignore(old, old);
+    assert_eq!(refreshed, format!("{old}.env\n"));
+    assert!(report.contains(".gitignore"), "{report}");
+
+    let edited = format!("{old}notes/\n");
+    let (kept, report) = apply_with_old_gitignore(&edited, old);
+    assert_eq!(kept, edited);
+    assert!(report.contains(".gitignore"), "{report}");
+}
