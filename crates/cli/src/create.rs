@@ -165,8 +165,8 @@ pub fn package_manager(agent: &str) -> &'static str {
 
 pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
     let workspace: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../package.json")).expect("workspace package.json is valid");
-    let sample: serde_json::Value = serde_json::from_str(include_str!("../../../../examples/sample-game/package.json"))
+        serde_json::from_str(include_str!("../../../package.json")).expect("workspace package.json is valid");
+    let sample: serde_json::Value = serde_json::from_str(include_str!("../../../examples/sample-game/package.json"))
         .expect("sample package.json is valid");
     let mut tokens = vec![("__NAME__", name.into()), ("__VERSION__", env!("CARGO_PKG_VERSION").into())];
     for (token, package, manifest) in
@@ -227,8 +227,8 @@ mod tests {
     #[test]
     fn runtime_compiler_types_and_cli_release_together() {
         for manifest in [
-            include_str!("../../../../packages/crucible/package.json"),
-            include_str!("../../../../packages/compiler-types/package.json"),
+            include_str!("../../../packages/crucible/package.json"),
+            include_str!("../../../packages/compiler-types/package.json"),
         ] {
             let package: serde_json::Value = serde_json::from_str(manifest).unwrap();
             assert_eq!(package["version"], env!("CARGO_PKG_VERSION"), "{}", package["name"]);

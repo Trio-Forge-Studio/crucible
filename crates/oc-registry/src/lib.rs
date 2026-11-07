@@ -219,7 +219,7 @@ mod tests {
     use super::*;
 
     fn search(operations: &[(&str, &str)], query: &str) -> Vec<String> {
-        let mut registry: Registry = serde_json::from_str(include_str!("../../../spec/registry.json")).unwrap();
+        let mut registry: Registry = serde_json::from_str(include_str!("../spec/registry.json")).unwrap();
         let base = registry.ops[0].clone();
         registry.ops = operations
             .iter()

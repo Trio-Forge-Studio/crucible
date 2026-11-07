@@ -161,7 +161,7 @@ fn theme_errors_pin_keys_and_values_to_line_and_column() {
 
 #[test]
 fn class_keywords_and_diagnostics_are_documented() {
-    let docs = include_str!("../../../../../docs/ui.md");
+    let docs = include_str!("../../../../docs/ui.md");
     for token in Catalog::empty(false).named.keys() {
         assert!(docs.contains(token), "{token}");
     }

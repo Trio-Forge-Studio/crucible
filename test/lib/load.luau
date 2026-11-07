@@ -49,7 +49,7 @@ end
 -- roblox-ts emits `TS.Promise` for the Promise global; the RuntimeLib's copy needs only a Heartbeat to load. Its
 -- source is read here because Lune's readFile yields, and `TS.Promise` resolves inside a metamethod. Scratch copies
 -- without node_modules never reach it.
-local PROMISE_PATH = "cli/crates/compiler/roblox-ts/Promise.lua"
+local PROMISE_PATH = "crates/compiler/roblox-ts/Promise.lua"
 local PROMISE_SOURCE = if fs.isFile(PROMISE_PATH) then fs.readFile(PROMISE_PATH) else nil
 local promise
 local function Promise()

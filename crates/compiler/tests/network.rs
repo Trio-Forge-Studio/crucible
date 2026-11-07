@@ -25,7 +25,7 @@ fn fresh() -> Game {
 }
 
 fn fixture(path: &str) -> String {
-    let file = repo().join("cli/crates/compiler/tests/transform-fixtures").join(path);
+    let file = repo().join("crates/compiler/tests/transform-fixtures").join(path);
     std::fs::read_to_string(&file).unwrap_or_else(|_| panic!("{} exists", file.display())).replace('\r', "")
 }
 
@@ -3094,7 +3094,7 @@ fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let result = std::process::Command::new("lune")
         .current_dir(repo())
         .arg("run")
-        .arg(repo().join("cli/crates/compiler/tests/lowering/declarations.luau"))
+        .arg(repo().join("crates/compiler/tests/lowering/declarations.luau"))
         .arg(repo().join("build/sample-game.rbxl"))
         .arg(scratch.join("runtime"))
         .arg(scratch.join("game"))

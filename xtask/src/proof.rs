@@ -31,7 +31,7 @@ use crate::run::{git, git_maybe, repo};
 const USAGE: &str = "usage: cargo xtask proof [<base>]";
 const SIMILARITY: u32 = 95;
 /// Generated files whose CI check proves they match what their command writes.
-const GENERATED: &[&str] = &[BASELINE, arch::LIST, "cli/spec/registry.json"];
+const GENERATED: &[&str] = &[BASELINE, arch::LIST, "crates/oc-registry/spec/registry.json"];
 /// The extensions that make a word read as a file name.
 const EXTENSIONS: &[&str] = &[
     "rs", "ts", "tsx", "js", "mjs", "cjs", "json", "jsonc", "toml", "yml", "yaml", "md", "txt", "lua", "luau", "rbxl",
@@ -421,10 +421,10 @@ mod tests {
     fn mechanical_commits_are_flagged_when_they_add_logic() {
         let dir = std::env::temp_dir().join(format!("xtask-proof-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("cli/xtask")).unwrap();
+        std::fs::create_dir_all(dir.join("xtask")).unwrap();
         let body: String = (0..40).map(|i| format!("let line_{i} = elapsed.as_secs_f64() * 1e3;\n")).collect();
         std::fs::write(dir.join("cli/lib.rs"), &body).unwrap();
-        std::fs::write(dir.join("cli/xtask/arch.txt"), "1 a \"x\"\n").unwrap();
+        std::fs::write(dir.join("xtask/arch.txt"), "1 a \"x\"\n").unwrap();
         std::fs::write(dir.join("ci.yml"), "run: cargo test --manifest-path cli/Cargo.toml\n").unwrap();
         std::fs::write(dir.join("gone.rs"), "fn gone() {}\n").unwrap();
         git(&dir, &["init", "-q"]);
@@ -434,7 +434,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("crates")).unwrap();
         std::fs::rename(dir.join("cli/lib.rs"), dir.join("crates/lib.rs")).unwrap();
         std::fs::write(dir.join("ci.yml"), "run: cargo test --manifest-path Cargo.toml\n").unwrap();
-        std::fs::write(dir.join("cli/xtask/arch.txt"), "").unwrap();
+        std::fs::write(dir.join("xtask/arch.txt"), "").unwrap();
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-q", "-m", "move"]);
         let clean = mechanical(&dir, "HEAD").unwrap();

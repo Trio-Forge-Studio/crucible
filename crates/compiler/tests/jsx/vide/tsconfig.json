@@ -1,17 +1,17 @@
 {
-	"extends": "../../../../../../tsconfig.json",
+	"extends": "../../../../../tsconfig.json",
 	"compilerOptions": {
 		"rootDir": "src",
 		"jsx": "react",
 		"jsxFactory": "Vide.jsx",
 		"jsxFragmentFactory": "Vide.Fragment",
 		"typeRoots": [
-			"../../../../../../packages/crucible/node_modules/@trioforge",
-			"../../../../../../packages/crucible/node_modules/@rbxts"
+			"../../../../../packages/crucible/node_modules/@trioforge",
+			"../../../../../packages/crucible/node_modules/@rbxts"
 		],
 		"types": ["compiler-types", "types"],
 		"paths": {
-			"@rbxts/vide": ["../../../../../../packages/crucible/node_modules/@rbxts/vide"]
+			"@rbxts/vide": ["../../../../../packages/crucible/node_modules/@rbxts/vide"]
 		}
 	},
 	"include": ["src"]

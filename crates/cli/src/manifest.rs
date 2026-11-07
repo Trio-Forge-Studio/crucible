@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn cli_guide_example_parses() {
-        let guide = include_str!("../../../../docs/cli.md").replace("\r\n", "\n");
+        let guide = include_str!("../../../docs/cli.md").replace("\r\n", "\n");
         let (_, rest) = guide.split_once("```toml\n[places.start]").expect("CLI guide shows a crucible.toml");
         let (body, _) = rest.split_once("```").unwrap();
         let manifest = Manifest::parse(&format!("[places.start]{body}")).unwrap();

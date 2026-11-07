@@ -66,7 +66,7 @@ const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
 const sorted = (codes) => [...new Set(codes)].sort();
 test("the diagnostics guide lists every CRU code the compiler reports, in order", () => {
-	const compilerDir = path.join(repo, "cli/crates/compiler/src");
+	const compilerDir = path.join(repo, "crates/compiler/src");
 	const compiler = sorted(
 		fs
 			.readdirSync(compilerDir, { recursive: true })

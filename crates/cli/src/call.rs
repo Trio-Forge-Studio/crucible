@@ -379,7 +379,7 @@ pub fn mime(path: &std::path::Path) -> &'static str {
 mod tests {
     use super::*;
     fn registry() -> oc_registry::Registry {
-        serde_json::from_str(include_str!("../../../spec/registry.json")).unwrap()
+        serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).unwrap()
     }
     #[test]
     fn binding_checks_and_encodes_at_the_boundary() {
