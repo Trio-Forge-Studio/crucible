@@ -187,7 +187,7 @@ mod tests {
 
     fn runtime_limits(file: &str) -> Vec<(String, String)> {
         let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../packages/crucible/src/internal").join(file);
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/crucible/src/internal").join(file);
         let text = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{} exists", path.display()));
         text.lines()
             .filter_map(|line| line.trim().strip_prefix("export const "))

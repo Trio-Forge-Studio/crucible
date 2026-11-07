@@ -15,7 +15,7 @@ const rebuild = () => {
 			"--quiet",
 			"--locked",
 			"--manifest-path",
-			"../../cli/Cargo.toml",
+			"../../Cargo.toml",
 			"--bin",
 			"crucible",
 			"--",

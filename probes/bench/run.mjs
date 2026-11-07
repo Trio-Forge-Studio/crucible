@@ -77,7 +77,7 @@ function digest(dir) {
 
 const BUILDERS = {
 	compiler(out) {
-		const compile = path.join(root, "cli/target/release/examples/compile.exe");
+		const compile = path.join(root, "target/release/examples/compile.exe");
 		if (!fs.existsSync(compile))
 			throw Error("Build the compiler first: cargo build --release -p crucible-compiler --example compile");
 		execFileSync(compile, [path.join(bench, "tsconfig.json"), out], { stdio: "inherit" });
@@ -113,7 +113,7 @@ function placeFor(variant, out, libmp, label) {
 			ReplicatedStorage: {
 				$className: "ReplicatedStorage",
 				TS: { $path: path.join(out, "shared") },
-				rbxts_include: { $path: path.join(root, "cli/crates/compiler/roblox-ts") },
+				rbxts_include: { $path: path.join(root, "crates/compiler/roblox-ts") },
 				LibMP: { $path: libmp },
 			},
 			ServerScriptService: { $className: "ServerScriptService", TS: { $path: path.join(out, "server") } },

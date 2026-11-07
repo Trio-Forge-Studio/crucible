@@ -11,7 +11,7 @@ use syntect::parsing::{SyntaxDefinition, SyntaxSet, SyntaxSetBuilder};
 const DIAGRAM_WIDTHS: [usize; 4] = [40, 60, 80, 100];
 
 fn main() {
-    let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../docs");
+    let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
     println!("cargo::rerun-if-changed={}", docs.display());
     let mut files: Vec<_> = std::fs::read_dir(&docs)
         .expect("the repository has a docs folder")

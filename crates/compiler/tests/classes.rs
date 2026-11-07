@@ -382,7 +382,7 @@ fn each_bad_breakpoint_reports_cru030_at_its_key_or_value() {
 
 #[test]
 fn the_guide_examples_compile_against_the_guide_theme() {
-    let guide = include_str!("../../../../docs/ui.md");
+    let guide = include_str!("../../../docs/ui.md");
     let block = |lang: &str| -> Vec<&str> {
         guide.split(&format!("```{lang}\n")).skip(1).map(|b| b.split("```").next().unwrap()).collect()
     };

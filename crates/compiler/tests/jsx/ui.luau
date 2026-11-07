@@ -2,7 +2,7 @@
 -- folders: the runtime under ReplicatedStorage's rbxts_include, and the fixtures under StarterPlayerScripts.
 local process = require("@lune/process")
 local task = require("@lune/task")
-local Engine = require("../../../../../test/lib/engine")
+local Engine = require("../../../../test/lib/engine")
 local fake = require("./instance")
 local graph = require("./load")
 local roblox = require("@lune/roblox")

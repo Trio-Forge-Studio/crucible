@@ -5,8 +5,8 @@ local luau = require("@lune/luau")
 local process = require("@lune/process")
 local roblox = require("@lune/roblox")
 local task = require("@lune/task")
-local engine = require("../../../../../test/lib/engine")
-local networkPort = require("../../../../../test/lib/network-port")
+local engine = require("../../../../test/lib/engine")
+local networkPort = require("../../../../test/lib/network-port")
 
 local placePath, runtime, gameOut = process.args[1], process.args[2], process.args[3]
 assert(placePath and runtime and gameOut, "usage: declarations.luau <place> <runtime out> <game out>")

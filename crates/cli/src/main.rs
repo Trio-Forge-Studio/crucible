@@ -28,7 +28,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../../spec/registry.json")).expect("embedded registry is valid")
+    serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).expect("embedded registry is valid")
 });
 fn main() -> ExitCode {
     let cli = match Cli::try_parse() {

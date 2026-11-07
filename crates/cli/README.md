@@ -10,7 +10,7 @@ A topic starts with a `# Title` line, a blank line, and a one-line summary that 
 
 ## Build the CLI
 
-Run this from `cli/` with the toolchain pinned in the repository's `rust-toolchain.toml`. The binary is `target/release/crucible`.
+Run this from `.` with the toolchain pinned in the repository's `rust-toolchain.toml`. The binary is `target/release/crucible`.
 
 ```console
 cargo build --release --locked --package crucible
@@ -32,9 +32,9 @@ node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 
 `.github/workflows/release.yml` runs on pull requests and `v*` tag pushes. It builds MSVC Windows x64, static musl Linux x64, and Apple Silicon macOS arm64 binaries on GitHub-hosted runners. Windows checks the static CRT. Linux checks `file` and `ldd`. macOS checks the arm64 executable and system library links. All three execute the binary.
 
-The packaging job builds the runtime, generates `THIRD_PARTY_NOTICES` with cargo-about from the locked dependency graph, and stages all packages at the version in `cli/Cargo.toml`. The platform packages include the notices and MIT license. Notices include dependency license texts, the Rojo source location for its MPL-2.0 license when Rojo is bundled, tsrs's NOTICE, and roblox-ts's MIT license for the runtime library the binary embeds. New dependency licenses outside `cli/about.toml` fail the job for review.
+The packaging job builds the runtime, generates `THIRD_PARTY_NOTICES` with cargo-about from the locked dependency graph, and stages all packages at the version in `Cargo.toml`. The platform packages include the notices and MIT license. Notices include dependency license texts, the Rojo source location for its MPL-2.0 license when Rojo is bundled, tsrs's NOTICE, and roblox-ts's MIT license for the runtime library the binary embeds. New dependency licenses outside `crates/cli/about.toml` fail the job for review.
 
-`node cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64`, `win32-x64`, and `darwin-arm64`. It checks `npm pack --dry-run` for runtime output, side entries, and the compiler types, then packs the tarballs. CI runs `npm stage publish --dry-run` on each tarball without credentials. Pull request runs stage `<version>-pr.<run id>`, because npm refuses a dry run of a published version. Tags must match `v` plus the Cargo version.
+`node crates/cli/npm/release.mjs <binaries> <out> <notices>` expects directories named `linux-x64`, `win32-x64`, and `darwin-arm64`. It checks `npm pack --dry-run` for runtime output, side entries, and the compiler types, then packs the tarballs. CI runs `npm stage publish --dry-run` on each tarball without credentials. Pull request runs stage `<version>-pr.<run id>`, because npm refuses a dry run of a published version. Tags must match `v` plus the Cargo version.
 
 The publish job runs on GitHub-hosted `ubuntu-latest`. npm provenance rejects self-hosted runners, including Blacksmith. The publish job holds no npm token. It authenticates through [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) from the `npm-release` GitHub Environment, and it can only [stage](https://docs.npmjs.com/cli/v11/commands/npm-stage) versions. A staged version stays private until a maintainer approves it with 2FA, so a compromised workflow cannot release on its own.
 
@@ -53,7 +53,7 @@ Trusted publishing only stages versions of packages that already exist. Before t
 
 ### Cut a release
 
-1. Bump `[workspace.package].version` in `cli/Cargo.toml` and `version` in `packages/crucible/package.json` and `packages/compiler-types/package.json` together. Run Cargo to refresh `cli/Cargo.lock` and retain it. Generated npm packages inherit the Cargo version.
+1. Bump `[workspace.package].version` in `Cargo.toml` and `version` in `packages/crucible/package.json` and `packages/compiler-types/package.json` together. Run Cargo to refresh `Cargo.lock` and retain it. Generated npm packages inherit the Cargo version.
 2. Choose a version never used by any of the packages. The registry preflight checks both `versions` and `time` keys before staging. Unpublishing does not make a version reusable.
 3. Run the repository checks and review the package dry runs in CI. Commit and land the version change before tagging.
 4. Create and push the exact version tag, replacing `X.Y.Z` below.
@@ -126,7 +126,7 @@ After an overlay edit, run `cargo xtask spec build`. Keep the previous registry 
 
 ## Verify changes
 
-Run these from `cli/`.
+Run these from `.`.
 
 Publish tests use local HTTP servers and never upload to Roblox. Recovery tests replay the emitted `next` argument array through a process spawn API and check place ids and credentials, including a key read from `.env`. `next` is a JSON array of strings beginning with `"crucible"`. Run it through `npx` as argv without shell parsing or joining its elements. Recovery preserves an explicit `--verbose` flag and selects each remaining place with `--place=<name>`, including names that start with `-`.
 

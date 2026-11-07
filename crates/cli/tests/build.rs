@@ -11,7 +11,7 @@ use game::{repo, slashes};
 use serde_json::{Value, json};
 
 fn vendored(name: &str) -> Vec<u8> {
-    fs::read(repo().join("cli/crates/compiler/roblox-ts").join(name)).unwrap()
+    fs::read(repo().join("crates/compiler/roblox-ts").join(name)).unwrap()
 }
 
 struct Game {
