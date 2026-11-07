@@ -1,17 +1,48 @@
-mod languages;
-mod reader;
-mod render;
-mod search;
+pub mod search;
 
-use std::io::{IsTerminal, Write};
-use std::process::ExitCode;
+use std::collections::HashMap;
 
 pub struct Topic {
     pub name: &'static str,
     pub markdown: &'static str,
 }
 
-pub static TOPICS: &[Topic] = &include!(concat!(env!("OUT_DIR"), "/topics.rs"));
+macro_rules! topics {
+    ($($file:literal),* $(,)?) => {
+        &[$(Topic { name: stem($file), markdown: include_str!(concat!("../../../docs/", $file)) }),*]
+    };
+}
+
+const fn stem(file: &'static str) -> &'static str {
+    let Some((stem, b".md")) = file.as_bytes().split_last_chunk::<3>() else { panic!("a topic is a .md file") };
+    match std::str::from_utf8(stem) {
+        Ok(stem) => stem,
+        Err(_) => panic!("a topic name is UTF-8"),
+    }
+}
+
+/// A build script would need `std::env` to find `OUT_DIR`, which only the CLI may read, so the topics are listed here
+/// and a test fails when the list and the `docs` folder differ.
+pub static TOPICS: &[Topic] = topics![
+    "boot.md",
+    "cli.md",
+    "configs.md",
+    "data-stores.md",
+    "diagnostics.md",
+    "lifecycle.md",
+    "logging.md",
+    "networking.md",
+    "oc.md",
+    "profile-stores.md",
+    "random.md",
+    "reactive.md",
+    "replicated.md",
+    "sample-game.md",
+    "spline.md",
+    "testing.md",
+    "ui.md",
+    "vide.md",
+];
 
 impl Topic {
     pub fn summary(&self) -> Option<&'static str> {
@@ -25,42 +56,49 @@ impl Topic {
     }
 }
 
-/// Agents read `crucible docs` through a pipe and need the Markdown bytes, so only a person at a terminal gets the reader.
-pub fn run(topic: Option<&str>, plain: bool) -> ExitCode {
-    let dumb = std::env::var_os("TERM").is_some_and(|term| term == "dumb");
-    if plain || dumb || !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        return print(topic);
-    }
-    match reader::run(topic) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("crucible docs: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
+/// GitHub's anchor rules: lowercase, drop punctuation, spaces become hyphens, and repeats get `-1`, `-2`.
+#[derive(Default)]
+pub struct Slugger(HashMap<String, usize>);
 
-fn print(topic: Option<&str>) -> ExitCode {
-    let text = match topic {
-        Some(name) => {
-            TOPICS.iter().find(|topic| topic.name == name).expect("clap accepts only topic names").markdown.to_owned()
+impl Slugger {
+    pub fn slug(&mut self, text: &str) -> String {
+        let base: String = text
+            .trim()
+            .to_lowercase()
+            .chars()
+            .filter_map(|c| match c {
+                ' ' => Some('-'),
+                c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+                _ => None,
+            })
+            .collect();
+        let mut slug = base.clone();
+        while self.0.contains_key(&slug) {
+            let count = self.0.get_mut(&base).expect("a taken slug's base is taken");
+            *count += 1;
+            slug = format!("{base}-{count}");
         }
-        None => {
-            let width = TOPICS.iter().map(|topic| topic.name.len()).max().unwrap_or(0);
-            TOPICS
-                .iter()
-                .map(|topic| {
-                    format!("{:width$}  {}\n", topic.name, topic.summary().expect("every topic has a summary"))
-                })
-                .collect()
-        }
-    };
-    if std::io::stdout().lock().write_all(text.as_bytes()).is_ok() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+        self.0.insert(slug.clone(), 0);
+        slug
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_docs_file_is_a_topic() {
+        let mut files: Vec<String> = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+            .map(|path| path.file_stem().unwrap().to_str().unwrap().to_owned())
+            .collect();
+        files.sort();
+        let topics: Vec<_> = TOPICS.iter().map(|topic| topic.name).collect();
+        assert_eq!(topics, files, "TOPICS in crates/docs/src/lib.rs lists each docs/*.md file in byte order");
+    }
 
     #[test]
     fn every_topic_has_a_summary_line() {

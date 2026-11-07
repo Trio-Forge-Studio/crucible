@@ -488,7 +488,7 @@ fn snapshot(name: &str) -> SnapshotV1 {
             PartV1 { path: path.into(), section: heading.map(Into::into), content: render(source, &tokens) }
         })
         .collect();
-    let docs = crate::docs::TOPICS
+    let docs = crucible_docs::TOPICS
         .iter()
         .map(|topic| (topic.name.to_owned(), format!("{:x}", Sha256::digest(topic.markdown))))
         .collect();

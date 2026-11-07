@@ -64,7 +64,7 @@ pub enum Command {
     },
 }
 fn topics() -> clap::builder::PossibleValuesParser {
-    crate::docs::TOPICS
+    crucible_docs::TOPICS
         .iter()
         .map(|topic| clap::builder::PossibleValue::new(topic.name).help(topic.summary()))
         .collect::<Vec<_>>()
