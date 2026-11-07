@@ -88,7 +88,7 @@ export function stage(out, binaries, notices, version = cliVersion()) {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 	const [out, ...pairs] = process.argv.slice(2);
 	if (!out || pairs.length === 0 || pairs.some((pair) => !pair.includes("="))) {
-		process.stderr.write("Usage: node npm/stage.mjs <out> <os>-<cpu>=<binary> [...]\n");
+		process.stderr.write("Usage: node crates/cli/npm/stage.mjs <out> <os>-<cpu>=<binary> [...]\n");
 		process.exit(2);
 	}
 	const binaries = Object.fromEntries(pairs.map((pair) => pair.split(/=(.*)/s, 2)));
