@@ -115,7 +115,6 @@ pub fn choose(
     }
     Err("set CRUCIBLE_OC_API_KEY or select a configured profile".into())
 }
-/// `env` reads one environment variable, so the caller decides where the environment comes from.
 pub fn load(config: &Config, source: &KeySource, env: impl Fn(&str) -> Option<String>) -> Result<Secret, String> {
     let value = match source {
         KeySource::Environment => {

@@ -60,7 +60,6 @@ impl Topic {
 /// The CLI's build script draws each Mermaid fence at these widths, and the reader picks the widest that fits the page.
 pub const DIAGRAM_WIDTHS: [usize; 4] = [40, 60, 80, 100];
 
-/// Each fenced code block as its info string and its text.
 pub fn fences(markdown: &str) -> Vec<(String, String)> {
     let mut fences = Vec::new();
     let mut open: Option<(String, String)> = None;

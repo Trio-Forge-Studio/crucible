@@ -27,7 +27,6 @@ impl Clock for SystemClock {
         std::thread::sleep(duration);
     }
 }
-/// A request the transport can build again for every attempt.
 pub trait Request {
     fn operation(&self) -> Operation<'_>;
     fn build(&self, origin: &str) -> Result<ureq::http::Request<Vec<u8>>, Failure>;
