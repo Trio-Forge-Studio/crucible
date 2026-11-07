@@ -1,7 +1,9 @@
 mod build;
 mod diff;
+mod golden;
 mod naming;
 mod overlay;
+mod run;
 #[cfg(test)]
 mod tests;
 
@@ -16,18 +18,14 @@ use sha2::{Digest, Sha256};
 const SPEC_REPOSITORY: &str = "Roblox/creator-docs";
 const SPEC_PATH: &str = "content/en-us/reference/cloud/openapi.json";
 
+const USAGE: &str = "usage: cargo xtask <spec|golden> ...";
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let flag = |name: &str| args.iter().position(|arg| arg == name).and_then(|at| args.get(at + 1)).cloned();
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let spec_path = flag("--spec").map(PathBuf::from).unwrap_or_else(|| root.join("spec/openapi.json"));
-    let registry_path = flag("--out").map(PathBuf::from).unwrap_or_else(|| root.join("spec/registry.json"));
-    let overlay_path = root.join("spec/overlay.toml");
-    let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        ["spec", "build", ..] => rebuild(&spec_path, &registry_path, &overlay_path, flag("--commit"), Mode::Write),
-        ["spec", "check", ..] => rebuild(&spec_path, &registry_path, &overlay_path, flag("--commit"), Mode::Check),
-        ["spec", "update", ..] => update(&spec_path, &registry_path, &overlay_path),
-        _ => Err("usage: cargo xtask spec <update|build|check> [--spec path] [--out path] [--commit sha]".into()),
+    let result = match args.first().map(String::as_str) {
+        Some("spec") => spec(&args),
+        Some("golden") => golden::main(&args[1..]),
+        _ => Err(USAGE.into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -35,6 +33,20 @@ fn main() -> ExitCode {
             eprintln!("{message}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn spec(args: &[String]) -> Result<(), String> {
+    let flag = |name: &str| args.iter().position(|arg| arg == name).and_then(|at| args.get(at + 1)).cloned();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let spec_path = flag("--spec").map(PathBuf::from).unwrap_or_else(|| root.join("spec/openapi.json"));
+    let registry_path = flag("--out").map(PathBuf::from).unwrap_or_else(|| root.join("spec/registry.json"));
+    let overlay_path = root.join("spec/overlay.toml");
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["spec", "build", ..] => rebuild(&spec_path, &registry_path, &overlay_path, flag("--commit"), Mode::Write),
+        ["spec", "check", ..] => rebuild(&spec_path, &registry_path, &overlay_path, flag("--commit"), Mode::Check),
+        ["spec", "update", ..] => update(&spec_path, &registry_path, &overlay_path),
+        _ => Err("usage: cargo xtask spec <update|build|check> [--spec path] [--out path] [--commit sha]".into()),
     }
 }
 
