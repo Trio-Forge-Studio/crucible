@@ -8,7 +8,8 @@
 		"fmt": "vp fmt && stylua test .lune probes cli/crates/compiler/tests",
 		"test:compiler": "node test/compiler/specs.mjs",
 		"prepare": "vp config",
-		"specs:check": "node specs/check.mjs"
+		"specs:check": "node specs/check.mjs",
+		"specs:mutate": "node specs/mutate.mjs provisioning"
 	},
 	"devDependencies": {
 		"@trioforge/tooling": "0.1.0",
