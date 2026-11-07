@@ -7,7 +7,8 @@
 		"check": "vp check && stylua --check test .lune probes cli/crates/compiler/tests && selene test .lune cli/crates/compiler/tests && selene --config probes/engine/selene.toml probes && node --test probes/engine/verification.test.mjs probes/modules/verification.test.mjs probes/sample/verification.test.mjs probes/bench/verification.test.mjs && pnpm run test",
 		"fmt": "vp fmt && stylua test .lune probes cli/crates/compiler/tests",
 		"test:compiler": "node test/compiler/specs.mjs",
-		"prepare": "vp config"
+		"prepare": "vp config",
+		"specs:check": "node specs/check.mjs"
 	},
 	"devDependencies": {
 		"@trioforge/tooling": "0.1.0",
