@@ -1,5 +1,5 @@
+use crate::Auth;
 use crate::outcome::Failure;
-use crucible_oc::Auth;
 use serde::Deserialize;
 use serde_json::json;
 use std::ffi::OsString;

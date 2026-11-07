@@ -703,7 +703,12 @@ version = "0.4.0"
 name = "crucible-oc"
 version = "0.4.0"
 dependencies = [
+ "httpmock",
  "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+ "url",
 ]
 
 [[package]]

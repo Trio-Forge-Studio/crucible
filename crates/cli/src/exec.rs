@@ -1,8 +1,8 @@
-use crate::auth::Secret;
 use crate::call::Call;
-use crate::outcome::{Acceptance, Attempt, Failure, History, Verdict, judge};
 use crate::output::Output;
-use crate::transport::{Event, Operation, Reply, Request, Sink, SystemClock, Timing, Transport};
+use crucible_oc::auth::Secret;
+use crucible_oc::outcome::{Acceptance, Attempt, Failure, History, Verdict, judge};
+use crucible_oc::transport::{Event, Operation, Reply, Request, Sink, SystemClock, Timing, Transport};
 use oc_registry::{Completion, Method, Op, Registry};
 use serde_json::{Value, json};
 use std::cell::RefCell;

@@ -1,6 +1,6 @@
 use crate::auth::Secret;
 use crate::outcome::{Attempt, DEFAULT_ATTEMPTS, Failure, History, Verdict, judge, judge_read};
-use crucible_oc::{Auth, Payload, RetryPolicy, Safety};
+use crate::{Auth, Payload, RetryPolicy, Safety};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use ureq::RequestExt;
