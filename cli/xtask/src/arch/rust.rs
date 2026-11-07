@@ -317,7 +317,6 @@ impl Scan {
         i
     }
 
-    /// The entries of `use std::env::{..}`.
     fn use_group(&mut self, group: &proc_macro2::Group) {
         let tokens: Vec<TokenTree> = group.stream().into_iter().collect();
         for entry in tokens.split(|token| matches!(token, TokenTree::Punct(p) if p.as_char() == ',')) {

@@ -30,7 +30,6 @@ pub fn status(command: &mut Command) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err(format!("{shown} failed with {status}")) }
 }
 
-/// Runs `command` and returns its standard output, failing unless it exits 0.
 pub fn stdout(command: &mut Command) -> Result<String, String> {
     let shown = describe(command);
     let output = command.stderr(Stdio::inherit()).output().map_err(|e| format!("cannot start {shown}: {e}"))?;
