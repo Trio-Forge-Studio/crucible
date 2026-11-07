@@ -42,7 +42,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         .map(|name| crate::op_ref(registry, std::slice::from_ref(name)).map(|(resolved, _)| resolved.op))
         .transpose()?;
     let primary = required.unwrap_or_else(|| registry.op("api-keys.introspect").expect("introspection is registered"));
-    let (source, key) = auth::load(root).map_err(|failure| auth::decorate(failure, primary, None))?;
+    let (source, key) = auth::load(root).map_err(|failure| auth::decorate(failure, &primary.auth, None))?;
     output.redact_also(&key);
     let acceptance = RefCell::new(Acceptance::default());
     let result = (|| {
@@ -60,5 +60,5 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         )?;
         auth::check(&executor, &source, required)
     })();
-    acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, primary, Some(&source)))
+    acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, &primary.auth, Some(&source)))
 }

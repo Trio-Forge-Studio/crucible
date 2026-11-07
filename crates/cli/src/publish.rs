@@ -69,7 +69,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
     let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
     let preflight = |failure: Failure| failure.with("publish", progress(&published, None, &targets));
-    let (source, key) = auth::load(root).map_err(|failure| preflight(auth::decorate(failure, primary, None)))?;
+    let (source, key) = auth::load(root).map_err(|failure| preflight(auth::decorate(failure, &primary.auth, None)))?;
     output.redact_also(&key);
     let execute = |file: Option<(&String, std::path::PathBuf)>, output: &mut Output| {
         let acceptance = RefCell::new(Acceptance::default());
@@ -102,7 +102,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 ),
             }
         })();
-        acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, primary, Some(&source)))
+        acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, &primary.auth, Some(&source)))
     };
     let built = crate::build::build(root, &manifest, &args.places, None).map_err(|error| {
         let failure = match error {

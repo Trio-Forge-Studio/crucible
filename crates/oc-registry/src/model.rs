@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
+pub use crucible_oc::{Auth, ClassName, RetryPolicy, Safety, Scope, StatusClass};
 use serde::{Deserialize, Serialize};
+
+pub type Payload = crucible_oc::Payload<Shape>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Registry {
@@ -146,15 +149,6 @@ pub enum PartKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
-pub enum Payload {
-    Empty,
-    Json { shape: Shape },
-    Text,
-    Binary,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
 pub enum Shape {
     Any,
     String {
@@ -196,30 +190,6 @@ pub struct Field {
     pub description: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Auth {
-    ApiKey { scopes: Option<Vec<Scope>> },
-    BodyKey { field: String },
-    None,
-}
-
-impl Auth {
-    pub fn required_scopes(&self) -> Option<&[Scope]> {
-        match self {
-            Self::ApiKey { scopes } => scopes.as_deref(),
-            Self::BodyKey { .. } | Self::None => Some(&[]),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Scope {
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Stability {
@@ -227,14 +197,6 @@ pub enum Stability {
     Beta,
     Experimental,
     Unspecified,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Safety {
-    Read,
-    Idempotent,
-    Unsafe,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -251,33 +213,4 @@ pub struct Pagination {
 pub enum Completion {
     Operation,
     State { field: String, success: Vec<String>, failure: Vec<String> },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RetryPolicy {
-    pub statuses: Vec<StatusClass>,
-    pub attempts: u8,
-    pub delay_seconds: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum StatusClass {
-    Exact(u16),
-    Class(ClassName),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClassName {
-    #[serde(rename = "5xx")]
-    ServerError,
-}
-
-impl StatusClass {
-    pub fn matches(self, status: u16) -> bool {
-        match self {
-            StatusClass::Exact(code) => code == status,
-            StatusClass::Class(ClassName::ServerError) => (500..600).contains(&status),
-        }
-    }
 }
