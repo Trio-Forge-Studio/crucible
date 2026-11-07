@@ -65,6 +65,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
+      - run: cargo xtask arch
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -74,10 +75,14 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build
       - run: cargo test --workspace --locked
+      # The golden build also writes build/sample-game.rbxl, which the network execution test loads.
+      - name: Compare the build output with the golden baseline
+        if: runner.os != 'macOS'
+        run: cargo xtask golden check
       - name: Install Lune
         if: runner.os == 'Linux'
         uses: Trio-Forge-Studio/tooling/.github/actions/setup@main
-      - name: Run the compiler's emitted Luau in Lune
+      - name: Run the compiler's emitted Luau, JSX and network declarations in Lune
         if: runner.os == 'Linux'
-        run: cargo test --locked -p crucible-compiler --test lowering -- --ignored
+        run: cargo test --locked -p crucible-compiler -- --ignored
       - run: node --test npm/package.test.mjs
