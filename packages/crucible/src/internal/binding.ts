@@ -1,5 +1,6 @@
 import { runtimeDiagnostic } from "./diagnostics";
 import type { CrucibleObject } from "../crucible-object";
+import type { EmittedAttribute } from "../emit";
 import { clearClaim, setClaim } from "./construction-claim";
 import { drain, fault, hasEnded, isDraining, isLive, notePairs, request, track } from "./lifecycle";
 import { type Disconnect, type EnginePort } from "./port";
@@ -163,7 +164,7 @@ function connect(pair: Pair) {
 			schedule();
 		}),
 	];
-	for (const [field, descriptor] of record.attributes ?? new Map<string, import("../emit").EmittedAttribute>()) {
+	for (const [field, descriptor] of record.attributes ?? new Map<string, EmittedAttribute>()) {
 		pair.connections.push(
 			port().onAttributeChanged(instance, descriptor.name, () => {
 				const state = record.bound.get(instance);
@@ -177,8 +178,7 @@ function connect(pair: Pair) {
 	}
 	const state = record.bound.get(instance);
 	if (state !== undefined)
-		for (const [field] of record.attributes ?? new Map<string, import("../emit").EmittedAttribute>())
-			applyAttribute(state, field);
+		for (const [field] of record.attributes ?? new Map<string, EmittedAttribute>()) applyAttribute(state, field);
 }
 function reset(pair: Pair) {
 	pair.reset = true;
@@ -256,7 +256,7 @@ function evaluate(pair: Pair): ObjectState | undefined {
 	}
 	const attributes: Record<string, unknown> = {};
 	let valid = true;
-	for (const [field] of record.attributes ?? new Map<string, import("../emit").EmittedAttribute>()) {
+	for (const [field] of record.attributes ?? new Map<string, EmittedAttribute>()) {
 		const [ok, value] = valueFor(pair, field);
 		if (!ok) valid = false;
 		attributes[field] = value;
@@ -346,7 +346,7 @@ export function boundTo(klass: object, instance: Instance): ObjectState | undefi
 		const state = record.bound.get(instance);
 		let attributesValid = true;
 		if (pair.rejected === "attributes") {
-			for (const [, descriptor] of record.attributes ?? new Map<string, import("../emit").EmittedAttribute>()) {
+			for (const [, descriptor] of record.attributes ?? new Map<string, EmittedAttribute>()) {
 				const value = port().getAttribute(instance, descriptor.name);
 				if (value === undefined ? descriptor.required : !descriptor.check(value)) attributesValid = false;
 			}

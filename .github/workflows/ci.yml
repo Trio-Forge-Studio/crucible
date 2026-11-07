@@ -57,6 +57,11 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 2
+      - name: Fetch the pull request's base for the architecture ratchet
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
@@ -65,6 +70,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
+      - name: Check the architecture rules and that no violation is new against the base
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD^' }}
+        run: cargo xtask arch --base "$BASE"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -74,10 +84,14 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build
       - run: cargo test --workspace --locked
+      # The golden build also writes build/sample-game.rbxl, which the network execution test loads.
+      - name: Compare the build output with the golden baseline
+        if: runner.os != 'macOS'
+        run: cargo xtask golden check
       - name: Install Lune
         if: runner.os == 'Linux'
         uses: Trio-Forge-Studio/tooling/.github/actions/setup@main
-      - name: Run the compiler's emitted Luau in Lune
+      - name: Run the compiler's emitted Luau, JSX and network declarations in Lune
         if: runner.os == 'Linux'
-        run: cargo test --locked -p crucible-compiler --test lowering -- --ignored
+        run: cargo test --locked -p crucible-compiler -- --ignored
       - run: node --test npm/package.test.mjs
