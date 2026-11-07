@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/luau", "crates/oc", "crates/oc-registry", "crates/cli", "crates/compiler", "xtask"]
+members = ["crates/luau", "crates/oc", "crates/project", "crates/oc-registry", "crates/cli", "crates/compiler", "xtask"]
 
 [workspace.package]
 version = "0.4.0"

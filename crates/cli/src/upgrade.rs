@@ -703,7 +703,7 @@ fn move_off_roblox_ts(root: &Path, to: &Version, manager: Manager) -> Migration 
     if migration.failed.is_some() {
         return migration;
     }
-    let places = crate::manifest::Manifest::read(root).ok().flatten().unwrap_or_default().places;
+    let places = crucible_project::Manifest::read(root).ok().flatten().unwrap_or_default().places;
     let mut tsconfigs: Vec<_> = places.into_values().map(|place| place.tsconfig).collect();
     tsconfigs.sort();
     tsconfigs.dedup();
