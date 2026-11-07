@@ -1,10 +1,10 @@
-use crate::auth;
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
 use crate::exec::Executor;
 use crate::manifest::VersionType;
-use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
-use crate::transport::Timing;
+use crucible_oc::auth;
+use crucible_oc::outcome::{Acceptance, Failure};
+use crucible_oc::transport::Timing;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::path::Path;

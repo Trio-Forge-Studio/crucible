@@ -1,4 +1,4 @@
-use crate::outcome::Failure;
+use crucible_oc::outcome::Failure;
 use oc_registry::path::{Template, fold};
 use oc_registry::{BodyMedia, Location, Op, PartKind, ValueKind};
 use std::collections::BTreeMap;

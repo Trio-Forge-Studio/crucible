@@ -1,3 +1,7 @@
+pub mod auth;
+pub mod outcome;
+pub mod transport;
+
 use serde::{Deserialize, Serialize};
 
 /// What a response body holds. `S` describes a JSON body, such as the registry's schema outline.

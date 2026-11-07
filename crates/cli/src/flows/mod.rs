@@ -2,7 +2,7 @@ pub mod download;
 pub mod luau;
 pub mod publish;
 pub mod upload;
-use crate::outcome::Failure;
+use crucible_oc::outcome::Failure;
 use oc_registry::{Op, Registry};
 use std::path::Path;
 pub const CREATE_ASSET: &str = "POST /assets/v1/assets";

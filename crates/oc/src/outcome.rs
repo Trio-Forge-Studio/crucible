@@ -1,4 +1,4 @@
-use crucible_oc::{RetryPolicy, Safety};
+use crate::{RetryPolicy, Safety};
 use serde_json::{Value, json};
 
 pub const DEFAULT_ATTEMPTS: u8 = 3;
@@ -169,7 +169,7 @@ pub fn judge(safety: Safety, retry: Option<&RetryPolicy>, attempt: Attempt, hist
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crucible_oc::{ClassName, StatusClass};
+    use crate::{ClassName, StatusClass};
     fn response(status: u16) -> Attempt {
         Attempt::Response { status, retry_after: None, body: b"reply".to_vec() }
     }

@@ -45,7 +45,7 @@ pub fn describe(registry: &Registry, op: &Op) -> Value {
     let mut doc = json!({"name":op.name,"method":op.method,"url":format!("{}{}",op.server.origin(),op.path),"path":op.path,"operationId":op.operation_id,"summary":op.summary,"description":op.description,"params":outline(registry,json!(op.params),2),"safety":op.safety,"legacy":op.legacy,"stability":op.stability,"patches":op.patches,"alternatives":op.alternatives});
     doc.as_object_mut()
         .expect("description is an object")
-        .extend(crate::auth::scope_metadata(&op.auth).as_object().expect("scope metadata is an object").clone());
+        .extend(crucible_oc::auth::scope_metadata(&op.auth).as_object().expect("scope metadata is an object").clone());
     doc["body"] = match &op.body {
         None => Value::Null,
         Some(body) => {

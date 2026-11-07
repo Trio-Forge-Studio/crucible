@@ -1,4 +1,3 @@
-mod auth;
 mod build;
 mod call;
 mod child;
@@ -9,19 +8,18 @@ mod docs;
 mod exec;
 mod flows;
 mod manifest;
-mod outcome;
 mod output;
 mod publish;
-mod transport;
 mod upgrade;
 
 use crate::call::{Call, Source};
 use crate::cli::{AssetCommand, AuthCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
 use crate::exec::Executor;
-use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
-use crate::transport::Timing;
 use clap::Parser;
+use crucible_oc::auth;
+use crucible_oc::outcome::{Acceptance, Failure};
+use crucible_oc::transport::Timing;
 use oc_registry::{Auth, Method, OpRef, Registry, Resolved};
 use serde_json::{Value, json};
 use std::process::ExitCode;
