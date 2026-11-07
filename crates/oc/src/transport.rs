@@ -73,6 +73,7 @@ impl<'a> Transport<'a> {
         origin: Option<String>,
         key: Option<&'a Secret>,
         timing: Timing,
+        proxy: Option<ureq::Proxy>,
         sink: Box<dyn Sink + 'a>,
         clock: Box<dyn Clock + 'a>,
     ) -> Result<Self, Failure> {
@@ -92,6 +93,7 @@ impl<'a> Transport<'a> {
             sink.event(Event::Note("Warning: CRUCIBLE_OC_ORIGIN overrides Roblox servers."));
         }
         let agent = ureq::Agent::config_builder()
+            .proxy(proxy.clone())
             .max_redirects(0)
             .max_redirects_will_error(false)
             .http_status_as_error(false)
@@ -101,6 +103,7 @@ impl<'a> Transport<'a> {
             .into();
         let downloads = Downloads {
             agent: ureq::Agent::config_builder()
+                .proxy(proxy)
                 .max_redirects(0)
                 .max_redirects_will_error(false)
                 .http_status_as_error(false)
@@ -417,7 +420,8 @@ mod tests {
         });
         let recorder = Recorder::default();
         let transport =
-            Transport::new(Some(server.base_url()), None, timing(), Box::new(&recorder), Box::new(&recorder)).unwrap();
+            Transport::new(Some(server.base_url()), None, timing(), None, Box::new(&recorder), Box::new(&recorder))
+                .unwrap();
         let failure = transport.send(&Get(Auth::None)).err().unwrap();
         assert_eq!(failure.code, 7);
         m.assert_calls(3);
@@ -433,9 +437,21 @@ mod tests {
     }
 
     #[test]
+    fn agents_use_only_the_proxy_they_are_given() {
+        let recorder = Recorder::default();
+        let proxy = ureq::Proxy::new("http://127.0.0.1:9").unwrap();
+        let transport =
+            Transport::new(None, None, timing(), Some(proxy), Box::new(&recorder), Box::new(SystemClock)).unwrap();
+        assert!(transport.agent.config().proxy().is_some());
+        assert!(transport.downloads.agent.config().proxy().is_some());
+        let transport = Transport::new(None, None, timing(), None, Box::new(&recorder), Box::new(SystemClock)).unwrap();
+        assert!(transport.agent.config().proxy().is_none());
+        assert!(transport.downloads.agent.config().proxy().is_none());
+    }
+    #[test]
     fn downloads_have_idle_budgets_and_api_calls_have_ten_minutes() {
         let recorder = Recorder::default();
-        let transport = Transport::new(None, None, timing(), Box::new(&recorder), Box::new(SystemClock)).unwrap();
+        let transport = Transport::new(None, None, timing(), None, Box::new(&recorder), Box::new(SystemClock)).unwrap();
         assert!(
             transport.downloads.agent.config().timeouts().global.is_none(),
             "active downloads have no total duration cap"

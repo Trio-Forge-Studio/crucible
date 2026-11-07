@@ -58,7 +58,8 @@ impl<'a> Executor<'a> {
         acceptance: &'a RefCell<Acceptance>,
     ) -> Result<Self, Failure> {
         let events = Events { out, acceptance };
-        let transport = Transport::new(origin, key, timing, Box::new(events), Box::new(SystemClock))?;
+        let proxy = ureq::Proxy::try_from_env();
+        let transport = Transport::new(origin, key, timing, proxy, Box::new(events), Box::new(SystemClock))?;
         Ok(Self { registry, acceptance, transport, out })
     }
     pub fn send(&self, call: &Call<'_>) -> Result<Reply, Failure> {
