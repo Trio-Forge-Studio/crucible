@@ -3,7 +3,7 @@ use crucible_oc::Auth;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Secret(String);
 #[derive(Deserialize)]
@@ -34,10 +34,10 @@ impl Introspection {
     }
 }
 impl Secret {
-    pub(crate) fn expose(&self) -> &str {
+    pub fn expose(&self) -> &str {
         &self.0
     }
-    pub(crate) fn from_string(value: String) -> Self {
+    pub fn from_string(value: String) -> Self {
         Self(value)
     }
 }
@@ -115,16 +115,17 @@ pub fn choose(
     }
     Err("set CRUCIBLE_OC_API_KEY or select a configured profile".into())
 }
-pub fn load(config: &Config, source: &KeySource) -> Result<Secret, String> {
+/// `env` reads one environment variable, so the caller decides where the environment comes from.
+pub fn load(config: &Config, source: &KeySource, env: impl Fn(&str) -> Option<String>) -> Result<Secret, String> {
     let value = match source {
         KeySource::Environment => {
-            std::env::var("CRUCIBLE_OC_API_KEY").map_err(|_| "CRUCIBLE_OC_API_KEY is missing".to_string())?
+            env("CRUCIBLE_OC_API_KEY").ok_or_else(|| "CRUCIBLE_OC_API_KEY is missing".to_string())?
         }
         KeySource::Profile(name) => {
             let p = config.profiles.get(name).ok_or_else(|| format!("profile {name} does not exist"))?;
             match (&p.key_env, &p.key_file) {
                 (Some(var), None) => {
-                    std::env::var(var).map_err(|_| format!("profile {name} key environment variable is missing"))?
+                    env(var).ok_or_else(|| format!("profile {name} key environment variable is missing"))?
                 }
                 (None, Some(path)) => {
                     std::fs::read_to_string(path).map_err(|_| format!("profile {name} key file cannot be read"))?
@@ -145,12 +146,8 @@ struct ConfigFile {
     #[serde(default)]
     oc: Config,
 }
-pub fn load_config() -> Result<Config, Failure> {
-    let path = std::env::var_os("CRUCIBLE_CONFIG")
-        .map(PathBuf::from)
-        .or_else(|| dirs::config_dir().map(|dir| dir.join("crucible/config.toml")))
-        .ok_or_else(|| Failure::usage("cannot locate the config directory"))?;
-    let text = match std::fs::read_to_string(&path) {
+pub fn read_config(path: &Path) -> Result<Config, Failure> {
+    let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
         Err(_) => return Err(Failure::usage("cannot read the crucible config file")),

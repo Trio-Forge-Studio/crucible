@@ -1,9 +1,10 @@
 use crate::auth;
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
-use crate::exec::{Executor, Timing};
+use crate::exec::Executor;
 use crate::manifest::VersionType;
 use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
+use crate::transport::Timing;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::path::Path;
@@ -72,7 +73,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
     let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
     let preflight = |failure: Failure| failure.with("publish", progress(&published, None, &targets));
-    let config = auth::load_config().map_err(preflight)?;
+    let config = crate::load_config().map_err(preflight)?;
     let source = auth::choose(
         &config,
         args.profile.as_deref(),
@@ -81,7 +82,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         env.profile.as_deref(),
     )
     .map_err(|message| preflight(auth::decorate(Failure::new(3, "auth", message), &primary.auth, None, &config)))?;
-    let key = auth::load(&config, &source).map_err(|message| {
+    let key = auth::load(&config, &source, crate::env).map_err(|message| {
         preflight(auth::decorate(Failure::new(3, "auth", message), &primary.auth, Some(&source), &config))
     })?;
     output.redact_also(&key);

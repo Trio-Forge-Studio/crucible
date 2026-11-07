@@ -12,13 +12,15 @@ mod manifest;
 mod outcome;
 mod output;
 mod publish;
+mod transport;
 mod upgrade;
 
 use crate::call::{Call, Source};
 use crate::cli::{AssetCommand, AuthCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
-use crate::exec::{Executor, Timing};
+use crate::exec::Executor;
 use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
+use crate::transport::Timing;
 use clap::Parser;
 use oc_registry::{Auth, Method, OpRef, Registry, Resolved};
 use serde_json::{Value, json};
@@ -94,9 +96,9 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
     } else {
         None
     };
-    let config = auth::load_config()?;
+    let config = load_config()?;
     if matches!(cli.command, OcCommand::Auth(AuthCommand::Profiles)) {
-        return Ok(json!(config.profiles.iter().map(|(name,p)|json!({"name":name,"keyEnv":p.key_env,"keyFile":p.key_file,"group":p.group,"user":p.user,"present":auth::load(&config,&auth::KeySource::Profile(name.clone())).is_ok()})).collect::<Vec<_>>()));
+        return Ok(json!(config.profiles.iter().map(|(name,p)|json!({"name":name,"keyEnv":p.key_env,"keyFile":p.key_file,"group":p.group,"user":p.user,"present":auth::load(&config,&auth::KeySource::Profile(name.clone()),env).is_ok()})).collect::<Vec<_>>()));
     }
     let primary = if let Some(call) = &prepared {
         call.op()
@@ -130,7 +132,7 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
         };
         let key = source
             .as_ref()
-            .map(|source| auth::load(&config, source).map_err(|message| Failure::new(3, "auth", message)))
+            .map(|source| auth::load(&config, source, env).map_err(|message| Failure::new(3, "auth", message)))
             .transpose()?;
         if let Some(key) = &key {
             output.redact_also(key);
@@ -189,6 +191,16 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
         }
     })();
     result.map_err(|failure| auth::decorate(failure, &primary.auth, source.as_ref(), &config))
+}
+fn env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+fn load_config() -> Result<auth::Config, Failure> {
+    let path = std::env::var_os("CRUCIBLE_CONFIG")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::config_dir().map(|dir| dir.join("crucible/config.toml")))
+        .ok_or_else(|| Failure::usage("cannot locate the config directory"))?;
+    auth::read_config(&path)
 }
 fn op_ref<'r>(registry: &'r Registry, words: &[String]) -> Result<(Resolved<'r>, usize), Failure> {
     let first = words.first().ok_or_else(|| Failure::usage("an operation name or METHOD and URL is required"))?;
