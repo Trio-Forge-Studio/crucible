@@ -1,9 +1,10 @@
 use crate::auth;
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
-use crate::exec::{Executor, Timing};
+use crate::exec::Executor;
 use crate::manifest::VersionType;
 use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
+use crate::transport::Timing;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::path::Path;
@@ -69,7 +70,8 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
     let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
     let preflight = |failure: Failure| failure.with("publish", progress(&published, None, &targets));
-    let (source, key) = auth::load(root).map_err(|failure| preflight(auth::decorate(failure, &primary.auth, None)))?;
+    let (source, key) =
+        crate::load_key(root).map_err(|failure| preflight(auth::decorate(failure, &primary.auth, None)))?;
     output.redact_also(&key);
     let execute = |file: Option<(&String, std::path::PathBuf)>, output: &mut Output| {
         let acceptance = RefCell::new(Acceptance::default());
@@ -87,7 +89,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 &acceptance,
             )?;
             match file {
-                None => auth::check(&executor, &source, Some(primary)),
+                None => crate::whoami::check(&executor, &source, Some(primary)),
                 Some((name, file)) => crate::flows::publish::run(
                     &executor,
                     crate::flows::publish::Args {

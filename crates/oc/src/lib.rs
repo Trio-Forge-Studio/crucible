@@ -10,6 +10,17 @@ pub enum Payload<S> {
     Binary,
 }
 
+impl<S> Payload<S> {
+    pub fn kind(&self) -> Payload<()> {
+        match self {
+            Self::Empty => Payload::Empty,
+            Self::Json { .. } => Payload::Json { shape: () },
+            Self::Text => Payload::Text,
+            Self::Binary => Payload::Binary,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Auth {
