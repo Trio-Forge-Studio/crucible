@@ -164,7 +164,7 @@ impl<'a> Executor<'a> {
                 Attempt::Redirect(_) => "redirect".into(),
                 Attempt::PageOverflow { .. } => "page exceeds limit".into(),
             };
-            match judge(op, attempt, history) {
+            match judge(op.safety, op.retry.as_ref(), attempt, history) {
                 Verdict::Redirect(_) => unreachable!("API requests do not follow redirects"),
                 Verdict::Success(body) => {
                     if body.is_empty() {
@@ -219,7 +219,12 @@ impl<'a> Executor<'a> {
                 max_items.map(|limit| limit - items.len()).filter(|remaining| page_items.len() > *remaining)
             {
                 let can_resize = p.size_param.is_some() && call.page_size().is_none_or(|size| size > remaining);
-                match judge(call.op(), Attempt::PageOverflow { can_resize }, resize_history) {
+                match judge(
+                    call.op().safety,
+                    call.op().retry.as_ref(),
+                    Attempt::PageOverflow { can_resize },
+                    resize_history,
+                ) {
                     Verdict::Retry { after_seconds, history } => {
                         resize_history = history;
                         std::thread::sleep(

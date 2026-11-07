@@ -80,9 +80,9 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         std::env::var_os("CRUCIBLE_OC_API_KEY").is_some(),
         env.profile.as_deref(),
     )
-    .map_err(|message| preflight(auth::decorate(Failure::new(3, "auth", message), primary, None, &config)))?;
+    .map_err(|message| preflight(auth::decorate(Failure::new(3, "auth", message), &primary.auth, None, &config)))?;
     let key = auth::load(&config, &source).map_err(|message| {
-        preflight(auth::decorate(Failure::new(3, "auth", message), primary, Some(&source), &config))
+        preflight(auth::decorate(Failure::new(3, "auth", message), &primary.auth, Some(&source), &config))
     })?;
     output.redact_also(&key);
     let execute = |file: Option<(&String, std::path::PathBuf)>, output: &mut Output| {
@@ -119,7 +119,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         acceptance
             .into_inner()
             .finish(result)
-            .map_err(|failure| auth::decorate(failure, primary, Some(&source), &config))
+            .map_err(|failure| auth::decorate(failure, &primary.auth, Some(&source), &config))
     };
     let built = crate::build::build(root, &manifest, &args.places, None).map_err(|error| {
         let failure = match error {

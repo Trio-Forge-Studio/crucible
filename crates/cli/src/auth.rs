@@ -1,5 +1,5 @@
 use crate::outcome::Failure;
-use oc_registry::Op;
+use crucible_oc::Auth;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -69,15 +69,15 @@ impl KeySource {
         }
     }
 }
-pub fn scope_metadata(op: &Op) -> serde_json::Value {
-    let scopes = op.auth.required_scopes();
+pub fn scope_metadata(auth: &Auth) -> serde_json::Value {
+    let scopes = auth.required_scopes();
     json!({"requiredScopes":scopes,"scopeMetadata":if scopes.is_some() { "declared" } else { "unknown" }})
 }
-pub fn decorate(mut failure: Failure, op: &Op, source: Option<&KeySource>, config: &Config) -> Failure {
+pub fn decorate(mut failure: Failure, auth: &Auth, source: Option<&KeySource>, config: &Config) -> Failure {
     if failure.code == 3 {
         let error = failure.error.as_object_mut().expect("a failure is an object");
         error.entry("status").or_insert(serde_json::Value::Null);
-        error.extend(scope_metadata(op).as_object().expect("scope metadata is an object").clone());
+        error.extend(scope_metadata(auth).as_object().expect("scope metadata is an object").clone());
         failure = failure
             .with("keySource", json!(source.map(KeySource::label)))
             .with("profiles", json!(config.profiles.keys().collect::<Vec<_>>()));

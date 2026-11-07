@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+crucible-oc = { path = "../oc" }
 oc-registry = { path = "../oc-registry" }
 crucible-compiler = { path = "../compiler" }
 serde.workspace = true

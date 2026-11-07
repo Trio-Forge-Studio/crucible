@@ -188,7 +188,7 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
             _ => unreachable!("discovery and profiles returned before execution"),
         }
     })();
-    result.map_err(|failure| auth::decorate(failure, primary, source.as_ref(), &config))
+    result.map_err(|failure| auth::decorate(failure, &primary.auth, source.as_ref(), &config))
 }
 fn op_ref<'r>(registry: &'r Registry, words: &[String]) -> Result<(Resolved<'r>, usize), Failure> {
     let first = words.first().ok_or_else(|| Failure::usage("an operation name or METHOD and URL is required"))?;
