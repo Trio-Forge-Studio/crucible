@@ -16,15 +16,21 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+// The fact table is internal. Tests read it through `analyze`, which the `test-support` feature exports.
+#[cfg(feature = "test-support")]
 pub use declarations::DeclarationKind;
+#[cfg(feature = "test-support")]
 pub use facts::{
     Attribute, Callee, Check, Class, ClassKind, ClassStyle, Constant, Crucible, Declaration, Dependency, Fact, Facts,
     Falsy, Field, FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Prop, Reason, Receiver,
     RuntimeLib, Schema, Site, Span, Tail, Unanswered,
 };
+#[cfg(not(feature = "test-support"))]
+use facts::{FileFacts, Unanswered};
 pub use include::write_include;
 pub use lower::Error;
 use lower::ImportBase;
+#[cfg(feature = "test-support")]
 pub use macros::{Macro, MacroKind};
 use write::HEADER;
 pub use write::{Written, write};
@@ -67,6 +73,7 @@ pub enum Target<'a> {
 
 /// Builds the program for `tsconfig`, checks every file with one checker, and returns the fact table of every source
 /// file it compiles. Any diagnostic stops the build before facts are extracted.
+#[cfg(feature = "test-support")]
 pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Facts, Vec<Diagnostic>> {
     let checked = program::check(tsconfig)?;
     Ok(extract::extract(checked, target))

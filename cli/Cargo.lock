@@ -680,6 +680,7 @@ dependencies = [
 name = "crucible-compiler"
 version = "0.4.0"
 dependencies = [
+ "crucible-compiler",
  "serde_json",
  "toml 1.1.8+spec-1.1.0",
  "tsrs_ast",

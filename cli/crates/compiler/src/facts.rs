@@ -464,6 +464,7 @@ pub struct Facts {
     pub place: Place,
 }
 
+#[cfg(feature = "test-support")]
 impl Facts {
     /// The facts of the file at `path`, an absolute path in either slash direction.
     pub fn file(&self, path: &str) -> Option<&FileFacts> {
