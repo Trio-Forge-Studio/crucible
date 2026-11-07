@@ -2,9 +2,9 @@ use std::borrow::Cow;
 
 use super::{Lower, Usage, is_stable, skip_parens_and_assertions};
 use crate::facts::{Callee, Constant, Crucible, Falsy, Receiver};
-use crate::luau::{BinOp, Block, Expr, Field, Name, Part, Stmt, UnOp};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Op, UnaryOp};
+use crucible_luau::{BinOp, Block, Expr, Field, Name, Part, Stmt, UnOp};
 
 #[derive(Clone)]
 pub(super) enum Place {
@@ -122,7 +122,7 @@ impl Lower<'_> {
             self.uses_ts = true;
             return Expr::global("TS.Promise");
         }
-        if !crate::luau::is_name(text) {
+        if !crucible_luau::is_name(text) {
             self.error(n, format!("`{text}` cannot be a Luau name"));
         }
         Expr::Name(Cow::Borrowed(text))
