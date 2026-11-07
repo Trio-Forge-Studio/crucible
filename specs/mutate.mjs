@@ -57,7 +57,7 @@ for (const m of mutations) {
 	const base = bases.get(m.config);
 	if (!base) fail(`${m.id}: no configuration ${m.config}`);
 	const names = m.only ? [m.only] : [...checked(base.text).INVARIANT, ...checked(base.text).PROPERTY];
-	const caught = m.expect === "liveness" ? names.filter((n) => /^Converges/.test(n)) : [m.expect];
+	const caught = m.expect !== "liveness" ? [m.expect] : m.only ? [m.only] : names.filter((n) => /^Converges/.test(n));
 	for (const name of caught) coveredBy.set(name, [...(coveredBy.get(name) ?? []), m.id]);
 }
 const required = new Set();

@@ -497,5 +497,49 @@
 			["           \\/ Declared(k) /\\ (o.name # cfg[k].name \\/ o.mark # NoMark)", "           \\/ FALSE"]
 		],
 		"expect": "liveness"
+	},
+	{
+		"id": "M42",
+		"what": "Accept a plan made before an edit to a description, price or icon",
+		"config": "PlanFiles.cfg",
+		"edits": [
+			[
+				"    /\\ P.cfg = cfg\n",
+				"    /\\ \\A k \\in Keys : [P.cfg[k] EXCEPT !.fields = 0] = [cfg[k] EXCEPT !.fields = 0]\n"
+			]
+		],
+		"expect": "PlanIsFresh"
+	},
+	{
+		"id": "M43",
+		"what": "Accept a plan made before an icon hash write",
+		"config": "PlanFiles.cfg",
+		"edits": [
+			[
+				"    /\\ P.lock = lock[p]\n",
+				"    /\\ \\A k \\in Keys : [P.lock[k] EXCEPT !.icon = 0] = [lock[p][k] EXCEPT !.icon = 0]\n"
+			]
+		],
+		"expect": "PlanIsFresh"
+	},
+	{
+		"id": "M44",
+		"what": "Tie availability back to status, so a managed badge cannot stay disabled",
+		"config": "LivenessLag.cfg",
+		"edits": [["DesiredOn(k) == cfg[k].st = \"managed\" /\\ cfg[k].on", "DesiredOn(k) == cfg[k].st = \"managed\""]],
+		"expect": "liveness"
+	},
+	{
+		"id": "M45",
+		"what": "Stop updating a key once its entry says retired",
+		"config": "RetireRepair.cfg",
+		"only": "RetiredEndsOff",
+		"edits": [
+			[
+				"MayUpdate(p, k) == Reconciled(p, k) /\\ ~NeedsManagedMark(p, k)",
+				"MayUpdate(p, k) == Reconciled(p, k) /\\ ~NeedsManagedMark(p, k) /\\ lock[p][k].st # \"retired\""
+			]
+		],
+		"expect": "liveness"
 	}
 ]

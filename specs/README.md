@@ -1,4 +1,4 @@
-undefined24823 | 4 s |undefined117502 | 7 s |undefined572 | 2 s |undefined91022 | 5 s |undefined1076372 | 30 s |undefined456980 | 9 s |undefined270 | 4 s |undefined104102 | 7 s |undefined4264 | 3 s |undefined4141 | 2 s |undefined259066 | 8 s |undefined1658 | 2 s |undefined1354 | 2 s |undefined220854 | 35 s |undefined220854 | 33 s |undefined31160 | 6 s |undefined129526 | 8 s |undefined3313 | 2 s |undefined329092 | 15 s |# Provisioning models
+# Provisioning models
 
 Two TLA+ models of `crucible provision <env>`, the infrastructure-as-code step in `design/architecture.md` ("Infrastructure as code", rules 1 to 7). PR 8's `crucible provision` must conform to both through a `proptest-state-machine` test against a fake Open Cloud. Each provisioner action is one operation of the Rust code, and the [action lists](#actions-the-rust-code-mirrors) give the mapping.
 
@@ -32,15 +32,15 @@ The models match `design/architecture.md` at commit `3c36049`, plus the [design 
 3. **No create runs while an earlier create of the same lineage may commit or has committed** (`NoBlindCreate`). The lineage of a `moved_from` key is the key and its old key.
 4. **No create runs beside a match in its own listing** (`NoCreateBesideMatch`). A match is an unlocked resource that carries a create marker of the key's lineage, or an unlocked, unmarked resource of the key's kind with its exact name.
 5. **The lock names only resources that exist and that its key owns** (`LockNamesExisting`, `LockOwnsItsResource`), and never gives one ID of a kind to two keys (`LockInjective`). Each kind has its own ID space, so product 42 and badge 42 are two resources.
-6. **A `retired` lock entry names a resource that is off sale or disabled** (`RetiredIsOff`). That is what makes removing a retired key from the config safe.
+6. **A `retired` lock entry ends up naming a resource that is off sale or disabled, as long as the developer keeps rerunning `provision`** (`RetiredEndsOff`, `RetireRepair.cfg`). A metadata `PATCH` whose response was lost, or an edit in Creations, can turn a retired resource back on after the lock says `retired`. The next run sees the drift and retires it again. Removing a retired key from the config is safe because its entry stays in the lock and keeps that repair going. The stronger claim, that a `retired` entry never names a resource on sale (`RetiredIsOff`), holds only without late updates and edits in Creations. `Provisioning.cfg` and the other safety configurations check it there, and `RetireLate.cfg` shows it fail with late updates.
 7. **A badge create never spends Robux** (`NoPaidBadge`). The create sends `expectedCost: 0`, so Roblox refuses a paid create, and the run reports the badge as deferred.
 8. **Removing a key from the config without `retired` or `untrack` is an error, never a silent delete.** Three checks cover it.
    - `RemovedIsError`: no run lists or writes while the config drops a key that is still managed in the lock or has an intent.
    - `NoSilentDelete`, an action property: a lock entry leaves the lock only through `moved_from`.
    - `NoSilentRetire`, an action property: Roblox takes a resource off sale only through an update sent while its key's config, or its retired entry, said retired. A late update counts by what its config said when it was sent.
 9. **`moved_from` keeps the ID** (`MovedKeepsId`, an action property).
-10. **`provision --plan` accepts only a plan whose environment, config, lock, listed identities and creates all match the run's own** (`PlanIsFresh`, an action property).
-11. **Each step writes at most one of the lock, the journal, the plan file and Roblox** (`OneWritePerStep`, an action property). So a crash can fall between any two writes, and the conformance test can kill the client at each of them.
+10. **`provision --plan` accepts only a plan whose environment, config, lock, listed identities and creates all match the run's own** (`PlanIsFresh`, an action property). The config binding covers every field of `crucible.toml`, and the lock binding covers every field of `crucible.lock`, icon hashes included. The identity model abstracts the fields it doesn't otherwise model as a value per key: `EditField` changes a key's description, price or icon, and `WriteIconHash` changes an entry's icon hash. Only `PlanFiles.cfg` enables those two actions, because nothing else in the identity model reads them.
+11. **No step changes more than one of the lock, the journal, the plan file and Roblox's state** (`OneWritePerStep`, an action property). This is a check on state changes, not on operations. Two Roblox calls that change nothing would count as no change, and a write of identical bytes counts as none. So it shows only that the model bundles no two writes. The conformance test must check the operation count itself, as [PR 8 conformance obligations](#pr-8-conformance-obligations) requires.
 12. **A started run always has a next step** (`RunAdvances`), so the Rust loop never spins or hangs. `TypeOK` holds too.
 
 ### Field invariants
@@ -57,8 +57,9 @@ Assume the developer reruns `provision`, the reviewer approves its plan, an oper
 - **Fields** (`Converges` in `Reconcile.tla`). The resource ends with every listed field the config gives, the config's icon, and that icon's hash in the lock. The listed fields are the name, the description, the price, and availability, which can be off for a managed badge. `Reconcile.cfg` and `ReconcileLag.cfg` check it, with metadata updates that land after newer ones and edits in Creations.
 - **Identity without the operator** (`ConvergesOrAsks`, `LivenessAuto.cfg`). Each key converges, or ends with an intent whose create Roblox dropped or never received. A crash between the journal write and the create call leaves the same intent. Only `crucible resolve <env> <key> --not-created` settles it, because no listing can tell a dropped create from a late one.
 - **Identity with the operator** (`Converges` in `Provisioning.tla`, `Liveness.cfg` and `LivenessLag.cfg`). If the operator also runs `--not-created` for each such intent, every key converges. `NoOperator.cfg` is the counterexample without the operator: Roblox drops a create, and its intent stays forever.
+- **Retirement without the operator** (`RetiredEndsOff`, `RetireRepair.cfg`). Every `retired` entry ends up naming a resource that is off, with lag and late updates.
 
-A converged key has no intent, and a managed key has a lock entry. A key with an entry that the config declares `managed` or `retired` shows the config's name, no marker, and the config's availability, and the entry's status matches the config. A retired key that was never created has no entry, because there is nothing to retire. An absent key's retired entry stays off. An untracked key has no entry or an `untracked` one.
+A converged key has no intent, and a managed key has a lock entry. A key with an entry that the config declares `managed` or `retired` shows the config's name, no marker, and the config's availability, and the entry's status matches the config. A managed key's availability is the config's own value, so a managed badge can stay disabled. `Disable` names the keys whose config may do that, and `LivenessLag.cfg`, `RetireRepair.cfg` and `Provisioning.cfg` give it to the badge. A retired key's availability is off whatever the config's value says. A retired key that was never created has no entry, because there is nothing to retire. An absent key's retired entry stays off. An untracked key has no entry or an `untracked` one.
 
 ## Assumptions
 
@@ -72,7 +73,7 @@ The guarantees hold only under these contracts. The fake Open Cloud in PR 8's co
 - **A listing may lag.** With `ListLag`, a new resource stays hidden from every list endpoint until it propagates (`Provisioning.tla`), and a list can return a field value Roblox has since replaced (`Reconcile.tla`). Resources made by hand may start hidden too. That covers the public badge list, whose freshness Roblox doesn't guarantee. The fake service must be able to do both.
 - **An update is two calls.** A metadata `PATCH` carries every listed field and no icon. An icon upload follows only when the icon hash differs. For a product or pass, it is a `PATCH` with only the image. For a badge, it is `POST /legacy-publish/v1/badges/{badgeId}/icon`. Any call may fail after Roblox applied it, and a lost metadata `PATCH` may apply after a newer one. The fake service must be able to apply a lost `PATCH` at any later time.
 - **A lost icon upload doesn't land after a newer one.** The icon can't be read back, so nothing can detect it. `LateIcon.cfg` shows the stale icon it leaves.
-- **The reviewer reads the plan.** A careful reviewer declines a plan that shows a create beside the key's own unlocked resource. `LostLockApproved.cfg` shows the duplicate when the reviewer approves anyway.
+- **The reviewer reads the plan.** A careful reviewer declines a plan that shows a create beside the key's own unlocked resource. `LostLockApproved.cfg` shows the duplicate when the reviewer approves anyway. Review guards creates only. An adopt by name needs no approval, so after a lost lock no reviewer can stop one key adopting another key's resource (`CrossAdopt.cfg`).
 - **The operator is truthful.** `crucible resolve --not-created` is safe only when the create never committed and never will. `crucible adopt` is safe when it names the lineage's own resource, or any unlocked resource while no create of the lineage can have committed. Mutation M21 shows the duplicate a false `--not-created` makes.
 - **Edits in Creations reach only listed fields.** The run reads listed fields back, so an edit in Creations to a name, description, price or availability is overwritten at the next run. An icon changed in Creations is not detected, for the same reason as a late icon upload.
 - **The config changes only between runs.** The models let no edit happen during a run. The Rust code reads `crucible.toml`, the lock and the journal once at start, and the conformance test must not edit them mid-run.
@@ -80,22 +81,27 @@ The guarantees hold only under these contracts. The fake Open Cloud in PR 8's co
 
 ### The local loss the product tolerates
 
-The journal lives at `~/.crucible/journal/<universeId>/<env>.json`, outside the checkout. Losing the checkout keeps it. That covers `git clean`, `git checkout -- crucible.lock`, a fresh clone, and a second checkout on the same machine. `LostLock.cfg` passes with a lost lock and a careful reviewer.
+The journal lives at `~/.crucible/journal/<universeId>/<env>.json`, outside the checkout. Losing the checkout keeps it. That covers `git clean`, `git checkout -- crucible.lock`, a fresh clone, and a second checkout on the same machine. `LostLock.cfg` passes with a lost lock, one key and a careful reviewer.
 
-Two losses remain residual risks:
+Three losses remain residual risks:
 
 - **Losing the home folder while an intent's create is in flight**, or moving to another machine, when the create's commit is still hidden as the next create is approved (`LostJournal.cfg`). If Roblox has committed the create and the list shows it, its marker adopts it, and `LostJournalSeen.cfg` passes even with a reviewer who approves every plan.
 - **Losing an uncommitted lock while the list still hides the key's resource** (`LostLockLag.cfg`). Neither a marker nor the review can see a resource the list doesn't return.
+- **Losing an uncommitted lock while one key's resource carries another key's desired name** (`CrossAdopt.cfg`). The operator adopts a hand-made "gold" product for `p`, whose desired name is "vip", and the process dies before the rename. The checkout then loses the lock, and `q`, whose desired name is "gold", adopts the product by name. Two keys that trade names reach the same state. The review sees no create, so a careful reviewer doesn't help.
 
 ## How the two models compose
 
-The Rust code is one program. Projected onto `Provisioning.tla`'s variables, each of its traces must be a trace of `Provisioning.tla`, with the icon steps as stuttering steps. Projected onto one resource's fields, it must be a trace of `Reconcile.tla`, with the identity steps as stuttering steps or config edits. The conformance test checks both projections after each operation. The two models share only the lock entry and the listed fields of a locked resource, and these points make checking them apart sound.
+The Rust code is one program. Projected onto `Provisioning.tla`'s variables, each of its traces must be a trace of `Provisioning.tla`, with each icon upload as a stuttering step and each icon hash write as `WriteIconHash`. Projected onto one resource's fields, it must be a trace of `Reconcile.tla`, with the identity steps as stuttering steps or config edits. The conformance test checks both projections after each operation. The two models share only the lock entry and the listed fields of a locked resource. These points argue that checking them apart is sound, within the gap point 3 states.
 
-1. **`Provisioning.tla`'s `Update` is `Reconcile.tla`'s `UpdateMeta`, seen through what identity reads.** It keeps the name, whether the description still carries a marker, and availability. The icon calls and the icon hash belong to `Reconcile.tla` alone, and no identity step reads them. `Update` may also run with no drift that identity can see, which stands for a price or description edit.
-2. **Identity never reads a locked resource's fields.** Adoption by marker or by name, intent resolution, and the orphan review all skip every identity the lock holds. While the lock survives, a resource stays locked once a key adopts or creates it (`NoSilentDelete`). So the late metadata updates and the edits in Creations that `Reconcile.tla` adds cannot change an identity decision. `Provisioning.tla` turns on `LateUpdates` where the lock can be lost (`LostLock.cfg`). It also turns it on in `LivenessLag.cfg` and `LivenessAuto.cfg`, where a late restore can land after a retire.
-3. **`Reconcile.tla` starts from every state identity can leave a locked resource in.** That is any field values, a marker in the description (a description that differs from the config's), and an icon hash that is unknown or true. Adoption leaves the hash unknown, and a move carries the old key's hash. A move changes which config applies to the resource, which `Reconcile.tla` covers as config edits.
-4. **Resources don't share field state.** A run reads each resource's fields from its own list entry, and each `PATCH` and upload names one resource ID. So one resource is enough. It is a product, because a badge has the same calls and fields with no price.
-5. **The conclusions chain.** Identity convergence ends with every managed key locked to its resource and no intent left. Field convergence then brings every listed field and the icon to the config.
+1. **`Provisioning.tla`'s `Update` is `Reconcile.tla`'s `UpdateMeta`, seen through what identity reads.** It keeps the name, whether the description still carries a marker, and availability. Both models take availability from the config's own value for a managed key and force it off for a retired one (`DesiredOn`). The icon calls belong to `Reconcile.tla` alone. Identity sees the icon hash and the other config fields only through the plan bindings (`WriteIconHash`, `EditField`). `Update` may also run with no drift that identity can see, which stands for a price or description edit.
+2. **Identity reads no field of a locked resource except availability.** Adoption by marker or by name, intent resolution, and the orphan review all skip every identity the lock holds. While the lock survives, a resource stays locked once a key adopts or creates it (`NoSilentDelete`). So the late updates and the edits in Creations that `Reconcile.tla` adds cannot change which resource a key names. `Provisioning.tla` turns on `LateUpdates` where the lock can be lost (`LostLock.cfg`).
+3. **Availability couples the two models.** Both read it and both write it. Identity reads a locked resource's availability in `Drift`, which sends an update, and in `NeedsRetiredMark`, which writes `retired` once the listing shows the resource off. Each model over-approximates the other's effect on it.
+   - `Reconcile.tla` starts from either availability and lets the config change it between runs. That covers a retire, a restore, a re-enable and a disabled badge.
+   - `Provisioning.tla` with `LateUpdates` lets any failed update land at any later time with the availability its config said when it was sent. With `Disable`, that can be either value. It has no transition for an edit in Creations. Such an edit has the effect of a late update with the same availability, except that it needs no earlier failed update.
+   - So the identity properties that read availability are stated with that gap in mind. `RetiredIsOff` holds only without late updates and edits in Creations (`RetireLate.cfg`). `NoSilentRetire` constrains only `provision`'s own calls. `RetiredEndsOff` and `Converges` need only that late updates settle and edits stop, which is when `Reconcile.tla`'s `Converges` shows availability reaching the config's value. `LivenessLag.cfg`, `LivenessAuto.cfg` and `RetireRepair.cfg` turn on `LateUpdates`, so a late restore can land after a retire.
+4. **`Reconcile.tla` starts from every state identity can leave a locked resource in.** That is any field values, a marker in the description (a description that differs from the config's), and an icon hash that is unknown or true. Adoption leaves the hash unknown, and a move carries the old key's hash. A move changes which config applies to the resource, which `Reconcile.tla` covers as config edits.
+5. **Resources don't share field state.** A run reads each resource's fields from its own list entry, and each `PATCH` and upload names one resource ID. So one resource is enough. It is a product, because a badge has the same calls and fields with no price.
+6. **The conclusions chain.** Identity convergence ends with every managed key locked to its resource and no intent left. Field convergence then brings every listed field and the icon to the config.
 
 ## Configurations
 
@@ -103,27 +109,30 @@ These were measured on the Windows laptop (16 cores, `-workers auto`, Temurin 21
 
 | Config | Keys | What it checks | Expected | Distinct states | Time |
 | --- | --- | --- | --- | --- | --- |
-| `provisioning/Collision.cfg` | p, b | Two products and a badge may exist by hand, under any names, with one edit. Product 1 and badge 1 are two resources. | pass | 329092 | 17 s |
-| `provisioning/Concurrent.cfg` | p | The documented gap: two provisioners, each with its own checkout, mint two resources for one key. | violation of `AtMostOneRemotePerKey` | 3857 | 3 s |
-| `provisioning/ListLag.cfg` | b | Two badges may exist by hand, hidden from the list until they propagate, and a create whose response was lost can commit later. | pass | 129526 | 7 s |
+| `provisioning/Collision.cfg` | p, b | Two products and a badge may exist by hand, under any names, with one edit. Product 1 and badge 1 are two resources. | pass | 329092 | 20 s |
+| `provisioning/Concurrent.cfg` | p | The documented gap: two provisioners, each with its own checkout, mint two resources for one key. | violation of `AtMostOneRemotePerKey` | 3852 | 5 s |
+| `provisioning/CrossAdopt.cfg` | p, q | The residual risk of a lost lock between two keys of one kind: one key's resource carries the other's desired name, and the other adopts it. | violation of `LockOwnsItsResource` | 7678 | 5 s |
+| `provisioning/ListLag.cfg` | b | Two badges may exist by hand, hidden from the list until they propagate, and a create whose response was lost can commit later. | pass | 129526 | 8 s |
 | `provisioning/Liveness.cfg` | p, p2 | Convergence with manual recovery, once edits and faults stop: every key ends locked to its resource with the config's name, no marker, and the config's availability, and no intent remains. | pass | 31160 | 8 s |
-| `provisioning/LivenessAuto.cfg` | b | Automatic reconciliation: with no operator, a badge converges, or ends with an intent that only `crucible resolve --not-created` can settle. | pass | 220854 | 28 s |
-| `provisioning/LivenessLag.cfg` | b | Convergence with manual recovery of a badge while the list lags and a lost update can land late. | pass | 220854 | 47 s |
-| `provisioning/LostJournal.cfg` | p | The residual risk of a lost home folder: the journal is lost while it holds an intent, and Roblox commits the create after the next listing. | violation of `AtMostOneRemotePerKey` | 1536 | 3 s |
-| `provisioning/LostJournalSeen.cfg` | p | The home folder loses the journal while it holds an intent, and Roblox settles the create before the next listing. The marker identifies it, so even a reviewer who approves every plan makes no duplicate. | pass | 1658 | 4 s |
-| `provisioning/LostLock.cfg` | p | The checkout can lose its uncommitted lock, a lost update can land late, and the config can rename the product. The reviewer declines a plan with a create beside the key's own orphan, and the operator adopts the orphan. | pass | 259066 | 10 s |
-| `provisioning/LostLockApproved.cfg` | p | The residual risk of review: after a lost lock and a rename, the reviewer approves a plan with a create beside the key's own orphan. | violation of `AtMostOneRemotePerKey` | 4089 | 2 s |
-| `provisioning/LostLockLag.cfg` | p | The residual risk of a lost lock while the list still hides the key's resource: neither its marker nor the review can see it. | violation of `AtMostOneRemotePerKey` | 4418 | 3 s |
-| `provisioning/Moves.cfg` | p, p2 | `p2` declares `moved_from = "p"`, and `p` may already exist by hand. Every safety property must hold. | pass | 104102 | 7 s |
-| `provisioning/NoOperator.cfg` | b | The residual dependence on the operator: Roblox drops a create whose response was lost, and nobody runs `crucible resolve --not-created`. | violation of `Converges` | 270 | 2 s |
-| `provisioning/PlanFiles.cfg` | p | `crucible plan --out` for either environment, then `provision --plan`, while the list lags and a hand-made product may exist. Every accepted plan matches its environment, config, lock, identities and creates. | pass | 456980 | 14 s |
-| `provisioning/Provisioning.cfg` | p, b | One provisioner, a product and a badge with the same display name, and a product that may already exist by hand. Every safety property must hold. | pass | 1076372 | 35 s |
-| `provisioning/SameKind.cfg` | p, q | Two product keys that can trade names between runs, while a create of one may still commit under the name the other now uses. | pass | 91022 | 8 s |
+| `provisioning/LivenessAuto.cfg` | b | Automatic reconciliation: with no operator, a badge converges, or ends with an intent that only `crucible resolve --not-created` can settle. | pass | 220854 | 30 s |
+| `provisioning/LivenessLag.cfg` | b | Convergence with manual recovery of a badge while the list lags and a lost update can land late. The config can disable the managed badge. | pass | 335822 | 58 s |
+| `provisioning/LostJournal.cfg` | p | The residual risk of a lost home folder: the journal is lost while it holds an intent, and Roblox commits the create after the next listing. | violation of `AtMostOneRemotePerKey` | 1497 | 3 s |
+| `provisioning/LostJournalSeen.cfg` | p | The home folder loses the journal while it holds an intent, and Roblox settles the create before the next listing. The marker identifies it, so even a reviewer who approves every plan makes no duplicate. | pass | 1658 | 3 s |
+| `provisioning/LostLock.cfg` | p | The checkout can lose its uncommitted lock, a lost update can land late, and the config can rename the product. The reviewer declines a plan with a create beside the key's own orphan, and the operator adopts the orphan. | pass | 259066 | 13 s |
+| `provisioning/LostLockApproved.cfg` | p | The residual risk of review: after a lost lock and a rename, the reviewer approves a plan with a create beside the key's own orphan. | violation of `AtMostOneRemotePerKey` | 3357 | 3 s |
+| `provisioning/LostLockLag.cfg` | p | The residual risk of a lost lock while the list still hides the key's resource: neither its marker nor the review can see it. | violation of `AtMostOneRemotePerKey` | 4408 | 4 s |
+| `provisioning/Moves.cfg` | p, p2 | `p2` declares `moved_from = "p"`, and `p` may already exist by hand. Every safety property must hold. | pass | 104102 | 9 s |
+| `provisioning/NoOperator.cfg` | b | The residual dependence on the operator: Roblox drops a create whose response was lost, and nobody runs `crucible resolve --not-created`. | violation of `Converges` | 270 | 3 s |
+| `provisioning/PlanFiles.cfg` | p | `crucible plan --out` for either environment, then `provision --plan`, while the list lags and a hand-made product may exist. The developer can edit a description, price or icon, and a run can write an icon hash. Every accepted plan matches its environment, whole config, whole lock, identities and creates. | pass | 1095016 | 25 s |
+| `provisioning/Provisioning.cfg` | p, b | One provisioner, a product and a badge with the same display name, and a product that may already exist by hand. The config can disable the managed badge. Every safety property must hold. | pass | 1508316 | 59 s |
+| `provisioning/RetireLate.cfg` | b | The stronger retirement claim fails: a lost restore `PATCH` lands after the retire and after the lock says `retired`. | violation of `RetiredIsOff` | 39588 | 5 s |
+| `provisioning/RetireRepair.cfg` | b | Retirement without the operator: every `retired` entry ends up naming a resource that is off, while the list lags, lost updates land late, and the config can disable the badge. | pass | 335822 | 43 s |
+| `provisioning/SameKind.cfg` | p, q | Two product keys that can trade names between runs, while a create of one may still commit under the name the other now uses. | pass | 91022 | 10 s |
 | `reconcile/LateIcon.cfg` | one product | The residual risk of the icon: an upload whose response was lost lands after a newer one, and no read-back can see it. | violation of `IconHashTrue` | 572 | 2 s |
-| `reconcile/Reconcile.cfg` | one product | A product's name, description, price and availability vary independently, a lost metadata PATCH can land after a newer one, and Creations can edit any listed field. The fields and the icon converge once that stops. | pass | 117502 | 8 s |
-| `reconcile/ReconcileLag.cfg` | one product | The list can return a field value Roblox has since replaced, as the public badge list does. Convergence still holds once the list catches up. | pass | 24823 | 3 s |
+| `reconcile/Reconcile.cfg` | one product | A product's name, description, price and availability vary independently, a lost metadata PATCH can land after a newer one, and Creations can edit any listed field. The fields and the icon converge once that stops. | pass | 117502 | 12 s |
+| `reconcile/ReconcileLag.cfg` | one product | The list can return a field value Roblox has since replaced, as the public badge list does. Convergence still holds once the list catches up. | pass | 24823 | 4 s |
 
-The whole run takes 183 seconds.
+The whole run takes 330 seconds.
 
 For a violation, the count is the states TLC explored before it stopped at the first counterexample. With several workers that number changes from run to run, and so do the counts in the mutation table.
 
@@ -147,6 +156,8 @@ TLC reports each of these as a short trace. They are the documented residual ris
 - **A lost home folder** (`LostJournal.cfg`). A create's response is lost, and then the journal is deleted. Roblox commits the create after the next listing, and the next run creates again.
 - **No operator** (`NoOperator.cfg`). Roblox drops a create whose response was lost. Nothing but `--not-created` can settle its intent.
 - **A late icon upload** (`LateIcon.cfg`). An upload whose response was lost lands after a newer one. The lock records the newer hash, and no read-back can see the old icon.
+- **A late restore after a retire** (`RetireLate.cfg`, against `RetiredIsOff`). A managed key's metadata `PATCH` with availability on loses its response. The config retires the key, the retire succeeds, and the lock records `retired`. Then the old `PATCH` lands and puts the resource back on sale. The next run repairs it (`RetireRepair.cfg`).
+- **A lost lock that hands one key's resource to another** (`CrossAdopt.cfg`). The operator adopts a hand-made product for `p` under a name that must change, the process dies before the rename, and the checkout loses the lock. `q`, whose desired name is the product's current name, adopts it.
 
 ## Actions the Rust code mirrors
 
@@ -159,7 +170,7 @@ Each provisioner action is one operation. A crash can fall between any two. "Loc
 | `Start(p, mode)` | Read `crucible.toml`, `crucible.lock`, the journal and, for `--plan`, the plan file, then validate them (`Valid`). `mode` is `tty`, `file` for `provision --plan`, or `plan` for `crucible plan --out`. | Invalid: exit 2 and write nothing. Valid: the listing starts. |
 | `ListPage(p, x)` | One `GET` of one page: developer products, game passes, or the public badge list (`GET badges.roblox.com/v1/universes/{id}/badges`). Products and passes come before badges. | Success adds the page's kind, ID, name, description and availability to the listing. Failure stops the run before any write. |
 | `Approve(p, yes)` | Print the plan this listing gives and take the TTY answer. `yes = FALSE` is a run without approval, such as CI without `--plan`. | Records the plan's creates as approved |
-| `UsePlan(p)` | Compare the plan file's environment, config hash, lock hash, listed (kind, id) identities and (kind, key, name) creates with this run's (`PlanMatches`) | All match: approves the plan's creates. Any differs: exit non-zero before any write. |
+| `UsePlan(p)` | Compare the plan file's environment, hash of the whole `crucible.toml`, hash of the whole `crucible.lock` with its icon hashes, listed (kind, id) identities and (kind, key, name) creates with this run's (`PlanMatches`) | All match: approves the plan's creates. Any differs: exit non-zero before any write. |
 | `WritePlan(p, e)` | `crucible plan --out` writes the plan file for environment `e` | |
 | `ResolveIntent(p, k)` | For an intent an earlier run left, search the unlocked listed resources for a marker of `k`'s lineage | The intent's exact marker: lock write adopting it. A lineage marker with another nonce: stop the run. None: report `unresolved` and keep the intent. |
 | `ClearIntent(p, k)` | Journal write removing `k`'s intent | Runs after the lock records the ID, or after a create that proves no commit |
@@ -172,6 +183,7 @@ Each provisioner action is one operation. A crash can fall between any two. "Loc
 | `WriteIntent(p, k)` | Journal write recording `k`, its kind, the exact name and a fresh nonce | |
 | `Create(p, k)` | One create call with the marker as the description. It is never repeated in the run. A badge sends `expectedCost: 0`. | Accepted with an ID, unknown, rejected, or deferred |
 | `WriteLockCreated(p, k)` | Lock write of the new ID with status `managed` | `ClearIntent` and an `Update` follow |
+| `WriteIconHash(p, k)` | Lock write that changes only `k`'s icon hash, which is `Reconcile.tla`'s `WriteIconStale` or `WriteIconHash` | Changes the lock binding of every plan. Only `PlanFiles.cfg` enables it. |
 | `Finish(p)` | Exit once every key is settled | Exit 0 when `Unfinished(p)` is empty. Otherwise non-zero, and 5 when any key is `unknown` or `unresolved`. |
 | `Crash(p)` | The process dies | Memory is lost. The files and Roblox keep every finished write. |
 
@@ -184,7 +196,8 @@ The operator's commands are separate processes, run between provisions:
 
 The environment's actions:
 
-- `Edit` is the developer editing the config between runs.
+- `Edit` is the developer editing a key's status, name or availability between runs. Only a key in `Disable` can be managed with availability off.
+- `EditField` is the developer editing a key's description, price or icon between runs. Only `PlanFiles.cfg` enables it.
 - `CommitLock` and `DiscardCheckout` are git committing the lock and the checkout losing its uncommitted lock. `DiscardHome` is the home folder losing the journal.
 - `NewDay` refills free badges, and `Propagate` is a hidden resource reaching the list.
 - `Settle` and `SettleUpdate` are Roblox finishing or dropping a create or an update whose response was lost.
@@ -213,7 +226,7 @@ The environment's actions are `EditField` and `EditIcon` for the config, `EditIn
 2. **An adopt check matches kind as well as name** (M3). A "VIP" pass and a "VIP" badge are normal.
 3. **An adopt check skips every (kind, id) identity the lock holds, retired and untracked entries included** (M10, M15). Numeric IDs overlap across kinds, so locking product 1 must not hide badge 1.
 4. **A marker of the key's lineage wins over a name, and a name adopts only an unmarked resource.** A run that lost its journal adopts a listed resource that carries the key's marker instead of creating (M30). Another key's marked resource is never adopted by name, even after the keys trade names (M29). A `moved_from` key adopts its old key's marked resource.
-5. **A lineage marker with another nonce, during an unresolved intent, stops the run.** It means state was lost and a duplicate already exists. This and the nonce itself are diagnostics. With the stop removed, and separately with any lineage marker accepted as the intent's own, every safety configuration still passes. The duplicate was decided when the second create was sent, so the nonce only lets the error name it. The campaign has no mutation for either, because no property catches one.
+5. **A lineage marker with another nonce, during an unresolved intent, stops the run.** It means state was lost, and conflicting intent history requires operator investigation. It doesn't prove a duplicate exists, because a newer intent may have been followed by a crash before its create was sent. This and the nonce itself are diagnostics. With the stop removed, and separately with any lineage marker accepted as the intent's own, every safety configuration still passes. The duplicate was decided when the second create was sent, so the nonce only lets the error name it. The campaign has no mutation for either, because no property catches one.
 6. **Fields come from the listing, and an update follows every create and every marker adoption.** The run compares each listed field with the config and sends a metadata `PATCH` on drift, or when the listing didn't show the resource, as after a create. That `PATCH` writes the real description, which removes the marker (M40, M41).
 7. **An intent for a key the config dropped is an error, like a dropped managed key.** Its create may have committed. Rule 5 names only lock entries.
 8. **A retired or untracked entry may stay in the lock after its key leaves the config.** Its ID stays out of adoption, and declaring the key again brings back the same resource. A retired entry stays reconciled off, so a late restore that lands after the key left the config is undone.
@@ -230,12 +243,12 @@ The environment's actions are `EditField` and `EditIcon` for the config, `EditIn
 16. **The lock write comes before the journal clear, and each write is durable before the next call** (M12, M32). Each write goes to a temp file, is flushed with `fsync` (`FlushFileBuffers` on Windows), is renamed over the old file, and then the directory is flushed. On Windows the rename uses `MoveFileEx` with `MOVEFILE_WRITE_THROUGH`. A rename alone survives a process crash, because the OS keeps its page cache. Only a flushed write survives a power loss. `OneWritePerStep` checks that no step bundles two writes.
 17. **Two matches stop the run before its next write, and ask for `crucible adopt <kind> <key> <id>`.** Writes the run already made stay. They are resolved intents, moves, untracks, lock status writes and updates for other keys, and each one is consistent on its own.
 18. **A resource made by hand is adopted automatically only when the config names it exactly, the key has no intent, and no marker of its lineage is listed.** Otherwise the plan lists the create beside every unlocked resource of that kind as a possible orphan. `crucible adopt` handles a resource whose name must change, and adopts in bulk for FD's first run.
-19. **A create needs approval from one reviewed plan, which is bound to its inputs and observations.** On a TTY, `provision` prints the plan and asks. Otherwise it takes `--plan <file>` from `crucible plan --out`. The file records the environment, the hash of `crucible.toml`, the hash of `crucible.lock`, the (kind, id) identities its listing saw, and the exact (kind, key, name) creates. `provision --plan` lists again and compares each binding with its own. If any differs, it exits non-zero before any write (M33 to M37). The TTY flow takes the same path with a plan built from the run's own listing, so its bindings match by construction. The reviewer approves the whole plan or none of it. There is no global bypass.
-20. **A plan file is not consumed.** A plan whose five bindings all match the run's own is the plan a fresh `crucible plan` would print. So a replay is either rejected or harmless, and `PlanFiles.cfg` passes with every plan reusable any number of times.
+19. **A create needs approval from one reviewed plan, which is bound to its inputs and observations.** On a TTY, `provision` prints the plan and asks. Otherwise it takes `--plan <file>` from `crucible plan --out`. The file records the environment, the hash of `crucible.toml`, the hash of `crucible.lock`, the (kind, id) identities its listing saw, and the exact (kind, key, name) creates. `provision --plan` lists again and compares each binding with its own. If any differs, it exits non-zero before any write (M33 to M37, M42, M43). The TTY flow takes the same path with a plan built from the run's own listing, so its bindings match by construction. The reviewer approves the whole plan or none of it. There is no global bypass.
+20. **A plan file is not consumed.** A plan whose five bindings all match the run's own is the plan a fresh `crucible plan` would print, provided the bindings cover every input the plan depends on. That is why the config and lock bindings hash the whole files (M42, M43). Under that condition a replay is either rejected or harmless, and `PlanFiles.cfg` passes with every plan reusable any number of times.
 21. **The config, lock and journal are read once at start.** The run writes the lock and the journal as whole files from memory. Nothing else may write them during a run, because the run would overwrite that write. The models exclude a config edit during a run. They don't model a snapshot of one.
-22. **Listed fields reconcile from the listing, not from a lock fingerprint.** The lock keeps no fingerprint of the name, description, price or availability. A lost `PATCH` that lands after a newer one, or an edit in Creations, shows up as drift at the next run, which repairs it (R4). Each listed field takes part in the comparison on its own (R1, R2), and a managed badge may stay disabled (R3).
+22. **Listed fields reconcile from the listing, not from a lock fingerprint.** The lock keeps no fingerprint of the name, description, price or availability. A lost `PATCH` that lands after a newer one, or an edit in Creations, shows up as drift at the next run, which repairs it (R4). Each listed field takes part in the comparison on its own (R1, R2), and a managed badge may stay disabled (R3). The identity model takes the same availability from the config (M44).
 23. **The icon goes in its own call for every kind, and the lock keeps its hash.** A product's metadata `PATCH` could carry the image, but a late one would then restore an old icon that nothing can detect (R5). Before an upload, the lock clears the icon hash. After the upload succeeds, it writes the new one (R6, R7, R8). A late icon upload is the residual risk in `LateIcon.cfg`.
-24. **The lock's status follows Roblox conservatively.** `managed` is written before a restore or a re-track, and `retired` only after a retire succeeded or the listing shows the resource off (M38, M39). A key whose entry says `retired` can leave the config, so the entry must never say `retired` while the resource may be on sale.
+24. **The lock's status follows Roblox conservatively, and every run repairs a retired resource that is back on.** `managed` is written before a restore or a re-track, and `retired` only after a retire succeeded or the listing shows the resource off (M38, M39). That keeps `provision`'s own steps from leaving a `retired` entry beside a resource on sale. It can't stop an older `PATCH` whose response was lost, or an edit in Creations, from turning the resource on afterwards (`RetireLate.cfg`). So a retired entry stays reconciled: each run that lists the resource on sends another retire (M45). A key whose entry says `retired` can leave the config, because the entry stays and the repair goes on as long as the developer keeps running `provision`.
 25. **Every list page succeeds before the run writes anything** (M22). A failed page stops the run. Counting it as empty hides an orphan from the review.
 26. **The journal lives in the home folder, at `~/.crucible/journal/<universeId>/<env>.json`** (M31). A journal inside the checkout is lost with it, and with it the only record of a create in flight.
 27. **`crucible adopt` reads, writes the lock, and clears the intent in three steps** (M32). Each is one write, like every provisioner action.
@@ -293,6 +306,10 @@ Each property was shown to have teeth. `specs/mutate.mjs` applies each entry of 
 | M39 | Mark the lock retired before the retire succeeded | `provisioning/Provisioning` | `RetiredIsOff` |
 | M40 | The update keeps the create marker in the description | `provisioning/Liveness` | `Converges` |
 | M41 | Compare only availability, not the name and the marker | `provisioning/Liveness` | `Converges` |
+| M42 | Accept a plan made before an edit to a description, price or icon | `provisioning/PlanFiles` | `PlanIsFresh` |
+| M43 | Accept a plan made before an icon hash write | `provisioning/PlanFiles` | `PlanIsFresh` |
+| M44 | Tie availability back to status, so a managed badge cannot stay disabled | `provisioning/LivenessLag` | `Converges` |
+| M45 | Stop updating a key once its entry says retired | `provisioning/RetireRepair`, only `RetiredEndsOff` | `RetiredEndsOff` |
 | R1 | Leave price out of the read-back comparison | `reconcile/Reconcile` | `Converges` |
 | R2 | Leave the description out of the read-back comparison | `reconcile/Reconcile` | `Converges` |
 | R3 | A managed resource is always sent as available, so a disabled badge cannot stay disabled | `reconcile/Reconcile` | `Converges` |
@@ -312,8 +329,31 @@ What the results show:
 - **M29, M30 and M31** are the new identity rules. Each one fails a safety property again, so each rule carries weight. M30 needs a reviewer who approves every plan, because a careful reviewer also sees the committed create as the key's own orphan. The marker makes the lost-journal case safe without the review.
 - **M27** also fails `RemovedIsError`, because the moved key's create leaves an entry beside its old key's intent. The run checks only `NoBlindCreate` to show that property catches the bug alone.
 - **M33 to M37** drop one plan binding each. Each one lets `provision --plan` accept a plan that differs from its own in exactly that binding.
+- **M42 and M43** keep the config and lock bindings but leave out the fields the previous round's bindings missed. A plan survives an edit to a description, price or icon, or an icon hash write, and `provision --plan` accepts it.
+- **M44** is the previous round's availability, tied to status. A managed badge that the config disables stays enabled.
+- **M45** removes the repair that `RetiredEndsOff` depends on. A late restore that lands after the retire leaves the resource on sale for good.
 - **R4** is the previous round's fingerprint, which trusted the lock instead of the listing. It fails `Converges` because a late `PATCH` or an edit in Creations is never repaired.
 - **R5** is the single product call that carries the icon. A late one restores an old icon behind a true-looking hash.
+
+## PR 8 conformance obligations
+
+The models check what they model and no more. PR 8's `proptest-state-machine` test must also cover these, against the fake Open Cloud.
+
+The verifier's residuals, each a test requirement:
+
+- home or journal loss with pending creates and lagging visibility;
+- lock loss with hidden resources, renames and cross-key adoption;
+- old metadata landing after several later runs, retirement, removal and dashboard edits;
+- late icon uploads and dashboard icon changes;
+- a crash after the intent is persisted but before the create is sent;
+- full config and lock plan invalidation, observable call boundaries, and adopt-read failures.
+
+Two failure modes the fake service must offer, which the models leave out:
+
+- **Adopt-read failure.** `AdoptRead` models only a read that succeeds. The fake service must also fail that read, and the test must show that `crucible adopt` then writes nothing.
+- **A listing missing a locked resource.** `Reconcile.tla`'s `List` always returns the resource. The fake service must return a successful listing without a locked ID, as a lagging list can, and the test must show that the run still sends the metadata `PATCH` that `Unlisted` requires in `Provisioning.tla`.
+
+`OneWritePerStep` checks state changes, so the test must count operations itself. It records each Open Cloud call and each file write as an event, checks that every model step maps to at most one event, and injects a crash at every boundary between two events.
 
 ## What CI needs
 
@@ -322,6 +362,6 @@ The `specs:check` script is ready for CI. No CI job runs it yet. A job needs:
 - Java 11 or later, for example `actions/setup-java` with Temurin 21. The scripts look for `$JAVA`, then `$JAVA_HOME/bin/java`, then `java` on `PATH`.
 - Node 24 and `pnpm specs:check`. No `pnpm install` is needed, because the scripts use only Node built-ins.
 - Network access to GitHub releases on the first run. The script downloads `tla2tools.jar` v1.7.4 into `specs/.tools/` (gitignored) and checks its SHA-256, `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`. A cache keyed on that hash skips the download.
-- About 3 minutes on 16 cores. A 4-core runner should take a few times longer.
+- About 6 minutes on 16 cores. A 4-core runner should take a few times longer.
 
-The script exits 1 when any configuration's result differs from its `\* expect:` line, and then prints TLC's full output for that configuration. `pnpm specs:mutate` takes about 5 minutes more and can run in the same job.
+The script exits 1 when any configuration's result differs from its `\* expect:` line, and then prints TLC's full output for that configuration. `pnpm specs:mutate` takes about 8 minutes more and can run in the same job.

@@ -1,13 +1,7 @@
 ------------------------------ MODULE Reconcile ------------------------------
-(***************************************************************************)
-(* How one locked resource's fields converge in `crucible provision`.      *)
-(* `specs/provisioning` decides which resource the lock names. This model  *)
-(* starts from any state that model can leave: any field values, a create  *)
-(* marker in the description, and an icon hash that is unknown or true.   *)
-(* The run reads the listed fields back from the list endpoint. It cannot  *)
-(* read the icon, so the lock keeps the icon's hash. README.md states the  *)
-(* properties and how the two models compose.                              *)
-(***************************************************************************)
+(* Init covers every state identity can leave a locked resource in. The    *)
+(* run reads the listed fields back but cannot read the icon, so the lock  *)
+(* keeps the icon's hash.                                                  *)
 EXTENDS Integers
 
 CONSTANTS

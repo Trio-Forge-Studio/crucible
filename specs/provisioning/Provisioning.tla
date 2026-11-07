@@ -1,13 +1,6 @@
 ---------------------------- MODULE Provisioning ----------------------------
-(***************************************************************************)
-(* Resource identity in `crucible provision <env>` for one environment:    *)
-(* the config, each provisioner's lock and intent journal, Roblox's        *)
-(* resources and in-flight requests, the plan review and plan files, and   *)
-(* the operator's commands. Each provisioner action is one Open Cloud      *)
-(* call, one atomic file write, or one decision on data already in memory. *)
-(* `specs/reconcile` models how a locked resource's fields converge.       *)
-(* README.md maps the actions to the Rust code and states every property.  *)
-(***************************************************************************)
+(* Each provisioner action is one Open Cloud call, one durable file write, *)
+(* or one decision on data already in memory.                              *)
 EXTENDS Integers, FiniteSets
 
 CONSTANTS
@@ -27,6 +20,7 @@ CONSTANTS
     BadgeCost,   \* the `expectedCost` a badge create sends
     MaxFaults,
     MaxEdits,
+    Disable,     \* keys whose config may keep them managed but disabled
     ListLag,
     LateUpdates,
     SettleFirst,
@@ -41,6 +35,7 @@ Lineage(k) == IF k \in Targets THEN {k, MovedFrom[k]} ELSE {k}
 ASSUME \A a, b \in Keys \ Targets : a # b /\ Kind[a] = Kind[b] => Name0[a] # Name0[b]
 ASSUME \A t \in Targets : Kind[t] = Kind[MovedFrom[t]]
 ASSUME Env \in Envs
+ASSUME Disable \subseteq Keys
 
 Ids == 1..(CHOOSE n \in {MaxId[x] : x \in Kinds} : \A x \in Kinds : MaxId[x] <= n)
 PageSize(x) == (MaxId[x] + PageCount - 1) \div PageCount
@@ -51,7 +46,8 @@ NoName == ""
 NoIntent == "none"
 NoMark == [key |-> "", n |-> NoIntent]
 Mark(k, n) == [key |-> k, n |-> n]
-NoEntry == [id |-> 0, st |-> "none"]
+NoIcon == 0
+NoEntry == [id |-> 0, st |-> "none", icon |-> NoIcon]
 NoRec == [ex |-> FALSE, name |-> NoName, mark |-> NoMark, on |-> FALSE, vis |-> FALSE]
 NoPlan == [env |-> "none"]
 Fresh == [s |-> "todo", id |-> 0]
@@ -116,7 +112,7 @@ NoStaleIntents(p) == \A k \in Keys : ~StaleIntent(p, k)
 Reconciled(p, k) ==
     /\ Locked(p, k)
     /\ Declared(k) \/ (cfg[k].st = "absent" /\ lock[p][k].st = "retired")
-DesiredOn(k) == cfg[k].st = "managed"
+DesiredOn(k) == cfg[k].st = "managed" /\ cfg[k].on
 View(p, k) == {o \in run[p].obs : o.kind = Kind[k] /\ o.id = lock[p][k].id}
 Unlisted(p, k) == View(p, k) = {}
 Drift(p, k) ==
@@ -213,7 +209,7 @@ Spend(max, n) == IF max = Unbounded THEN n ELSE n + 1
 Fault == Budget(MaxFaults, faults) /\ faults' = Spend(MaxFaults, faults)
 SetKs(p, k, v) == run' = [run EXCEPT ![p].ks[k] = v]
 Stop(p) == run' = [run EXCEPT ![p] = IdleRun]
-Adopted(i) == [id |-> i, st |-> "managed"]
+Adopted(i) == [id |-> i, st |-> "managed", icon |-> NoIcon]
 Claim(x, i, k) == [owner EXCEPT ![x][i] = IF @ \in {""} \cup Lineage(k) THEN k ELSE @]
 
 GhostMatchShown(p, k) ==
@@ -335,7 +331,7 @@ WriteLockManaged(p, k) ==
 Payload(p, k) ==
     [kind |-> Kind[k], id |-> lock[p][k].id, declared |-> Declared(k),
      name |-> cfg[k].name, on |-> DesiredOn(k),
-     why |-> cfg[k].st = "retired" \/ (cfg[k].st = "absent" /\ lock[p][k].st = "retired")]
+     why |-> ~DesiredOn(k)]
 Apply(r) ==
     [remote EXCEPT ![r.kind][r.id].on = r.on,
                    ![r.kind][r.id].name = IF r.declared THEN r.name ELSE @,
@@ -418,9 +414,18 @@ Create(p, k) ==
 WriteLockCreated(p, k) ==
     /\ Working(p)
     /\ Ks(p, k).s = "created"
-    /\ lock' = [lock EXCEPT ![p][k] = [id |-> Ks(p, k).id, st |-> "managed"]]
+    /\ lock' = [lock EXCEPT ![p][k] = [id |-> Ks(p, k).id, st |-> "managed", icon |-> NoIcon]]
     /\ SetKs(p, k, [s |-> "locked", id |-> 0])
     /\ UNCHANGED <<cfg, journal, committed, planFile, roblox, ghosts, faults, edits>>
+
+WriteIconHash(p, k) ==
+    /\ PlanFiles
+    /\ Working(p)
+    /\ NoStaleIntents(p)
+    /\ Ks(p, k).s \in {"todo", "synced"}
+    /\ MayUpdate(p, k)
+    /\ lock' = [lock EXCEPT ![p][k].icon = 1 - @]
+    /\ UNCHANGED <<cfg, journal, committed, planFile, roblox, run, ghosts, faults, edits>>
 
 Finish(p) ==
     /\ Working(p)
@@ -438,6 +443,7 @@ KeyStep(p, k) ==
     \/ ResolveIntent(p, k) \/ ClearIntent(p, k) \/ Move(p, k) \/ Untrack(p, k)
     \/ WriteLockManaged(p, k) \/ Update(p, k) \/ WriteLockRetired(p, k)
     \/ AdoptCheck(p, k) \/ WriteIntent(p, k) \/ Create(p, k) \/ WriteLockCreated(p, k)
+    \/ WriteIconHash(p, k)
 
 Provision(p) ==
     \/ Finish(p)
@@ -492,14 +498,23 @@ Operate(p) ==
 
 Idle == \A p \in Provs : run[p].pc = "idle"
 
-Edit(k, st, name) ==
+Edit(k, st, name, on) ==
     /\ Idle
     /\ Budget(MaxEdits, edits)
     /\ (st \in {"absent", "untrack"}) = (name = NoName)
-    /\ [st |-> st, name |-> name] # cfg[k]
+    /\ on \in IF st = "managed" /\ k \in Disable THEN BOOLEAN ELSE {TRUE}
+    /\ [cfg[k] EXCEPT !.st = st, !.name = name, !.on = on] # cfg[k]
     /\ st \in {"managed", "retired"} =>
            \A j \in Keys \ {k} : Kind[j] = Kind[k] /\ Declared(j) => cfg[j].name # name
-    /\ cfg' = [cfg EXCEPT ![k] = [st |-> st, name |-> name]]
+    /\ cfg' = [cfg EXCEPT ![k].st = st, ![k].name = name, ![k].on = on]
+    /\ edits' = Spend(MaxEdits, edits)
+    /\ UNCHANGED <<lock, journal, committed, planFile, roblox, run, ghosts, faults>>
+
+EditField(k) ==
+    /\ PlanFiles
+    /\ Idle
+    /\ Budget(MaxEdits, edits)
+    /\ cfg' = [cfg EXCEPT ![k].fields = 1 - @]
     /\ edits' = Spend(MaxEdits, edits)
     /\ UNCHANGED <<lock, journal, committed, planFile, roblox, run, ghosts, faults>>
 
@@ -558,8 +573,9 @@ SettleUpdate(r) ==
 -----------------------------------------------------------------------------
 
 Init ==
-    /\ cfg = [k \in Keys |-> IF k \in Targets THEN [st |-> "absent", name |-> NoName]
-                                               ELSE [st |-> "managed", name |-> Name0[k]]]
+    /\ cfg = [k \in Keys |-> [st |-> IF k \in Targets THEN "absent" ELSE "managed",
+                               name |-> IF k \in Targets THEN NoName ELSE Name0[k],
+                               on |-> TRUE, fields |-> 0]]
     /\ lock = [p \in Provs |-> [k \in Keys |-> NoEntry]]
     /\ journal = [p \in Provs |-> [k \in Keys |-> NoIntent]]
     /\ committed = lock
@@ -588,7 +604,9 @@ Next ==
     \/ \E p \in Provs :
           \/ Provision(p) \/ Crash(p) \/ Operate(p)
           \/ CommitLock(p) \/ DiscardCheckout(p) \/ DiscardHome(p)
-    \/ \E k \in Keys, st \in Statuses, name \in Names \cup {NoName} : Edit(k, st, name)
+    \/ \E k \in Keys, st \in Statuses, name \in Names \cup {NoName}, on \in BOOLEAN :
+          Edit(k, st, name, on)
+    \/ \E k \in Keys : EditField(k)
     \/ NewDay
     \/ \E x \in Kinds, i \in Ids : Propagate(x, i)
     \/ \E r \in pending : Settle(r)
@@ -612,7 +630,7 @@ OperatorSpec == LiveSpec /\ \A p \in Provs : SF_vars(\E k \in Keys : OperatorNot
 -----------------------------------------------------------------------------
 
 TypeOK ==
-    /\ cfg \in [Keys -> [st : Statuses, name : Names \cup {NoName}]]
+    /\ cfg \in [Keys -> [st : Statuses, name : Names \cup {NoName}, on : BOOLEAN, fields : {0, 1}]]
     /\ \A x \in Kinds : nextId[x] \in 1..(MaxId[x] + 1)
     /\ freeBadges \in 0..FreeQuota
     /\ blind \in BOOLEAN
@@ -659,7 +677,9 @@ OffAllowed(x, i) ==
     \/ \E p \in Provs, k \in Keys :
            /\ Kind[k] = x
            /\ lock[p][k].id = i
-           /\ cfg[k].st = "retired" \/ (cfg[k].st = "absent" /\ lock[p][k].st = "retired")
+           /\ \/ cfg[k].st = "retired"
+              \/ cfg[k].st = "managed" /\ ~cfg[k].on
+              \/ cfg[k].st = "absent" /\ lock[p][k].st = "retired"
     \/ \E r \in late \ late' : r.kind = x /\ r.id = i /\ r.why
 
 NoSilentRetire ==
@@ -687,7 +707,7 @@ KeyConverged(p, k) ==
     /\ cfg[k].st = "managed" => Locked(p, k)
     /\ Reconciled(p, k) =>
            LET r == remote[Kind[k]][lock[p][k].id]
-           IN /\ r.on = DesiredOn(k)
+           IN /\ r.on = (cfg[k].st = "managed" /\ cfg[k].on)
               /\ lock[p][k].st = IF cfg[k].st = "managed" THEN "managed" ELSE "retired"
               /\ Declared(k) => r.name = cfg[k].name /\ r.mark = NoMark
     /\ cfg[k].st = "untrack" => lock[p][k].st \in {"none", "untracked"}
@@ -696,6 +716,11 @@ KeyConverged(p, k) ==
 NeedsOperator(p, k) == Intent(p, k) /\ ~Locked(p, k) /\ ~InFlight(k) /\ ~Claimed(k)
 
 Converges == \A p \in Provs : <>[]((\A k \in Keys : KeyConverged(p, k)) \/ ~Valid(p))
+
+RetiredEndsOff ==
+    \A p \in Provs :
+        <>[]((\A k \in Keys : lock[p][k].st = "retired" => ~remote[Kind[k]][lock[p][k].id].on)
+             \/ ~Valid(p))
 
 ConvergesOrAsks ==
     \A p \in Provs, k \in Keys : <>[](KeyConverged(p, k) \/ NeedsOperator(p, k) \/ ~Valid(p))
