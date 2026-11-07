@@ -21,9 +21,18 @@ const FD_BASELINE: &str = "build/golden/fd.txt";
 /// runtime's declarations, so the runtime builds first.
 const PACKAGES: &[&str] = &["packages/crucible", "examples/sample-game"];
 
+enum Kind {
+    Folder,
+    File,
+}
+
 /// Everything those builds write. Each is removed first, so a file a change stops emitting cannot linger.
-const OUTPUTS: &[&str] =
-    &["packages/crucible/out", "examples/sample-game/out", "examples/sample-game/include", "build/sample-game.rbxl"];
+const OUTPUTS: &[(&str, Kind)] = &[
+    ("packages/crucible/out", Kind::Folder),
+    ("examples/sample-game/out", Kind::Folder),
+    ("examples/sample-game/include", Kind::Folder),
+    ("build/sample-game.rbxl", Kind::File),
+];
 
 const USAGE: &str = "usage: cargo xtask golden <record|check> [--fd <fragile-delivery checkout>]";
 
@@ -41,6 +50,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
             write(&root.join(BASELINE), &manifest)?;
             println!("golden: recorded {} files in {BASELINE}", manifest.len());
             if let Some(manifest) = fd_manifest(&root)? {
+                validate_fd(&manifest)?;
                 write(&root.join(FD_BASELINE), &manifest)?;
                 println!("golden: recorded {} Fragile Delivery files in {FD_BASELINE}", manifest.len());
             }
@@ -48,11 +58,15 @@ pub fn main(args: &[String]) -> Result<(), String> {
         }
         "check" => {
             let manifest = build(&root)?;
-            let mut differs = report(BASELINE, &read(&root.join(BASELINE))?, &manifest);
+            let baseline = read(&root.join(BASELINE))?;
+            validate(&baseline).map_err(|e| format!("{BASELINE}: {e}"))?;
+            let mut differs = report(BASELINE, &baseline, &manifest);
             if let Some(manifest) = fd_manifest(&root)? {
+                validate_fd(&manifest)?;
                 let baseline = read(&root.join(FD_BASELINE)).map_err(|e| {
                     format!("{e}\nRecord it on the base commit first: cargo xtask golden record --fd <path>")
                 })?;
+                validate_fd(&baseline).map_err(|e| format!("{FD_BASELINE}: {e}"))?;
                 differs |= report(FD_BASELINE, &baseline, &manifest);
             }
             if differs { Err("golden: the output differs from the baseline".into()) } else { Ok(()) }
@@ -61,19 +75,58 @@ pub fn main(args: &[String]) -> Result<(), String> {
     }
 }
 
-/// Builds the runtime and the sample game from clean and hashes what they write.
 pub fn build(root: &Path) -> Result<Manifest, String> {
-    for output in OUTPUTS {
+    for (output, _) in OUTPUTS {
         remove(&root.join(output))?;
     }
     for package in PACKAGES {
         run_build_script(&root.join(package))?;
     }
+    hash_outputs(root)
+}
+
+fn hash_outputs(root: &Path) -> Result<Manifest, String> {
     let mut manifest = Manifest::new();
-    for output in OUTPUTS {
-        hash_into(&mut manifest, root, &root.join(output), "")?;
+    for (output, kind) in OUTPUTS {
+        let path = root.join(output);
+        let meta =
+            fs::symlink_metadata(&path).map_err(|e| format!("the build did not write {}: {e}", path.display()))?;
+        let (fits, expected) = match kind {
+            Kind::File => (meta.is_file(), "a file"),
+            Kind::Folder => (meta.is_dir(), "a folder"),
+        };
+        if !fits {
+            return Err(format!("golden: the build wrote {output}, which must be {expected}"));
+        }
+        hash_into(&mut manifest, root, &path, "")?;
     }
+    validate(&manifest)?;
     Ok(manifest)
+}
+
+/// Fails unless every required output holds at least one file, so a build or baseline that hashes nothing can
+/// never compare equal to another that hashes nothing.
+pub fn validate(manifest: &Manifest) -> Result<(), String> {
+    for (output, kind) in OUTPUTS {
+        let present = match kind {
+            Kind::File => manifest.contains_key(*output),
+            Kind::Folder => {
+                manifest.keys().any(|path| path.strip_prefix(output).is_some_and(|rest| rest.starts_with('/')))
+            }
+        };
+        if !present {
+            let what = if matches!(kind, Kind::File) { "the file" } else { "any file under" };
+            return Err(format!("golden: the manifest lacks {what} {output}, so the build wrote nothing to compare"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_fd(manifest: &Manifest) -> Result<(), String> {
+    if manifest.is_empty() {
+        return Err("golden: the Fragile Delivery manifest is empty, so the build wrote nothing to compare".into());
+    }
+    Ok(())
 }
 
 /// Runs the package's own `build` script, so this check cannot drift from `pnpm build`. The scripts are one plain
@@ -104,7 +157,6 @@ fn remove(path: &Path) -> Result<(), String> {
     result.map_err(|e| format!("cannot remove {}: {e}", path.display()))
 }
 
-/// Adds every file at or under `path` to the manifest, keyed by its path relative to `base` after `prefix`.
 fn hash_into(manifest: &mut Manifest, base: &Path, path: &Path, prefix: &str) -> Result<(), String> {
     let meta = fs::symlink_metadata(path).map_err(|e| format!("the build did not write {}: {e}", path.display()))?;
     if meta.is_dir() {
@@ -143,7 +195,13 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
             continue;
         }
         let (hash, path) = line.split_once("  ").ok_or_else(|| format!("malformed manifest line: {line}"))?;
-        manifest.insert(path.to_owned(), hash.to_owned());
+        let hex = hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !hex || path.is_empty() {
+            return Err(format!("malformed manifest line: {line}"));
+        }
+        if manifest.insert(path.to_owned(), hash.to_owned()).is_some() {
+            return Err(format!("the manifest lists {path} twice"));
+        }
     }
     Ok(manifest)
 }
@@ -185,7 +243,7 @@ pub fn compare(baseline: &Manifest, current: &Manifest) -> Diff {
     diff
 }
 
-/// Prints the comparison and returns whether anything differs.
+/// Returns whether anything differs.
 fn report(name: &str, baseline: &Manifest, current: &Manifest) -> bool {
     let diff = compare(baseline, current);
     if diff.is_empty() {
@@ -206,7 +264,6 @@ fn report(name: &str, baseline: &Manifest, current: &Manifest) -> bool {
 mod fd {
     use super::*;
 
-    /// What FD's build writes, under the copy's root.
     fn outputs(copy: &Path) -> Result<Vec<PathBuf>, String> {
         let mut outputs = Vec::new();
         let places = copy.join("places");
@@ -248,7 +305,6 @@ mod fd {
         Ok(manifest)
     }
 
-    /// Builds this repository's `crucible` and returns its path.
     fn crucible_binary(root: &Path) -> Result<PathBuf, String> {
         let manifest = root.join("cli/Cargo.toml");
         let text = run::stdout(
@@ -299,7 +355,6 @@ mod fd {
             .map_err(|e| format!("cannot write the crucible shim: {e}"))
     }
 
-    /// A folder under the system temporary folder, removed when dropped.
     struct Temporary(PathBuf);
 
     impl Temporary {
@@ -315,5 +370,71 @@ mod fd {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    fn full() -> Manifest {
+        [
+            "packages/crucible/out/init.luau",
+            "examples/sample-game/out/main.luau",
+            "examples/sample-game/include/RuntimeLib.lua",
+            "build/sample-game.rbxl",
+        ]
+        .into_iter()
+        .map(|path| (path.to_owned(), HASH.to_owned()))
+        .collect()
+    }
+
+    #[test]
+    fn a_manifest_needs_a_file_in_every_output() {
+        assert_eq!(validate(&full()), Ok(()));
+        assert!(validate(&Manifest::new()).is_err());
+        for missing in full().keys() {
+            let mut manifest = full();
+            manifest.remove(missing);
+            assert!(validate(&manifest).is_err(), "{missing}");
+        }
+        let mut sibling = full();
+        sibling.remove("packages/crucible/out/init.luau");
+        sibling.insert("packages/crucible/outside.luau".into(), HASH.into());
+        assert!(validate(&sibling).is_err());
+        assert!(validate_fd(&Manifest::new()).is_err());
+    }
+
+    #[test]
+    fn a_baseline_must_be_well_formed() {
+        assert_eq!(parse(&render(&full())), Ok(full()));
+        assert!(parse("abc  packages/crucible/out/init.luau\n").is_err());
+        assert!(parse(&format!("{HASH}  \n")).is_err());
+        assert!(parse(&format!("{HASH}  a\n{HASH}  a\n")).is_err());
+    }
+
+    #[test]
+    fn empty_outputs_and_a_folder_for_the_place_are_refused() {
+        let root = std::env::temp_dir().join(format!("xtask-golden-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for (output, _) in OUTPUTS {
+            fs::create_dir_all(root.join(output)).unwrap();
+        }
+        let folder_place = hash_outputs(&root);
+        fs::remove_dir_all(root.join("build/sample-game.rbxl")).unwrap();
+        fs::write(root.join("build/sample-game.rbxl"), "place").unwrap();
+        let empty_folders = hash_outputs(&root);
+        for (output, kind) in OUTPUTS {
+            if matches!(kind, Kind::Folder) {
+                fs::write(root.join(output).join("a.luau"), "return nil").unwrap();
+            }
+        }
+        let built = hash_outputs(&root);
+        fs::remove_dir_all(&root).unwrap();
+        assert!(folder_place.unwrap_err().contains("must be a file"));
+        assert!(empty_folders.unwrap_err().contains("lacks any file under"));
+        assert_eq!(built.unwrap().len(), 4);
     }
 }

@@ -64,6 +64,7 @@ fn golden_row(root: &Path, base: &str, fork: &str) -> Result<(String, String), S
             (golden::parse(&text)?, format!("`{BASELINE}` on this branch, because `{base}` has none"))
         }
     };
+    golden::validate(&baseline).map_err(|e| format!("the golden baseline at `{base}`: {e}"))?;
     let diff = golden::compare(&baseline, &current);
     if diff.is_empty() {
         return Ok((format!("Identical. {} files match {against}.", current.len()), String::new()));
