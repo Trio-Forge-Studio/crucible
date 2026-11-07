@@ -20,9 +20,6 @@ pub struct Args {
     /// Build and check the key's scopes without uploading.
     #[arg(long)]
     pub dry_run: bool,
-    /// Override the environment's credential profile.
-    #[arg(long)]
-    pub profile: Option<String>,
     /// Write request and response details to stderr.
     #[arg(long)]
     pub verbose: bool,
@@ -72,18 +69,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
     let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
     let preflight = |failure: Failure| failure.with("publish", progress(&published, None, &targets));
-    let config = auth::load_config().map_err(preflight)?;
-    let source = auth::choose(
-        &config,
-        args.profile.as_deref(),
-        std::env::var("CRUCIBLE_OC_PROFILE").ok().as_deref(),
-        std::env::var_os("CRUCIBLE_OC_API_KEY").is_some(),
-        env.profile.as_deref(),
-    )
-    .map_err(|message| preflight(auth::decorate(Failure::new(3, "auth", message), primary, None, &config)))?;
-    let key = auth::load(&config, &source).map_err(|message| {
-        preflight(auth::decorate(Failure::new(3, "auth", message), primary, Some(&source), &config))
-    })?;
+    let (source, key) = auth::load(root).map_err(|failure| preflight(auth::decorate(failure, primary, None)))?;
     output.redact_also(&key);
     let execute = |file: Option<(&String, std::path::PathBuf)>, output: &mut Output| {
         let acceptance = RefCell::new(Acceptance::default());
@@ -101,7 +87,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 &acceptance,
             )?;
             match file {
-                None => crate::check_auth(&executor, primary, Some(&source), true),
+                None => auth::check(&executor, &source, Some(primary)),
                 Some((name, file)) => crate::flows::publish::run(
                     &executor,
                     crate::flows::publish::Args {
@@ -116,10 +102,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 ),
             }
         })();
-        acceptance
-            .into_inner()
-            .finish(result)
-            .map_err(|failure| auth::decorate(failure, primary, Some(&source), &config))
+        acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, primary, Some(&source)))
     };
     let built = crate::build::build(root, &manifest, &args.places, None).map_err(|error| {
         let failure = match error {
@@ -148,9 +131,6 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 let names: Vec<_> = remaining.iter().collect();
                 let mut state = progress(&published, Some(&name), &names);
                 let mut next = vec!["crucible".to_owned(), "publish".to_owned(), args.env.clone()];
-                if let Some(profile) = &args.profile {
-                    next.extend(["--profile".to_owned(), profile.clone()]);
-                }
                 if args.verbose {
                     next.push("--verbose".to_owned());
                 }

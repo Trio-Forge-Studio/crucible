@@ -55,15 +55,15 @@ $ crucible oc call universes.get-place-universe placeId=1818
 exit 0
 ```
 
-Check that a key works and see what it can do. `call api-keys.introspect` and `auth check` use `Auth::BodyKey { field: "apiKey" }`. The executor supplies the selected key and rejects caller bodies before reading them. `auth check` sends the key to `POST /api-keys/v1/introspect`, which answers with scopes such as `{"name":"asset","operations":["read","write"]}` (measured on 2026-10-27). `crucible oc` flattens them to `asset:read` and `asset:write`.
+Check that a key works and see what it can do. `call api-keys.introspect` and `crucible whoami` use `Auth::BodyKey { field: "apiKey" }`. The executor supplies the loaded key and rejects caller bodies before reading them. `whoami` sends the key to `POST /api-keys/v1/introspect`, which answers with scopes such as `{"name":"asset","operations":["read","write"]}` (measured on 2026-10-27). `crucible oc` flattens them to `asset:read` and `asset:write`.
 
 ```console
-$ crucible oc auth check
-{"keySource":"profile assets","name":"fd-assets","enabled":true,"expired":false,"scopes":["asset:read","asset:write"]}
+$ crucible whoami
+{"keySource":".env","name":"fd-assets","enabled":true,"expired":false,"scopes":["asset:read","asset:write"]}
 exit 0
 
-$ crucible oc auth check --for luau.create-task
-{"error":{"kind":"auth","status":null,"message":"the key from profile assets lacks universe.place.luau-execution-session:write","requiredScopes":[{"name":"universe.place.luau-execution-session:write"}],"keySource":"profile assets","profiles":["assets","publish","luau"]}}
+$ crucible whoami --for luau.create-task
+{"error":{"kind":"auth","status":null,"message":"the selected key lacks universe.place.luau-execution-session:write","requiredScopes":[{"name":"universe.place.luau-execution-session:write"}],"keySource":".env"}}
 exit 3
 ```
 
@@ -96,7 +96,7 @@ exit 0
 
 ### The four flows
 
-Upload one file. The display name defaults to the file stem in title case. The group defaults to the profile's `group`.
+Upload one file. The display name defaults to the file stem in title case. It needs `--group` or `--user`.
 
 ```console
 $ crucible oc asset upload assets/models/furniture/sofa.fbx --group 35 --description "Model for Fragile Delivery."
@@ -146,25 +146,13 @@ exit 6
 
 ### Keys
 
-A key never appears in argv. Locally, profiles in `%APPDATA%\crucible\config.toml` name an environment variable or a file.
+A key never appears in argv. Locally, it lives in `.env` at the project root.
 
-```toml
-[oc]
-default_profile = "assets"
-
-[oc.profiles.assets]
-key_env = "ROBLOX_ASSETS_API_KEY"
-group = 35
-
-[oc.profiles.publish]
-key_env = "ROBLOX_API_KEY"
-
-[oc.profiles.luau]
-key_file = "C:/Users/Admin/.secrets/roblox-luau.key"
-
+```sh
+CRUCIBLE_OC_API_KEY=your-open-cloud-key
 ```
 
-Precedence is `--profile`, then `CRUCIBLE_OC_PROFILE`, then `CRUCIBLE_OC_API_KEY`, then `default_profile`. A profile named explicitly that is missing or empty fails with exit 3. It never falls through to another key, and `crucible oc` never retries with a different key after a 401 or 403. Instead, the auth error lists the operation's required scopes and the configured profile names, so the caller can pick one. When the spec declares no scopes for an operation (7 of the 299), `requiredScopes` is `null` and `scopeMetadata` is `"unknown"`, never an empty list. Introspection requires no scopes, so its body-key auth reports `requiredScopes: []` with `scopeMetadata: "declared"`. CI sets one variable.
+A game has one key. `CRUCIBLE_OC_API_KEY` in the process environment wins when it is set. Otherwise the key comes from the same variable in `.env` at the current directory. A missing or empty key fails with exit 3. It never falls through to the other source, and `crucible oc` never retries with a different key after a 401 or 403. Instead, the auth error lists the operation's required scopes and the key source. When the spec declares no scopes for an operation (7 of the 299), `requiredScopes` is `null` and `scopeMetadata` is `"unknown"`, never an empty list. Introspection requires no scopes, so its body-key auth reports `requiredScopes: []` with `scopeMetadata: "declared"`. CI sets one variable.
 
 ```yaml
 - run: crucible oc place publish build/warehouse.rbxl --universe 13058 --place 1818
@@ -200,9 +188,9 @@ The v1 and v2 `followings` and `develop` APIs share their namespaces. The two fo
 
 **One executor.** `Executor::send(&Call)` owns registry requests. `Executor::download(url, file, overwrite)` delegates to a downloader that holds no key or registry operation. A `Call` has private fields, so it can only be built by `Call::new(op, preset, pairs, body)`. `Call::new` binds folded names to parameters, checks required ones and value kinds, and checks the body against `op.body`. So the executor trusts its input, per principle-boundary-discipline. `send` loops over a pure `judge(op, attempt, n) -> Verdict` whose table is the whole retry and exit-code policy. `send_all` follows pages. `finish` drives a `Completion`. `download` fetches a returned URL with a second client that never holds a key, follows at most five HTTPS redirects, and streams into a temporary file that it renames into place. Downloads have a 30-second idle read timeout and no total duration cap. Their retry sleeps stop at `--deadline`. CDN failures report `rejected` or `unavailable` without API-key metadata. Binary and multipart file requests get 600 seconds, while poll requests get at most 30 seconds and respect the remaining deadline. These methods own transport policy. The flows own input preparation, result receipts, and command-specific recovery. Luau also owns GET-only resumption and log collection.
 
-**Keys.** `Secret` has no `Debug`, `Display` or `Serialize`. `Output` is the only writer to stdout and stderr and replaces every registered secret, so a key echoed by the server can't print. `auth::choose` is pure and picks a `KeySource` once per command from the flags, environment and config, so a create and its polls never use different keys. HTTP errors have a short status message and a parsed JSON `error.detail`, or text detail for a non-JSON body. Poll errors keep the last known resource in `error.last`. An accepted unsafe response with invalid JSON uses `invalid JSON response` as its message and stores the raw text in `error.detail`. Redaction also covers JSON slash escapes, Unicode escapes, and mixed-case percent escapes of every key byte, including letters, and errors strip signed query strings from URLs before they print. The executor disables redirects so the header can't follow a 3xx to another host.
+**Keys.** `Secret` has no `Debug`, `Display` or `Serialize`. `Output` is the only writer to stdout and stderr and replaces every registered secret, so a key echoed by the server can't print. `auth::load` picks a `KeySource` and reads the key once per command from the environment or `.env`, so a create and its polls never use different keys. HTTP errors have a short status message and a parsed JSON `error.detail`, or text detail for a non-JSON body. Poll errors keep the last known resource in `error.last`. An accepted unsafe response with invalid JSON uses `invalid JSON response` as its message and stores the raw text in `error.detail`. Redaction also covers JSON slash escapes, Unicode escapes, and mixed-case percent escapes of every key byte, including letters, and errors strip signed query strings from URLs before they print. The executor disables redirects so the header can't follow a 3xx to another host.
 
-**Interface depth.** The public surface is seven verbs (`find`, `describe`, `call`, `asset`, `place`, `luau`, `auth`) and five global flags. `call` hides parameter location, encoding, body media, multipart assembly, pagination, polling, retries and key choice behind `name=value` pairs. An agent learns the exit table and `find`, and has the whole API. Parameters as `name=value` instead of generated `--flags` mean an operation's parameters can never collide with crucible's own options, by construction.
+**Interface depth.** The public surface is seven verbs (`find`, `describe`, `call`, `asset`, `place`, `luau`) and four global flags. `call` hides parameter location, encoding, body media, multipart assembly, pagination, polling, retries and key choice behind `name=value` pairs. An agent learns the exit table and `find`, and has the whole API. Parameters as `name=value` instead of generated `--flags` mean an operation's parameters can never collide with crucible's own options, by construction.
 
 **What it deliberately does not do.** It does not validate bodies against schemas (non-goal), load a spec at runtime, resend an `Unsafe` request (publish's overlay retry policy is the one exception), choose a key by matching scopes, or follow redirects with a key.
 
@@ -225,7 +213,7 @@ An action suffix distinguishes the v1 followings reader from the v2 reader withi
 
 **Release and CI.** The `cli` job in `ci.yml` runs fmt, clippy with `-D warnings`, `cargo xtask spec check` and `cargo test` on Ubuntu and Windows, because both developers are on Windows and paths and config directories differ. `cli-spec.yml` updates, builds, and tests weekly on Ubuntu and Windows with read-only repository permissions and `persist-credentials: false`. Its actions are pinned to commit SHAs. The commits API receives `GITHUB_TOKEN`. A separate write job creates the PR from identical verified files and records the added, removed, and changed list plus both verification results. The PR body states that token-created bot PRs do not trigger CI and that this workflow's verification job is the check.
 
-**Tests.** Pure units cover the naming rule, the overlay, pagination and completion detection, `judge`'s table, `Call::new` binding, `choose` precedence and redaction. One test checks every flow key resolves in the embedded registry. Behavior tests run the real binary against `httpmock` through `CRUCIBLE_OC_ORIGIN`, with `--poll-interval 0 --retry-delay 0` so retries and polls take no wall time. They port `upload-model.test.mjs` case by case: hit counts prove the POST is never re-sent, stdout and stderr are searched for the key, and each lost-response shape asserts exit 5. Publish asserts 4 calls on persistent 409. Download asserts the second request has no `x-api-key`. Luau asserts exit 6 with logs on FAILED. Each defect the design review found gets a test that fails on the defect: an unsafe POST answered with 429 or a refused connection is sent once and exits 7; publish answered 503 then 400 exits 5; an operation with no declared scopes reports `requiredScopes: null`; a patch whose `expect` no longer matches upstream fails the build. A coverage test fails when an operation whose response names an `Operation`-shaped schema has neither a completion nor an overlay note saying why it has none. A live smoke suite (`cargo test --test live -- --ignored`, local only) runs `auth check`, `assets.get` and `universes.get-place-universe`, uploads a 1x1 PNG decal, then archives it with `assets.archive`. Cleanup runs even when an assertion fails once an asset id is known, polls a pending operation first, and verifies the archive. If the upload outcome is unknown or cleanup fails, the test fails and prints the asset id or the Creations check to do by hand.
+**Tests.** Pure units cover the naming rule, the overlay, pagination and completion detection, `judge`'s table, `Call::new` binding, `.env` parsing and redaction. One test checks every flow key resolves in the embedded registry. Behavior tests run the real binary against `httpmock` through `CRUCIBLE_OC_ORIGIN`, with `--poll-interval 0 --retry-delay 0` so retries and polls take no wall time. They port `upload-model.test.mjs` case by case: hit counts prove the POST is never re-sent, stdout and stderr are searched for the key, and each lost-response shape asserts exit 5. Publish asserts 4 calls on persistent 409. Download asserts the second request has no `x-api-key`. Luau asserts exit 6 with logs on FAILED. Each defect the design review found gets a test that fails on the defect: an unsafe POST answered with 429 or a refused connection is sent once and exits 7; publish answered 503 then 400 exits 5; an operation with no declared scopes reports `requiredScopes: null`; a patch whose `expect` no longer matches upstream fails the build. A coverage test fails when an operation whose response names an `Operation`-shaped schema has neither a completion nor an overlay note saying why it has none. A live smoke suite (`cargo test --test live -- --ignored`, local only) runs `whoami`, `assets.get` and `universes.get-place-universe`, uploads a 1x1 PNG decal, then archives it with `assets.archive`. Cleanup runs even when an assertion fails once an asset id is known, polls a pending operation first, and verifies the archive. If the upload outcome is unknown or cleanup fails, the test fails and prints the asset id or the Creations check to do by hand.
 
 ## Synthesis decision
 
@@ -237,14 +225,12 @@ Grafted from B:
 
 - Publish keeps uncertainty across attempts. A 5xx or lost response with no later success exits 5.
 - Downloads use a client that never holds a key, follow at most five HTTPS redirects, write through a temporary file and rename, and need `--overwrite` to replace a file.
-- Key choice is explicit with no fallthrough, and no retry with another key. Missing scope metadata is `null` with `scopeMetadata: "unknown"`.
+- A game has one key from the environment or `.env`, with no fallthrough and no retry with another key. Missing scope metadata is `null` with `scopeMetadata: "unknown"`.
 - Overlay patches carry `expect` guards so a stale correction fails the build.
 - Redaction covers escaped forms of the key and strips signed query strings.
 - The live smoke test's cleanup contract.
 
 Rejected from B: per-location flags such as `--path-asset-id` (A's `name=value` can't collide with crucible's own flags), JSON-wrapped `--help`, and the transactional `spec update` with a journal and rollback (the update runs in a git checkout, and git is the rollback).
-
-Rejected from A: choosing a profile by matching declared scopes. It depends on whether `x-roblox-scopes` means all-of or any-of, which nothing settles, and declared scopes drift from real keys.
 
 ## Tradeoffs accepted
 
@@ -255,7 +241,7 @@ Rejected from A: choosing a profile by matching declared scopes. It depends on w
 - We accept `name=value` parameters over per-operation `--flags` in exchange for zero collisions with crucible's options and no per-operation clap tree. `describe` replaces per-operation `--help`.
 - We accept a one-file `asset upload` in exchange for one exit code per upload. Batch upload is a shell loop.
 - We accept a 3.8 ms registry parse on every start in exchange for embedding plain JSON. A build script could cut it with a binary encoding if it ever shows up.
-- We accept naming a profile for non-default keys in exchange for key choice that never guesses.
+- We accept one key per game in exchange for key choice that never guesses. A command that needs another key sets `CRUCIBLE_OC_API_KEY` for that run.
 - We accept plain-text `--help` in exchange for clap's standard help. `describe` is the machine-readable form.
 
 ## Alternatives considered

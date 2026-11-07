@@ -34,6 +34,8 @@ pub enum Command {
     Publish(crate::publish::Args),
     /// Upgrade crucible and @trioforge/crucible, then refresh template files this project has not edited.
     Upgrade(crate::upgrade::Args),
+    /// Check the Open Cloud key and list the scopes it grants. One JSON document.
+    Whoami(crate::whoami::Args),
     /// Compile one place. crucible build runs this in a child process.
     #[command(name = crate::build::COMPILE, hide = true)]
     Compile {
@@ -72,9 +74,6 @@ fn topics() -> clap::builder::PossibleValuesParser {
 }
 #[derive(Args)]
 pub struct Oc {
-    /// Select the credential profile to use.
-    #[arg(long, global = true)]
-    pub profile: Option<String>,
     /// Stop polling after this many seconds.
     #[arg(long,global=true,default_value_t=DEFAULT_DEADLINE,value_parser=seconds)]
     pub deadline: f64,
@@ -124,9 +123,6 @@ pub enum OcCommand {
     /// Run Luau and collect its results and logs.
     #[command(subcommand)]
     Luau(LuauCommand),
-    /// Inspect credentials without printing their values.
-    #[command(subcommand)]
-    Auth(AuthCommand),
 }
 #[derive(Args)]
 pub struct CallArgs {
@@ -153,18 +149,6 @@ pub struct CallArgs {
     pub no_wait: bool,
 }
 #[derive(Subcommand)]
-pub enum AuthCommand {
-    /// Check the selected key and optionally its required scopes.
-    Check {
-        /// Check that the key has the scopes required by this operation.
-        #[arg(long = "for")]
-        for_operation: Option<String>,
-    },
-    /// List configured credential sources and key availability.
-    Profiles,
-}
-
-#[derive(Subcommand)]
 pub enum AssetCommand {
     /// Upload one asset file, then poll for its asset ID.
     Upload(crate::flows::upload::Args),
@@ -190,10 +174,10 @@ const AGENT_GUIDE: &str = "Agent guide:
   place publish <file>      Publish with the guarded retry policy.
   asset download <id>       Download to --out without sending the key to the CDN.
   luau run <file>           Create once, then collect results and logs.
-  Keys: --profile > CRUCIBLE_OC_PROFILE > CRUCIBLE_OC_API_KEY > default_profile.
+  Keys: CRUCIBLE_OC_API_KEY in the environment, else in .env at the project root. Check it with crucible whoami.
   Exit 0  Success. Read the document.
   Exit 2  usage. Fix invalid arguments, input, files, or read-result limits.
-  Exit 3  auth. Missing key, HTTP 401/403, or failed key check. Fix the key or profile.
+  Exit 3  auth. Missing key, HTTP 401/403, or failed key check. Fix the key.
   Exit 4  rejected. Fix another 4xx request before repeating it.
   Exit 5  outcome_unknown. Check the remote resource before repeating a write.
   Exit 6  remote_failure. Inspect the operation error or Luau logs.

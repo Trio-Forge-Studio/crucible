@@ -1,13 +1,14 @@
 use serde_json::{Value, json};
 use std::process::{Command, Output};
-fn command() -> Command {
+fn base() -> Command {
     let key = std::env::var("ROBLOX_ASSETS_API_KEY").expect("ROBLOX_ASSETS_API_KEY is required for live tests");
     assert!(!key.trim().is_empty(), "the live key must be nonempty");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_crucible"));
-    cmd.env("CRUCIBLE_OC_API_KEY", key).env_remove("CRUCIBLE_OC_PROFILE").env_remove("CRUCIBLE_OC_ORIGIN").env(
-        "CRUCIBLE_CONFIG",
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build/no-live-config.toml"),
-    );
+    cmd.current_dir(env!("CARGO_TARGET_TMPDIR")).env("CRUCIBLE_OC_API_KEY", key).env_remove("CRUCIBLE_OC_ORIGIN");
+    cmd
+}
+fn command() -> Command {
+    let mut cmd = base();
     cmd.arg("oc");
     cmd
 }
@@ -24,8 +25,8 @@ fn success(out: Output) -> Value {
 }
 #[test]
 #[ignore = "requires a live Assets API key; read-only"]
-fn read_only_auth_check() {
-    let d = success(command().args(["auth", "check"]).output().unwrap());
+fn read_only_whoami() {
+    let d = success(base().arg("whoami").output().unwrap());
     assert_eq!(d["enabled"], true);
     assert_eq!(d["expired"], false);
     assert!(d["scopes"].as_array().unwrap().iter().any(|s| s == "asset:read"));

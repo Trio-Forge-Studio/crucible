@@ -128,7 +128,7 @@ After an overlay edit, run `cargo xtask spec build`. Keep the previous registry 
 
 Run these from `cli/`.
 
-Publish tests use local HTTP servers and never upload to Roblox. Recovery tests replay the emitted `next` argument array through a process spawn API and check place ids and credentials, including profiles with spaces. `next` is a JSON array of strings beginning with `"crucible"`. Run it through `npx` as argv without shell parsing or joining its elements. Recovery preserves explicit `--profile` and `--verbose` flags and selects each remaining place with `--place=<name>`, including names that start with `-`.
+Publish tests use local HTTP servers and never upload to Roblox. Recovery tests replay the emitted `next` argument array through a process spawn API and check place ids and credentials, including a key read from `.env`. `next` is a JSON array of strings beginning with `"crucible"`. Run it through `npx` as argv without shell parsing or joining its elements. Recovery preserves an explicit `--verbose` flag and selects each remaining place with `--place=<name>`, including names that start with `-`.
 
 ```console
 cargo fmt --all --check

@@ -13,9 +13,10 @@ mod outcome;
 mod output;
 mod publish;
 mod upgrade;
+mod whoami;
 
 use crate::call::{Call, Source};
-use crate::cli::{AssetCommand, AuthCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
+use crate::cli::{AssetCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
 use crate::exec::{Executor, Timing};
 use crate::outcome::{Acceptance, Failure};
 use crate::output::Output;
@@ -37,6 +38,7 @@ fn main() -> ExitCode {
         Ok(Cli { command: Command::Oc(cli) }) => cli,
         Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::Upgrade(args) }) => return upgrade::main(args),
+        Ok(Cli { command: Command::Whoami(args) }) => return whoami::main(args),
         Ok(Cli { command: Command::Compile { tsconfig, project, include } }) => {
             return build::compile_main(tsconfig, project, include);
         }
@@ -45,7 +47,10 @@ fn main() -> ExitCode {
             return upgrade::apply_main(from, crucible, runtime);
         }
         Err(error) => {
-            if std::env::args_os().nth(1).is_none_or(|word| word != "oc" && word != "publish") {
+            if !matches!(
+                std::env::args_os().nth(1).as_deref().and_then(std::ffi::OsStr::to_str),
+                Some("oc" | "publish" | "whoami")
+            ) {
                 error.exit();
             }
             let output = Output::new(false);
@@ -94,47 +99,29 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
     } else {
         None
     };
-    let config = auth::load_config()?;
-    if matches!(cli.command, OcCommand::Auth(AuthCommand::Profiles)) {
-        return Ok(json!(config.profiles.iter().map(|(name,p)|json!({"name":name,"keyEnv":p.key_env,"keyFile":p.key_file,"group":p.group,"user":p.user,"present":auth::load(&config,&auth::KeySource::Profile(name.clone())).is_ok()})).collect::<Vec<_>>()));
-    }
     let primary = if let Some(call) = &prepared {
         call.op()
-    } else if let OcCommand::Auth(AuthCommand::Check { for_operation: Some(name) }) = &cli.command {
-        op_ref(registry, std::slice::from_ref(name))?.0.op
     } else {
         match &cli.command {
             OcCommand::Asset(AssetCommand::Upload(args)) => flows::upload::primary(registry, args),
             OcCommand::Asset(AssetCommand::Download(args)) => flows::download::primary(registry, args),
             OcCommand::Place(PlaceCommand::Publish(_)) => flows::op(registry, flows::PUBLISH),
             OcCommand::Luau(LuauCommand::Run(args)) => flows::luau::primary(registry, args),
-            _ => registry.op("api-keys.introspect").expect("introspection is registered"),
+            _ => unreachable!("discovery returned before execution and calls are prepared"),
         }
     };
     let mut source = None;
     let result = (|| {
-        let force_key = matches!(cli.command, OcCommand::Auth(AuthCommand::Check { .. }));
-        source = if force_key || !matches!(primary.auth, Auth::None) {
-            Some(
-                auth::choose(
-                    &config,
-                    cli.profile.as_deref(),
-                    std::env::var("CRUCIBLE_OC_PROFILE").ok().as_deref(),
-                    std::env::var_os("CRUCIBLE_OC_API_KEY").is_some(),
-                    None,
-                )
-                .map_err(|message| Failure::new(3, "auth", message))?,
-            )
-        } else {
+        let key = if matches!(primary.auth, Auth::None) {
             None
+        } else {
+            let root =
+                std::env::current_dir().map_err(|_| Failure::unavailable("cannot read the current directory"))?;
+            let (found, key) = auth::load(&root)?;
+            source = Some(found);
+            output.redact_also(&key);
+            Some(key)
         };
-        let key = source
-            .as_ref()
-            .map(|source| auth::load(&config, source).map_err(|message| Failure::new(3, "auth", message)))
-            .transpose()?;
-        if let Some(key) = &key {
-            output.redact_also(key);
-        }
         let executor = Executor::new(
             registry,
             std::env::var("CRUCIBLE_OC_ORIGIN").ok(),
@@ -147,12 +134,8 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
             output,
             acceptance,
         )?;
-        let profile = source.as_ref().and_then(|source| match source {
-            auth::KeySource::Profile(name) => config.profiles.get(name),
-            _ => None,
-        });
         match cli.command {
-            OcCommand::Asset(AssetCommand::Upload(args)) => flows::upload::run(&executor, args, profile),
+            OcCommand::Asset(AssetCommand::Upload(args)) => flows::upload::run(&executor, args),
             OcCommand::Asset(AssetCommand::Download(args)) => flows::download::run(&executor, args),
             OcCommand::Place(PlaceCommand::Publish(args)) => flows::publish::run(&executor, args),
             OcCommand::Luau(LuauCommand::Run(args)) => flows::luau::run(&executor, args),
@@ -182,13 +165,10 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
                     }
                 }
             }
-            OcCommand::Auth(AuthCommand::Check { for_operation }) => {
-                check_auth(&executor, primary, source.as_ref(), for_operation.is_some())
-            }
-            _ => unreachable!("discovery and profiles returned before execution"),
+            _ => unreachable!("discovery returned before execution"),
         }
     })();
-    result.map_err(|failure| auth::decorate(failure, primary, source.as_ref(), &config))
+    result.map_err(|failure| auth::decorate(failure, primary, source.as_ref()))
 }
 fn op_ref<'r>(registry: &'r Registry, words: &[String]) -> Result<(Resolved<'r>, usize), Failure> {
     let first = words.first().ok_or_else(|| Failure::usage("an operation name or METHOD and URL is required"))?;
@@ -236,30 +216,4 @@ fn op_ref<'r>(registry: &'r Registry, words: &[String]) -> Result<(Resolved<'r>,
         }
     }
     Ok((resolved, used))
-}
-
-fn check_auth(
-    executor: &Executor<'_>,
-    primary: &oc_registry::Op,
-    source: Option<&auth::KeySource>,
-    for_operation: bool,
-) -> Result<Value, Failure> {
-    let registry = &*REGISTRY;
-    let introspect = registry.by_key("POST /api-keys/v1/introspect").expect("introspection is registered");
-    let reply = executor.send(&Call::new(introspect, vec![], vec![], None)?)?.json()?;
-    let reply = auth::Introspection::parse(reply)?;
-    let scopes = reply.scopes();
-    if !reply.enabled || reply.expired {
-        return Err(Failure::new(3, "auth", "the key is disabled or expired"));
-    }
-    if for_operation && let Auth::ApiKey { scopes: Some(required) } = &primary.auth {
-        let missing: Vec<_> =
-            required.iter().filter(|scope| !scopes.contains(&scope.name)).map(|scope| scope.name.as_str()).collect();
-        if !missing.is_empty() {
-            return Err(Failure::new(3, "auth", format!("the selected key lacks {}", missing.join(", "))));
-        }
-    }
-    Ok(
-        json!({"keySource":source.map(auth::KeySource::label),"name":reply.name,"enabled":reply.enabled,"expired":reply.expired,"scopes":scopes}),
-    )
 }
