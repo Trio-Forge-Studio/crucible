@@ -6,6 +6,11 @@
 //!
 //! A rule that names a crate applies once a workspace crate has that name, so rules about crates that do not exist
 //! yet already run.
+//!
+//! What the count measures: the Rust rules read what `rust` reads, the files a shipped target compiles, and rule 5
+//! reads what `ts` reads. Rules 1 and 4 count string literals, so a name assembled at run time, or coupling by meaning
+//! such as the compiler's `MacroKind::Crucible` and `uses_crucible`, is not counted. Rule 3 sees `std::env` however it
+//! is imported, but not an environment read through another crate. Rule 4 skips `n` and `t`, below.
 
 mod rust;
 mod ts;

@@ -21,7 +21,7 @@ Every body has the same five parts, in this order.
 
 ### Two kinds of commit
 
-- **Mechanical** commits move, rename, update paths or regenerate files. They carry a `Review: mechanical` trailer. `cargo xtask proof` checks that their renames keep at least 95% similarity and that the golden manifest stays identical. You skim them.
+- **Mechanical** commits move, rename, update paths or regenerate files. They carry a `Review: mechanical` trailer. `cargo xtask proof` checks that their renames keep at least 95% similarity and that every other edit changes only paths, and it compares the golden manifest at the pull request's head. You skim them.
 - **Logic** commits carry `Review: read`. You read them.
 
 Each commit passes `pnpm check` on its own, so the GitHub commit view works as a reading list. Squash merge keeps `main` at one commit per pull request.
