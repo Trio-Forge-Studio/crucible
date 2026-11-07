@@ -28,11 +28,11 @@ pub fn main(args: &[String]) -> Result<(), String> {
     let commits = git(&root, &["rev-list", "--reverse", &format!("{fork}..HEAD")])?;
 
     let golden = golden_row(&root, base, &fork)?;
-    let arch = arch_row(&root, &fork)?;
+    let arch = arch_row(&root, base, &fork)?;
     let mut out = String::new();
     out.push_str("| Check | Result |\n| --- | --- |\n");
     out.push_str(&format!("| Golden | {} |\n", golden.0));
-    out.push_str(&format!("| Arch violations | {arch} |\n"));
+    out.push_str(&format!("| Arch violations | {} |\n", arch.0));
     out.push_str("\n| Commit | Review | Evidence |\n| --- | --- | --- |\n");
     for commit in commits.lines() {
         let subject = git(&root, &["log", "-1", "--format=%s", commit])?.trim().to_owned();
@@ -49,6 +49,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
         out.push_str(&format!("| `{}` {} | {kind} | {evidence} |\n", &commit[..7], cell(&subject)));
     }
     out.push_str(&golden.1);
+    out.push_str(&arch.1);
     print!("{out}");
     Ok(())
 }
@@ -84,13 +85,21 @@ fn golden_row(root: &Path, base: &str, fork: &str) -> Result<(String, String), S
     Ok((cell, list))
 }
 
-fn arch_row(root: &Path, fork: &str) -> Result<String, String> {
+/// The arch cell and, when the ratchet fails, the new violations to print under the table.
+fn arch_row(root: &Path, base: &str, fork: &str) -> Result<(String, String), String> {
     let head = arch::violations(root)?;
-    let base = match git_maybe(root, &["show", &format!("{fork}:{}", arch::LIST)]) {
-        Some(text) => arch::parse(&text).len().to_string(),
-        None => "no list".to_owned(),
+    let at_head = format!("{} at HEAD ({})", head.len(), arch::summary(&head));
+    let Some(listed) = arch::base_list(root, fork)? else {
+        return Ok((format!("No list at `{base}`, so the ratchet starts here. {at_head}."), String::new()));
     };
-    Ok(format!("{base} at base, {} at HEAD ({}).", head.len(), arch::summary(&head)))
+    let (new, _) = arch::difference(&listed, &head);
+    if new.is_empty() {
+        return Ok((format!("{} at `{base}`, {at_head}. None is new.", listed.len()), String::new()));
+    }
+    let cell = format!("{} at `{base}`, {at_head}. **{} new or more frequent.**", listed.len(), new.len());
+    let mut list = String::from("\nNew arch violations:\n\n");
+    new.iter().for_each(|line| list.push_str(&format!("- `{line}`\n")));
+    Ok((cell, list))
 }
 
 /// What the mechanical checks flag in `commit`, or a summary of the evidence when they flag nothing.

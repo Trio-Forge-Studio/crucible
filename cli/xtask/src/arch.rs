@@ -1,6 +1,8 @@
 //! `cargo xtask arch` checks the architecture rules of `design/architecture.md` and compares what it finds with the
-//! violation list checked in at `cli/xtask/arch.txt`. The list can only shrink: a violation it lacks fails the check,
-//! and so does a listed one that no longer exists.
+//! violation list checked in at `cli/xtask/arch.txt`. A violation the list lacks fails the check, and so does a listed
+//! one that no longer exists. `arch record` rewrites the list, so the check alone cannot stop it from growing.
+//! `--base <rev>` adds the ratchet: it fails when a violation is new against the list at `<rev>`, or occurs more often
+//! than there. CI passes the pull request's base, or the previous commit on `main`.
 //!
 //! A rule that names a crate applies once a workspace crate has that name, so rules about crates that do not exist
 //! yet already run.
@@ -59,19 +61,61 @@ const ENVIRONMENT_READS: &[&str] = &["env::var(", "env::var_os(", "env::vars(", 
 /// scan for. The ABI crate's own check covers them once it exists.
 const UI_ABI: &[&str] = &["bind", "append"];
 
-const USAGE: &str = "usage: cargo xtask arch [check|record]";
+const USAGE: &str = "usage: cargo xtask arch [check [--base <rev>] | record]";
 
 pub fn main(args: &[String]) -> Result<(), String> {
     let root = repo();
+    let (record, base) = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] | ["check"] => (false, None),
+        ["--base", base] | ["check", "--base", base] => (false, Some(base.to_string())),
+        ["record"] => (true, None),
+        _ => return Err(USAGE.into()),
+    };
     let found = violations(&root)?;
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        [] | ["check"] => check(&root, &found),
-        ["record"] => {
-            fs::write(root.join(LIST), render(&found)).map_err(|e| format!("cannot write {LIST}: {e}"))?;
-            println!("arch: recorded {} violations in {LIST} ({})", found.len(), summary(&found));
-            Ok(())
-        }
-        _ => Err(USAGE.into()),
+    if record {
+        fs::write(root.join(LIST), render(&found)).map_err(|e| format!("cannot write {LIST}: {e}"))?;
+        println!("arch: recorded {} violations in {LIST} ({})", found.len(), summary(&found));
+        return Ok(());
+    }
+    check(&root, &found)?;
+    match base {
+        Some(base) => ratchet(&root, &base, &found),
+        None => Ok(()),
+    }
+}
+
+fn ratchet(root: &Path, base: &str, found: &[String]) -> Result<(), String> {
+    let Some(listed) = base_list(root, base)? else {
+        println!("arch: {base} has no violation list, so the ratchet starts here with {} violations", found.len());
+        return Ok(());
+    };
+    let (new, _) = difference(&listed, found);
+    if new.is_empty() {
+        println!("arch: no violation is new against {base} ({} there, {} now)", listed.len(), found.len());
+        return Ok(());
+    }
+    println!("arch: {} violations are new against {base}, or occur more often than there:", new.len());
+    new.iter().for_each(|line| println!("  + {line}"));
+    Err(format!("arch: the violation list grew against {base}"))
+}
+
+/// The violation list at `rev`. A list moved since then is still found, because the ratchet must not reset when
+/// `cli/` moves. `None` means `rev` predates the list, which only the commit that adds the list can meet: every
+/// later base has one, and the check fails at any head that lacks one.
+pub fn base_list(root: &Path, rev: &str) -> Result<Option<Vec<String>>, String> {
+    let commit = run::git(root, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")])
+        .map_err(|_| format!("arch: {rev} is not a commit this clone has"))?;
+    let commit = commit.trim();
+    if let Some(text) = run::git_maybe(root, &["show", &format!("{commit}:{LIST}")]) {
+        return Ok(Some(parse(&text)));
+    }
+    let tree = run::git(root, &["ls-tree", "-r", "--name-only", commit])?;
+    let moved: Vec<&str> =
+        tree.lines().filter(|path| *path == "xtask/arch.txt" || path.ends_with("/xtask/arch.txt")).collect();
+    match moved.as_slice() {
+        [] => Ok(None),
+        [path] => Ok(Some(parse(&run::git(root, &["show", &format!("{commit}:{path}")])?))),
+        _ => Err(format!("arch: {rev} has more than one violation list: {}", moved.join(", "))),
     }
 }
 
@@ -94,7 +138,7 @@ fn check(root: &Path, found: &[String]) -> Result<(), String> {
     Err("arch: the violations differ from the list".into())
 }
 
-/// The lines in `found` but not `listed`, and the lines in `listed` but not `found`, counting repeats.
+/// Counts repeats, so a second occurrence of a listed line is new.
 pub fn difference(listed: &[String], found: &[String]) -> (Vec<String>, Vec<String>) {
     let mut counts: BTreeMap<&str, i64> = BTreeMap::new();
     found.iter().for_each(|line| *counts.entry(line).or_default() += 1);
@@ -133,7 +177,7 @@ pub fn parse(text: &str) -> Vec<String> {
     lines
 }
 
-/// Counts per rule, such as `1: 40, 4: 12`.
+/// Such as `rule 1: 40, rule 4: 12`.
 pub fn summary(found: &[String]) -> String {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for line in found {
@@ -145,7 +189,6 @@ pub fn summary(found: &[String]) -> String {
     counts.iter().map(|(rule, count)| format!("rule {rule}: {count}")).collect::<Vec<_>>().join(", ")
 }
 
-/// Every violation in the tree, sorted.
 pub fn violations(root: &Path) -> Result<Vec<String>, String> {
     let workspace = Workspace::load(root)?;
     let abi = abi_names(root)?;
@@ -367,5 +410,61 @@ impl Workspace {
             }
         }
         names
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    fn lines(text: &[&str]) -> Vec<String> {
+        let mut lines: Vec<String> = text.iter().map(|line| (*line).to_owned()).collect();
+        lines.sort();
+        lines
+    }
+
+    #[test]
+    fn the_ratchet_refuses_a_new_line_and_a_higher_count() {
+        let dir = std::env::temp_dir().join(format!("xtask-arch-ratchet-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        fs::write(dir.join("README"), "before the list\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "before"]);
+        fs::create_dir_all(dir.join("cli/xtask")).unwrap();
+        fs::write(dir.join(LIST), render(&lines(&["1 a \"x\"", "1 a \"x\"", "4 b \"y\""]))).unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "list"]);
+        fs::create_dir_all(dir.join("xtask")).unwrap();
+        git(&dir, &["mv", LIST, "xtask/arch.txt"]);
+        git(&dir, &["commit", "-q", "-m", "move"]);
+
+        let before = base_list(&dir, "HEAD~2");
+        let listed = base_list(&dir, "HEAD~1");
+        let moved = base_list(&dir, "HEAD");
+        let unknown = base_list(&dir, "no-such-rev");
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(before, Ok(None));
+        let listed = listed.unwrap().unwrap();
+        assert_eq!(moved, Ok(Some(listed.clone())));
+        assert!(unknown.is_err());
+        let new = |found: &[&str]| difference(&listed, &lines(found)).0;
+        assert!(new(&["1 a \"x\""]).is_empty());
+        assert!(new(&["1 a \"x\"", "1 a \"x\"", "4 b \"y\""]).is_empty());
+        assert_eq!(new(&["1 a \"x\"", "1 a \"x\"", "1 a \"x\""]), ["1 a \"x\""]);
+        assert_eq!(new(&["4 b \"y\"", "4 c \"z\""]), ["4 c \"z\""]);
     }
 }
