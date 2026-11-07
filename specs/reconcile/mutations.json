@@ -1,0 +1,108 @@
+[
+	{
+		"id": "R1",
+		"what": "Leave price out of the read-back comparison",
+		"config": "Reconcile.cfg",
+		"edits": [
+			["    /\\ run.obs = want\n", "    /\\ \\A f \\in Fields \\ {\"price\"} : run.obs[f] = want[f]\n"],
+			["    /\\ run.obs # want\n", "    /\\ \\E f \\in Fields \\ {\"price\"} : run.obs[f] # want[f]\n"]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "R2",
+		"what": "Leave the description out of the read-back comparison",
+		"config": "Reconcile.cfg",
+		"edits": [
+			["    /\\ run.obs = want\n", "    /\\ \\A f \\in Fields \\ {\"description\"} : run.obs[f] = want[f]\n"],
+			["    /\\ run.obs # want\n", "    /\\ \\E f \\in Fields \\ {\"description\"} : run.obs[f] # want[f]\n"]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "R3",
+		"what": "A managed resource is always sent as available, so a disabled badge cannot stay disabled",
+		"config": "Reconcile.cfg",
+		"edits": [
+			[
+				"Payload == [f |-> want, icon |-> NoIcon]",
+				"Payload == [f |-> [want EXCEPT ![\"on\"] = 1], icon |-> NoIcon]"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "R4",
+		"what": "Trust a current icon hash and skip the read-back",
+		"config": "Reconcile.cfg",
+		"edits": [
+			[
+				"\\/ run' = [pc |-> \"meta\", obs |-> shown] /\\ UNCHANGED faults",
+				"\\/ run' = [pc |-> \"meta\", obs |-> IF lockIcon = wantIcon THEN want ELSE shown] /\\ UNCHANGED faults"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "R5",
+		"what": "Send the icon in the metadata PATCH, as one product call",
+		"config": "Reconcile.cfg",
+		"edits": [["Payload == [f |-> want, icon |-> NoIcon]", "Payload == [f |-> want, icon |-> wantIcon]"]],
+		"expect": "IconHashTrue"
+	},
+	{
+		"id": "R6",
+		"what": "Upload the icon without first marking the hash stale",
+		"config": "Reconcile.cfg",
+		"edits": [
+			[
+				"    /\\ lockIcon = NoIcon\n    /\\ \\/ /\\ actualIcon' = wantIcon",
+				"    /\\ lockIcon # wantIcon\n    /\\ \\/ /\\ actualIcon' = wantIcon"
+			]
+		],
+		"expect": "IconHashTrue"
+	},
+	{
+		"id": "R7",
+		"what": "Write the icon hash after a failed upload",
+		"config": "Reconcile.cfg",
+		"edits": [
+			[
+				"/\\ Fault\n          /\\ Stop\n          /\\ \\/ actualIcon' = wantIcon /\\ UNCHANGED <<actual, shown, late, lateIcons>>",
+				"/\\ Fault\n          /\\ run' = [run EXCEPT !.pc = \"hash\"]\n          /\\ \\/ actualIcon' = wantIcon /\\ UNCHANGED <<actual, shown, late, lateIcons>>"
+			]
+		],
+		"expect": "IconHashTrue"
+	},
+	{
+		"id": "R8",
+		"what": "Write the icon hash in the upload step",
+		"config": "Reconcile.cfg",
+		"edits": [
+			[
+				"          /\\ UNCHANGED <<actual, shown, late, lateIcons, lockIcon, faults>>",
+				"          /\\ lockIcon' = wantIcon\n          /\\ UNCHANGED <<actual, shown, late, lateIcons, faults>>"
+			]
+		],
+		"expect": "OneWritePerStep"
+	},
+	{
+		"id": "R9",
+		"what": "Never upload the icon",
+		"config": "Reconcile.cfg",
+		"edits": [
+			[
+				"    /\\ lockIcon = NoIcon\n    /\\ \\/ /\\ actualIcon' = wantIcon",
+				"    /\\ FALSE\n    /\\ \\/ /\\ actualIcon' = wantIcon"
+			]
+		],
+		"expect": "liveness"
+	},
+	{
+		"id": "R10",
+		"what": "A run enters a phase the model doesn't name",
+		"config": "Reconcile.cfg",
+		"edits": [["    /\\ run' = [run EXCEPT !.pc = \"listing\"]", "    /\\ run' = [run EXCEPT !.pc = \"started\"]"]],
+		"expect": "TypeOK"
+	}
+]

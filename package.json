@@ -9,7 +9,7 @@
 		"test:compiler": "node test/compiler/specs.mjs",
 		"prepare": "vp config",
 		"specs:check": "node specs/check.mjs",
-		"specs:mutate": "node specs/mutate.mjs provisioning"
+		"specs:mutate": "node specs/mutate.mjs provisioning && node specs/mutate.mjs reconcile"
 	},
 	"devDependencies": {
 		"@trioforge/tooling": "0.1.0",
