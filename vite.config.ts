@@ -3,7 +3,7 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
 	staged: {
 		"*": "vp check --fix",
-		"{.lune,test,cli/crates/compiler/tests}/**/*.luau": ["stylua", "selene"],
+		"{.lune,test,crates/compiler/tests}/**/*.luau": ["stylua", "selene"],
 		"probes/**/*.luau": ["stylua", "selene --config probes/engine/selene.toml"],
 	},
 	fmt: {
@@ -18,9 +18,9 @@ export default defineConfig({
 			"build/**",
 			"pnpm-lock.yaml",
 			"**/*.md",
-			"cli/spec/**",
-			"cli/notices.hbs",
-			"cli/target/**",
+			"crates/oc-registry/spec/**",
+			"crates/cli/notices.hbs",
+			"target/**",
 		],
 		overrides: [
 			{
@@ -33,6 +33,6 @@ export default defineConfig({
 		categories: { correctness: "error", suspicious: "error" },
 		plugins: ["typescript", "node"],
 		rules: { "no-shadow": "off" },
-		ignorePatterns: ["**/out/**", "**/include/**", "build/**", "cli/target/**", "packages/compiler-types/types/**"],
+		ignorePatterns: ["**/out/**", "**/include/**", "build/**", "target/**", "packages/compiler-types/types/**"],
 	},
 });

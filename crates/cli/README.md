@@ -20,10 +20,10 @@ cargo build --release --locked --package crucible
 
 The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package holds a Node shim and the `crucible` bin. npm reserves the unscoped `crucible` name, so the CLI ships in the `@trioforge` scope. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-darwin-arm64`, `@trioforge/crucible-cli-win32-x64`, and `@trioforge/crucible-cli-linux-x64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
 
-`npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
+`crates/cli/npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
 
 ```console
-node npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
+node crates/cli/npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 ```
 
 `npm/package.test.mjs` stages the debug binary from `cargo test`, packs the packages with `npm pack`, installs them into a temporary project, and runs `npx crucible`. Set `CRUCIBLE_BINARY` to test another binary.

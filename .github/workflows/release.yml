@@ -3,7 +3,12 @@ name: Release
 on:
   pull_request:
     paths:
-      - "cli/**"
+      - "crates/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rustfmt.toml"
       - "packages/crucible/**"
       - "packages/compiler-types/**"
       - "docs/**"
@@ -43,14 +48,14 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: cli
+        working-directory: .
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - run: rustup show && rustup target add '${{ matrix.target }}'
       - if: github.event_name == 'pull_request'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
-          workspaces: cli
+          workspaces: .
           key: release-${{ matrix.target }}
       - if: matrix.platform == 'linux-x64'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -78,7 +83,7 @@ jobs:
           awk 'NR > 1 && $1 !~ /^\/usr\/lib\// && $1 !~ /^\/System\/Library\// { bad = 1 } END { exit bad }' binary-libraries.txt
       - name: Verify Windows static CRT
         if: matrix.platform == 'win32-x64'
-        run: node npm/check-pe.mjs target/${{ matrix.target }}/release/crucible.exe
+        run: node crates/cli/npm/check-pe.mjs target/${{ matrix.target }}/release/crucible.exe
       - name: Exercise release binary through npm
         run: |
           export CRUCIBLE_BINARY="$PWD/target/${{ matrix.target }}/release/${{ matrix.binary }}"
@@ -87,7 +92,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: binary-${{ matrix.platform }}
-          path: cli/target/${{ matrix.target }}/release/${{ matrix.binary }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
           if-no-files-found: error
 
   packages:
@@ -109,21 +114,21 @@ jobs:
         run: |
           pnpm build
       - name: Generate notices from locked dependencies
-        working-directory: cli
+        working-directory: .
         run: |
           cargo install cargo-about --version 0.8.4 --locked
-          node npm/notices.mjs ../build/THIRD_PARTY_NOTICES
+          node crates/cli/npm/notices.mjs build/THIRD_PARTY_NOTICES
       - name: Stage the packages at the Cargo version, or a PR prerelease of it
         run: |
           for directory in build/binaries/binary-*; do
             mv "$directory" "build/binaries/${directory##*/binary-}"
           done
-          node cli/npm/release.mjs build/binaries build/release build/THIRD_PARTY_NOTICES
+          node crates/cli/npm/release.mjs build/binaries build/release build/THIRD_PARTY_NOTICES
       - name: Test registry preflight and partial staging recovery
-        run: node --test cli/npm/registry.test.mjs
+        run: node --test crates/cli/npm/registry.test.mjs
       - name: Reject previously used release versions
         if: github.event_name == 'push'
-        run: node cli/npm/registry.mjs preflight build/release/tarballs
+        run: node crates/cli/npm/registry.mjs preflight build/release/tarballs
       - run: npm install --global npm@11.21.1
       - name: Prove staged packaging without credentials
         run: |
@@ -163,4 +168,4 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           test "$REPOSITORY_PRIVATE" = false || { echo 'npm provenance requires a public source repository'; exit 1; }
-          node cli/npm/registry.mjs stage packages
+          node crates/cli/npm/registry.mjs stage packages

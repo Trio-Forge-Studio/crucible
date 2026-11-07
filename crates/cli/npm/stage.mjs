@@ -10,14 +10,18 @@ export const PLATFORMS = [
 	{ os: "linux", cpu: "x64" },
 ];
 
-const repository = { type: "git", url: "git+https://github.com/Trio-Forge-Studio/crucible.git", directory: "cli" };
+const repository = {
+	type: "git",
+	url: "git+https://github.com/Trio-Forge-Studio/crucible.git",
+	directory: "crates/cli",
+};
 const shared = { license: "MIT", repository };
 
 export function cliVersion() {
-	const manifest = readFileSync(join(cli, "Cargo.toml"), "utf8");
+	const manifest = readFileSync(join(cli, "../../Cargo.toml"), "utf8");
 	const version = /\[workspace\.package\][^[]*?\nversion = "([^"]+)"/.exec(manifest)?.[1];
 	if (!version) {
-		throw new Error("cli/Cargo.toml has no [workspace.package] version");
+		throw new Error("Cargo.toml has no [workspace.package] version");
 	}
 	return version;
 }
@@ -47,7 +51,7 @@ export function stage(out, binaries, notices, version = cliVersion()) {
 		engines: { node: ">=18" },
 		optionalDependencies: Object.fromEntries(PLATFORMS.map((platform) => [platformPackageName(platform), version])),
 	});
-	copyFileSync(join(cli, "..", "LICENSE"), join(shim, "LICENSE"));
+	copyFileSync(join(cli, "../..", "LICENSE"), join(shim, "LICENSE"));
 	staged.push(shim);
 
 	for (const [key, binary] of Object.entries(binaries)) {
@@ -72,7 +76,7 @@ export function stage(out, binaries, notices, version = cliVersion()) {
 			files: [executable, "THIRD_PARTY_NOTICES"],
 			preferUnplugged: true,
 		});
-		copyFileSync(join(cli, "..", "LICENSE"), join(directory, "LICENSE"));
+		copyFileSync(join(cli, "../..", "LICENSE"), join(directory, "LICENSE"));
 		if (notices) {
 			copyFileSync(notices, join(directory, "THIRD_PARTY_NOTICES"));
 		}

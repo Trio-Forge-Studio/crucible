@@ -21,7 +21,7 @@ pnpm check
 The repository has these parts:
 
 - `packages/crucible` is the runtime package, `@trioforge/crucible`. Its root entry, `src/index.ts`, loads on both sides, so it must never import server or client code.
-- `cli` holds the `crucible` CLI and Crucible's compiler, in Rust. `cli/README.md` covers building and packaging the CLI.
+- `crates/cli` holds the `crucible` CLI and `crates/compiler` holds Crucible's compiler, in Rust. `crates/cli/README.md` covers building and packaging the CLI.
 - `docs` holds the guides that `crucible docs` prints.
 - `examples/sample-game` is the game that the specs build and load.
 - `test` holds the Lune specs.
@@ -32,14 +32,14 @@ The repository has these parts:
 2. Keep the pull request to one topic.
 3. Add or update a spec for each behavior you change.
 4. If you change a feature that a guide describes, update the guide in `docs`. The specs type-check each TypeScript block in the guides.
-5. Run `pnpm check`. If you changed files under `cli`, also run `pnpm build` from the root, then these commands from `cli`:
+5. Run `pnpm check`. If you changed files under `crates` or `xtask`, also run `pnpm build` from the root, then these commands from `.`:
 
    ```sh
    cargo fmt --all --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo xtask spec check
    cargo test --workspace
-   node --test npm/package.test.mjs
+   node --test crates/cli/npm/package.test.mjs
    ```
 
 6. Write commit messages and the pull request title as [Conventional Commits](https://www.conventionalcommits.org) with a scope, such as `docs(boot): fix the load glob example`.

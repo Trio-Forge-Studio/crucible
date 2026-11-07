@@ -1,5 +1,5 @@
 //! `cargo xtask golden` builds the runtime and the sample game from clean, hashes every output file, and compares
-//! the hashes with the baseline checked in at `cli/xtask/golden.txt`.
+//! the hashes with the baseline checked in at `xtask/golden.txt`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -13,7 +13,7 @@ use crate::run::{self, repo, slashed};
 /// Output path, relative to the repository root with forward slashes, to its SHA-256.
 pub type Manifest = BTreeMap<String, String>;
 
-pub const BASELINE: &str = "cli/xtask/golden.txt";
+pub const BASELINE: &str = "xtask/golden.txt";
 /// Fragile Delivery's baseline is local, because its source is not in this repository.
 const FD_BASELINE: &str = "build/golden/fd.txt";
 
@@ -306,7 +306,7 @@ mod fd {
     }
 
     fn crucible_binary(root: &Path) -> Result<PathBuf, String> {
-        let manifest = root.join("cli/Cargo.toml");
+        let manifest = root.join("Cargo.toml");
         let text = run::stdout(
             Command::new("cargo")
                 .args(["build", "--quiet", "--locked", "--bin", "crucible", "--message-format=json", "--manifest-path"])

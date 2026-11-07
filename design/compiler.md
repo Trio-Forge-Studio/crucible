@@ -35,7 +35,7 @@ The edit appends a newline to `core/Commands/shared/command-tree.ts` and restore
 
 The compile child takes about 2.4 s. The remaining roughly 0.8 s covers the Rojo place build and the module hand-off from the child, inferred by subtraction rather than profiling. Inside the compile, the tsrs type check is the largest part. Possible levers are a compile-only mode so FD's check loop skips Rojo, `--fast` with four checkers, and phase 7's cache. None is in this stack.
 
-Reproduce from the repository root after `cargo build --release -p crucible` in `cli`. Run `cli/crates/compiler/tests/fd-benchmark.ps1 -Crucible <absolute-path-to-crucible.exe> -Fd <absolute-path-to-FD-checkout> -Report <results.json>`. FD needs the configs, `crucible.toml`, annotation, and packed packages described above. The script records every run, checks exit status and emitted modules, and restores the edited source in `finally`. Raw rows are in `C:/Users/Admin/.hstack/orchestrate/crucible-compiler-p5-p6/budget/bench-results.json`.
+Reproduce from the repository root after `cargo build --release -p crucible` in `cli`. Run `crates/compiler/tests/fd-benchmark.ps1 -Crucible <absolute-path-to-crucible.exe> -Fd <absolute-path-to-FD-checkout> -Report <results.json>`. FD needs the configs, `crucible.toml`, annotation, and packed packages described above. The script records every run, checks exit status and emitted modules, and restores the edited source in `finally`. Raw rows are in `C:/Users/Admin/.hstack/orchestrate/crucible-compiler-p5-p6/budget/bench-results.json`.
 
 ## Where the time goes today
 
@@ -135,7 +135,7 @@ Decorators, `jsx: "react"` with `jsxFactory: "Vide.jsx"`, and the Flamework and 
 
 Each phase ends in a budget check and a test run that a reviewer can repeat.
 
-0. **Delete `crucible dev`.** It is unused today and needs no compiler work, so it lands first as its own PR. Remove `cli/crates/crucible/src/dev.rs`, the command's registration, its section in `docs/cli.md`, and every pointer to it, such as the `npx crucible dev` step after `crucible create` and the template's `AGENTS.md`. The check is `pnpm check` and the CLI checks in `AGENTS.md` passing, with no remaining reference to `crucible dev` or `rbxtsc --watch`.
+0. **Delete `crucible dev`.** It is unused today and needs no compiler work, so it lands first as its own PR. Remove `crates/cli/src/dev.rs`, the command's registration, its section in `docs/cli.md`, and every pointer to it, such as the `npx crucible dev` step after `crucible create` and the template's `AGENTS.md`. The check is `pnpm check` and the CLI checks in `AGENTS.md` passing, with no remaining reference to `crucible dev` or `rbxtsc --watch`.
 1. **Add the compiler types.** Add `packages/compiler-types`, the `@trioforge/compiler-types` source with the three-parameter `Iterable`, as a private workspace package. It is published through the release workflow later. Crucible's own configs stay on TypeScript 5 until phase 6, because `rbxtsc` builds them until then. The check is zero tsrs errors on Crucible's runtime and sample game under a TypeScript 7 test config that uses the package.
 2. **Build the front end.** Add a compiler crate to the `cli` workspace that builds the tsrs program from a tsconfig, checks it, and fills the fact table, and writes nothing yet. Move the Rust pin to tsrs's version. The check is every site answered on Crucible's runtime and sample game in `cargo test`, and the whole run under 2.5 s and 250 MB on FD's TypeScript 7 copy.
 3. **Lower Crucible's runtime.** Implement the lowering for the features Crucible's runtime uses. The check is Crucible's Lune specs passing on the compiler's output.
@@ -148,7 +148,7 @@ Each phase ends in a budget check and a test run that a reviewer can repeat.
 
 These are settled.
 
-- **Home.** The compiler is crates in `cli/crates/` of this repository, linked into the `crucible` binary. It has no command line, binary, or npm package of its own, so it needs no product name. One PR can change the runtime's `@trioforge/crucible/emit` calls and the compiler's Crucible transform together, and a game can never run mismatched versions of the two.
+- **Home.** The compiler is crates in `crates/` of this repository, linked into the `crucible` binary. It has no command line, binary, or npm package of its own, so it needs no product name. One PR can change the runtime's `@trioforge/crucible/emit` calls and the compiler's Crucible transform together, and a game can never run mismatched versions of the two.
 - **Scope.** The compiler serves Trio Forge's stack only. There is no plugin API, and Crucible's transform is part of the compiler.
 - **Pass bar.** Compiler speed and memory come first. Output quality comes second, and roblox-ts parity is not a goal.
 - **Flamework.** The compiler never implements Flamework. FD moves to Crucible before phase 5. FD uses Flamework today on 201 decorated classes, with 351 injected constructor parameters, 65 macro calls, and 28 components with type-derived attribute guards.

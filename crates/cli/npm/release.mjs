@@ -5,12 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliVersion, PLATFORMS, stage } from "./stage.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [binaryDirectory, outputDirectory, notices] = process.argv.slice(2);
-assert.ok(binaryDirectory && outputDirectory && notices, "Usage: node cli/npm/release.mjs <binaries> <out> <notices>");
+assert.ok(
+	binaryDirectory && outputDirectory && notices,
+	"Usage: node crates/cli/npm/release.mjs <binaries> <out> <notices>",
+);
 const release = cliVersion();
 if (process.env.GITHUB_EVENT_NAME === "push") {
-	assert.equal(process.env.GITHUB_REF, `refs/tags/v${release}`, "release tag must match cli/Cargo.toml");
+	assert.equal(process.env.GITHUB_REF, `refs/tags/v${release}`, "release tag must match Cargo.toml");
 }
 // npm refuses even a dry-run publish of a released version, and the Cargo version stays released until the next bump.
 let version = release;

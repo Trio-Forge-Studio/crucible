@@ -174,7 +174,7 @@ mod tests {
     use super::*;
     use oc_registry::Registry;
     fn op(safety: Safety) -> Op {
-        let r: Registry = serde_json::from_str(include_str!("../../../spec/registry.json")).unwrap();
+        let r: Registry = serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).unwrap();
         let mut op = r.op("assets.get").unwrap().clone();
         op.safety = safety;
         op
@@ -296,7 +296,7 @@ mod tests {
     }
     #[test]
     fn publish_uncertainty_row() {
-        let r: Registry = serde_json::from_str(include_str!("../../../spec/registry.json")).unwrap();
+        let r: Registry = serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).unwrap();
         let p = r.op("universes.create-place-version").unwrap();
         let Verdict::Retry { history, .. } = judge(p, response(503), History::default()) else {
             panic!("publish retries 5xx")

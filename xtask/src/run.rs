@@ -1,9 +1,9 @@
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// The repository root, two folders above this crate.
+/// The repository root, one folder above this crate.
 pub fn repo() -> PathBuf {
-    normalize(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+    normalize(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".."))
 }
 
 /// Removes `.` and `..` components without touching the file system, so two spellings of a path compare equal.

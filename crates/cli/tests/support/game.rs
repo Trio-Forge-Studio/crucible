@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 pub fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 pub fn slashes(path: &Path) -> String {

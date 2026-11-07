@@ -4,9 +4,9 @@ use std::collections::BTreeSet;
 
 fn inputs() -> (Value, overlay::Overlay, Registry) {
     (
-        serde_json::from_str(include_str!("../../spec/openapi.json")).unwrap(),
-        toml::from_str(include_str!("../../spec/overlay.toml")).unwrap(),
-        serde_json::from_str(include_str!("../../spec/registry.json")).unwrap(),
+        serde_json::from_str(include_str!("../../crates/oc-registry/spec/openapi.json")).unwrap(),
+        toml::from_str(include_str!("../../crates/oc-registry/spec/overlay.toml")).unwrap(),
+        serde_json::from_str(include_str!("../../crates/oc-registry/spec/registry.json")).unwrap(),
     )
 }
 
@@ -723,7 +723,9 @@ fn final_name_fixture_covers_every_namespace_and_limits_action_length() {
 #[test]
 fn spec_hash_ignores_checkout_line_endings() {
     let (_, _, registry) = inputs();
-    let lf = String::from_utf8(include_bytes!("../../spec/openapi.json").to_vec()).unwrap().replace("\r\n", "\n");
+    let lf = String::from_utf8(include_bytes!("../../crates/oc-registry/spec/openapi.json").to_vec())
+        .unwrap()
+        .replace("\r\n", "\n");
     let crlf = lf.replace('\n', "\r\n");
     assert_eq!(spec_digest(lf.as_bytes()), registry.source.sha256);
     assert_eq!(spec_digest(crlf.as_bytes()), registry.source.sha256);
@@ -759,7 +761,7 @@ fn commits_lookup_authenticates_with_the_supplied_github_token() {
 
 #[test]
 fn spec_pull_request_requires_both_uploaded_artifacts() {
-    let workflow = include_str!("../../../.github/workflows/cli-spec.yml").replace("\r\n", "\n");
+    let workflow = include_str!("../../.github/workflows/cli-spec.yml").replace("\r\n", "\n");
     let (verify, pull_request) = workflow.split_once("  pull-request:\n").unwrap();
     for runner in ["ubuntu", "windows"] {
         let output = format!(
@@ -780,7 +782,7 @@ fn spec_pull_request_requires_both_uploaded_artifacts() {
 
 #[test]
 fn spec_action_pins_have_readable_upstream_refs() {
-    let workflow = include_str!("../../../.github/workflows/cli-spec.yml").replace("\r\n", "\n");
+    let workflow = include_str!("../../.github/workflows/cli-spec.yml").replace("\r\n", "\n");
     for line in workflow.lines().filter(|line| line.contains("uses:")) {
         let (action, tag) = line.split_once(" # ").expect("each action pin has a readable upstream ref");
         let (_, sha) = action.split_once('@').unwrap();
