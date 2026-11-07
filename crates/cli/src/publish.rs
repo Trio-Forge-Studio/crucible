@@ -1,10 +1,10 @@
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
 use crate::exec::Executor;
-use crate::manifest::VersionType;
 use crate::output::Output;
 use crucible_oc::auth;
 use crucible_oc::outcome::{Acceptance, Failure};
 use crucible_oc::transport::Timing;
+use crucible_project::VersionType;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::path::Path;
@@ -43,7 +43,7 @@ pub fn main(args: Args) -> ExitCode {
 
 fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
     let manifest = crate::build::manifest(root).map_err(|error| Failure::usage(error.to_string()))?;
-    if !root.join(crate::manifest::FILE).exists() {
+    if !root.join(crucible_project::FILE).exists() {
         return Err(Failure::usage(
             "publish requires crucible.toml. Example:\n[env.production]\nuniverse = 1234\nplace = 5678\n",
         ));

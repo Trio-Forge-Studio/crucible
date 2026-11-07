@@ -7,7 +7,6 @@ mod discover;
 mod docs;
 mod exec;
 mod flows;
-mod manifest;
 mod output;
 mod publish;
 mod upgrade;

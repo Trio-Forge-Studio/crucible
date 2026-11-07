@@ -647,6 +647,7 @@ dependencies = [
  "clap 4.6.7",
  "crucible-compiler",
  "crucible-oc",
+ "crucible-project",
  "dotenvy",
  "env_logger",
  "httpmock",
@@ -668,7 +669,6 @@ dependencies = [
  "sha2",
  "syntect",
  "tempfile",
- "toml 1.1.8+spec-1.1.0",
  "two-face",
  "unicode-width",
  "ureq",
@@ -709,6 +709,15 @@ dependencies = [
  "tempfile",
  "ureq",
  "url",
+]
+
+[[package]]
+name = "crucible-project"
+version = "0.4.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
