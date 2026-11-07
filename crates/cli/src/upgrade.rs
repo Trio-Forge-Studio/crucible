@@ -23,7 +23,7 @@ pub struct Args {
 
 pub const APPLY: &str = "__upgrade-apply";
 
-// The hand-off contract in cli/README.md says when to raise this.
+// The hand-off contract in crates/cli/README.md says when to raise this.
 const FORMAT: u32 = 1;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 const CLI: &str = "@trioforge/crucible-cli";

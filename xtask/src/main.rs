@@ -43,9 +43,11 @@ fn main() -> ExitCode {
 fn spec(args: &[String]) -> Result<(), String> {
     let flag = |name: &str| args.iter().position(|arg| arg == name).and_then(|at| args.get(at + 1)).cloned();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let spec_path = flag("--spec").map(PathBuf::from).unwrap_or_else(|| root.join("spec/openapi.json"));
-    let registry_path = flag("--out").map(PathBuf::from).unwrap_or_else(|| root.join("spec/registry.json"));
-    let overlay_path = root.join("spec/overlay.toml");
+    let spec_path =
+        flag("--spec").map(PathBuf::from).unwrap_or_else(|| root.join("crates/oc-registry/spec/openapi.json"));
+    let registry_path =
+        flag("--out").map(PathBuf::from).unwrap_or_else(|| root.join("crates/oc-registry/spec/registry.json"));
+    let overlay_path = root.join("crates/oc-registry/spec/overlay.toml");
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["spec", "build", ..] => rebuild(&spec_path, &registry_path, &overlay_path, flag("--commit"), Mode::Write),
         ["spec", "check", ..] => rebuild(&spec_path, &registry_path, &overlay_path, flag("--commit"), Mode::Check),
@@ -91,7 +93,7 @@ fn rebuild(
         let current = fs::read_to_string(registry_path).unwrap_or_default();
         if current != text {
             return Err(format!(
-                "spec/registry.json is stale. Run `cargo xtask spec build`.\n{}",
+                "crates/oc-registry/spec/registry.json is stale. Run `cargo xtask spec build`.\n{}",
                 serde_json::to_string_pretty(&changes).unwrap_or_default()
             ));
         }

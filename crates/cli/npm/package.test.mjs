@@ -13,7 +13,7 @@ const cli = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const host = `${process.platform}-${process.arch}`;
 const binary =
 	process.env.CRUCIBLE_BINARY ??
-	join(cli, "target", "debug", process.platform === "win32" ? "crucible.exe" : "crucible");
+	join(cli, "../../target", "debug", process.platform === "win32" ? "crucible.exe" : "crucible");
 const supported = PLATFORMS.some(({ os, cpu }) => `${os}-${cpu}` === host);
 
 let root;
@@ -43,7 +43,7 @@ function project(name, tarballs, flags = []) {
 
 before(() => {
 	assert.ok(
-		existsSync(join(cli, "..", "packages", "crucible", "out")),
+		existsSync(join(cli, "../..", "packages", "crucible", "out")),
 		"Runtime output is missing. Run pnpm build from the repository root first.",
 	);
 	root = mkdtempSync(join(tmpdir(), "crucible-npm-"));
@@ -87,7 +87,7 @@ test("npx crucible runs the installed platform binary", { skip: !supported && `n
 	assert.equal(guide.status, 0, guide.stderr);
 	assert.equal(
 		guide.stdout,
-		readFileSync(join(cli, "..", "docs", "logging.md"), "utf8"),
+		readFileSync(join(cli, "../..", "docs", "logging.md"), "utf8"),
 		"docs logging prints the guide",
 	);
 
@@ -101,7 +101,7 @@ test(
 	{ skip: !supported && `no package for ${host}` },
 	() => {
 		const app = project("node-example", [shim, platform]);
-		const markdown = readFileSync(join(cli, "..", "docs", "oc.md"), "utf8");
+		const markdown = readFileSync(join(cli, "../..", "docs", "oc.md"), "utf8");
 		const example = markdown.match(/^```javascript\n([\s\S]*?)^```$/m);
 		assert.ok(example, "Open Cloud guide has a Node example");
 		const script = join(app, "example.mjs");
@@ -117,7 +117,7 @@ test("release staging rejects a tag that differs from the Cargo version", () => 
 		env: { ...process.env, GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/v999.0.0" },
 	});
 	assert.notEqual(result.status, 0);
-	assert.match(result.stderr, /release tag must match cli\/Cargo.toml/);
+	assert.match(result.stderr, /release tag must match Cargo.toml/);
 });
 
 test("the shim names the missing platform package", () => {
@@ -132,9 +132,9 @@ test(
 	"an installed create produces a standalone game whose check passes",
 	{ skip: !supported && `no package for ${host}` },
 	() => {
-		const runtimeDir = join(cli, "..", "packages", "crucible");
+		const runtimeDir = join(cli, "../..", "packages", "crucible");
 		const runtime = pack(runtimeDir, join(root, "tarballs"));
-		const compilerTypes = pack(join(cli, "..", "packages", "compiler-types"), join(root, "tarballs"));
+		const compilerTypes = pack(join(cli, "../..", "packages", "compiler-types"), join(root, "tarballs"));
 		const contents = run("npm", ["pack", "--dry-run", "--json"], runtimeDir);
 		assert.equal(contents.status, 0, contents.stderr);
 		const files = JSON.parse(contents.stdout)[0].files.map(({ path }) => path);
@@ -270,7 +270,7 @@ function startUpgradeRegistry() {
 function launchUpgradeRegistry() {
 	const next = nextPatch(cliVersion());
 	const platformName = platformPackageName(PLATFORMS.find(({ os, cpu }) => `${os}-${cpu}` === host));
-	const runtimeDir = join(cli, "..", "packages", "crucible");
+	const runtimeDir = join(cli, "../..", "packages", "crucible");
 	const sources = {
 		"@trioforge/crucible-cli": join(root, "staged", "crucible"),
 		"@trioforge/crucible": join(root, "upgrade-runtime"),
@@ -285,7 +285,7 @@ function launchUpgradeRegistry() {
 	}
 	for (const entry of ["package.json", "types", "LICENSE"]) {
 		cpSync(
-			join(cli, "..", "packages", "compiler-types", entry),
+			join(cli, "../..", "packages", "compiler-types", entry),
 			join(sources["@trioforge/compiler-types"], entry),
 			{
 				recursive: true,

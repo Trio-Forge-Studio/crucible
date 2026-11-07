@@ -1,5 +1,5 @@
 //! `cargo xtask arch` checks the architecture rules of `design/architecture.md` and compares what it finds with the
-//! violation list checked in at `cli/xtask/arch.txt`. A violation the list lacks fails the check, and so does a listed
+//! violation list checked in at `xtask/arch.txt`. A violation the list lacks fails the check, and so does a listed
 //! one that no longer exists. `arch record` rewrites the list, so the check alone cannot stop it from growing.
 //! `--base <rev>` adds the ratchet: it fails when a violation is new against the list at `<rev>`, or occurs more often
 //! than there. CI passes the pull request's base, or the previous commit on `main`.
@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::run::{self, repo, slashed};
 
-pub const LIST: &str = "cli/xtask/arch.txt";
+pub const LIST: &str = "xtask/arch.txt";
 
 /// The binary that composes the products. Rule 3 lets only it parse arguments, draw a terminal or read the
 /// environment.
@@ -302,7 +302,7 @@ impl Workspace {
         let text = run::stdout(
             Command::new("cargo")
                 .args(["metadata", "--format-version", "1", "--locked", "--manifest-path"])
-                .arg(root.join("cli/Cargo.toml")),
+                .arg(root.join("Cargo.toml")),
         )?;
         let metadata: Value = serde_json::from_str(&text).map_err(|e| format!("cargo metadata: {e}"))?;
         let members: BTreeSet<&str> =
@@ -419,12 +419,12 @@ mod tests {
         fs::write(dir.join("README"), "before the list\n").unwrap();
         git(&dir, &["add", "."]);
         git(&dir, &["commit", "-q", "-m", "before"]);
-        fs::create_dir_all(dir.join("cli/xtask")).unwrap();
+        fs::create_dir_all(dir.join("xtask")).unwrap();
         fs::write(dir.join(LIST), render(&lines(&["1 a \"x\"", "1 a \"x\"", "4 b \"y\""]))).unwrap();
         git(&dir, &["add", "."]);
         git(&dir, &["commit", "-q", "-m", "list"]);
-        fs::create_dir_all(dir.join("xtask")).unwrap();
-        git(&dir, &["mv", LIST, "xtask/arch.txt"]);
+        fs::create_dir_all(dir.join("moved/xtask")).unwrap();
+        git(&dir, &["mv", LIST, "moved/xtask/arch.txt"]);
         git(&dir, &["commit", "-q", "-m", "move"]);
 
         let before = base_list(&dir, "HEAD~2");

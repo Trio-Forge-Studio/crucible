@@ -87,7 +87,9 @@ pub fn main(args: &[String]) -> Result<(), String> {
 /// The golden cell and, when the output differs, a list of the differing files to print under the table.
 fn golden_row(root: &Path, base: &str, fork: &str) -> Result<(String, String), String> {
     let current = golden::build(root)?;
-    let (baseline, against) = match git_maybe(root, &["show", &format!("{fork}:{BASELINE}")]) {
+    let (baseline, against) = match git_maybe(root, &["show", &format!("{fork}:{BASELINE}")])
+        .or_else(|| git_maybe(root, &["show", &format!("{fork}:cli/xtask/golden.txt")]))
+    {
         Some(text) => (golden::parse(&text)?, format!("the baseline at `{base}`")),
         None => {
             let path = root.join(BASELINE);
@@ -422,6 +424,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xtask-proof-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("xtask")).unwrap();
+        std::fs::create_dir_all(dir.join("cli")).unwrap();
         let body: String = (0..40).map(|i| format!("let line_{i} = elapsed.as_secs_f64() * 1e3;\n")).collect();
         std::fs::write(dir.join("cli/lib.rs"), &body).unwrap();
         std::fs::write(dir.join("xtask/arch.txt"), "1 a \"x\"\n").unwrap();

@@ -5,7 +5,7 @@ fn crucible(args: &[&str]) -> Output {
 }
 
 fn topics() -> Vec<String> {
-    let docs = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../docs");
+    let docs = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs");
     let mut names: Vec<_> = std::fs::read_dir(docs)
         .unwrap()
         .filter_map(|entry| entry.unwrap().file_name().into_string().unwrap().strip_suffix(".md").map(str::to_owned))
@@ -33,7 +33,7 @@ fn docs_topic_prints_the_file_verbatim() {
     for topic in topics() {
         let out = crucible(&["docs", &topic]);
         assert_eq!(out.status.code(), Some(0));
-        let file = std::fs::read(format!("{}/../../../docs/{topic}.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let file = std::fs::read(format!("{}/../../docs/{topic}.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
         assert_eq!(out.stdout, file, "docs {topic}");
     }
 }

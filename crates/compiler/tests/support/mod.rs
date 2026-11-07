@@ -7,7 +7,7 @@ use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, Module, Target};
 use serde_json::{Value, json};
 
 pub fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 pub fn slashes(path: &Path) -> String {
