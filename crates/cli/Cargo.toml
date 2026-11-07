@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+crucible-docs = { path = "../docs" }
 crucible-oc = { path = "../oc" }
 crucible-project = { path = "../project" }
 oc-registry = { path = "../oc-registry" }
@@ -26,7 +27,6 @@ env_logger = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
-nucleo-matcher = "0.3"
 open = "5"
 unicode-width = "0.2"
 

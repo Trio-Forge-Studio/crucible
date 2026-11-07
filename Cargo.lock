@@ -646,6 +646,7 @@ version = "0.4.0"
 dependencies = [
  "clap 4.6.7",
  "crucible-compiler",
+ "crucible-docs",
  "crucible-oc",
  "crucible-project",
  "dotenvy",
@@ -654,7 +655,6 @@ dependencies = [
  "jsonc-parser",
  "libc",
  "mermaid-text",
- "nucleo-matcher",
  "oc-registry",
  "open",
  "percent-encoding",
@@ -693,6 +693,14 @@ dependencies = [
  "tsrs_scanner",
  "tsrs_tsoptions",
  "tsrs_vfs",
+]
+
+[[package]]
+name = "crucible-docs"
+version = "0.4.0"
+dependencies = [
+ "nucleo-matcher",
+ "pulldown-cmark",
 ]
 
 [[package]]

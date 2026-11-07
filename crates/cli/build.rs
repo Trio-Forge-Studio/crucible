@@ -19,14 +19,6 @@ fn main() {
         .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
         .collect();
     files.sort();
-    let topics: String = files
-        .iter()
-        .map(|path| {
-            let name = path.file_stem().and_then(|stem| stem.to_str()).expect("topic names are UTF-8");
-            let path = path.to_str().expect("docs paths are UTF-8");
-            format!("Topic {{ name: {name:?}, markdown: include_str!({path:?}) }},\n")
-        })
-        .collect();
     let mut diagrams = String::new();
     let mut languages = BTreeSet::new();
     for path in &files {
@@ -46,7 +38,6 @@ fn main() {
         }
     }
     let out = Path::new(&std::env::var("OUT_DIR").expect("cargo sets OUT_DIR")).to_owned();
-    std::fs::write(out.join("topics.rs"), format!("[\n{topics}]\n")).expect("OUT_DIR is writable");
     std::fs::write(out.join("diagrams.rs"), format!("[\n{diagrams}]\n")).expect("OUT_DIR is writable");
     let syntaxes = syntax_subset(&languages);
     std::fs::write(out.join("syntaxes.packdump"), syntect::dumps::dump_binary(&syntaxes)).expect("OUT_DIR is writable");

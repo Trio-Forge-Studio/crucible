@@ -1,5 +1,5 @@
+use super::Slugger;
 use super::Topic;
-use super::render::Slugger;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
@@ -160,14 +160,14 @@ mod tests {
     use super::*;
 
     fn index() -> Index {
-        Index::new(crate::docs::TOPICS)
+        Index::new(crate::TOPICS)
     }
 
     #[test]
     fn an_empty_query_lists_every_topic() {
         let hits = index().search("");
         let topics: Vec<_> = hits.iter().map(|hit| hit.topic).collect();
-        let expected: Vec<_> = crate::docs::TOPICS.iter().map(|topic| topic.name).collect();
+        let expected: Vec<_> = crate::TOPICS.iter().map(|topic| topic.name).collect();
         assert_eq!(topics, expected);
         assert!(hits.iter().all(|hit| hit.slug.is_none()));
     }
