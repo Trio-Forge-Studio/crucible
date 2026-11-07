@@ -44,6 +44,12 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     stdout(Command::new("git").arg("-C").arg(dir).args(args))
 }
 
+/// Like `git`, but `None` when git exits non-zero, for questions such as "does this file exist at that commit".
+pub fn git_maybe(dir: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git").arg("-C").arg(dir).args(args).stderr(Stdio::null()).output().ok()?;
+    if output.status.success() { String::from_utf8(output.stdout).ok() } else { None }
+}
+
 /// A program found on PATH. Windows installs pnpm as a `.cmd` shim, which only `cmd` can start.
 pub fn tool(name: &str) -> Command {
     if cfg!(windows) {
