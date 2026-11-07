@@ -12,7 +12,7 @@ for (const [command, args] of [
 			"--quiet",
 			"--locked",
 			"--manifest-path",
-			path.join(repo, "cli/Cargo.toml"),
+			path.join(repo, "Cargo.toml"),
 			"-p",
 			"crucible-compiler",
 			"--example",

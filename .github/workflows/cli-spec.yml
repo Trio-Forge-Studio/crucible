@@ -12,7 +12,7 @@ jobs:
   verify:
     defaults:
       run:
-        working-directory: cli
+        working-directory: .
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +34,7 @@ jobs:
           python-version: "3.13"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: cli
+          workspaces: .
       - shell: python
         run: |
           from pathlib import Path
@@ -68,10 +68,10 @@ jobs:
         with:
           name: spec-update-${{ matrix.os }}
           path: |
-            cli/spec/openapi.json
-            cli/spec/registry.json
-            cli/build/spec-update.json
-            cli/build/spec-verification.json
+            crates/oc-registry/spec/openapi.json
+            crates/oc-registry/spec/registry.json
+            build/spec-update.json
+            build/spec-verification.json
           if-no-files-found: error
       - name: Report failed verification
         if: steps.checks.outcome == 'failure'
@@ -100,10 +100,10 @@ jobs:
           from pathlib import Path
           roots = [Path("build/verified") / f"spec-update-{runner}" for runner in ["ubuntu-latest", "windows-latest"]]
           for name in ["openapi.json", "registry.json"]:
-              assert (roots[0] / "spec" / name).read_bytes() == (roots[1] / "spec" / name).read_bytes(), "both runners must verify identical spec bytes"
-              shutil.copyfile(roots[0] / "spec" / name, Path("cli/spec") / name)
+              assert (roots[0] / "crates/oc-registry/spec" / name).read_bytes() == (roots[1] / "crates/oc-registry/spec" / name).read_bytes(), "both runners must verify identical spec bytes"
+              shutil.copyfile(roots[0] / "crates/oc-registry/spec" / name, Path("crates/oc-registry/spec") / name)
           update = json.loads((roots[0] / "build/spec-update.json").read_text())
-          registry = json.loads(Path("cli/spec/registry.json").read_text())
+          registry = json.loads(Path("crates/oc-registry/spec/registry.json").read_text())
           commit = registry["source"]["commit"]
           lines = [f"Updates the Roblox Open Cloud spec to [{commit}](https://github.com/Roblox/creator-docs/commit/{commit}).", ""]
           lines.extend(["GitHub does not trigger CI on bot PRs created with GITHUB_TOKEN. This workflow's Ubuntu and Windows verification job is the check for this update.", ""])
@@ -136,5 +136,5 @@ jobs:
           commit-message: "chore(cli): update the Roblox Open Cloud spec"
           body-path: build/spec-update.md
           add-paths: |
-            cli/spec/openapi.json
-            cli/spec/registry.json
+            crates/oc-registry/spec/openapi.json
+            crates/oc-registry/spec/registry.json

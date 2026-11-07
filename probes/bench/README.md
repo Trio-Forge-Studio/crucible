@@ -3,7 +3,7 @@
 These drivers measure what a change to the emitted Luau costs or saves at run time. Run them from the repository root on Windows with Studio signed in and Assistant MCP enabled, after `pnpm install` and a release build of the compiler.
 
 ```powershell
-cargo build --release --locked --manifest-path cli/Cargo.toml -p crucible-compiler --example compile
+cargo build --release --locked --manifest-path Cargo.toml -p crucible-compiler --example compile
 node probes/bench/run.mjs --reps 5
 node --test probes/bench/verification.test.mjs
 ```
