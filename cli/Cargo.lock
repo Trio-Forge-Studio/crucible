@@ -4735,9 +4735,12 @@ name = "xtask"
 version = "0.4.0"
 dependencies = [
  "oc-registry",
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
  "serde",
  "serde_json",
  "sha2",
+ "syn 2.0.119",
  "toml 1.1.8+spec-1.1.0",
  "ureq",
 ]

@@ -54,12 +54,13 @@ const FRAMEWORK_MACROS: &[&str] = &[
 ];
 /// Rule 3's terminal and argument crates.
 const CLI_ONLY_DEPENDENCIES: &[&str] = &["clap", "ratatui", "syntect"];
-/// Rule 3's environment reads. `env!` and `option_env!` read the build's environment, so they are not listed.
-const ENVIRONMENT_READS: &[&str] = &["env::var(", "env::var_os(", "env::vars(", "env::vars_os("];
 /// The UI calls compiled JSX makes. The runtime's UI entry also exports functions games call, which are not ABI.
 /// Rule 4 skips the one-letter ABI names, the `n` and `t` namespaces, because a one-letter string is too common to
 /// scan for. The ABI crate's own check covers them once it exists.
 const UI_ABI: &[&str] = &["bind", "append"];
+
+/// The Cargo target kinds a crate ships. Tests, examples and benches are left out.
+const SHIPPED: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro", "bin", "custom-build"];
 
 const USAGE: &str = "usage: cargo xtask arch [check [--base <rev>] | record]";
 
@@ -196,34 +197,24 @@ pub fn violations(root: &Path) -> Result<Vec<String>, String> {
     for package in &workspace.packages {
         let name = package.name.as_str();
         dependency_rules(&workspace, package, &mut found);
-        let mut scans = Vec::new();
-        for path in package.sources()? {
-            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            scans.push((path, rust::scan(&text)));
-        }
-        let tests: Vec<PathBuf> =
-            scans.iter().flat_map(|(path, scan)| test_module_paths(path, &scan.test_modules)).collect();
-        for (path, scan) in &scans {
-            if tests.iter().any(|test| path == test || path.starts_with(test.with_extension(""))) {
-                continue;
-            }
-            let at = format!("{name}:{}", slashed(path.strip_prefix(&package.dir).unwrap_or(path)));
+        for source in rust::sources(&package.roots)? {
+            let path = &source.path;
+            let relative = path.strip_prefix(&package.dir).or_else(|_| path.strip_prefix(root)).unwrap_or(path);
+            let at = format!("{name}:{}", slashed(relative));
             if GENERIC.contains(&name) {
-                for literal in &scan.strings {
+                for literal in &source.strings {
                     if let Some(shown) = framework_literal(literal) {
                         found.push(format!("1 {at} {shown}"));
                     }
                 }
             }
             if name != CLI && name != TOOLING {
-                for read in ENVIRONMENT_READS {
-                    for _ in scan.code.matches(read) {
-                        found.push(format!("3 {at} reads std::{}", read.trim_end_matches('(')));
-                    }
+                for read in &source.environment {
+                    found.push(format!("3 {at} {read}"));
                 }
             }
             if name != ABI && name != TOOLING {
-                for literal in &scan.strings {
+                for literal in &source.strings {
                     let named = literal.len() > 1 && abi.contains(literal.as_str());
                     if named || literal.starts_with("@trioforge/crucible/") {
                         found.push(format!("4 {at} {}", shown(literal, literal)));
@@ -237,15 +228,6 @@ pub fn violations(root: &Path) -> Result<Vec<String>, String> {
     }
     found.sort();
     Ok(found)
-}
-
-/// The files of `#[cfg(test)] mod name;` declarations in `file`, each as `name.rs`. A test module's submodules live
-/// in the folder of the same name, which the caller skips too.
-fn test_module_paths(file: &Path, modules: &[String]) -> Vec<PathBuf> {
-    let dir = file.parent().unwrap_or(file);
-    let owns_folder = file.file_name().is_some_and(|name| name == "lib.rs" || name == "main.rs" || name == "mod.rs");
-    let base = if owns_folder { dir.to_path_buf() } else { dir.join(file.file_stem().unwrap_or_default()) };
-    modules.iter().flat_map(|module| [base.join(format!("{module}.rs")), base.join(module).join("mod.rs")]).collect()
 }
 
 fn framework_literal(literal: &str) -> Option<String> {
@@ -296,38 +278,12 @@ struct Package {
     id: String,
     name: String,
     dir: PathBuf,
+    /// The source files of the targets the crate ships: its library, binaries and build script.
+    roots: Vec<PathBuf>,
     /// Normal and build dependencies by name. Rule 3 ignores dev-dependencies, because tests are not shipped.
     dependencies: BTreeSet<String>,
     /// Every dependency kind, limited to workspace members.
     workspace_dependencies: BTreeSet<String>,
-}
-
-impl Package {
-    /// The crate's own source: `src` and `build.rs`. The rules apply to what the crate ships, so integration tests,
-    /// examples and `#[cfg(test)]` code are left out. The framework's tests move with the framework in this refactor.
-    fn sources(&self) -> Result<Vec<PathBuf>, String> {
-        let mut files = Vec::new();
-        collect_rust(&self.dir.join("src"), &mut files)?;
-        let build = self.dir.join("build.rs");
-        if build.is_file() {
-            files.push(build);
-        }
-        files.sort();
-        Ok(files)
-    }
-}
-
-fn collect_rust(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    let Ok(entries) = fs::read_dir(dir) else { return Ok(()) };
-    for entry in entries {
-        let path = entry.map_err(|e| format!("cannot list {}: {e}", dir.display()))?.path();
-        if path.is_dir() {
-            collect_rust(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            files.push(path);
-        }
-    }
-    Ok(())
 }
 
 struct Workspace {
@@ -357,9 +313,24 @@ impl Workspace {
             let manifest = PathBuf::from(package["manifest_path"].as_str().unwrap_or_default());
             let dependencies = package["dependencies"].as_array().into_iter().flatten();
             let name = package["name"].as_str().unwrap_or_default().to_owned();
+            let roots = package["targets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|target| {
+                    target["kind"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .any(|kind| SHIPPED.contains(&kind))
+                })
+                .filter_map(|target| target["src_path"].as_str().map(PathBuf::from))
+                .collect();
             packages.push(Package {
                 id: package["id"].as_str().unwrap_or_default().to_owned(),
                 dir: manifest.parent().map(Path::to_path_buf).unwrap_or_default(),
+                roots,
                 dependencies: dependencies
                     .clone()
                     .filter(|dependency| dependency["kind"].as_str() != Some("dev"))
