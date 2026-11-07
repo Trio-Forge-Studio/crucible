@@ -681,6 +681,7 @@ name = "crucible-compiler"
 version = "0.4.0"
 dependencies = [
  "crucible-compiler",
+ "crucible-luau",
  "serde_json",
  "toml 1.1.8+spec-1.1.0",
  "tsrs_ast",
@@ -692,6 +693,10 @@ dependencies = [
  "tsrs_tsoptions",
  "tsrs_vfs",
 ]
+
+[[package]]
+name = "crucible-luau"
+version = "0.4.0"
 
 [[package]]
 name = "crypto-common"

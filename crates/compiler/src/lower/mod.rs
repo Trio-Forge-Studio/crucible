@@ -12,8 +12,8 @@ use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 
 use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
-use crate::luau::{Block, Expr, Name, Stmt};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
+use crucible_luau::{Block, Expr, Name, Stmt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
@@ -457,7 +457,7 @@ impl<'a> Lower<'a> {
 
     fn local_name(&mut self, n: Node) -> Name {
         let text = n.text();
-        if !crate::luau::is_name(text) || EMITTED_GLOBALS.contains(&text) {
+        if !crucible_luau::is_name(text) || EMITTED_GLOBALS.contains(&text) {
             self.error(n, format!("`{text}` cannot be a Luau local name"));
         }
         Cow::Borrowed(text)

@@ -2,8 +2,8 @@ use std::borrow::Cow;
 
 use super::Lower;
 use crate::facts::{Jsx, Prop};
-use crate::luau::{BinOp, Block, Expr, Field, Stmt};
 use crate::tree::{Kind, Node};
+use crucible_luau::{BinOp, Block, Expr, Field, Stmt};
 
 /// A JSX element or fragment, as each lowering reads it.
 struct Element {

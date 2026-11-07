@@ -2,8 +2,8 @@ use std::borrow::Cow;
 
 use super::{Lower, is_hole, skip_parens_and_assertions};
 use crate::facts::Receiver;
-use crate::luau::{BinOp, Expr, Name, Stmt, UnOp};
 use crate::tree::{Kind, Node, Op};
+use crucible_luau::{BinOp, Expr, Name, Stmt, UnOp};
 
 impl Lower<'_> {
     /// A `LuaTuple` call binds its values directly.
