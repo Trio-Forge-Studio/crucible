@@ -78,7 +78,7 @@ for (const m of selected) {
 	rmSync(work, { recursive: true, force: true });
 	mkdirSync(work, { recursive: true });
 	cpSync(dir, work, { recursive: true, filter: (path) => !path.endsWith(".json") });
-	const spec = join(work, "Provisioning.tla");
+	const spec = join(work, base.module.replace(/^MC/, ""));
 	writeFileSync(spec, mutateModel(readFileSync(spec, "utf8"), m.edits ?? [], m.id));
 	writeFileSync(join(work, m.config), mutateConfig(base, m.set, m.only, m.id));
 	const run = runTlc(java, work, m.config, base.module, `mutants/${model}/${m.id}`);
