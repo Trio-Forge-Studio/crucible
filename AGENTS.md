@@ -44,7 +44,7 @@ Three `cargo xtask` commands, run from `cli`, let a pull request prove itself wi
 
 Every commit ends with a `Review:` trailer.
 
-- `Review: mechanical` marks a commit that only moves, renames, updates paths or regenerates files. `proof` flags each rename under 95% similarity, each added, deleted or copied file, each binary or mode change, each hunk that adds or removes lines, and each line that is not byte-identical to the old one, whitespace included, outside path words swapped inside a string literal of the same quote or, in YAML and TOML, anywhere on the line. It accepts changes to `golden.txt`, `arch.txt` and `cli/spec/registry.json`, whose CI checks compare them with what their commands write, and it lists every path edit it accepted under the table.
+- `Review: mechanical` marks a commit that only moves, renames, updates paths or regenerates files. `proof` flags each rename under 95% similarity, each added, deleted or copied file, each binary or mode change, each hunk that adds or removes lines, and each line that is not byte-identical to the old one, whitespace, line ending and final newline included, outside path words swapped inside a string literal of the same quote or, in YAML and TOML, anywhere on the line. A word that holds a backslash is never a path word, so a changed escape sequence is flagged. It accepts changes to `golden.txt`, `arch.txt` and `cli/spec/registry.json`, whose CI checks compare them with what their commands write, and it lists every path edit it accepted under the table.
 - `Review: read` marks every other commit.
 
 Each commit passes `pnpm check` on its own. A pull request body has these parts, in order:

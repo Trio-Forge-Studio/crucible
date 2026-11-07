@@ -10,8 +10,9 @@
 //!   must equal the old one byte for byte, whitespace included, outside the words a path edit swaps. Those words may
 //!   sit only in string literals of the same quote on both lines, without `${`, and, in YAML and TOML files, whose
 //!   values are often unquoted, anywhere on the line. A path edit swaps one word for another, both made of letters,
-//!   digits and `_.-/\@~+`, where one holds `/` or `\`, is `.` or `..`, or ends in a known file extension. The table
-//!   lists every path edit, so a reader can skim them.
+//!   digits and `_.-/@~+`, where one holds `/`, is `.` or `..`, or ends in a known file extension. A word with a
+//!   backslash is never a path edit, so a changed escape sequence is flagged. Each line keeps its terminator, so a
+//!   changed line ending or final newline is flagged too. The table lists every path edit, so a reader can skim them.
 //!
 //! String literals are found by their quote characters, without a full lexer, so a lone quote in a comment or a regular
 //! expression can make code read as a string. An unterminated literal leaves the rest of the line as code.
@@ -220,15 +221,17 @@ struct File {
     hunks: Vec<Hunk>,
 }
 
+/// Each line keeps its terminator, so a changed line ending or final newline is a changed line.
 #[derive(Default)]
 struct Hunk {
     removed: Vec<String>,
     added: Vec<String>,
+    last_added: bool,
 }
 
 fn files(patch: &str) -> Vec<File> {
     let mut files: Vec<File> = Vec::new();
-    for line in patch.lines() {
+    for line in patch.split_terminator('\n') {
         if let Some(header) = line.strip_prefix("diff --git ") {
             let path = header.rsplit(" b/").next().unwrap_or(header).to_owned();
             files.push(File { path, ..File::default() });
@@ -243,9 +246,16 @@ fn files(patch: &str) -> Vec<File> {
             file.hunks.push(Hunk::default());
         } else if let Some(hunk) = file.hunks.last_mut() {
             if let Some(text) = line.strip_prefix('-') {
-                hunk.removed.push(text.to_owned());
+                hunk.removed.push(format!("{text}\n"));
+                hunk.last_added = false;
             } else if let Some(text) = line.strip_prefix('+') {
-                hunk.added.push(text.to_owned());
+                hunk.added.push(format!("{text}\n"));
+                hunk.last_added = true;
+            } else if line.starts_with('\\') {
+                let side = if hunk.last_added { &mut hunk.added } else { &mut hunk.removed };
+                if let Some(last) = side.last_mut() {
+                    last.pop();
+                }
             }
         }
     }
@@ -374,12 +384,12 @@ fn words(text: &str) -> Vec<(&str, &str)> {
 
 fn path_word(word: &str) -> bool {
     !word.is_empty()
-        && word.chars().all(|c| c.is_alphanumeric() || "_.-/\\@~+".contains(c))
+        && word.chars().all(|c| c.is_alphanumeric() || "_.-/@~+".contains(c))
         && (word.chars().any(char::is_alphanumeric) || word == "." || word == "..")
 }
 
 fn strong_path(word: &str) -> bool {
-    word.contains(['/', '\\'])
+    word.contains('/')
         || word == "."
         || word == ".."
         || word.rsplit_once('.').is_some_and(|(_, ext)| EXTENSIONS.contains(&ext))
@@ -400,6 +410,7 @@ mod tests {
             .arg("-C")
             .arg(dir)
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(["-c", "core.autocrlf=false"])
             .args(args)
             .output()
             .unwrap();
@@ -488,6 +499,66 @@ mod tests {
     }
 
     #[test]
+    fn an_escape_change_in_a_renamed_file_is_flagged() {
+        let dir = std::env::temp_dir().join(format!("xtask-proof-escape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let body: String = (0..40).map(|i| format!("export const line{i} = {i};\n")).collect();
+        std::fs::write(dir.join("src/a.ts"), format!("{body}let s = \"a\\nb\";\n")).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "base"]);
+
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::remove_file(dir.join("src/a.ts")).unwrap();
+        std::fs::write(dir.join("lib/a.ts"), format!("{body}let s = \"a\\tb\";\n")).unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "move"]);
+        let escape = mechanical(&dir, "HEAD").unwrap().0;
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(escape.starts_with("Flagged:"), "{escape}");
+        assert!(escape.contains("`lib/a.ts` changes more than a path: `let s = \"a\\tb\";`"), "{escape}");
+    }
+
+    #[test]
+    fn a_line_ending_change_is_flagged() {
+        let dir = std::env::temp_dir().join(format!("xtask-proof-eol-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.rs"), "let a = 1;\r\nlet b = \"cli/a.json\";\r\n").unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "base"]);
+
+        std::fs::write(dir.join("a.rs"), "let a = 1;\nlet b = \"cli/a.json\";\r\n").unwrap();
+        git(&dir, &["commit", "-q", "-am", "crlf"]);
+        let crlf = mechanical(&dir, "HEAD").unwrap().0;
+
+        std::fs::write(dir.join("a.rs"), "let a = 1;\nlet b = \"cli/a.json\";").unwrap();
+        git(&dir, &["commit", "-q", "-am", "eof"]);
+        let eof = mechanical(&dir, "HEAD").unwrap().0;
+
+        std::fs::write(dir.join("a.rs"), "let a = 1;\nlet b = \"a.json\";").unwrap();
+        git(&dir, &["commit", "-q", "-am", "path"]);
+        let path = mechanical(&dir, "HEAD").unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(crlf.starts_with("Flagged:"), "{crlf}");
+        assert!(crlf.contains("`a.rs` changes more than a path: `let a = 1;`"), "{crlf}");
+        assert!(eof.starts_with("Flagged:"), "{eof}");
+        assert!(eof.contains("`a.rs` changes more than a path: `let b = \"cli/a.json\";`"), "{eof}");
+        assert_eq!(
+            path,
+            (
+                "Renames: 0, exact: 0. Regenerated: 0. Files with path-only edits: 1, 1 listed below. Nothing flagged."
+                    .to_owned(),
+                vec!["`a.rs`: `cli/a.json` → `a.json`".to_owned()]
+            )
+        );
+    }
+
+    #[test]
     fn path_updates_pass_and_new_logic_does_not() {
         let pass = |path: &str, removed: &str, added: &str| path_update(path, removed, added).is_some();
         assert!(pass(
@@ -509,6 +580,8 @@ mod tests {
         assert!(pass("AGENTS.md", "Run it from `cli`.", "Run it from `.`."));
         assert!(pass("a.ts", "import { x } from \"../cli/a\";", "import { x } from \"../a\";"));
         assert!(pass("a.rs", "if c == '\"' { load(\"cli/a.json\") }", "if c == '\"' { load(\"a.json\") }"));
+        assert!(pass("a.rs", "load(\"cli/a.json\");\r\n", "load(\"a.json\");\r\n"));
+        assert!(pass("a.rs", "let s = \"a\\nb\"; load(\"cli/a.json\")", "let s = \"a\\nb\"; load(\"a.json\")"));
 
         assert!(!pass("a.rs", "let x = 1;", "let x = compute(1);"));
         assert!(!pass("ci.yml", "run: cargo test", "run: cargo test --release"));
@@ -542,5 +615,12 @@ mod tests {
         assert!(!pass("a.rs", "if c == '\"' { n = a/b; } let s = \"x\";", "if c == '\"' { n = a/c; } let s = \"x\";"));
         assert!(!pass("a.ts", "let s = 'it; n = a/b;", "let s = 'it; n = a/c;"));
         assert!(!pass("ci.yml", "run: cargo test cli/a.toml", "run: cargo test\tcli/a.toml"));
+        assert!(!pass("a.ts", "let s = \"a\\nb\";", "let s = \"a\\tb\";"));
+        assert!(!pass("a.rs", "load(\"cli/a.json\", \"\\n\")", "load(\"a.json\", \"\\t\")"));
+        assert!(!pass("a.rs", "load(\"cli/a.json \\n\")", "load(\"a.json \\t\")"));
+        assert!(!pass("a.rs", "load(\"cli\\a.json\")", "load(\"a.json\")"));
+        assert!(!pass("a.rs", "let x = 1;\r\n", "let x = 1;\n"));
+        assert!(!pass("a.rs", "let x = 1;\n", "let x = 1;"));
+        assert!(!pass("ci.yml", "run: cargo test cli/a.toml\r\n", "run: cargo test a.toml\n"));
     }
 }
