@@ -7,12 +7,14 @@
 //! - A change to a file that a CI check regenerates and compares: the golden baseline, the arch list and the Open
 //!   Cloud registry.
 //! - A line whose only changes are path edits. Each hunk must replace as many lines as it removes, and each new line
-//!   must keep the old line's indentation and every token: words, numbers, operators and punctuation. A token may
-//!   differ only when both are string literals of the same quote, without `${`, whose whitespace-separated words
-//!   differ only in path edits. In YAML and TOML files, whose values are often unquoted, the line's words may also
-//!   differ in path edits. A path edit swaps one word for another, both made of letters, digits and `_.-/\@~+`,
-//!   where one holds `/` or `\`, is `.` or `..`, or ends in a known file extension. The table lists every path edit,
-//!   so a reader can skim them.
+//!   must equal the old one byte for byte, whitespace included, outside the words a path edit swaps. Those words may
+//!   sit only in string literals of the same quote on both lines, without `${`, and, in YAML and TOML files, whose
+//!   values are often unquoted, anywhere on the line. A path edit swaps one word for another, both made of letters,
+//!   digits and `_.-/\@~+`, where one holds `/` or `\`, is `.` or `..`, or ends in a known file extension. The table
+//!   lists every path edit, so a reader can skim them.
+//!
+//! String literals are found by their quote characters, without a full lexer, so a lone quote in a comment or a regular
+//! expression can make code read as a string. An unterminated literal leaves the rest of the line as code.
 //!
 //! An added, deleted or copied file, a binary change, a mode change and a hunk that adds or removes lines are flagged.
 //! The bias is to flag: a false flag costs the author a `Review: read` trailer, and a false pass skips a read.
@@ -251,105 +253,123 @@ fn files(patch: &str) -> Vec<File> {
 }
 
 #[derive(Debug, PartialEq)]
-enum Token<'a> {
-    Word(&'a str),
+enum Span<'a> {
+    Code(&'a str),
+    /// A string literal's quote and the text between its quotes.
     Quoted(char, &'a str),
-    Punct(char),
 }
 
-/// The quote characters that open a string literal in the file's language.
 fn quotes(path: &str) -> &'static [char] {
-    match path.rsplit_once('.').map_or("", |(_, ext)| ext) {
+    match extension(path) {
         "rs" => &['"'],
         "ts" | "tsx" | "js" | "mjs" | "cjs" | "md" => &['"', '\'', '`'],
         _ => &['"', '\''],
     }
 }
 
-fn tokens<'a>(line: &'a str, quotes: &[char]) -> Vec<Token<'a>> {
+fn extension(path: &str) -> &str {
+    path.rsplit_once('.').map_or("", |(_, ext)| ext)
+}
+
+/// `line` cut into code and string literals. An unterminated literal leaves the rest of the line as code.
+fn spans<'a>(line: &'a str, path: &str) -> Vec<Span<'a>> {
+    let (quotes, rust) = (quotes(path), extension(path) == "rs");
     let mut found = Vec::new();
-    let mut chars = line.char_indices().peekable();
-    while let Some((start, c)) = chars.next() {
-        if c.is_whitespace() {
+    let (mut code, mut at) = (0, 0);
+    while let Some(c) = line[at..].chars().next() {
+        if let Some(len) = char_literal(&line[at..]).filter(|_| rust) {
+            at += len;
             continue;
         }
-        if quotes.contains(&c) {
-            let mut end = line.len();
-            while let Some((at, next)) = chars.next() {
-                if next == '\\' {
-                    chars.next();
-                } else if next == c {
-                    end = at;
-                    break;
-                }
-            }
-            found.push(Token::Quoted(c, &line[start + c.len_utf8()..end]));
-        } else if c.is_alphanumeric() || c == '_' {
-            let mut end = start + c.len_utf8();
-            while let Some((at, next)) = chars.peek().copied() {
-                if !(next.is_alphanumeric() || next == '_') {
-                    break;
-                }
-                end = at + next.len_utf8();
-                chars.next();
-            }
-            found.push(Token::Word(&line[start..end]));
-        } else {
-            found.push(Token::Punct(c));
+        if !quotes.contains(&c) {
+            at += c.len_utf8();
+            continue;
         }
+        let Some(end) = closing(&line[at + 1..], c).map(|end| at + 1 + end) else { break };
+        if code < at {
+            found.push(Span::Code(&line[code..at]));
+        }
+        found.push(Span::Quoted(c, &line[at + 1..end]));
+        at = end + 1;
+        code = at;
+    }
+    if code < line.len() {
+        found.push(Span::Code(&line[code..]));
     }
     found
 }
 
-/// The path edits that turn `removed` into `added`, or `None` when anything else changes too.
-pub fn path_update(path: &str, removed: &str, added: &str) -> Option<Vec<(String, String)>> {
-    let indent = |line: &str| line.len() - line.trim_start().len();
-    if removed[..indent(removed)] != added[..indent(added)] {
-        return None;
-    }
-    let (old, new) = (tokens(removed, quotes(path)), tokens(added, quotes(path)));
-    let mut pairs = Vec::new();
-    let tokens_match = old.len() == new.len()
-        && old.iter().zip(&new).all(|pair| match pair {
-            (a, b) if a == b => true,
-            (Token::Quoted(q, a), Token::Quoted(r, b)) if q == r && !a.contains("${") && !b.contains("${") => {
-                words_differ_in_paths(a, b, &mut pairs)
-            }
-            _ => false,
-        });
-    if tokens_match {
-        return Some(pairs);
-    }
-    let config = matches!(path.rsplit_once('.').map(|(_, ext)| ext), Some("yml" | "yaml" | "toml"));
-    let mut pairs = Vec::new();
-    (config && words_differ_in_paths(removed, added, &mut pairs)).then_some(pairs)
+/// The length of the Rust character literal that starts `text`, such as `'"'`, whose quote opens no string.
+fn char_literal(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix('\'')?;
+    let len = match rest.strip_prefix('\\') {
+        Some(escaped) => escaped.get(1..)?.find('\'')? + 2,
+        None => rest.chars().next()?.len_utf8(),
+    };
+    rest[len..].starts_with('\'').then_some(len + 2)
 }
 
-fn words_differ_in_paths(old: &str, new: &str, pairs: &mut Vec<(String, String)>) -> bool {
-    let (old, new): (Vec<&str>, Vec<&str>) = (old.split_whitespace().collect(), new.split_whitespace().collect());
+/// The offset of the `quote` that closes a literal whose text starts `text`, past any escaped character.
+fn closing(text: &str, quote: char) -> Option<usize> {
+    let mut chars = text.char_indices();
+    while let Some((at, c)) = chars.next() {
+        if c == '\\' {
+            chars.next();
+        } else if c == quote {
+            return Some(at);
+        }
+    }
+    None
+}
+
+/// The path edits that turn `removed` into `added`, or `None` when anything else changes too.
+pub fn path_update(path: &str, removed: &str, added: &str) -> Option<Vec<(String, String)>> {
+    let config = matches!(extension(path), "yml" | "yaml" | "toml");
+    let (old, new) = (spans(removed, path), spans(added, path));
+    if old.len() != new.len() {
+        return None;
+    }
+    let mut pairs = Vec::new();
+    for pair in old.iter().zip(&new) {
+        let same = match pair {
+            (a, b) if a == b => true,
+            (Span::Code(a), Span::Code(b)) => config && only_paths_differ(a, b, &mut pairs),
+            (Span::Quoted(q, a), Span::Quoted(r, b)) => {
+                q == r && !a.contains("${") && !b.contains("${") && only_paths_differ(a, b, &mut pairs)
+            }
+            _ => false,
+        };
+        if !same {
+            return None;
+        }
+    }
+    Some(pairs)
+}
+
+/// Whether `old` and `new` are byte-identical once each word that differs is a path edit.
+fn only_paths_differ(old: &str, new: &str, pairs: &mut Vec<(String, String)>) -> bool {
+    let (old, new) = (words(old), words(new));
     old.len() == new.len()
-        && old.iter().zip(&new).all(|(a, b)| {
+        && old.iter().zip(&new).all(|((a, a_space), (b, b_space))| {
+            if a_space != b_space {
+                return false;
+            }
             if a == b {
                 return true;
             }
-            let (a, b) = unquoted(a, b);
             let edit = path_word(a) && path_word(b) && (strong_path(a) || strong_path(b));
             if edit {
-                pairs.push((a.to_owned(), b.to_owned()));
+                pairs.push(((*a).to_owned(), (*b).to_owned()));
             }
             edit
         })
 }
 
-/// Both words without the quotes they share, as in `"cli/a"` and `"a"`.
-fn unquoted<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
-    for quote in ['"', '\''] {
-        let strip = |word: &'a str| word.strip_prefix(quote).and_then(|word| word.strip_suffix(quote));
-        if let (Some(a), Some(b)) = (strip(a), strip(b)) {
-            return (a, b);
-        }
-    }
-    (a, b)
+/// Each word of `text` with the whitespace character after it.
+fn words(text: &str) -> Vec<(&str, &str)> {
+    text.split_inclusive(char::is_whitespace)
+        .map(|piece| piece.split_at(piece.trim_end_matches(char::is_whitespace).len()))
+        .collect()
 }
 
 fn path_word(word: &str) -> bool {
@@ -365,7 +385,6 @@ fn strong_path(word: &str) -> bool {
         || word.rsplit_once('.').is_some_and(|(_, ext)| EXTENSIONS.contains(&ext))
 }
 
-/// Text that is safe inside a Markdown table cell.
 fn cell(text: &str) -> String {
     text.replace('|', "\\|")
 }
@@ -440,6 +459,35 @@ mod tests {
     }
 
     #[test]
+    fn an_operator_change_in_a_renamed_file_is_flagged() {
+        let dir = std::env::temp_dir().join(format!("xtask-proof-operator-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let body: String = (0..40).map(|i| format!("export const line{i} = \"./a/{i}.ts\";\n")).collect();
+        std::fs::write(dir.join("src/a.ts"), format!("{body}let answer = a + ++b;\n")).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "base"]);
+
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::remove_file(dir.join("src/a.ts")).unwrap();
+        std::fs::write(dir.join("lib/a.ts"), format!("{body}let answer = a++ + b;\n")).unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "move"]);
+        let operator = mechanical(&dir, "HEAD").unwrap().0;
+
+        std::fs::write(dir.join("lib/a.ts"), format!("{}let answer = a++ + b;\n", body.replace("./a/", "./b/")))
+            .unwrap();
+        git(&dir, &["commit", "-q", "-am", "paths"]);
+        let paths = mechanical(&dir, "HEAD").unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(operator.starts_with("Flagged:"), "{operator}");
+        assert!(operator.contains("`lib/a.ts` changes more than a path: `let answer = a++ + b;`"), "{operator}");
+        assert!(paths.0.ends_with("Files with path-only edits: 1, 40 listed below. Nothing flagged."), "{}", paths.0);
+    }
+
+    #[test]
     fn path_updates_pass_and_new_logic_does_not() {
         let pass = |path: &str, removed: &str, added: &str| path_update(path, removed, added).is_some();
         assert!(pass(
@@ -459,6 +507,8 @@ mod tests {
             "\"build\": \"cargo run --manifest-path ../Cargo.toml\","
         ));
         assert!(pass("AGENTS.md", "Run it from `cli`.", "Run it from `.`."));
+        assert!(pass("a.ts", "import { x } from \"../cli/a\";", "import { x } from \"../a\";"));
+        assert!(pass("a.rs", "if c == '\"' { load(\"cli/a.json\") }", "if c == '\"' { load(\"a.json\") }"));
 
         assert!(!pass("a.rs", "let x = 1;", "let x = compute(1);"));
         assert!(!pass("ci.yml", "run: cargo test", "run: cargo test --release"));
@@ -483,5 +533,14 @@ mod tests {
             "fn f(x: &'static str) -> usize { x.len() * 2 }",
             "fn f(x: &'static str) -> usize { x.len() * a/2 }"
         ));
+        assert!(!pass("a.ts", "let answer = a + ++b;", "let answer = a++ + b;"));
+        assert!(!pass("a.ts", "let answer = a - -b;", "let answer = a--b;"));
+        assert!(!pass("a.rs", "let p = load(\"../cli/a.json\") + 1;", "let p = load(\"../a.json\") - 1;"));
+        assert!(!pass("a.rs", "let p = load(\"cli/a.json\");", "let p = load( \"a.json\");"));
+        assert!(!pass("a.rs", "let p = load(\"cli/a.json\");", "let p = load('cli/a.json');"));
+        assert!(!pass("package.json", "\"cargo run  cli/a.toml\"", "\"cargo run a.toml\""));
+        assert!(!pass("a.rs", "if c == '\"' { n = a/b; } let s = \"x\";", "if c == '\"' { n = a/c; } let s = \"x\";"));
+        assert!(!pass("a.ts", "let s = 'it; n = a/b;", "let s = 'it; n = a/c;"));
+        assert!(!pass("ci.yml", "run: cargo test cli/a.toml", "run: cargo test\tcli/a.toml"));
     }
 }
