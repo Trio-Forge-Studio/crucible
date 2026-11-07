@@ -10,7 +10,7 @@ A topic starts with a `# Title` line, a blank line, and a one-line summary that 
 
 ## Build the CLI
 
-Run this from `.` with the toolchain pinned in the repository's `rust-toolchain.toml`. The binary is `target/release/crucible`.
+Run this from the repository root with the toolchain pinned in the repository's `rust-toolchain.toml`. The binary is `target/release/crucible`.
 
 ```console
 cargo build --release --locked --package crucible
@@ -26,7 +26,7 @@ The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package 
 node crates/cli/npm/stage.mjs build/npm win32-x64=target/release/crucible.exe
 ```
 
-`npm/package.test.mjs` stages the debug binary from `cargo test`, packs the packages with `npm pack`, installs them into a temporary project, and runs `npx crucible`. Set `CRUCIBLE_BINARY` to test another binary.
+`crates/cli/npm/package.test.mjs` stages the debug binary from `cargo test`, packs the packages with `npm pack`, installs them into a temporary project, and runs `npx crucible`. Set `CRUCIBLE_BINARY` to test another binary.
 
 ## Release packages
 
@@ -77,7 +77,7 @@ After release, run `npm view <name>@X.Y.Z version dist.integrity dist.attestatio
 
 In the generated game, run `npx crucible build`, then open `build/start.rbxl` in Studio.
 
-`crates/crucible/template` holds the real template files. `src/create.rs` embeds an explicit file table. Tokens use `__NAME__`, `__VERSION__`, and uppercase dependency names with punctuation replaced by underscores. Versions come from the Cargo package and repository manifests. A Rust test checks that the runtime, the compiler types, and the CLI share one version. Generated template files use MIT-0 and include their own `LICENSE`, independent of the MIT-licensed CLI.
+`crates/cli/template` holds the real template files. `src/create.rs` embeds an explicit file table. Tokens use `__NAME__`, `__VERSION__`, and uppercase dependency names with punctuation replaced by underscores. Versions come from the Cargo package and repository manifests. A Rust test checks that the runtime, the compiler types, and the CLI share one version. Generated template files use MIT-0 and include their own `LICENSE`, independent of the MIT-licensed CLI.
 
 Run `pnpm build` from the repository root first. The npm package test packs the built runtime and the compiler types, creates a project through the packed CLI, replaces its dependency pins with local test tarballs, installs it, and runs its full `check` script. Shipped templates contain no tarball paths.
 
@@ -113,7 +113,7 @@ Skew rules for the snapshot:
 
 ## Update the spec
 
-The checked-in source is `spec/openapi.json` from `Roblox/creator-docs` commit `46be165f526ec23305394ac0c56a95edd2d7f7d9`. `spec/overlay.toml` contains guarded corrections and the two added operations. Every command reads the generated `spec/registry.json`. The binary embeds that registry and loads no spec at runtime.
+The checked-in source is `crates/oc-registry/spec/openapi.json` from `Roblox/creator-docs` commit `46be165f526ec23305394ac0c56a95edd2d7f7d9`. `crates/oc-registry/spec/overlay.toml` contains guarded corrections and the two added operations. Every command reads the generated `crates/oc-registry/spec/registry.json`. The binary embeds that registry and loads no spec at runtime.
 
 ```console
 cargo xtask spec update
@@ -126,7 +126,7 @@ After an overlay edit, run `cargo xtask spec build`. Keep the previous registry 
 
 ## Verify changes
 
-Run these from `.`.
+Run these from the repository root.
 
 Publish tests use local HTTP servers and never upload to Roblox. Recovery tests replay the emitted `next` argument array through a process spawn API and check place ids and credentials, including a key read from `.env`. `next` is a JSON array of strings beginning with `"crucible"`. Run it through `npx` as argv without shell parsing or joining its elements. Recovery preserves an explicit `--verbose` flag and selects each remaining place with `--place=<name>`, including names that start with `-`.
 
@@ -135,7 +135,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask spec check
-node --test npm/package.test.mjs
+node --test crates/cli/npm/package.test.mjs
 ```
 
 The behavior tests drive the real binary against local HTTP servers. `CRUCIBLE_OC_ORIGIN` overrides Roblox origins for these tests and always prints a warning. In that mode, the download client also permits HTTP loopback URLs. It still sends no key to a download URL. API requests never follow redirects.
