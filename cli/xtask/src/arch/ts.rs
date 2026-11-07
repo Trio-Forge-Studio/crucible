@@ -4,10 +4,11 @@
 //! expressions can never merge two statements or hide one. The token stream is then read for `import` and `export`
 //! declarations, `import(..)` calls and `require(..)` calls with a string literal. A statement that imports only types
 //! is skipped, because the compiler erases it. Any other import counts, even one whose names the compiler would erase as
-//! unused, so the check over-reports rather than miss a value import. An `import(..)` counts unless it is a type: after
-//! `typeof`, or followed by `.Name` other than `then`, `catch` or `finally`. A declaration the reader does not
-//! recognize, a computed `import(..)` and an unterminated string, comment, template or regular expression fail the
-//! check instead of being skipped.
+//! unused, so the check over-reports rather than miss a value import. Every `import(..)` counts, even one in a type,
+//! because `typeof import("x")` and `import("x").Name` are expressions as well as types and the tokens alone cannot
+//! tell which. Name such a type with `import type` instead. A declaration the reader does not recognize, a computed
+//! `import(..)` and an unterminated string, comment, template or regular expression fail the check instead of being
+//! skipped.
 //!
 //! Its limits: a `require` of a non-literal, such as the boot glob's `require(module)`, loads game modules at run time
 //! and is not an edge of this graph. A `/` right after `)` is read as division, as in most JavaScript tokenizers, so a
@@ -339,9 +340,7 @@ fn parse(text: &str) -> Result<Parsed, String> {
                 let Some(specifier) = string(at + 2).filter(|_| punct(at + 3, ')')) else {
                     return Err("a computed `import(..)`, which this check cannot follow".into());
                 };
-                let member = |at: usize| matches!(tokens.get(at), Some(Token::Word(w)) if !["then", "catch", "finally"].contains(&w.as_str()));
-                let types_only = (at > 0 && word(at - 1, "typeof")) || (punct(at + 4, '.') && member(at + 5));
-                parsed.statements.push(Statement { specifier: Some(specifier), types_only, ..Statement::default() });
+                parsed.statements.push(Statement { specifier: Some(specifier), ..Statement::default() });
             }
             "import" if punct(at + 1, '.') || punct(at + 1, ':') => {}
             "import" => parsed.statements.push(import(&tokens, at + 1)?),
@@ -670,11 +669,13 @@ mod tests {
     }
 
     #[test]
-    fn import_calls_count_unless_they_are_types() {
-        assert!(one("let m: Map<string, import(\"../emit\").EmittedAttribute>;").types_only);
-        assert!(one("type S = typeof import(\"./server\");").types_only);
+    fn every_import_call_counts() {
+        assert!(!one("const reviewImport = typeof import(\"./server\");").types_only);
+        assert!(!one("const reviewImport = import(\"./server\").toString();").types_only);
         assert!(!one("import(\"./server\").then((m) => m);").types_only);
         assert!(!one("const m = await import(\"./server\");").types_only);
+        assert!(!one("let m: Map<string, import(\"../emit\").EmittedAttribute>;").types_only);
+        assert!(!one("type S = typeof import(\"./server\");").types_only);
     }
 
     #[test]
@@ -737,5 +738,22 @@ mod tests {
             found.unwrap(),
             [("packages/crucible/src/index.ts".to_owned(), "packages/crucible/src/server/index.ts".to_owned())]
         );
+    }
+
+    #[test]
+    fn dynamic_imports_in_values_are_reported() {
+        for (name, line) in [
+            ("typeof", "const reviewImport = typeof import(\"./server\");\n"),
+            ("member", "const reviewImport = import(\"./server\").toString();\n"),
+        ] {
+            let repo = tree(name, &[("index.ts", line), ("server/index.ts", "export const s = 1;\n")]);
+            let found = root_reaches(&repo);
+            fs::remove_dir_all(&repo).unwrap();
+            assert_eq!(
+                found.unwrap(),
+                [("packages/crucible/src/index.ts".to_owned(), "packages/crucible/src/server/index.ts".to_owned())],
+                "{line}"
+            );
+        }
     }
 }
