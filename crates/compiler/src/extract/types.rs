@@ -26,7 +26,7 @@ pub(super) struct Globals {
 }
 
 impl Globals {
-    pub fn new(c: &mut Checker) -> Globals {
+    pub(super) fn new(c: &mut Checker) -> Globals {
         let mut resolve = |name: &str, meaning: SymbolFlags| c.resolve_name_exported(name, None, meaning, false);
         let mut globals = Globals {
             calls: HashMap::new(),
@@ -86,15 +86,15 @@ impl Globals {
         globals
     }
 
-    pub fn call_macro(&self, s: P<Symbol>) -> Option<Macro> {
+    pub(super) fn call_macro(&self, s: P<Symbol>) -> Option<Macro> {
         self.calls.get(&s).copied()
     }
 
-    pub fn constructor_macro(&self, s: P<Symbol>) -> Option<Macro> {
+    pub(super) fn constructor_macro(&self, s: P<Symbol>) -> Option<Macro> {
         self.constructors.get(&s).copied()
     }
 
-    pub fn method_macro(&self, s: P<Symbol>) -> Option<Macro> {
+    pub(super) fn method_macro(&self, s: P<Symbol>) -> Option<Macro> {
         self.methods.get(&s).copied()
     }
 }
@@ -123,21 +123,21 @@ fn is_number(t: P<Type>) -> bool {
     t.flags().intersects(TypeFlags::NumberLike)
 }
 
-pub(super) fn literal_number(t: P<Type>) -> Option<f64> {
+pub fn literal_number(t: P<Type>) -> Option<f64> {
     match t.flags().intersects(TypeFlags::NumberLiteral).then(|| t.as_literal_type().value()) {
         Some(Some(LiteralValue::Number(n))) => Some(n.0),
         _ => None,
     }
 }
 
-pub(super) fn literal_string(t: P<Type>) -> Option<&'static str> {
+pub fn literal_string(t: P<Type>) -> Option<&'static str> {
     match t.flags().intersects(TypeFlags::StringLiteral).then(|| t.as_literal_type().value()) {
         Some(Some(LiteralValue::String(s))) => Some(s),
         _ => None,
     }
 }
 
-pub(super) fn literal_bool(t: P<Type>) -> Option<bool> {
+pub fn literal_bool(t: P<Type>) -> Option<bool> {
     match t.flags().intersects(TypeFlags::BooleanLiteral).then(|| t.as_literal_type().value()) {
         Some(Some(LiteralValue::Boolean(b))) => Some(b),
         _ => None,
@@ -174,13 +174,13 @@ fn skip_upwards(mut n: P<Node>) -> P<Node> {
 
 type Predicate = fn(&mut Extractor, P<Type>) -> bool;
 
-pub(super) struct ValueClass {
+pub struct ValueClass {
     pub receiver: Receiver,
     /// The type is a union of members that lower differently.
     pub mixed: bool,
 }
 
-pub(super) struct Signatures {
+pub struct Signatures {
     /// Some call signature takes `self`.
     pub method: bool,
     /// Some call signature takes no `self`.

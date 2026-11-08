@@ -6,12 +6,13 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Facts, Failure, Literal, Target};
+use crucible_compiler::{ClassKind, Facts, Failure, Literal, Target};
+use crucible_transform::{Check, Class, Dependency};
 use serde_json::{Value, json};
 use support::{Game, copy_declarations, has, lines, project, repo, slashes};
 
 const HEADER: &str = "import { Subsystem, CrucibleBehaviour, attribute, type All } from \"@trioforge/crucible\";\nimport { boot } from \"@trioforge/crucible/server\";\n";
-const POSITIVE: &str = include_str!("transform-fixtures/game.ts");
+const POSITIVE: &str = include_str!("../../compiler/tests/transform-fixtures/game.ts");
 
 fn line_count(text: &str) -> usize {
     text.trim_end().split('\n').count()
@@ -22,11 +23,21 @@ fn classes(facts: &Facts, file: &str) -> Vec<Class> {
     table
         .facts
         .iter()
-        .filter_map(|(_, fact)| match fact.crucible.as_deref() {
-            Some(Crucible::Class(class)) => Some(class.clone()),
-            _ => None,
-        })
+        .filter_map(|(_, fact)| fact.extension.get("class").and_then(|v| v.get::<Class>()).cloned())
         .collect()
+}
+
+#[test]
+fn runtime_attribute_export_does_not_register_a_macro_field() {
+    let game = Game::new();
+    game.main(
+        "import { CrucibleBehaviour } from \"@trioforge/crucible\";\nimport { attribute as runtimeAttribute } from \"@trioforge/crucible/emit\";\nexport class Example extends CrucibleBehaviour<\"Example\"> { value = runtimeAttribute(this, \"value\", 1); }",
+    );
+    let facts = game.facts();
+    assert!(facts.diagnostics.iter().any(|d| d.code == 90004));
+    let classes = classes(&facts, "src/server/main.ts");
+    assert_eq!(classes.len(), 1);
+    assert!(classes[0].attributes.is_empty());
 }
 
 fn class<'a>(classes: &'a [Class], name: &str) -> &'a Class {
@@ -633,12 +644,12 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     let (project, include) = (game.dir.join("gen/place/default.project.json"), game.include());
     let target = Target::Game { project: &project, include: &include };
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});");
-    let modules = crucible_compiler::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
+    let modules = crucible_transform::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
     let main = modules.modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
     has(&main.source, "crucible-path:ServerScriptService/TS/**");
 
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"../../src/server/**\"]});");
-    let facts = crucible_compiler::analyze(&place, target).expect("the place type-checks");
+    let facts = crucible_transform::analyze(&place, target).expect("the place type-checks");
     assert!(
         facts
             .diagnostics
@@ -1227,7 +1238,7 @@ fn package_sides_without_a_package_search_the_whole_path() {
         "include": ["server"],
     });
     std::fs::write(dir.join("tsconfig.json"), serde_json::to_string(&config).unwrap()).unwrap();
-    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json"), Target::Package)
+    let facts = crucible_transform::analyze(&dir.join("tsconfig.json"), Target::Package)
         .unwrap_or_else(|d| panic!("{}", lines(&d)));
     let found: Vec<(i32, u32)> = facts.diagnostics.iter().map(|d| (d.code, d.line)).collect();
     assert_eq!(found, [(90011, 2)]);

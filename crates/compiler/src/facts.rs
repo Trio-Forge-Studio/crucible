@@ -18,6 +18,9 @@ pub struct Span {
 /// `None` in a field means no site on the node asks for it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fact {
+    pub extension: std::collections::BTreeMap<&'static str, crate::extension::Value>,
+    pub call_hook: Option<usize>,
+    pub class_hook: Option<usize>,
     /// Computed over the non-nullable part of the type, with `falsy` saying whether the value may also be nil.
     pub receiver: Option<Receiver>,
     /// What a call or tagged template callee, a `new` callee or an identifier macro resolves to, and whether a
@@ -35,7 +38,7 @@ pub struct Fact {
     /// How many values each step of an iterated `LuaTuple` iterator has. Absent where the tuple's length varies.
     pub step_length: Option<u32>,
     pub import: Option<Import>,
-    /// Set at a registered class, an `inject`, declaration or `receive` call, and a `boot` load glob.
+    /// A declaration or receiver fact from the remaining legacy transform.
     pub crucible: Option<Box<Crucible>>,
     /// Where an imported module's instance is, set at an import's module specifier in a game.
     pub module: Option<Box<ModulePath>>,
@@ -197,13 +200,6 @@ impl ClassStyle {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Crucible {
-    /// A class that extends `Subsystem` or `CrucibleBehaviour`, registered with `defineClass`.
-    Class(Class),
-    /// An `inject` call. Without a type argument its target is `Invalid`.
-    Inject(Dependency),
-    /// A `boot` load glob, as the instance path pattern the runtime matches, such as
-    /// `crucible-path:ServerScriptService/TS/systems/**`.
-    Load(Box<str>),
     /// A declaration macro call, which lowers to the `@trioforge/crucible/emit` function of the same name.
     Declaration(Declaration),
     /// A `receive` call, which lowers to `receive(self, field, target, callback)`.
@@ -323,55 +319,6 @@ pub struct Place {
 pub enum ClassKind {
     Subsystem,
     Behaviour,
-}
-
-/// The registration data of a concrete Crucible class. A type id is `<package>/<module path>:<name>`, and `None` where the
-/// transform reports that it cannot compute one.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Class {
-    pub kind: ClassKind,
-    pub id: Option<Box<str>>,
-    /// The constructor's parameters in order.
-    pub deps: Vec<Dependency>,
-    /// Every base class and implemented interface below Crucible's own classes.
-    pub provides: Vec<Box<str>>,
-    /// The behaviour's tag literal.
-    pub tag: Option<Box<str>>,
-    /// The behaviour's `Instances` class names.
-    pub instance: Vec<Box<str>>,
-    pub attributes: Vec<Attribute>,
-}
-
-/// A constructor parameter or `inject` target, by type id.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Dependency {
-    One(Box<str>),
-    /// `All<T>`.
-    All(Box<str>),
-    /// A target CRU001 or CRU005 rejects, or one without a type id. The pass reports it and the compile fails.
-    Invalid,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Attribute {
-    pub field: Box<str>,
-    pub check: Check,
-    /// False when `attribute()` has a default value.
-    pub required: bool,
-}
-
-/// A runtime type check for an attribute value.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Check {
-    Boolean,
-    String,
-    Number,
-    Vector3,
-    Color3,
-    Literal(Literal),
-    Union(Vec<Check>),
-    /// A type CRU007 rejects. The pass reports it and the compile fails.
-    Invalid,
 }
 
 #[derive(Clone, Debug, PartialEq)]

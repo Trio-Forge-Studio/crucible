@@ -1,8 +1,7 @@
+use crucible_transform::{Attribute, Check, Class, Dependency};
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{
-    Attribute, Check, Class, ClassKind, Crucible, Dependency, Fact, Facts, Falsy, Receiver, Span, Target,
-};
+use crucible_compiler::{ClassKind, Fact, Facts, Falsy, Receiver, Span, Target};
 
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -14,7 +13,7 @@ fn sample_place() -> (PathBuf, PathBuf) {
 }
 
 fn analyze(tsconfig: &str, target: Target<'_>) -> Facts {
-    crucible_compiler::analyze(&repo().join(tsconfig), target).unwrap_or_else(|diagnostics| {
+    crucible_transform::analyze(&repo().join(tsconfig), target).unwrap_or_else(|diagnostics| {
         let listed: Vec<String> = diagnostics.iter().map(ToString::to_string).collect();
         panic!("{tsconfig} checks without diagnostics:\n{}", listed.join("\n"))
     })
@@ -59,10 +58,7 @@ fn class(facts: &Facts, file: &str) -> Class {
     let classes: Vec<Class> = table
         .facts
         .iter()
-        .filter_map(|(_, fact)| match fact.crucible.as_deref() {
-            Some(Crucible::Class(class)) => Some(class.clone()),
-            _ => None,
-        })
+        .filter_map(|(_, fact)| fact.extension.get("class").and_then(|v| v.get::<Class>()).cloned())
         .collect();
     assert_eq!(classes.len(), 1, "{file} registers one class");
     classes.into_iter().next().unwrap()
@@ -114,7 +110,7 @@ fn sample_game_checks_and_every_site_is_answered() {
 
 #[test]
 fn the_runtime_lowers_to_one_module_per_source_file() {
-    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
+    let modules = crucible_transform::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
         .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"))
         .modules;
     let src = repo().join("packages/crucible/src").to_string_lossy().replace('\\', "/");
@@ -147,7 +143,7 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
 fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
     let (project, include) = sample_place();
     let target = Target::Game { project: &project, include: &include };
-    let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
+    let modules = crucible_transform::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
         .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))
         .modules;
     let mut paths: Vec<&str> = modules.iter().map(|m| m.path.as_str()).collect();

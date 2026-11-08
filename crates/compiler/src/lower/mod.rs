@@ -43,6 +43,7 @@ pub(crate) fn lower(
     unanswered: &[&Unanswered],
     import_base: ImportBase,
     place: &Place,
+    hooks: &crate::extension::Hooks,
 ) -> Result<Block, Vec<Error>> {
     let mut l = Lower {
         file,
@@ -55,7 +56,8 @@ pub(crate) fn lower(
         temp_prefix: temp_prefix(file.text()),
         temps: 0,
         uses_ts: false,
-        uses_crucible: false,
+        helpers: std::collections::BTreeMap::new(),
+        hooks,
         uses_ui: false,
         refs: references(file.root()),
         closure_assigned: closure_assigned(file.root()),
@@ -124,7 +126,8 @@ pub(crate) struct Lower<'a> {
     temp_prefix: String,
     temps: u32,
     uses_ts: bool,
-    uses_crucible: bool,
+    helpers: std::collections::BTreeMap<&'static str, Option<crate::facts::ModulePath>>,
+    hooks: &'a crate::extension::Hooks,
     uses_ui: bool,
     refs: Vec<Reference>,
     closure_assigned: HashSet<&'static str>,
@@ -658,4 +661,52 @@ fn skip_parens_and_assertions(mut n: Node) -> Node {
         n = n.expression();
     }
     n
+}
+
+pub struct LowerCx<'a, 'b> {
+    lower: &'a mut Lower<'b>,
+}
+impl<'facts> LowerCx<'_, 'facts> {
+    pub fn helper(&mut self, module: &str, name: &'static str) -> Expr {
+        let entry = self.lower.hooks.helpers.iter().find(|h| h.module == module).expect("unregistered helper module");
+        self.lower.helper(entry.path.clone(), entry.local, name)
+    }
+    pub fn fact<T: 'static>(&self, n: Node, kind: &str) -> Option<&'facts T> {
+        self.lower.fact(n)?.extension.get(kind)?.get()
+    }
+    pub fn arguments(&mut self, n: Node) -> Vec<Expr> {
+        self.lower.macro_arguments(n)
+    }
+    pub fn expression(&mut self, n: Node) -> Expr {
+        self.lower.expr(n)
+    }
+    pub fn unsupported(&mut self, n: Node, what: &str) -> Expr {
+        self.lower.unsupported(n, what)
+    }
+    pub fn emit(&mut self, statement: Stmt) {
+        self.lower.current_block.push(statement);
+    }
+}
+impl Lower<'_> {
+    fn helper(&mut self, module: Option<crate::facts::ModulePath>, local: &'static str, name: &'static str) -> Expr {
+        self.helpers.insert(local, module);
+        Expr::global(local).field(name)
+    }
+    fn extension_call(&mut self, n: Node, callee: Node) -> Option<Expr> {
+        let index = self.fact(callee)?.call_hook?;
+        let lower = self.hooks.calls[index].lower;
+        Some(lower(&mut LowerCx { lower: self }, n))
+    }
+    fn extension_class_tail(&mut self, n: Node, name: Name) {
+        if let Some(index) = self.fact(n).and_then(|f| f.class_hook) {
+            let lower = self.hooks.classes[index].lower;
+            lower(&mut LowerCx { lower: self }, n, name);
+        }
+    }
+    fn extension_value(&mut self, n: Node) -> Option<Expr> {
+        let fact = self.fact(n)?;
+        let lower =
+            self.hooks.facts.iter().find_map(|h| fact.extension.contains_key(h.kind).then_some(h.lower).flatten())?;
+        Some(lower(&mut LowerCx { lower: self }, n))
+    }
 }

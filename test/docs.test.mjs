@@ -65,19 +65,21 @@ const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 
 const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
 const sorted = (codes) => [...new Set(codes)].sort();
-test("the diagnostics guide lists every CRU code the compiler reports, in order", () => {
-	const compilerDir = path.join(repo, "crates/compiler/src");
+test("the diagnostics guide lists every CRU code the compiler and transform report, in order", () => {
 	const compiler = sorted(
-		fs
-			.readdirSync(compilerDir, { recursive: true })
-			.filter((name) => name.endsWith(".rs"))
-			.flatMap((name) => {
-				const code = read(path.join(compilerDir, name));
-				return [
-					...code.matchAll(/Code::Rule\((\d+)\)/g),
-					...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
-				].map((m) => cru(m[1]));
-			}),
+		["compiler", "transform"].flatMap((crate) => {
+			const source = path.join(repo, "crates", crate, "src");
+			return fs
+				.readdirSync(source, { recursive: true })
+				.filter((name) => name.endsWith(".rs"))
+				.flatMap((name) => {
+					const code = read(path.join(source, name));
+					return [
+						...code.matchAll(/Code::Rule\((\d+)\)/g),
+						...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
+					].map((m) => cru(m[1]));
+				});
+		}),
 	);
 	const headings = [...read(path.join(repo, "docs/diagnostics.md")).matchAll(/^## (CRU\d{3})$/gm)].map((m) => m[1]);
 	assert.ok(compiler.length > 0, "found CRU codes in the compiler");

@@ -1,6 +1,7 @@
 mod classes;
 mod declarations;
 mod entities;
+pub mod extension;
 mod extract;
 mod facts;
 mod include;
@@ -8,7 +9,7 @@ mod lower;
 mod macros;
 mod program;
 mod project;
-mod tree;
+pub mod tree;
 mod write;
 
 use std::collections::HashMap;
@@ -20,9 +21,9 @@ use std::path::{Path, PathBuf};
 pub use declarations::DeclarationKind;
 #[cfg(feature = "test-support")]
 pub use facts::{
-    Attribute, Callee, Check, Class, ClassKind, ClassStyle, Constant, Crucible, Declaration, Dependency, Fact, Facts,
-    Falsy, Field, FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Prop, Reason, Receiver,
-    RuntimeLib, Schema, Site, Span, Tail, Unanswered,
+    Callee, ClassKind, ClassStyle, Constant, Crucible, Declaration, Fact, Facts, Falsy, Field, FileFacts, Import, Jsx,
+    KeyLiteral, Literal, MapKey, ModulePath, Place, Prop, Reason, Receiver, RuntimeLib, Schema, Site, Span, Tail,
+    Unanswered,
 };
 #[cfg(not(feature = "test-support"))]
 use facts::{FileFacts, Unanswered};
@@ -74,8 +75,7 @@ pub enum Target<'a> {
 /// file it compiles. Any diagnostic stops the build before facts are extracted.
 #[cfg(feature = "test-support")]
 pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Facts, Vec<Diagnostic>> {
-    let checked = program::check(tsconfig)?;
-    Ok(extract::extract(checked, target))
+    analyze_with(tsconfig, target, extension::empty)
 }
 
 /// The `outDir` that `tsconfig` sets, read without building its program, with the diagnostics of reading and parsing
@@ -121,24 +121,37 @@ impl fmt::Display for Failure {
 
 /// Any diagnostic, Crucible rule or lowering error fails the whole compile, and no module is returned.
 pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
+    compile_with(tsconfig, target, extension::empty)
+}
+
+pub fn analyze_with(
+    tsconfig: &Path,
+    target: Target<'_>,
+    factory: extension::Factory,
+) -> Result<facts::Facts, Vec<Diagnostic>> {
+    let checked = program::check(tsconfig)?;
+    Ok(extract::extract(checked, target, factory().as_mut()).0)
+}
+
+pub fn compile_with(tsconfig: &Path, target: Target<'_>, factory: extension::Factory) -> Result<Compiled, Failure> {
     // tsrs's checker recurses with the source, so every caller needs the stack its CLI uses.
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(512 << 20)
-            .spawn_scoped(scope, || compile_on_thread(tsconfig, target))
+            .spawn_scoped(scope, || compile_on_thread(tsconfig, target, factory))
             .expect("cannot start the compiler thread")
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
     })
 }
 
-fn compile_on_thread(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
+fn compile_on_thread(tsconfig: &Path, target: Target<'_>, factory: extension::Factory) -> Result<Compiled, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
     let files = checked.files();
     let paths: Vec<String> = files.iter().map(|f| f.path()).collect();
     let root = checked.source_root();
     let out_dir = PathBuf::from(checked.out_dir().unwrap_or_else(|| root.clone()));
-    let facts = extract::extract(checked, target);
+    let (facts, hooks) = extract::extract(checked, target, factory().as_mut());
     if !facts.diagnostics.is_empty() {
         return Err(Failure::Crucible(facts.diagnostics));
     }
@@ -158,7 +171,7 @@ fn compile_on_thread(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Fa
             _ => (stem.to_owned(), ImportBase::ScriptParent),
         };
         let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
-        match lower::lower(file, file_facts, &unanswered, import_base, &facts.place) {
+        match lower::lower(file, file_facts, &unanswered, import_base, &facts.place, &hooks) {
             Ok(chunk) => {
                 let mut source = crucible_luau::print(&chunk);
                 source.insert_str(0, HEADER);

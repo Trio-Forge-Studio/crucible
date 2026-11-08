@@ -4,11 +4,11 @@
 //! not sites yet.
 
 mod classes;
-mod crucible;
+pub mod crucible;
 mod data;
 mod network;
 mod typed_lint;
-mod types;
+pub mod types;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -30,7 +30,11 @@ use crucible::Code;
 
 const UI_ENTRY: &str = "@trioforge/crucible/ui";
 
-pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
+pub(crate) fn extract(
+    checked: Checked,
+    target: crate::Target<'_>,
+    extension: &mut dyn crate::extension::Extension,
+) -> (Facts, std::rc::Rc<crate::extension::Hooks>) {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -98,15 +102,21 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
         jsx: None,
         instance_classes: None,
         catalog,
+        extension_enabled: false,
+        hooks: std::rc::Rc::new(crate::extension::Hooks::default()),
     };
+    let mut hooks = extension.hooks(&mut x);
+    hooks.index();
+    x.hooks = std::rc::Rc::new(hooks);
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
             continue;
         }
         x.source_file(file);
     }
+    extension.finish_program(&mut x);
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
-    x.facts
+    (x.facts, x.hooks)
 }
 
 /// When an import's module must be reachable in the place.
@@ -131,13 +141,19 @@ struct ConstEnumImport {
 }
 
 #[derive(Default)]
-struct Table {
-    facts: HashMap<Span, Fact>,
+pub(crate) struct Table {
+    pub(crate) facts: HashMap<Span, Fact>,
     conflicts: Vec<(Span, Site)>,
 }
 
 impl Table {
-    fn store<T: PartialEq>(&mut self, span: Span, site: Site, field: fn(&mut Fact) -> &mut Option<T>, value: T) {
+    pub(crate) fn store<T: PartialEq>(
+        &mut self,
+        span: Span,
+        site: Site,
+        field: fn(&mut Fact) -> &mut Option<T>,
+        value: T,
+    ) {
         let slot = field(self.facts.entry(span).or_default());
         match slot {
             Some(old) if *old != value => self.conflicts.push((span, site)),
@@ -188,19 +204,21 @@ fn computed_key(n: P<Node>) -> bool {
     }
 }
 
-struct Extractor {
+pub struct Extractor {
+    pub(crate) extension_enabled: bool,
+    pub(crate) hooks: std::rc::Rc<crate::extension::Hooks>,
     catalog: Option<crate::classes::Catalog>,
-    checker: CheckerHandle,
+    pub checker: CheckerHandle,
     resolver: P<EmitResolver>,
     globals: types::Globals,
-    crucible: crucible::Api,
-    game: Option<Game>,
+    pub crucible: crucible::Api,
+    pub game: Option<Game>,
     config_dir: PathBuf,
     network: network::Program,
-    facts: Facts,
-    text: &'static str,
-    path: String,
-    table: Table,
+    pub(crate) facts: Facts,
+    pub(crate) text: &'static str,
+    pub(crate) path: String,
+    pub(crate) table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
     reported: HashSet<(String, u32, Code)>,
@@ -213,6 +231,7 @@ struct Extractor {
 
 impl Extractor {
     fn source_file(&mut self, file: P<SourceFile>) {
+        self.extension_enabled = !self.crucible.owns(Path::new(file.file_name())) && !self.crucible.invalid_metadata;
         self.text = file.text();
         self.path = file.file_name().replace('\\', "/");
         let first = self.facts.unanswered.len();
@@ -238,6 +257,7 @@ impl Extractor {
             }
         }
         self.crucible_file(file);
+        crate::extension::dispatch_file(self, file);
         let table = std::mem::take(&mut self.table);
         for (span, site) in table.conflicts {
             self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
@@ -248,11 +268,11 @@ impl Extractor {
         self.facts.files.push(FileFacts { path: std::mem::take(&mut self.path), facts, jsx: self.jsx.take() });
     }
 
-    fn span(&self, n: P<Node>) -> Span {
+    pub fn span(&self, n: P<Node>) -> Span {
         crate::tree::span(n, self.text)
     }
 
-    fn site(&mut self) {
+    pub fn site(&mut self) {
         self.facts.sites += 1;
     }
 
@@ -394,14 +414,14 @@ impl Extractor {
         }
         self.site();
         let span = self.span(callee);
-        if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
+        let (hook, legacy) = crate::extension::resolve_call(self, n);
+        if let Some(index) = hook {
+            self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Function);
+            self.table.store(span, Site::CallCallee, |f| &mut f.call_hook, index);
+            let hook = self.hooks.calls[index].extract.clone();
+            hook(self, n, tsrs_ast::get_source_file_of_node(n).unwrap());
+        } else if let Some(m) = legacy {
             self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
-            if m == Macro::Inject {
-                self.site();
-                let inject = Box::new(self.crucible_inject(n));
-                let call = self.span(n);
-                self.table.store(call, Site::Crucible, |f| &mut f.crucible, inject);
-            }
         } else {
             let t = self.type_of(callee);
             let t = self.checker.get_non_optional_type(t);

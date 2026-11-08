@@ -23,11 +23,22 @@ if (process.argv.includes("--check")) {
 	if (checked.error) throw checked.error;
 	process.exit(checked.status ?? 1);
 }
-const executable = path.join(
-	process.env.CARGO_TARGET_DIR ?? path.join(repo, "target"),
-	"debug/examples",
-	process.platform === "win32" ? "compile.exe" : "compile",
+const result = spawnSync(
+	"cargo",
+	[
+		"run",
+		"--quiet",
+		"--locked",
+		"--manifest-path",
+		path.join(repo, "Cargo.toml"),
+		"-p",
+		"crucible-transform",
+		"--example",
+		"compile-framework",
+		"--",
+		...args,
+	],
+	{ stdio: "inherit" },
 );
-const result = spawnSync(executable, args, { stdio: "inherit" });
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

@@ -31,9 +31,9 @@ const compile = (...args) =>
 		"--manifest-path",
 		"Cargo.toml",
 		"-p",
-		"crucible-compiler",
+		"crucible-transform",
 		"--example",
-		"compile",
+		"compile-framework",
 		"--",
 		...args,
 	]);
