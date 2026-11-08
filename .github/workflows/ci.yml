@@ -35,10 +35,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
-          workspaces: cli
+          workspaces: .
 
       - name: Build the crucible CLI
-        working-directory: cli
+        working-directory: .
         run: cargo build --locked --package crucible
 
       - name: Run checks and tests
@@ -54,7 +54,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
-        working-directory: cli
+        working-directory: .
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -66,7 +66,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
-          workspaces: cli
+          workspaces: .
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
@@ -94,4 +94,4 @@ jobs:
       - name: Run the compiler's emitted Luau, JSX and network declarations in Lune
         if: runner.os == 'Linux'
         run: cargo test --locked -p crucible-compiler -- --ignored
-      - run: node --test npm/package.test.mjs
+      - run: node --test crates/cli/npm/package.test.mjs

@@ -29,7 +29,7 @@ const compile = (...args) =>
 		"--quiet",
 		"--locked",
 		"--manifest-path",
-		"cli/Cargo.toml",
+		"Cargo.toml",
 		"-p",
 		"crucible-compiler",
 		"--example",

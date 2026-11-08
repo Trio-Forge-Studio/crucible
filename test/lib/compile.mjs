@@ -24,7 +24,7 @@ if (process.argv.includes("--check")) {
 	process.exit(checked.status ?? 1);
 }
 const executable = path.join(
-	process.env.CARGO_TARGET_DIR ?? path.join(repo, "cli/target"),
+	process.env.CARGO_TARGET_DIR ?? path.join(repo, "target"),
 	"debug/examples",
 	process.platform === "win32" ? "compile.exe" : "compile",
 );
