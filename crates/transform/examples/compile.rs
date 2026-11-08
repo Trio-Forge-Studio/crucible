@@ -15,7 +15,7 @@ fn main() -> ExitCode {
         }
     };
     let start = Instant::now();
-    let compiled = match crucible_compiler::compile(tsconfig, target) {
+    let compiled = match crucible_transform::compile(tsconfig, target) {
         Ok(compiled) => compiled,
         Err(failure) => {
             eprint!("{failure}");

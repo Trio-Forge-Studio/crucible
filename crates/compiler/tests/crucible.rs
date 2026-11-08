@@ -14,7 +14,7 @@ fn sample_place() -> (PathBuf, PathBuf) {
 }
 
 fn analyze(tsconfig: &str, target: Target<'_>) -> Facts {
-    crucible_compiler::analyze(&repo().join(tsconfig), target).unwrap_or_else(|diagnostics| {
+    crucible_compiler::analyze(&repo().join(tsconfig), target, &mut []).unwrap_or_else(|diagnostics| {
         let listed: Vec<String> = diagnostics.iter().map(ToString::to_string).collect();
         panic!("{tsconfig} checks without diagnostics:\n{}", listed.join("\n"))
     })
@@ -114,9 +114,10 @@ fn sample_game_checks_and_every_site_is_answered() {
 
 #[test]
 fn the_runtime_lowers_to_one_module_per_source_file() {
-    let modules = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
-        .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"))
-        .modules;
+    let modules =
+        crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package, Vec::new())
+            .unwrap_or_else(|failure| panic!("the runtime compiles:\n{failure}"))
+            .modules;
     let src = repo().join("packages/crucible/src").to_string_lossy().replace('\\', "/");
     let mut files = Vec::new();
     sources(&repo().join("packages/crucible/src"), &mut files);
@@ -147,7 +148,7 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
 fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
     let (project, include) = sample_place();
     let target = Target::Game { project: &project, include: &include };
-    let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
+    let modules = crucible_compiler::compile(&repo().join("examples/sample-game/tsconfig.json"), target, Vec::new())
         .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))
         .modules;
     let mut paths: Vec<&str> = modules.iter().map(|m| m.path.as_str()).collect();

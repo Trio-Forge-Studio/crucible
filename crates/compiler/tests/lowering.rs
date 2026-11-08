@@ -8,7 +8,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 static MODULES: LazyLock<Vec<Module>> = LazyLock::new(|| {
-    crucible_compiler::compile(&fixture("lowering/tsconfig.json"), Target::Package)
+    crucible_compiler::compile(&fixture("lowering/tsconfig.json"), Target::Package, Vec::new())
         .unwrap_or_else(|failure| panic!("the lowering fixtures compile (run pnpm build first):\n{failure}"))
         .modules
 });
@@ -225,7 +225,7 @@ fn a_lua_tuple_iterator_step_binds_as_a_whole() {
 #[test]
 fn out_of_scope_constructs_are_errors_at_their_location() {
     let Err(Failure::Lower(errors)) =
-        crucible_compiler::compile(&fixture("lowering-errors/tsconfig.json"), Target::Package)
+        crucible_compiler::compile(&fixture("lowering-errors/tsconfig.json"), Target::Package, Vec::new())
     else {
         panic!("the refused constructs fail the compile");
     };

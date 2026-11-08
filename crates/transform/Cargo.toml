@@ -1,0 +1,18 @@
+[package]
+name = "crucible-transform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crucible-compiler = { path = "../compiler" }
+crucible-luau = { path = "../luau" }
+
+[features]
+# Exports the registration facts, which only this crate's tests read.
+test-support = ["crucible-compiler/test-support"]
+
+[dev-dependencies]
+crucible-transform = { path = ".", features = ["test-support"] }
+serde_json.workspace = true

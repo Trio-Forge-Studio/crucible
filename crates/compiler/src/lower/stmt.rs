@@ -39,19 +39,17 @@ impl Lower<'_> {
             Expr::Name(name)
         };
         body.push(Stmt::Return(vec![value]));
-        if self.uses_crucible {
-            match &self.place.crucible_emit {
-                Some(emit) => {
+        for &index in std::mem::take(&mut self.helpers).iter().rev() {
+            let helper = &self.place.helpers[index];
+            match &helper.module {
+                Some(module) => {
                     self.uses_ts = true;
-                    let import = Expr::global("TS.import").call(super::import_arguments(emit));
-                    body.insert(0, Stmt::Local(vec![Cow::Borrowed("__crucible")], vec![import]));
+                    let import = Expr::global("TS.import").call(super::import_arguments(module));
+                    body.insert(0, Stmt::Local(vec![Cow::Borrowed(helper.local)], vec![import]));
                 }
                 None => {
                     let root = self.file.root();
-                    self.error(
-                        root,
-                        "Crucible's macros and registration need a game that maps @trioforge/crucible/emit",
-                    );
+                    self.error(root, helper.missing);
                 }
             }
         }

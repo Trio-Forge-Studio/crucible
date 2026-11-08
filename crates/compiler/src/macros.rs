@@ -12,7 +12,7 @@ pub enum MacroKind {
     Identifier,
     /// A call to a method declared on the named interface, such as `array.push(x)`.
     Method,
-    /// A call to a function that `@trioforge/crucible` or one of its side entries exports.
+    /// A declaration macro that `@trioforge/crucible` or one of its side entries exports.
     Crucible,
 }
 
@@ -156,9 +156,6 @@ macros! {
     MapSet = Method("Map") "set",
     PromiseThen = Method("Promise") "then",
 
-    Attribute = Crucible "attribute",
-    Inject = Crucible "inject",
-    Boot = Crucible "boot",
     ToServer = Crucible "toServer",
     ToClient = Crucible "toClient",
     AskServer = Crucible "askServer",

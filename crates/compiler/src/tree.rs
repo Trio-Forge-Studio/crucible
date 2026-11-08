@@ -336,6 +336,14 @@ impl Nodes {
 }
 
 impl Node {
+    pub(crate) fn raw(&self) -> P<TsNode> {
+        self.n
+    }
+
+    pub(crate) fn from_raw(n: P<TsNode>, text: &'static str) -> Node {
+        Node { n, text }
+    }
+
     fn wrap(&self, n: P<TsNode>) -> Node {
         Node { n, text: self.text }
     }

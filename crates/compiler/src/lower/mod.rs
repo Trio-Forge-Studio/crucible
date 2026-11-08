@@ -2,6 +2,7 @@ mod call;
 mod class;
 mod crucible;
 mod expr;
+pub(crate) mod extension;
 mod jsx;
 mod pattern;
 mod stmt;
@@ -11,6 +12,9 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 
+pub(crate) use crucible::EMIT;
+
+use crate::extension::Extension;
 use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 use crucible_luau::{Block, Expr, Name, Stmt};
@@ -43,11 +47,15 @@ pub(crate) fn lower(
     unanswered: &[&Unanswered],
     import_base: ImportBase,
     place: &Place,
+    extensions: &[&dyn Extension],
 ) -> Result<Block, Vec<Error>> {
     let mut l = Lower {
         file,
         facts,
         place,
+        extensions,
+        helpers: Vec::new(),
+        replacements: Vec::new(),
         path: file.path(),
         import_base,
         errors: Vec::new(),
@@ -55,7 +63,6 @@ pub(crate) fn lower(
         temp_prefix: temp_prefix(file.text()),
         temps: 0,
         uses_ts: false,
-        uses_crucible: false,
         uses_ui: false,
         refs: references(file.root()),
         closure_assigned: closure_assigned(file.root()),
@@ -117,6 +124,11 @@ pub(crate) struct Lower<'a> {
     file: File,
     facts: &'a FileFacts,
     place: &'a Place,
+    extensions: &'a [&'a dyn Extension],
+    /// The indices of the place's helper modules this file uses, in order of first use.
+    helpers: Vec<usize>,
+    /// Expressions an extension lowers in place of nodes inside a call it lowers.
+    replacements: Vec<(crate::extension::Node, Expr)>,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,
@@ -124,7 +136,6 @@ pub(crate) struct Lower<'a> {
     temp_prefix: String,
     temps: u32,
     uses_ts: bool,
-    uses_crucible: bool,
     uses_ui: bool,
     refs: Vec<Reference>,
     closure_assigned: HashSet<&'static str>,

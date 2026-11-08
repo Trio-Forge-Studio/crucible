@@ -3077,9 +3077,10 @@ export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, v
 fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let scratch = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("declarations");
     let _ = std::fs::remove_dir_all(&scratch);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
-        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
-        .modules;
+    let runtime =
+        crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package, Vec::new())
+            .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
+            .modules;
     crucible_compiler::write(&scratch.join("runtime"), &runtime).expect("the runtime is written");
     let game = fresh();
     game.write(

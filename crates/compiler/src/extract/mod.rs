@@ -4,8 +4,9 @@
 //! not sites yet.
 
 mod classes;
-mod crucible;
+pub(crate) mod crucible;
 mod data;
+pub(crate) mod extension;
 mod network;
 mod typed_lint;
 mod types;
@@ -30,7 +31,11 @@ use crucible::Code;
 
 const UI_ENTRY: &str = "@trioforge/crucible/ui";
 
-pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
+pub(crate) fn extract(
+    checked: Checked,
+    target: crate::Target<'_>,
+    extensions: &mut [&mut dyn crate::extension::Extension],
+) -> Facts {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -71,8 +76,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
                 message: "roblox-ts's runtime library has no instance path".to_owned(),
             }),
         }
-        facts.place.crucible_emit =
-            crucible.emit.as_deref().and_then(|emit| game.module(emit)).and_then(|r| absolute(&r));
     }
     facts.place.crucible_ui = crucible.ui.as_deref().and_then(|ui| match &game {
         Some(game) => game.module(ui).and_then(|r| absolute(&r)),
@@ -99,11 +102,15 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
         instance_classes: None,
         catalog,
     };
+    x.declare_helper(&crate::lower::EMIT);
+    for e in extensions.iter_mut() {
+        e.begin_program(&mut extension::ExtractCx::new(&mut x));
+    }
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
             continue;
         }
-        x.source_file(file);
+        x.source_file(file, extensions);
     }
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     x.facts
@@ -188,7 +195,7 @@ fn computed_key(n: P<Node>) -> bool {
     }
 }
 
-struct Extractor {
+pub(crate) struct Extractor {
     catalog: Option<crate::classes::Catalog>,
     checker: CheckerHandle,
     resolver: P<EmitResolver>,
@@ -212,7 +219,7 @@ struct Extractor {
 }
 
 impl Extractor {
-    fn source_file(&mut self, file: P<SourceFile>) {
+    fn source_file(&mut self, file: P<SourceFile>, extensions: &mut [&mut dyn crate::extension::Extension]) {
         self.text = file.text();
         self.path = file.file_name().replace('\\', "/");
         let first = self.facts.unanswered.len();
@@ -238,6 +245,9 @@ impl Extractor {
             }
         }
         self.crucible_file(file);
+        for e in extensions.iter_mut() {
+            e.extract_file(&mut extension::ExtractCx::new(self), crate::extension::SourceFile(file));
+        }
         let table = std::mem::take(&mut self.table);
         for (span, site) in table.conflicts {
             self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
@@ -396,12 +406,6 @@ impl Extractor {
         let span = self.span(callee);
         if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
             self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
-            if m == Macro::Inject {
-                self.site();
-                let inject = Box::new(self.crucible_inject(n));
-                let call = self.span(n);
-                self.table.store(call, Site::Crucible, |f| &mut f.crucible, inject);
-            }
         } else {
             let t = self.type_of(callee);
             let t = self.checker.get_non_optional_type(t);

@@ -17,7 +17,7 @@ fn main() -> ExitCode {
         }
     };
     let start = Instant::now();
-    let facts = match crucible_compiler::analyze(tsconfig, target) {
+    let facts = match crucible_compiler::analyze(tsconfig, target, &mut []) {
         Ok(facts) => facts,
         Err(diagnostics) => {
             for d in &diagnostics {

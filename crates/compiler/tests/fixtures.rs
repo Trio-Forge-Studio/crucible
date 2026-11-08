@@ -11,7 +11,7 @@ fn fixtures() -> PathBuf {
 
 static FACTS: LazyLock<Facts> = LazyLock::new(|| {
     let tsconfig = fixtures().join("tsconfig.json");
-    crucible_compiler::analyze(&tsconfig, Target::Package).unwrap_or_else(|diagnostics| {
+    crucible_compiler::analyze(&tsconfig, Target::Package, &mut []).unwrap_or_else(|diagnostics| {
         let listed: Vec<String> = diagnostics.iter().map(ToString::to_string).collect();
         panic!("the fixtures check without diagnostics (run pnpm build first):\n{}", listed.join("\n"))
     })
@@ -281,7 +281,7 @@ fn unanswerable_sites_are_reported() {
 
 #[test]
 fn type_errors_stop_the_build() {
-    let diagnostics = crucible_compiler::analyze(&fixtures().join("broken/tsconfig.json"), Target::Package)
+    let diagnostics = crucible_compiler::analyze(&fixtures().join("broken/tsconfig.json"), Target::Package, &mut [])
         .expect_err("the check fails");
     assert_eq!(diagnostics.len(), 1, "one error: {diagnostics:?}");
     let error = &diagnostics[0];

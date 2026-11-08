@@ -633,12 +633,13 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     let (project, include) = (game.dir.join("gen/place/default.project.json"), game.include());
     let target = Target::Game { project: &project, include: &include };
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});");
-    let modules = crucible_compiler::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
+    let modules =
+        crucible_compiler::compile(&place, target, Vec::new()).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
     let main = modules.modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
     has(&main.source, "crucible-path:ServerScriptService/TS/**");
 
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"../../src/server/**\"]});");
-    let facts = crucible_compiler::analyze(&place, target).expect("the place type-checks");
+    let facts = crucible_compiler::analyze(&place, target, &mut []).expect("the place type-checks");
     assert!(
         facts
             .diagnostics
@@ -1227,7 +1228,7 @@ fn package_sides_without_a_package_search_the_whole_path() {
         "include": ["server"],
     });
     std::fs::write(dir.join("tsconfig.json"), serde_json::to_string(&config).unwrap()).unwrap();
-    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json"), Target::Package)
+    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json"), Target::Package, &mut [])
         .unwrap_or_else(|d| panic!("{}", lines(&d)));
     let found: Vec<(i32, u32)> = facts.diagnostics.iter().map(|d| (d.code, d.line)).collect();
     assert_eq!(found, [(90011, 2)]);
