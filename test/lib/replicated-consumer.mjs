@@ -73,7 +73,7 @@ publish;
 	],
 };
 
-function build(name, files) {
+function build(name, files, check = false) {
 	const game = path.join(scratch, name);
 	const write = (file, text) => {
 		fs.mkdirSync(path.dirname(path.join(game, file)), { recursive: true });
@@ -133,10 +133,14 @@ function build(name, files) {
 		include: ["src"],
 	});
 	for (const [file, text] of Object.entries(files)) write(file, text);
-	const result = spawnSync(process.execPath, [path.join(repo, "test/lib/compile.mjs"), game], {
-		cwd: game,
-		encoding: "utf8",
-	});
+	const result = spawnSync(
+		process.execPath,
+		[path.join(repo, "test/lib/compile.mjs"), game, ...(check ? ["--check"] : [])],
+		{
+			cwd: game,
+			encoding: "utf8",
+		},
+	);
 	return {
 		game,
 		status: result.status,
@@ -164,6 +168,22 @@ try {
 		const reported = bad.output.slice(at).replace(/^.*?\): /, "");
 		assert.ok(reported.startsWith(`error TS${code}: ${message}`), `${file}\n${bad.output}`);
 	}
+	// The compiler lowers replicated to the emit form after type-checking the root's signature, so nothing else checks
+	// the emit form's own signature.
+	const direct = build(
+		"emit",
+		{
+			"src/shared/emit.ts": [
+				'import { replicated } from "@trioforge/crucible/emit";',
+				'export const score = replicated<number>("Job.Score", 0, undefined as never);',
+				"// @ts-expect-error the initial value has the declared type",
+				'export const wrong = replicated<number>("Job.Wrong", "zero", undefined as never);',
+				"",
+			].join("\n"),
+		},
+		true,
+	);
+	assert.equal(direct.status, 0, `the emit form refuses an initial value of another type\n${direct.output}`);
 	console.log(
 		`the transformed build accepts replicated declarations and rejects ${Object.keys(rejected).length} wrong lines`,
 	);

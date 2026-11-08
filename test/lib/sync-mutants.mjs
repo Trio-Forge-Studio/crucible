@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 const repo = process.cwd();
 const src = "packages/crucible/src/";
@@ -597,11 +598,28 @@ try {
 		recursive: true,
 		filter: (p) => !p.split(path.sep).includes("node_modules"),
 	});
-	for (const name of ["node_modules", "packages/crucible/node_modules", "build"])
+	for (const name of ["node_modules", "packages/crucible/node_modules", "build", "target", "packages/compiler-types"])
 		fs.symlinkSync(path.join(repo, name), path.join(scratch, name), "junction");
 	const originals = new Map(mutants.map(([, file]) => [file, fs.readFileSync(path.join(scratch, file), "utf8")]));
 	const build = () => run(scratch, process.execPath, [path.join(repo, "test/lib/compile.mjs"), "packages/crucible"]);
+	// The compiler writes Luau only, so a mutant that sync-types checks also needs the declarations its consumer reads.
+	const tsrs = path.join(path.dirname(createRequire(import.meta.url).resolve("tsrs/package.json")), "bin/tsrs");
+	const declare = () =>
+		run(scratch, process.execPath, [
+			tsrs,
+			"-p",
+			"packages/crucible/tsconfig.json",
+			"--noEmit",
+			"false",
+			"--declaration",
+			"--emitDeclarationOnly",
+			"--stripInternal",
+			"--outDir",
+			"packages/crucible/out",
+		]);
 	let built = build();
+	assert.equal(built.status, 0, built.stdout + built.stderr);
+	built = declare();
 	assert.equal(built.status, 0, built.stdout + built.stderr);
 	const baseline = specRun(scratch, [...new Set(mutants.flatMap(([, , , , extra]) => extra))]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
@@ -617,6 +635,7 @@ try {
 		const original = originals.get(file);
 		fs.writeFileSync(path.join(scratch, file), original.replaceAll(before, after));
 		built = build();
+		if (built.status === 0 && extra.length > 0) built = declare();
 		const failure =
 			built.status === 0
 				? (() => {
@@ -628,6 +647,10 @@ try {
 					})()
 				: undefined;
 		fs.writeFileSync(path.join(scratch, file), original);
+		if (extra.length > 0) {
+			const restored = declare();
+			assert.equal(restored.status, 0, restored.stdout + restored.stderr);
+		}
 		if (built.status !== 0) {
 			console.log(`DID NOT COMPILE ${name} | ${path.basename(file)}\n${built.stdout}${built.stderr}`);
 			problems.push(name);

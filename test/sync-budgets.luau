@@ -565,6 +565,49 @@ return {
 		assert(w:sync().examined > 0, "a later write is examined again")
 		w:finish()
 	end,
+	["58 60 a write of the value a published value already holds examines no peer"] = function()
+		local w = World.new(projected(function(n)
+			return n.f64
+		end))
+		want(w, function()
+			return 1
+		end)
+		local ann = w:join("Ann")
+		w.score(2)
+		w:heartbeat()
+		w:heartbeat()
+		spec.eq(w:sync().examined, 0, "the world is settled")
+		local before = #w:frames(ann)
+		w.score(2)
+		w:heartbeat()
+		spec.eq(w:sync().examined, 0, "a write of the value it holds examines no peer")
+		spec.eq(#w:frames(ann), before, "and sends nothing")
+		w:finish()
+	end,
+	["58 60 a peer examined with nothing to send keeps its revision and applies the next update"] = function()
+		local w = World.new(projected(function(n)
+			return n.f64
+		end))
+		want(w, function(player)
+			return if player.Name == "Ann" then 1 else 2
+		end)
+		local ann = w:join("Ann")
+		local bea = w:join("Bea")
+		w:heartbeat()
+		local seen, revision = #w:frames(bea), w:sync().peers[bea.player].revision
+		want(w, function(player)
+			return if player.Name == "Ann" then 3 else 2
+		end)
+		w:heartbeat()
+		spec.eq(w:sync().examined, 2, "the Heartbeat examined both peers")
+		spec.eq(ann.d.View(), 3, "Ann got her new value")
+		spec.eq(#w:frames(bea), seen, "Bea, whose value did not change, got no frame")
+		spec.eq(w:sync().peers[bea.player].revision, revision, "and kept her revision")
+		w.score(5)
+		w:heartbeat()
+		spec.eq(bea.d.Score(), 5, "Bea applied the next update")
+		w:finish()
+	end,
 	["69 frameCost counts 130 values with a two-byte list length, as networking's encoder does"] = function()
 		local w = World.new({
 			declare = function(r)
