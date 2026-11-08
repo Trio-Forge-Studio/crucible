@@ -14,6 +14,7 @@ import { call, CallResult } from "../runner";
 import {
 	SYNC_HEARTBEAT_BYTES,
 	SYNC_HEARTBEAT_PEERS,
+	SYNC_HEARTBEAT_SCAN,
 	SYNC_HEARTBEAT_VISITS,
 	SYNC_MAX_REVISION,
 	SYNC_PEER_VISITS,
@@ -116,13 +117,17 @@ class ServerSync extends Subsystem {
 	private readonly peers = new Map<Player, View>();
 	private readonly order = new Array<View>();
 	private cursor = 0;
+	/** The peer the next quiet Heartbeat's scan starts at. */
+	private scanned = 0;
 	/** A published value or a projection changed since the last Heartbeat began a round. */
 	private changed = true;
 	private incomplete = false;
 	private retiredSince = false;
 	private examining = "";
-	/** Visits the last Heartbeat spent, for specs of rule 70's bound. */
+	/** Visits the last Heartbeat spent, its scan's reads included, for specs of rule 70's bound. */
 	spent = 0;
+	/** Peers the last Heartbeat examined, for specs of rule 58. */
+	examined = 0;
 	private disconnect?: () => void;
 
 	readonly ready = claim(this, "ready", ClientReady, (player: Player) => this.snapshot(player));
@@ -180,17 +185,26 @@ class ServerSync extends Subsystem {
 		if (!ok) runtimeDiagnostic("error", `Crucible sync: internal error in the Heartbeat: ${tostring(err)}`);
 	}
 
-	/** Rules 58 and 70: round robin from the first peer the last Heartbeat did not complete. */
+	/**
+	 * Rules 58 and 70: round robin from the first peer the last Heartbeat did not complete. A Heartbeat with nothing to
+	 * send scans instead, and its reads count against the round that a skipped projection starts.
+	 */
 	private pace() {
 		this.spent = 0;
-		const ring = [...this.order];
-		if (ring.size() === 0) return;
-		if (!this.changed) this.changed = this.anySkipped();
-		if (!this.incomplete && !this.retiredSince && !this.changed) return;
+		this.examined = 0;
+		if (this.order.size() === 0) return;
+		let visits = 0;
+		if (!this.incomplete && !this.retiredSince && !this.changed) {
+			visits = this.scan();
+			if (!this.changed) {
+				this.spent = visits;
+				return;
+			}
+		}
 		this.changed = false;
 		this.retiredSince = false;
+		const ring = [...this.order];
 		let bytes = 0;
-		let visits = 0;
 		let examined = 0;
 		let stopped: View | undefined;
 		const first = this.cursor % ring.size();
@@ -218,6 +232,7 @@ class ServerSync extends Subsystem {
 			bytes += result;
 		}
 		this.spent = visits;
+		this.examined = examined;
 		if (stopped !== undefined) {
 			this.incomplete = true;
 			this.cursor = math.max(this.order.indexOf(stopped), 0);
@@ -227,10 +242,27 @@ class ServerSync extends Subsystem {
 		}
 	}
 
-	private anySkipped(): boolean {
-		for (const view of this.order)
-			for (const [, projection] of view.projections) if (!projection.dirty && skipped(projection)) return true;
-		return false;
+	/**
+	 * Looks for a projection whose effect a failed flush skipped, which only its flags show. It reads whole peers'
+	 * projections, round robin from where the last scan stopped, until it has read SYNC_HEARTBEAT_SCAN or every peer,
+	 * and each read is a visit. A sweep over every peer takes ceil(peers / k) quiet Heartbeats, where k is how many
+	 * peers' projections fit in SYNC_HEARTBEAT_SCAN reads, at least one. The round it starts pulls the projection when
+	 * it reaches that peer, within rule 58's limits.
+	 */
+	private scan(): number {
+		const size = this.order.size();
+		let reads = 0;
+		for (let peers = 0; peers < size && reads < SYNC_HEARTBEAT_SCAN; peers++) {
+			if (this.scanned >= size) this.scanned = 0;
+			const view = this.order[this.scanned];
+			this.scanned += 1;
+			for (const [, projection] of view.projections) {
+				reads += 1;
+				if (!projection.dirty && skipped(projection)) this.changed = true;
+			}
+			if (this.changed) break;
+		}
+		return reads;
 	}
 
 	/** One peer's staged examination, or undefined after failing the peer for passing its visit budget. */
@@ -401,7 +433,9 @@ class ServerSync extends Subsystem {
 		view.projections.clear();
 		if (this.peers.get(view.player) === view) this.peers.delete(view.player);
 		const index = this.order.indexOf(view);
-		if (index !== -1) this.order.remove(index);
+		if (index === -1) return;
+		this.order.remove(index);
+		if (index < this.scanned) this.scanned -= 1;
 	}
 
 	private retired(declaration: Declaration) {

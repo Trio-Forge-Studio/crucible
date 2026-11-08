@@ -282,14 +282,14 @@ return {
 		local ann = w:join("Ann")
 		w:heartbeat()
 		w:heartbeat()
-		spec.eq(w:sync().spent, 0, "a settled Heartbeat with nothing written examines none")
+		spec.eq(w:sync().examined, 0, "a settled Heartbeat with nothing written examines none")
 		w.server.life.fault(w.server.state(w.service), CALLBACK, "publisher faulted")
 		w.link:flush()
 		w:heartbeat()
-		assert(w:sync().spent > 0, "the retirement is examined")
+		assert(w:sync().examined > 0, "the retirement is examined")
 		spec.eq(ann.api.syncStatus(ann.d.Solo), "failed", "and announced")
 		w:heartbeat()
-		spec.eq(w:sync().spent, 0, "the next, with nothing written, examines none")
+		spec.eq(w:sync().examined, 0, "the next, with nothing written, examines none")
 		w:finish()
 	end,
 }

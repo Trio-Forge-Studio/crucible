@@ -31,5 +31,8 @@ export const SYNC_HEARTBEAT_PEERS = 64;
 /** @internal A peer starts only while the Heartbeat has spent fewer visits than this. A threshold, not a ceiling. */
 export const SYNC_HEARTBEAT_VISITS = 65_536;
 
+/** @internal Projection flags a quiet Heartbeat reads before it scans another peer, at least one peer. */
+export const SYNC_HEARTBEAT_SCAN = 1_024;
+
 /** @internal The last revision a peer's frames may carry. */
 export const SYNC_MAX_REVISION = 4_294_967_295;

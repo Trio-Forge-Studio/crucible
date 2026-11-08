@@ -942,4 +942,103 @@ return {
 		spec.eq(pcall(x, 1), false, "the earlier effect threw to the writer")
 		spec.eq(seen, 1, "and the later one still ran")
 	end,
+	["K1 rule 70 strict: a quiet Heartbeat reads a bounded share of projections, and a sweep still finds a skipped one"] = function()
+		local PEERS, DECLARATIONS = 9, 256
+		local frames = {}
+		local w = SyncWorld.new({
+			declare = function(r)
+				local declared = {}
+				for i = 1, DECLARATIONS do
+					declared[i] = r.emit.replicatedPerPlayer(`Scan.Value{i}`, 0, r.n.f64)
+				end
+				return declared
+			end,
+			serve = function(s, d, world)
+				s.charm.flags.strict = true
+				world.own = {}
+				for i = 1, PEERS do
+					world.own[`Peer{i}`] = s.charm.atom(0)
+				end
+				s.service("Publisher", function()
+					for i = 1, DECLARATIONS do
+						s.entry.publish(d[i], function(player)
+							return world.own[player.Name]() + i
+						end)
+					end
+				end, {
+					awake = function()
+						s.api.effect(function()
+							for _, own in world.own do
+								if own() ~= 0 then
+									error("a UI effect broke")
+								end
+							end
+						end)
+					end,
+				})
+			end,
+		})
+		w.server.graph.module("internal/sync/server-sync").installServerSync(function(player, frame)
+			table.insert(frames, { player = player.Name, frame = frame })
+			return true
+		end)
+		local sync = w:sync()
+		for i = 1, PEERS do
+			sync:snapshot({ Name = `Peer{i}`, UserId = i })
+		end
+		local reads = 0
+		for _, view in sync.order do
+			for _, projection in view.projections do
+				local node = projection.node
+				projection.node = setmetatable({}, {
+					__index = function(_, key)
+						if key == "flags" then
+							reads += 1
+						end
+						return node[key]
+					end,
+				})
+			end
+		end
+		w:heartbeat()
+		for _ = 1, 3 do
+			reads = 0
+			w:heartbeat()
+			assert(reads > 0 and reads < PEERS * DECLARATIONS, `a quiet Heartbeat read {reads} projection flags`)
+			local limit = w.server.reactiveLimits.SYNC_HEARTBEAT_SCAN
+			assert(reads <= limit + DECLARATIONS - 1, `{reads} reads stay within SYNC_HEARTBEAT_SCAN's whole peers`)
+			spec.eq(sync.spent, reads, "each read is a visit")
+			spec.eq(sync.examined, 0, "and no peer is examined")
+		end
+		local function sweep()
+			return math.ceil(#sync.order / math.max(1, w.server.reactiveLimits.SYNC_HEARTBEAT_SCAN // DECLARATIONS))
+		end
+		local function stall(name)
+			local before = #frames
+			local own = w.own[name]
+			spec.eq(pcall(own, own() + 1), false, `the earlier effect threw to {name}'s writer`)
+			local waited = 0
+			while #frames == before and waited < 10 do
+				w:heartbeat()
+				waited += 1
+			end
+			spec.eq(#frames - before, 1, `{name}'s skipped projections were sent in one frame`)
+			spec.eq(frames[#frames].player, name, "to the peer whose projections were skipped")
+			spec.eq(#frames[#frames].frame.values, DECLARATIONS, "with every skipped projection's value")
+			return waited
+		end
+		local waited = stall("Peer6")
+		assert(
+			waited <= sweep(),
+			`Peer6's projections were sent after {waited} Heartbeats, within a sweep of {sweep()}`
+		)
+		assert(sync.scanned >= 1 and sync.scanned < #sync.order, "the scan stopped inside the order")
+		local nextPeer = sync.order[sync.scanned + 1].player.Name
+		sync["end"](sync, sync.order[1])
+		spec.eq(stall(nextPeer), 1, "a peer that left before the cursor moves no peer past the next scan")
+		local behind = sync.order[sync.scanned].player.Name
+		waited = stall(behind)
+		assert(waited <= sweep(), `the peer the scan just read waited {waited} Heartbeats, within a sweep of {sweep()}`)
+		w:finish()
+	end,
 }
