@@ -194,6 +194,7 @@ fn every_hook_runs_and_its_lowering_lands_in_the_module() {
     let mut probe = Probe::default();
     let modules = compile(&game, &mut probe, Target::Game { project: &project, include: &include })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    assert_eq!(probe.name(), "probe");
     assert_eq!(probe.version.as_deref(), Some("1.2.3"));
     assert_eq!(probe.total, Some(3));
 
