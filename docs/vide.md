@@ -10,6 +10,22 @@ Import it from `@trioforge/crucible/vide`. The subpath needs `@rbxts/vide` 0.6.1
 import { useReadable } from "@trioforge/crucible/vide";
 ```
 
+## Compile JSX
+
+Use Vide to render UI. Set these options in the game's tsconfig:
+
+```json
+{
+	"compilerOptions": {
+		"jsx": "react",
+		"jsxFactory": "Vide.jsx",
+		"jsxFragmentFactory": "Vide.Fragment"
+	}
+}
+```
+
+Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail compilation at the tsconfig with this fix. Crucible no longer exports `@trioforge/crucible/ui` or compiles `className` and `theme.toml` into instance styles.
+
 ## Bind a value
 
 `useReadable(readable)` returns a Vide source, a function of no arguments that Vide tracks. `readable` is any Crucible `Readable`. That covers a `state`, a `computed`, a replicated declaration, and a getter function that reads them.

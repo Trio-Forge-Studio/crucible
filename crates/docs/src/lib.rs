@@ -41,7 +41,6 @@ pub static TOPICS: &[Topic] = topics![
     "sample-game.md",
     "spline.md",
     "testing.md",
-    "ui.md",
     "vide.md",
 ];
 
