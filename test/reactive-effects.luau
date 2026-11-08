@@ -1,12 +1,11 @@
 local spec = require("./lib/load")
 local realm = require("./lib/reactive-world")
-local Engine = require("./lib/engine")
 
 return {
-	["rule 14 T1 a setter queues one deferred run that sees the latest values"] = function()
+	["rule 14 T1 an effect runs at creation and inside each write that changes what it read"] = function()
 		local r = realm()
-		local count = r.api.state(0)
-		local doubled = r.api.computed(function()
+		local count = r.charm.atom(0)
+		local doubled = r.charm.computed(function()
 			return count() * 2
 		end)
 		local printed = {}
@@ -15,41 +14,33 @@ return {
 				table.insert(printed, doubled())
 			end)
 		end)
-		spec.eq(#printed, 0, "not run inside scope()")
-		spec.eq(#r.engine.deferred, 1, "one flush requested at the first enqueue")
-		count:set(1)
-		spec.eq(#r.engine.deferred, 1, "no second request")
-		spec.eq(doubled(), 2, "a read pulls the computed current")
-		r.flush()
-		spec.list(printed, { 2 }, "one run with the latest value; 0 never printed")
-		count:set(1)
-		spec.eq(#r.engine.deferred, 0, "equal write: nothing")
-		count:set(2)
-		r.flush()
-		spec.list(printed, { 2, 4 }, "validated the computed, ran once")
+		spec.list(printed, { 0 }, "run once inside scope()")
+		count(1)
+		spec.list(printed, { 0, 2 }, "run inside the write")
+		count(1)
+		spec.list(printed, { 0, 2 }, "equal write: nothing")
+		count(2)
+		spec.list(printed, { 0, 2, 4 }, "validated the computed, ran once")
 	end,
-	["rule 31 T12 writes made in one receiver call reach an effect as one run with every new value"] = function()
+	["rule 31 T12 writes made in one batch reach an effect as one run with every new value"] = function()
 		local r = realm()
-		local phase, score, payout = r.api.state("Waiting"), r.api.state(0), r.api.state(0)
+		local phase, score, payout = r.charm.atom("Waiting"), r.charm.atom(0), r.charm.atom(0)
 		local seen = {}
 		r.root(function()
 			r.api.effect(function()
 				table.insert(seen, `{phase()} {score()} {payout()}`)
 			end)
 		end)
-		r.flush()
-		local function receiver()
-			phase:set("Running")
-			score:set(3)
-			payout:set(30)
-		end
-		receiver()
-		r.flush()
+		r.charm.batch(function()
+			phase("Running")
+			score(3)
+			payout(30)
+		end)
 		spec.list(seen, { "Waiting 0 0", "Running 3 30" }, "no run observed part of the commit")
 	end,
 	["rule 14 dependencies are rebuilt every run"] = function()
 		local r = realm()
-		local flag, a, b = r.api.state(true), r.api.state(1), r.api.state(1)
+		local flag, a, b = r.charm.atom(true), r.charm.atom(1), r.charm.atom(1)
 		local runs = 0
 		r.root(function()
 			r.api.effect(function()
@@ -62,52 +53,53 @@ return {
 			end)
 		end)
 		r.flush()
-		b:set(2)
+		b(2)
 		r.flush()
 		spec.eq(runs, 1, "b not read yet")
-		flag:set(false)
+		flag(false)
 		r.flush()
-		a:set(2)
+		a(2)
 		r.flush()
 		spec.eq(runs, 2, "a no longer read")
-		b:set(3)
+		b(3)
 		r.flush()
 		spec.eq(runs, 3, "b read now")
 	end,
 	["rule 15 T14 watch fires once with the new value and the baseline taken at the call"] = function()
 		local r = realm()
-		local source = r.api.state("a")
+		local source = r.charm.atom("a")
 		local calls = {}
 		r.root(function()
 			r.api.watch(source, function(value, previous)
 				table.insert(calls, `{previous}>{value}`)
 			end)
 		end)
-		source:set("b")
+		source("b")
 		r.flush()
 		r.flush()
 		spec.list(calls, { "a>b" }, "a change before the first flush fires, once")
 	end,
-	["rule 15 watch coalesces per flush"] = function()
+	["rule 15 watch coalesces per batch"] = function()
 		local r = realm()
-		local source = r.api.state(1)
+		local source = r.charm.atom(1)
 		local calls = {}
 		r.root(function()
 			r.api.watch(source, function(value, previous)
 				table.insert(calls, `{previous}>{value}`)
 			end)
 		end)
-		source:set(2)
-		source:set(1)
-		r.flush()
-		spec.list(calls, {}, "changed and changed back before the first flush: no call")
-		source:set(2)
-		source:set(3)
-		source:set(4)
-		r.flush()
+		r.charm.batch(function()
+			source(2)
+			source(1)
+		end)
+		spec.list(calls, {}, "changed and changed back in one batch: no call")
+		r.charm.batch(function()
+			source(2)
+			source(3)
+			source(4)
+		end)
 		spec.list(calls, { "1>4" }, "three writes: one call with the first and last values")
-		source:set(1)
-		r.flush()
+		source(1)
 		spec.list(calls, { "1>4", "4>1" }, "previous moves with each call")
 	end,
 	["rule 15 a source that throws at the watch call is rethrown and creates nothing"] = function()
@@ -122,13 +114,11 @@ return {
 		end)
 		spec.eq(ok, false, "rethrown through the scope")
 		spec.has(err, "no baseline", "the source's error")
-		spec.eq(#r.engine.deferred, 0, "no effect queued")
-		r.flush()
 		spec.eq(ran, false, "nothing ran")
 	end,
 	["rule 15 what onChange creates belongs to that run"] = function()
 		local r = realm()
-		local source = r.api.state(1)
+		local source = r.charm.atom(1)
 		local events = {}
 		r.root(function()
 			r.api.watch(source, function(value)
@@ -140,16 +130,16 @@ return {
 				end)
 			end)
 		end)
-		source:set(2)
+		source(2)
 		r.flush()
-		source:set(3)
+		source(3)
 		r.flush()
 		spec.list(events, { "child 2", "release 2", "child 3" }, "the next run ended the previous run's work")
 	end,
 	["rule 15 T14 a waiter resumed by its watch disposes the watch mid-run"] = function()
 		local r = realm()
-		local phase = r.api.state(nil)
-		local ready = r.api.computed(function()
+		local phase = r.charm.atom(nil)
+		local ready = r.charm.computed(function()
 			return phase() ~= nil
 		end)
 		local calls, resumed = {}, false
@@ -169,34 +159,43 @@ return {
 			dispose()
 		end)
 		coroutine.resume(waiter)
-		phase:set("Waiting")
+		phase("Waiting")
 		r.flush()
 		spec.list(calls, { "false>true" }, "resume(true, false)")
 		spec.eq(resumed, true, "the waiter was resumed")
-		phase:set(nil)
+		phase(nil)
 		r.flush()
 		spec.list(calls, { "false>true" }, "the disposed watch never runs again")
 	end,
-	["rule 17 a run that returns neither nil nor a function stops the effect"] = function()
+	["rule 17 a run that returns neither nil nor a function throws to the code that wrote"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local runs = 0
 		r.root(function()
 			r.api.effect(function()
-				s()
 				runs += 1
-				return true :: any
+				if s() == 2 then
+					return true :: any
+				end
+				return nil
 			end)
 		end)
-		r.flush()
-		s:set(2)
-		r.flush()
-		spec.eq(runs, 1, "stopped after the bad return")
-		spec.eq(r.logged("returned a boolean"), 1, "one diagnostic names the return")
+		local ok, err = pcall(s, 2)
+		spec.eq(ok, false, "the write threw")
+		spec.has(err, "returned a boolean", "naming the return")
+		s(3)
+		spec.eq(runs, 3, "the effect still runs on the next change")
+		local created, first = pcall(r.root, function()
+			r.api.effect(function()
+				return 1 :: any
+			end)
+		end)
+		spec.eq(created, false, "a first run's bad return throws at the effect call")
+		spec.has(first, "returned a number", "naming that return")
 	end,
-	["rule 18 rule 79 a failing run releases what it acquired, stops and is reported once; the flush continues"] = function()
+	["rule 18 a failing run throws to the writer and keeps what it acquired until its next run"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local events = {}
 		r.root(function()
 			r.api.effect(function()
@@ -213,59 +212,53 @@ return {
 				table.insert(events, `other {s()}`)
 			end)
 		end)
-		r.flush()
-		local ok = pcall(s.set, s, 2)
-		spec.eq(ok, true, "the setter never throws")
-		r.flush()
-		spec.list(
-			events,
-			{ "run 1", "other 1", "release 1", "run 2", "release 2", "other 2" },
-			"partial run released at once, next effect still ran"
-		)
-		s:set(3)
-		r.flush()
-		spec.eq(events[#events], "other 3", "the failed effect never ran again")
-		spec.eq(r.logged("run failed"), 1, "one diagnostic")
-		spec.eq(r.logged("reactive-effects:"), 1, "naming the effect's origin")
-		spec.eq(r.logged("a root scope"), 1, "and its owner")
+		local ok, err = pcall(s, 2)
+		spec.eq(ok, false, "the write threw")
+		spec.has(err, "run failed", "the run's error")
+		spec.list(events, { "run 1", "other 1", "release 1", "run 2" }, "the failed run's release is held")
+		table.clear(events)
+		s(3)
+		spec.eq(events[1], "release 2", "released before the next run")
+		spec.eq(events[2], "run 3", "the failed effect runs again")
+		spec.eq(events[#events], "other 3", "and so does the other")
 	end,
-	["rule 18 a yielding run is cancelled and stops the effect"] = function()
+	["rule 18 a yielding run is cancelled at the yield and thrown to the writer"] = function()
 		local r = realm()
 		local runs = 0
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		r.root(function()
 			r.api.effect(function()
-				s()
 				runs += 1
-				coroutine.yield()
-				runs += 100
+				if s() == 2 then
+					coroutine.yield()
+					runs += 100
+				end
 			end)
 		end)
-		r.flush()
-		s:set(2)
-		r.flush()
-		spec.eq(runs, 1, "cancelled at the yield and stopped")
-		spec.eq(r.logged("yielded"), 1, "one diagnostic")
+		local ok, err = pcall(s, 2)
+		spec.eq(ok, false, "the write threw")
+		spec.has(err, "yielded", "naming the yield")
+		spec.eq(runs, 2, "cancelled at the yield")
 	end,
-	["rule 19 a computed's cached error read by a run is that run's failure"] = function()
+	["rule 19 a computed that throws throws into the run that reads it"] = function()
 		local r = realm()
-		local c = r.api.computed(function()
+		local c = r.charm.computed(function()
 			error("bad input")
 		end)
 		local after = false
-		r.root(function()
+		local ok, err = pcall(r.root, function()
 			r.api.effect(function()
 				c()
 				after = true
 			end)
 		end)
-		r.flush()
 		spec.eq(after, false, "the read threw into the run")
-		spec.eq(r.logged("bad input"), 1, "the effect stopped naming the computed's error")
+		spec.eq(ok, false, "and the first run threw at the effect call")
+		spec.has(err, "bad input", "with the computed's error")
 	end,
-	["rule 26 T10 a rerun ends the previous run's children first, then its releases newest first"] = function()
+	["rule 26 T10 a rerun ends the run's scopes, then its releases newest first, then its child effects after the rerun"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local events = {}
 		r.root(function()
 			r.api.effect(function()
@@ -281,18 +274,23 @@ return {
 				r.api.onCleanup(function()
 					table.insert(events, `R1 {n}`)
 				end)
+				r.api.scope(function()
+					r.api.onCleanup(function()
+						table.insert(events, `S release {n}`)
+					end)
+				end)
+				table.insert(events, `run {n}`)
 				return function()
 					table.insert(events, `R2 {n}`)
 				end
 			end)
 		end)
-		r.flush()
-		s:set(2)
-		r.flush()
+		table.clear(events)
+		s(2)
 		spec.list(
 			events,
-			{ "F cleanup 1", "F release 1", "R2 1", "R1 1" },
-			"child effect, then the returned cleanup, then the earlier release"
+			{ "S release 1", "R2 1", "R1 1", "run 2", "F cleanup 1", "F release 1" },
+			"Charm ends the previous run's child effects once the rerun returns"
 		)
 	end,
 	["rule 28 T10 a cleanup that throws is reported once and later releases still run"] = function()
@@ -316,8 +314,9 @@ return {
 		dispose()
 		spec.eq(r.logged("release failed"), 1, "dispose is idempotent")
 	end,
-	["rule 25 T10 an effect that disposes its own scope mid-run waits for its completion"] = function()
+	["rule 25 T10 an effect that disposes its own scope mid-run ends at once and creates nothing after"] = function()
 		local r = realm()
+		local s = r.charm.atom(1)
 		local events = {}
 		local dispose
 		dispose = r.root(function()
@@ -330,6 +329,9 @@ return {
 				end)
 			end)
 			r.api.effect(function()
+				if s() == 1 then
+					return nil
+				end
 				r.api.onCleanup(function()
 					table.insert(events, "E run release")
 				end)
@@ -343,64 +345,25 @@ return {
 				end
 			end)
 		end)
-		r.flush()
-		r.flush()
+		s(2)
 		spec.list(events, {
+			"G release",
+			"E run release",
+			"S release",
 			"after dispose",
 			"E cleanup",
-			"E run release",
-			"G release",
-			"S release",
-		}, "nothing released under the running body; then rule 25's order")
-	end,
-	["rule 31 rule 80 before a port is installed an enqueue only queues; installing it and releasing the barrier flushes"] = function()
-		local engine = Engine.new()
-		local graph = spec.runtime(nil, engine.loggingPort)
-		local api = graph.module("")
-		local reactive = graph.module("internal/reactive/flush")
-		local runs = 0
-		api.scope(function()
-			api.effect(function()
-				runs += 1
-			end)
-		end)
-		spec.eq(#engine.deferred, 0, "no port: nothing requested")
-		reactive.useReactivePort(engine.port)
-		engine.flush()
-		spec.eq(runs, 0, "barrier still held")
-		reactive.releaseBarrier()
-		spec.eq(#engine.deferred, 1, "release requests one flush")
-		engine.flush()
-		spec.eq(runs, 1, "the queued first run happened")
-	end,
-	["rule 31 with the barrier released and no port, an enqueue still only queues"] = function()
-		local engine = Engine.new()
-		local graph = spec.runtime(nil, engine.loggingPort)
-		local api = graph.module("")
-		local reactive = graph.module("internal/reactive/flush")
-		reactive.releaseBarrier()
-		local runs = 0
-		api.scope(function()
-			api.effect(function()
-				runs += 1
-			end)
-		end)
-		spec.eq(#engine.deferred, 0, "nothing requested without a port")
-		reactive.useReactivePort(engine.port)
-		reactive.releaseBarrier()
-		engine.flush()
-		spec.eq(runs, 1, "the queued run happened once a port existed")
+		}, "the scope ended inside dispose(); the returned cleanup ran at once")
 	end,
 	["rule 33 T7 a diamond reaches an effect once, with only new values"] = function()
 		local r = realm()
-		local a = r.api.state(1)
-		local b = r.api.computed(function()
+		local a = r.charm.atom(1)
+		local b = r.charm.computed(function()
 			return a() + 1
 		end)
-		local c = r.api.computed(function()
+		local c = r.charm.computed(function()
 			return a() * 2
 		end)
-		local d = r.api.computed(function()
+		local d = r.charm.computed(function()
 			return c() + 1
 		end)
 		local seen = {}
@@ -410,20 +373,20 @@ return {
 			end)
 		end)
 		r.flush()
-		a:set(5)
+		a(5)
 		r.flush()
 		spec.list(seen, { "2/3", "6/11" }, "one run per change, never new b with old d")
 	end,
 	["rule 33 T7 a run is skipped when every computed it read recomputed equal"] = function()
 		local r = realm()
-		local a = r.api.state(1)
-		local positive = r.api.computed(function()
+		local a = r.charm.atom(1)
+		local positive = r.charm.computed(function()
 			return a() > 0
 		end)
-		local parity = r.api.computed(function()
+		local parity = r.charm.computed(function()
 			return a() % 2
 		end)
-		local scaled = r.api.computed(function()
+		local scaled = r.charm.computed(function()
 			return parity() * 10
 		end)
 		local runs = 0
@@ -435,73 +398,28 @@ return {
 			end)
 		end)
 		r.flush()
-		a:set(3)
+		a(3)
 		r.flush()
 		spec.eq(runs, 1, "both paths equal: skipped")
-		a:set(2)
+		a(2)
 		r.flush()
 		spec.eq(runs, 2, "one path moved: ran")
 	end,
 	["rule 33 T9 a cascade runs in rounds and later effects see the completed write"] = function()
 		local r = realm()
-		local price, qty, total = r.api.state(2), r.api.state(3), r.api.state(0)
+		local price, qty, total = r.charm.atom(2), r.charm.atom(3), r.charm.atom(0)
 		local labels = {}
 		r.root(function()
 			r.api.effect(function()
-				total:set(price() * qty())
+				total(price() * qty())
 			end)
 			r.api.effect(function()
 				table.insert(labels, total())
 			end)
 		end)
 		r.flush()
-		price:set(3)
+		price(3)
 		r.flush()
 		spec.list(labels, { 6, 9 }, "B ran after A's write each time, never with a stale total")
-	end,
-	["rule 33 a round runs effects in creation order"] = function()
-		local r = realm()
-		local x, y = r.api.state(0), r.api.state(0)
-		local order = {}
-		r.root(function()
-			r.api.effect(function()
-				table.insert(order, `first {x()}`)
-			end)
-			r.api.effect(function()
-				table.insert(order, `second {y()}`)
-			end)
-		end)
-		r.flush()
-		table.clear(order)
-		y:set(1)
-		x:set(1)
-		r.flush()
-		spec.list(order, { "first 1", "second 1" }, "sorted by creation, not by enqueue")
-	end,
-	["rule 33 a round runs in creation order whether it was enqueued in order or out of order at the end"] = function()
-		local r = realm()
-		local states = {}
-		local order = {}
-		r.root(function()
-			for i = 1, 4 do
-				states[i] = r.api.state(0)
-				r.api.effect(function()
-					table.insert(order, `{i} {states[i]()}`)
-				end)
-			end
-		end)
-		r.flush()
-		table.clear(order)
-		for _, i in { 1, 2, 3, 4 } do
-			states[i]:set(1)
-		end
-		r.flush()
-		spec.list(order, { "1 1", "2 1", "3 1", "4 1" }, "enqueued in order")
-		table.clear(order)
-		for _, i in { 1, 2, 4, 3 } do
-			states[i]:set(2)
-		end
-		r.flush()
-		spec.list(order, { "1 2", "2 2", "3 2", "4 2" }, "the last two enqueued out of order")
 	end,
 }

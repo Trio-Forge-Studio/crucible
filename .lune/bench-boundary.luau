@@ -20,8 +20,6 @@ local r = realm(nil, ownable.globals)
 local graph = r.graph
 local runner = graph.module("internal/runner")
 local lifecycle = graph.module("internal/lifecycle")
-local context = graph.module("internal/reactive/context")
-local reactive = graph.module("internal/reactive/graph")
 local own, scope = r.api.own, r.api.scope
 
 -- `step(n)` does n of something and returns the seconds the timed part took.
@@ -58,7 +56,6 @@ local function body()
 	hits += 1
 end
 local function noop() end
-local OWNING = 3
 
 local DONE = {}
 local parked = coroutine.create(function()
@@ -112,49 +109,6 @@ time(
 		lifecycle.within(nil, nil, CALLBACK_HOOK, onWorker)
 	end)
 )
-local function framed(lifetime)
-	local frame = { kind = OWNING, lifetime = lifetime }
-	context.push(frame)
-	body()
-	context.pop(frame)
-end
-local lifetime = {}
-if reactive.contained then
-	-- The boundary before batching: `within` on one worker, the body on a second.
-	time(
-		"5 context.boundary: + job, completion, frames",
-		loop(function()
-			context.boundary(nil, body, nil, noop)
-		end)
-	)
-	time(
-		"6 graph.contained: + completion closure",
-		loop(function()
-			reactive.contained(nil, body, nil, noop)
-		end)
-	)
-	time(
-		"7 + an Owning frame pushed on the worker",
-		loop(function()
-			reactive.contained(nil, framed, lifetime, noop)
-		end)
-	)
-else
-	time(
-		"5 context.boundary: one worker in a scope",
-		loop(function()
-			context.boundary(nil, nil, body, nil, noop)
-		end)
-	)
-	local frame = { kind = OWNING, lifetime = lifetime }
-	time(
-		"6 + the body's frame installed",
-		loop(function()
-			context.boundary(nil, frame, body, nil, noop)
-		end)
-	)
-end
-
 print("Releases, a disposed scope, per value")
 local function releases(label: string, make: () -> any)
 	time(label, function(n)

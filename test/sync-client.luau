@@ -18,8 +18,8 @@ end
 
 local function newWorld()
 	local w = World.new({ declare = declare, serve = serve })
-	w.a:set(1)
-	w.b:set(2)
+	w.a(1)
+	w.b(2)
 	return w
 end
 
@@ -37,7 +37,7 @@ local function latched(w, client, label: string, fault: number)
 	spec.eq(client.api.syncStatus(client.d.B), "failed", `{label}: B failed`)
 	spec.eq(faults(w, client), fault, `{label}: fault messages`)
 	spec.eq(client.logged("Crucible sync stopped"), 1, `{label}: one diagnostic`)
-	w.a:set(50)
+	w.a(50)
 	w:heartbeat()
 	spec.eq(client.d.A(), 1, `{label}: later frames are ignored`)
 	spec.eq(client.logged("Crucible sync stopped"), 1, `{label}: and report nothing`)
@@ -75,8 +75,8 @@ local tests = {
 			end,
 		})
 		spec.eq(prepared, 2, "the snapshot prepared both values")
-		w.a:set(10)
-		w.b:set(20)
+		w.a(10)
+		w.b(20)
 		w:heartbeat()
 		spec.eq(prepared, 4, "the update failed on its second value")
 		latched(w, ann, "preparation", 1)
@@ -118,7 +118,7 @@ local tests = {
 		spec.eq(w.link.kicks[1].player, "Ann", "of the faulting player")
 		spec.eq(w.link.kicks[1].message, "Connection problem, please rejoin.", "with KICK_MESSAGE")
 		spec.eq(w:sync().peers[ann.player], nil, "Ann's view ended")
-		w.a:set(5)
+		w.a(5)
 		w:heartbeat()
 		spec.eq(bea.d.A(), 5, "Bea keeps syncing")
 		spec.eq(#w:frames(ann), 1, "Ann gets nothing more")
@@ -137,7 +137,7 @@ local tests = {
 		})
 		local ann = w:join("Ann")
 		local api = ann.api
-		local doubled = api.computed(function()
+		local doubled = ann.charm.computed(function()
 			return ann.d.Score() * 2
 		end)
 		local seen = {}
@@ -146,16 +146,16 @@ local tests = {
 				table.insert(seen, doubled())
 			end)
 		end)
-		local unobserved = api.computed(function()
+		local unobserved = ann.charm.computed(function()
 			return ann.d.Score() + 1
 		end)
 		w.link:flush()
 		spec.eq(unobserved(), 1, "the unobserved computed reads the snapshot")
-		w.score:set(5)
+		w.score(5)
 		w:heartbeat()
 		spec.eq(unobserved(), 6, "the unobserved computed is not stale after a frame")
 		spec.eq(doubled(), 10, "the observed computed recomputed")
-		w.score:set(6)
+		w.score(6)
 		w:heartbeat()
 		spec.eq(unobserved(), 7, "and again after the next frame")
 		spec.list(seen, { 0, 10, 12 }, "the effect ran once per frame")

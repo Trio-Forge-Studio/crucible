@@ -5,7 +5,7 @@ local life = require("./lib/reactive-life")
 return {
 	["rule 20 effect, watch and onCleanup need an owner; scope makes a root"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		for name, call in
 			{
 				effect = function()
@@ -32,13 +32,13 @@ return {
 		end)
 		r.flush()
 		dispose()
-		s:set(2)
+		s(2)
 		r.flush()
 		spec.eq(runs, 1, "the root owned the effect and its dispose ended it")
 	end,
 	["rule 20 code a Crucible object runs owns into its generation, ended once through its subscriptions"] = function()
 		local w = life()
-		local s = w.api.state(1)
+		local s = w.charm.atom(1)
 		local runs = 0
 		local object = w.make("Holder", {
 			awake = function()
@@ -59,13 +59,13 @@ return {
 		spec.eq(runs, 3, "owned and run")
 		w.life.request(object, w.Want.Destroyed)
 		spec.eq(w.events[#w.events - 1], "generation release", "ended after onDestroy, before ended")
-		s:set(2)
+		s(2)
 		w.flush()
 		spec.eq(runs, 3, "effects owned by a destroyed object never run again")
 	end,
 	["rule 23 a child scope ends with its parent or its dispose, whichever first"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local events = {}
 		local disposeChild
 		local disposeParent = r.root(function()
@@ -88,11 +88,11 @@ return {
 		spec.list(events, { "child" }, "dispose is idempotent")
 		disposeParent()
 		spec.list(events, { "child", "sibling", "parent" }, "children before the parent's releases")
-		s:set(2)
+		s(2)
 	end,
 	["rule 23 a scope inside an effect run ends at the next run"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local events = {}
 		r.root(function()
 			r.api.effect(function()
@@ -105,13 +105,13 @@ return {
 			end)
 		end)
 		r.flush()
-		s:set(2)
+		s(2)
 		r.flush()
 		spec.list(events, { "scope 1" }, "the run's scope ended before the next run")
 	end,
 	["rule 23 rule 24 a setup that throws releases what it registered and rethrows"] = function()
 		local r = realm()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local events, runs = {}, 0
 		local ok, err = pcall(r.api.scope, function()
 			r.api.onCleanup(function()
@@ -126,15 +126,20 @@ return {
 		spec.eq(ok, false, "rethrown at the scope call")
 		spec.has(err, "setup failed", "the setup's error")
 		spec.list(events, { "acquired before the throw" }, "released at completion")
-		r.flush()
-		spec.eq(runs, 0, "the effect setup created ended with it")
+		spec.eq(runs, 1, "the effect ran once when the setup created it")
+		s(2)
+		spec.eq(runs, 1, "and ended with the setup")
 	end,
 	["rule 27 under an ended owner nothing is created and onCleanup runs at once"] = function()
 		local r = realm()
+		local s = r.charm.atom(1)
 		local events = {}
 		local dispose
 		dispose = r.root(function()
 			r.api.effect(function()
+				if s() == 1 then
+					return
+				end
 				dispose()
 				r.api.effect(function()
 					table.insert(events, "effect created after the end")
@@ -152,8 +157,7 @@ return {
 				table.insert(events, "after onCleanup")
 			end)
 		end)
-		r.flush()
-		r.flush()
+		s(2)
 		spec.list(events, { "ran at once", "after onCleanup" }, "no effect, no watch, no setup")
 	end,
 	["rule 27 C6 a start segment after its generation ended creates nothing"] = function()
@@ -186,46 +190,80 @@ return {
 		}, "the extra segment ran under an ended generation")
 		spec.eq(runs, 0, "its effect was never created")
 	end,
-	["rule 27 rule 79 a child that ends early unlinks, and a generation warns once at the children bound"] = function()
+	["rule 27 a child that ends early leaves its parent; the rest end with the parent, oldest first"] = function()
 		local w = life()
-		local limits = w.graph.module("internal/reactive/limits")
+		local events = {}
 		local object = w.make("Busy", {
 			awake = function()
-				for _ = 1, 10 do
-					w.api.scope(function() end)()
+				for i = 1, 3 do
+					local dispose = w.api.scope(function()
+						w.api.onCleanup(function()
+							table.insert(events, `early {i}`)
+						end)
+					end)
+					dispose()
 				end
-				for _ = 1, limits.OWNER_CHILDREN_WARNING - 1 do
-					w.api.scope(function() end)
+				for i = 1, 2 do
+					w.api.scope(function()
+						w.api.onCleanup(function()
+							table.insert(events, `child {i}`)
+						end)
+					end)
 				end
 			end,
 		})
 		w.boot(object)
-		spec.eq(w.engine.logged("Busy owns"), 0, "disposed children were unlinked; one short of the bound")
-		w.life.within(object, object, w.Hook.Frame, function()
-			w.api.scope(function() end)
-			w.api.scope(function() end)
-		end)
-		spec.eq(w.engine.logged(`Busy owns {limits.OWNER_CHILDREN_WARNING}`), 1, "one warning naming the owner")
+		spec.list(events, { "early 1", "early 2", "early 3" }, "each ended at its dispose")
+		w.life.request(object, w.Want.Destroyed)
+		spec.list(events, { "early 1", "early 2", "early 3", "child 1", "child 2" }, "only the live children ended")
 	end,
-	["rule 12 rule 29 a thread spawned inside an effect has no frames: no owner and no tracking"] = function()
+	["rule 27 the oldest child ending early leaves its younger siblings to end with the parent"] = function()
+		local w = life()
+		local events = {}
+		local object = w.make("Busy", {
+			awake = function()
+				local disposers = {}
+				for i = 1, 3 do
+					disposers[i] = w.api.scope(function()
+						w.api.onCleanup(function()
+							table.insert(events, `child {i}`)
+						end)
+					end)
+				end
+				disposers[1]()
+			end,
+		})
+		w.boot(object)
+		spec.list(events, { "child 1" }, "the oldest ended at its dispose")
+		w.life.request(object, w.Want.Destroyed)
+		spec.list(events, { "child 1", "child 2", "child 3" }, "its siblings ended with the parent, oldest first")
+	end,
+	["rule 12 rule 29 a thread spawned inside an effect run belongs to the run until it first yields"] = function()
 		local r = realm()
-		local s = r.api.state(1)
-		local runs, ownerError = 0, nil
+		local s = r.charm.atom(1)
+		local runs, before, after, spawned = 0, nil, nil, nil
 		r.root(function()
 			r.api.effect(function()
 				runs += 1
-				coroutine.wrap(function()
+				if spawned then
+					return
+				end
+				spawned = coroutine.create(function()
 					s()
 					local ok, err = pcall(r.api.effect, function() end)
-					ownerError = if ok then "created" else err
-				end)()
+					before = if ok then "created" else err
+					coroutine.yield()
+					ok, err = pcall(r.api.effect, function() end)
+					after = if ok then "created" else err
+				end)
+				assert(coroutine.resume(spawned))
 			end)
 		end)
-		r.flush()
-		spec.has(ownerError, "needs an owner", "no owner on the spawned thread")
-		s:set(2)
-		r.flush()
-		spec.eq(runs, 1, "its read was not tracked by the run")
+		spec.eq(before, "created", "owned by the run before it yields")
+		assert(coroutine.resume(spawned))
+		spec.has(after, "needs an owner", "no owner once resumed from outside the run")
+		s(2)
+		spec.eq(runs, 2, "its read before the yield was tracked by the run")
 	end,
 	["rule 28 a release outside a drain applies its lifecycle request before dispose returns"] = function()
 		local w = life()

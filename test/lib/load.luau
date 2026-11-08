@@ -7,9 +7,9 @@ local networkPort = require("./network-port")
 type Node = { path: string, Parent: Node }
 
 local ROOT = "packages/crucible/out"
--- Where `TS.getModule` finds a package, such as @rbxts/vide for the vide subpath. Its modules see a `game` with
--- only the services Vide reads, Lune's `Instance`, `Enum` and `Color3`, and a `require` that takes a child node or a
--- `./` path.
+-- Where `TS.getModule` finds a package, such as @rbxts/charm. Its modules see a `game` with only the services Charm
+-- reads, Lune's `Instance`, `Enum` and `Color3`, and a `require` that takes a child node, a `./` path or an
+-- `@self/` path.
 local PACKAGES = "packages/crucible/node_modules"
 
 local nodes: { [string]: Node } = {}
@@ -77,15 +77,10 @@ local function Promise()
 	return promise
 end
 
--- Vide connects to RunService.Heartbeat and lists ReflectionService's classes when it loads.
+-- Charm asks RunService whether it runs in Studio, which turns on its strict and frozen flags. Specs set them.
 local PACKAGE_SERVICE = {
-	Heartbeat = {
-		Connect = function()
-			return { Disconnect = function() end }
-		end,
-	},
-	GetClasses = function()
-		return {}
+	IsStudio = function()
+		return false
 	end,
 }
 local PACKAGE_GAME = {
@@ -96,7 +91,8 @@ local PACKAGE_GAME = {
 
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
 -- that builds a runtime starts clean. Each graph gets its own network port: the given one, or the default fake.
-local function graph(defaults, loggingPort, configPort, network, dataPort)
+local function graph(defaults, loggingPort, configPort, network, dataPort, root: string?)
+	local folder = root or ROOT
 	network = network or networkPort()
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
@@ -136,6 +132,10 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 				env.Color3 = roblox.Color3
 				env.require = function(target: Node | string)
 					if type(target) == "string" then
+						local child = string.match(target, "^@self/(.+)$")
+						if child then
+							return load(`{path}/{child}`)
+						end
 						local relative =
 							assert(string.match(target, "^%./(.+)$"), `unsupported require {target} from {path}`)
 						return load(`{node(path).Parent.path}/{relative}`)
@@ -168,7 +168,7 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 	return {
 		network = network,
 		module = function(relative: string, globals: { [string]: any }?): any
-			return load(if relative == "" then ROOT else ROOT .. "/" .. relative, globals)
+			return load(if relative == "" then folder else folder .. "/" .. relative, globals)
 		end,
 		-- A module of an installed package, the same instance the runtime's imports of it get.
 		package = function(relative: string): any
@@ -199,6 +199,11 @@ end
 -- A fresh graph to load several modules that must share state, such as lifecycle and its runner.
 function spec.runtime(defaults, loggingPort, configPort, network, dataPort)
 	return graph(defaults, loggingPort, configPort, network, dataPort)
+end
+
+-- A fresh graph of the compiled runtime in `root` instead of packages/crucible/out, such as another commit's build.
+function spec.runtimeAt(root: string, defaults, loggingPort)
+	return graph(defaults, loggingPort, nil, nil, nil, root)
 end
 
 spec.Promise = Promise

@@ -15,7 +15,7 @@ end
 
 -- A profile service whose projection spreads the whole stored profile, as FD's ownerView does.
 local function profiles(s, d, w)
-	w.profiles = s.api.state({})
+	w.profiles = s.charm.atom({})
 	w.pulls = {}
 	s.service("ProfileService", function(self)
 		w.owner = s.entry.publish(d.Owner, function(player)
@@ -44,7 +44,7 @@ end
 local function load(w, name, profile)
 	local next = table.clone(w.profiles())
 	next[name] = profile
-	w.profiles:set(next)
+	w.profiles(next)
 end
 
 local function ownerValues(w, client)
@@ -103,7 +103,7 @@ return {
 			spec.eq(accepted[key], nil, `the server's admitted value has no {key}`)
 		end
 		spec.eq(ann.api.syncStatus(ann.d.Owner), "ready", "nothing failed")
-		w.board:set({ title = "posted", internal = "hidden" })
+		w.board({ title = "posted", internal = "hidden" })
 		spec.eq(w.server.d.Board().internal, nil, "a public publish drops an extra field on the server")
 		spec.eq(w.server.d.Board().title, "posted", "and keeps the declared one")
 		w:heartbeat()
@@ -137,7 +137,7 @@ return {
 		local bea = w:join("Bea")
 		load(w, "Bea", { coins = 2, name = "Bea", broken = true })
 		load(w, "Ann", { coins = 10, name = "Ann" })
-		w.score:set(7)
+		w.score(7)
 		w:heartbeat()
 		local frames = w:frames(bea)
 		spec.list(frames[2].frame.failed, { "Data.Owner" }, "Bea's frame lists the declaration failed")
@@ -179,7 +179,7 @@ return {
 	["52 54 a publisher fault fails its declarations for every live client and a later joiner, and its handle refuses writes"] = function()
 		local w = newWorld()
 		load(w, "Ann", { coins = 1, name = "Ann" })
-		w.score:set(3)
+		w.score(3)
 		local ann = w:join("Ann")
 		w.server.life.fault(w.server.state(w.service), CALLBACK, "publisher faulted")
 		w.link:flush()
@@ -192,7 +192,7 @@ return {
 		spec.eq(ann.d.Owner().coins, 1, "its last value is kept")
 		spec.eq(w.server.api.syncStatus(w.server.d.Score), "failed", "the server's status is failed")
 		local ok, err = pcall(function()
-			w.score:set(4)
+			w.score(4)
 		end)
 		spec.eq(ok, false, "a write after retirement throws")
 		spec.has(err, "Job.Score's publisher ProfileService has ended", "naming the declaration and the publisher")
@@ -222,8 +222,8 @@ return {
 			end,
 		})
 		local ann = w:join("Ann")
-		w.items:set({ { id = 1, label = "sword" }, { id = 2, label = "shield", secret = "SECRET-item" } })
-		w.tags:set({ red = { a = 1 }, blue = { a = 2, secret = "SECRET-tag" } })
+		w.items({ { id = 1, label = "sword" }, { id = 2, label = "shield", secret = "SECRET-item" } })
+		w.tags({ red = { a = 1 }, blue = { a = 2, secret = "SECRET-tag" } })
 		local items, tags = w.server.d.Items(), w.server.d.Tags()
 		spec.eq(items[2].secret, nil, "the server's admitted array element has no undeclared key")
 		spec.eq(items[2].label, "shield", "and keeps its declared fields")

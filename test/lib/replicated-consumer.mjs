@@ -13,15 +13,19 @@ const accepted = {
 	"src/shared/state.ts": `import { replicated, replicatedPerPlayer } from "@trioforge/crucible";
 export const Score = replicated<number>("Job.Score", 0);
 export const Owner = replicatedPerPlayer<{ coins: number } | undefined>("Data.Owner", undefined);
+export const Round = replicated<string | undefined>("Job.Round", undefined);
 `,
 	"src/server/job.ts": `import { Subsystem } from "@trioforge/crucible";
 import { publish } from "@trioforge/crucible/server";
-import { Owner, Score } from "../shared/state";
+import { Owner, Round, Score } from "../shared/state";
 export class JobService extends Subsystem {
 	private readonly score = publish(Score);
 	private readonly owner = publish(Owner, () => ({ coins: 1 }));
+	private readonly round = publish(Round);
 	bump() {
-		this.score.update((value) => value + 1);
+		this.score((value) => value + 1);
+		this.round("first");
+		this.round(() => undefined);
 	}
 }
 `,
@@ -45,6 +49,20 @@ Score.set(1);
 `,
 		2339,
 		"Property 'set' does not exist on type 'Replicated<number>'.",
+	],
+	"src/server/clear.ts": [
+		`import { Subsystem } from "@trioforge/crucible";
+import { publish } from "@trioforge/crucible/server";
+import { Round } from "../shared/state";
+export class RoundService extends Subsystem {
+	private readonly round = publish(Round);
+	clear() {
+		this.round(undefined);
+	}
+}
+`,
+		2345,
+		"Argument of type 'undefined' is not assignable to parameter of type 'string | ((current: string | undefined) => string | undefined)'.",
 	],
 	"src/client/publish.ts": [
 		`import { publish } from "@trioforge/crucible/client";

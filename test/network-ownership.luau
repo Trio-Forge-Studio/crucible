@@ -56,7 +56,7 @@ return {
 					local state = s.state(owner)
 					table.insert(seen, `{text} {s.life.current() == state}`)
 					s.task.spawn(function()
-						table.insert(seen, `spawned {s.life.current() == nil}`)
+						table.insert(seen, `spawned {s.life.current() == state}`)
 					end)
 					if text == "hold" then
 						set:observe(function(item)
@@ -96,7 +96,7 @@ return {
 			"spawned true",
 			"first one",
 			"after fault true",
-		}, "owned until it returns, observe disconnected by the fault, nothing subscribed after it")
+		}, "owned until it returns, with what it spawns until that yields; observe disconnected by the fault")
 		link:assertClean()
 	end,
 	["29 45 retirement replies unavailable to an in-flight request and leaves events running"] = function()

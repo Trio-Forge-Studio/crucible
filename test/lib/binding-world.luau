@@ -57,6 +57,9 @@ return function(beforeBinding)
 		diagnose = function(_, _, message)
 			w.engine.loggingPort.writeInternal("error", tostring(message))
 		end,
+		effectFailed = function(_, _, message)
+			w.engine.loggingPort.writeInternal("error", tostring(message))
+		end,
 	})
 	function w.define(id, methods, options)
 		options = options or {}

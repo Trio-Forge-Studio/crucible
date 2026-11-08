@@ -55,6 +55,9 @@ return function()
 			error(message)
 		end,
 		diagnose = function() end,
+		effectFailed = function(_, _, message)
+			error(message)
+		end,
 	})
 	function w.define(id, kind, methods, options)
 		options = options or {}

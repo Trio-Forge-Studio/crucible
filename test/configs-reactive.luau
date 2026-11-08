@@ -58,8 +58,8 @@ local function newWorld(configs)
 				awake = function()
 					s.api.effect(function()
 						local event = d.GlobalEvent()
-						s.api.untracked(function()
-							w.event:set(event)
+						s.charm.untracked(function()
+							w.event(event)
 							w.published += 1
 						end)
 					end)
@@ -346,9 +346,13 @@ return {
 		table.insert(configs.players, target)
 		configs.joined.fire(target)
 		step(w, configs, 1)
-		spec.list(values, { "0", "9", "0", "5" }, "a rejoin reruns the reader, global value until the snapshot")
+		spec.list(
+			values,
+			{ "0", "5", "9", "0", "5" },
+			"each join reruns the reader at once, with the global value until the snapshot"
+		)
 		step(w, configs, 5)
-		spec.list(values, { "0", "9", "0", "5", "9" }, "then the targeted value again")
+		spec.list(values, { "0", "5", "9", "0", "5", "9" }, "then the targeted value again")
 		spec.list(ready, { "false", "true", "false", "true" }, "readiness follows the rejoin")
 		w:finish()
 	end,

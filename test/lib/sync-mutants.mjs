@@ -11,7 +11,6 @@ const D = src + "internal/sync/declarations.ts";
 const F = src + "internal/sync/frame.ts";
 const SS = src + "internal/sync/server-sync.ts";
 const CS = src + "internal/sync/client-sync.ts";
-const G = src + "internal/reactive/graph.ts";
 const CAT = src + "internal/network/catalog.ts";
 const B = src + "internal/boot.ts";
 const R = src + "replicated.ts";
@@ -46,12 +45,7 @@ const rules = [
 	],
 	[
 		"43",
-		[
-			"guard",
-			D,
-			"() => (onServer() ? perPlayer(declaration) : readState(declaration.node))",
-			"() => readState(declaration.node)",
-		],
+		["guard", D, "() => (onServer() ? perPlayer(declaration) : declaration.node())", "() => declaration.node()"],
 		["swap", "a read takes no arguments and reads one node"],
 		["pair", "a read is a single tracked read with nothing paired to it"],
 	],
@@ -76,7 +70,7 @@ const rules = [
 			'\t\t\t\tout.push([declaration.status, "ready"]);',
 			'\t\t\t\tout.push([declaration.status, "failed"]);',
 		],
-		["pair", D, '\twrite(declaration.status, "ready");\n\treturn setmetatable', "\treturn setmetatable"],
+		["pair", D, '\tstore([[declaration.status, "ready"]], `${declaration.name} was published`);\n', "\n"],
 	],
 	[
 		"47",
@@ -291,12 +285,7 @@ const rules = [
 		],
 		["swap", SS, "\t\t\t\tthis.commit(view, staged, false);", "\t\t\t\tthis.commit(view, staged, true);"],
 		["pair", SS, "\t\tthis.commit(view, staged, true);\n\t\treturn cost.bytes;", "\t\treturn cost.bytes;"],
-		[
-			"guard quiet",
-			SS,
-			"\t\tif (!this.incomplete && !this.retiredSince && currentEpoch() === this.settledEpoch) return;\n",
-			"\n",
-		],
+		["guard quiet", SS, "\t\tif (!this.incomplete && !this.retiredSince && !this.changed) return;\n", "\n"],
 		["guard retirement cleared", SS, "\t\tthis.retiredSince = false;\n", "\n"],
 		["guard incomplete cleared", SS, "\t\t\tthis.incomplete = false;\n", "\n"],
 	],
@@ -317,23 +306,18 @@ const rules = [
 		[
 			"swap",
 			CS,
-			"\t\t\t\tif (!rawequal(reused, declaration.node.value)) out.push([declaration.node, reused]);",
-			"\t\t\t\tif (!rawequal(reused, declaration.node.value)) commitPrepared([[declaration.node, reused]]);",
+			"\t\t\t\tif (!rawequal(reused, current)) out.push(assignment(declaration, reused));",
+			"\t\t\t\tif (!rawequal(reused, current)) declaration.node(reused);",
 		],
 		["pair", CS, "\t\tthis.revision = frame.revision;\n", "\n"],
-		["guard commit equal", G, "\t\tif (rawequal(value, node.value)) continue;\n", "\n"],
 		[
-			"guard commit version",
-			G,
-			"\t\tnode.value = value;\n\t\tnode.version += 1;\n\t\tepoch += 1;\n\t\tmarkObservers(node);",
-			"\t\tnode.value = value;\n\t\tepoch += 1;\n\t\tmarkObservers(node);",
+			"guard assign equal",
+			D,
+			"\tif (rawequal(peek(declaration.node), value)) return;\n\tdeclaration.version += 1;",
+			"\tdeclaration.version += 1;",
 		],
-		[
-			"guard commit epoch",
-			G,
-			"\t\tnode.value = value;\n\t\tnode.version += 1;\n\t\tepoch += 1;\n\t\tmarkObservers(node);",
-			"\t\tnode.value = value;\n\t\tnode.version += 1;\n\t\tmarkObservers(node);",
-		],
+		["guard assign version", D, "\tdeclaration.version += 1;\n\tonChanged();", "\tonChanged();"],
+		["guard assign wakes sync", D, "\tdeclaration.version += 1;\n\tonChanged();", "\tdeclaration.version += 1;"],
 	],
 	[
 		"61",
@@ -521,8 +505,13 @@ const rules = [
 		"74",
 		["guard", B, "\tside.network.close();\n\trollbackDeclarations();\n", "\tside.network.close();\n"],
 		["guard unseal", D, "\tsealed = false;\n}", "}"],
-		["swap", D, '\t\twrite(declaration.status, "pending");', '\t\twrite(declaration.status, "ready");'],
-		["pair", D, "\t\twrite(declaration.node, declaration.initial);\n", "\n"],
+		[
+			"swap",
+			D,
+			'\t\twrites.push([declaration.status, "pending"]);',
+			'\t\twrites.push([declaration.status, "ready"]);',
+		],
+		["pair", D, "\t\twrites.push(assignment(declaration, declaration.initial));\n", "\n"],
 	],
 	[
 		"78 K9",

@@ -43,6 +43,7 @@ function world.new()
 		threads = {},
 		failures = {},
 		diagnosed = {},
+		effectFailures = {},
 		cancelError = nil,
 		reconcile = function()
 			return {}
@@ -117,6 +118,9 @@ function world.new()
 		diagnose = function(s, hook, err)
 			log(s, "diagnose")
 			table.insert(w.diagnosed, { hook = hook, error = err })
+		end,
+		effectFailed = function(s, hook, err)
+			table.insert(w.effectFailures, { s = s, hook = hook, error = err })
 		end,
 	})
 	function w.make(name, script, kind)

@@ -593,38 +593,6 @@ return {
 		w:finish()
 	end,
 
-	["123 RX 7 a handle write inside a computed throws"] = function()
-		local w, _, player, data = loaded()
-		local api = w.server.api
-		local c = api.computed(function()
-			data(player).currency:set(1)
-			return 1
-		end)
-		throws(function()
-			c()
-		end, "computed must not write state", "the computed's write")
-		spec.eq(data(player).currency(), 0, "unchanged")
-		local live = w:run(function()
-			return data:inspect(4120)
-		end)
-		w:settle()
-		spec.eq(live.value.value.currency, 0, "the session committed nothing either")
-		w:finish()
-	end,
-
-	["13 a data handoff inside a computed throws and hands nothing off"] = function()
-		local w, _, player, data = loaded()
-		local c = w.server.api.computed(function()
-			data:handoff(player)
-			return 1
-		end)
-		throws(function()
-			c()
-		end, "computed", "the computed's handoff")
-		spec.eq(data:loaded(player), true, "still loaded: nothing handed off")
-		w:finish()
-	end,
-
 	["115 the root is cached across a resume, inert for an absent player, and per player on the server"] = function()
 		local w, ann, player, data = loaded()
 		local root = data(player)

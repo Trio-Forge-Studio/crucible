@@ -1,22 +1,21 @@
--- A fresh runtime whose reactive core has the fake engine's port and a released barrier, as boot's commit leaves it.
--- `patch(graph)` runs before the flush module loads, so it can replace an export the flush imports, which is how
--- specs inject an internal error where the flush calls into ownership, the graph or the diagnostic sink. `globals`
--- override Lune's for every module, such as a `typeof` that knows fake engine values.
+-- A fresh runtime and its own copy of Charm, as the runtime imports it. `patch(graph)` runs before the runtime loads,
+-- so it can replace a module's export. `globals` override Lune's for every module, such as a `typeof` that knows fake
+-- engine values. `strict` turns on Charm's strict mode, which Studio turns on, before anything is created.
 local Engine = require("./engine")
 local spec = require("./load")
 
-return function(patch: ((any) -> ())?, globals: { [string]: any }?)
+return function(patch: ((any) -> ())?, globals: { [string]: any }?, strict: boolean?)
 	local engine = Engine.new()
 	local graph = spec.runtime(globals, engine.loggingPort)
 	if patch then
 		patch(graph)
 	end
 	local r = { engine = engine, graph = graph }
+	r.charm = graph.package("@rbxts/charm/src")
+	r.charm.flags.strict = strict == true
 	r.api = graph.module("")
-	r.reactive = graph.module("internal/reactive/flush")
-	r.limits = graph.module("internal/reactive/limits")
-	r.reactive.useReactivePort(engine.port)
-	r.reactive.releaseBarrier()
+	r.ownership = graph.module("internal/reactive/ownership")
+	r.ownership.useDescribe(engine.port.describe)
 	function r.flush()
 		engine.flush()
 	end

@@ -2,7 +2,8 @@
 -- and the server's data port; this adds a fake ConfigService and loads the sample's own compiled scripts from
 -- build/sample-game.rbxl. The runtime comes from packages/crucible/out, the package the place was built from: the
 -- place's RuntimeLib is replaced by a TS.import that resolves the sample's runtime imports into each realm's graph, so
--- the sample's compiled modules and the runtime share the same module state.
+-- the sample's compiled modules and the runtime share the same module state. The sample's imports of Charm resolve
+-- to the copy the runtime loads, as `TS.getModule` makes them share one in the place.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
@@ -22,6 +23,20 @@ local function runtimeRelative(node): string?
 	local current = node
 	while current ~= nil do
 		if current.Name == RUNTIME and current.Parent and current.Parent.Name == "crucible" then
+			return table.concat(names, "/")
+		end
+		table.insert(names, 1, current.Name)
+		current = current.Parent
+	end
+	return nil
+end
+
+-- The path of a node under the place's node_modules, such as "@rbxts/charm/src", or nil outside it.
+local function packageRelative(node): string?
+	local names = {}
+	local current = node
+	while current ~= nil do
+		if current.Name == "node_modules" then
 			return table.concat(names, "/")
 		end
 		table.insert(names, 1, current.Name)
@@ -93,6 +108,11 @@ local function attach(self, realm, runtimeLib)
 		if relative ~= nil then
 			realm.imported[relative] = true
 			return realm.graph.module(relative)
+		end
+		-- The runtime finds Charm with TS.getModule, so in the place the sample and the runtime share one copy.
+		local package = packageRelative(node)
+		if package ~= nil and string.sub(package, 1, #"@rbxts/charm") == "@rbxts/charm" then
+			return realm.graph.package(package)
 		end
 		return load(node)
 	end

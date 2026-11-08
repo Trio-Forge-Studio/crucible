@@ -33,7 +33,7 @@ local function world(profile)
         reconcile = function() return {} end,
         defer = task.defer, cancel = task.cancel,
         failed = function(message) table.insert(failures, message) end,
-        diagnose = noop,
+        diagnose = noop, effectFailed = noop,
     })
     local function make(callbacks)
         local s = life.track({kind = 1, name = "S2Measurement"})
