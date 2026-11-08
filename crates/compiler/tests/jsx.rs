@@ -97,6 +97,56 @@ fn jsx_needs_the_react_setting_and_a_factory() {
 }
 
 #[test]
+fn automatic_jsx_options_fail_at_the_tsconfig_before_checking_ui_imports() {
+    for (jsx, source) in [
+        ("react-jsx", None),
+        ("react-jsxdev", None),
+        ("react-jsx", Some("@trioforge/crucible/ui")),
+        ("react", Some("@rbxts/vide")),
+        ("preserve", Some("another-renderer")),
+    ] {
+        let game = Game::new();
+        game.config(|c| {
+            c["compilerOptions"]["jsx"] = jsx.into();
+            if let Some(source) = source {
+                c["compilerOptions"]["jsxImportSource"] = source.into();
+            }
+        });
+        game.write(
+            "src/client/view.tsx",
+            "import { mount } from \"@trioforge/crucible/ui\";\nexport const view = <frame />;\n",
+        );
+        assert_jsx_config_error(&game);
+    }
+}
+
+#[test]
+fn inherited_jsx_options_fail_at_the_invoked_tsconfig() {
+    let game = Game::new();
+    game.write("jsx-options.json", r#"{"compilerOptions":{"jsx":"react-jsx"}}"#);
+    game.config(|c| {
+        let base = c["extends"].take();
+        c["extends"] = serde_json::json!([base, "./jsx-options.json"]);
+    });
+    game.main("export {};\n");
+    assert_jsx_config_error(&game);
+}
+
+fn assert_jsx_config_error(game: &Game) {
+    let Err(Failure::Check(errors)) = game.try_compile() else {
+        panic!("automatic JSX options fail before source checking");
+    };
+    assert_eq!(errors.len(), 1);
+    let error = &errors[0];
+    assert_eq!(game.relative(error), "tsconfig.json");
+    assert_eq!((error.line, error.column, error.code), (1, 1, 0));
+    assert_eq!(
+        error.message,
+        "`jsx: \"react-jsx\"`, `jsx: \"react-jsxdev\"` and `jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` and remove `jsxImportSource` in the tsconfig."
+    );
+}
+
+#[test]
 #[ignore = "runs the emitted Luau in Lune, which must be on PATH"]
 fn the_vide_lowering_mounts_updates_and_connects_through_vide() {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jsx-vide");

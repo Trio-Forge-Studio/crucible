@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tsrs_ast::Diagnostic as TsDiagnostic;
 use tsrs_compiler::{CheckerHandle, Context, Program, ProgramOptions, new_cached_fs_compiler_host, new_program};
-use tsrs_core::{CompilerOptions, P, tspath};
+use tsrs_core::{CompilerOptions, JsxEmit, P, tspath};
 use tsrs_tsoptions::{self as tsoptions, ParseConfigHost};
 use tsrs_vfs::{FS, bundled::embed as bundled, osvfs};
 
@@ -122,6 +122,17 @@ pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {
     let Some(config) = config else {
         return Err(vec![plain(&format!("cannot read {path}"))]);
     };
+    if let Some(options) = config.compiler_options()
+        && (matches!(options.jsx, JsxEmit::REACT_JSX | JsxEmit::REACT_JSX_DEV) || !options.jsx_import_source.is_empty())
+    {
+        return Err(vec![Diagnostic {
+            path: Some(path),
+            line: 1,
+            column: 1,
+            code: 0,
+            message: "`jsx: \"react-jsx\"`, `jsx: \"react-jsxdev\"` and `jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` and remove `jsxImportSource` in the tsconfig.".to_owned(),
+        }]);
+    }
     let compiler_host = new_cached_fs_compiler_host(&cwd, fs, &bundled::lib_path(), None, None, None);
     let program = new_program(ProgramOptions::new(P::new(config), compiler_host));
     let ctx = Context::default();
