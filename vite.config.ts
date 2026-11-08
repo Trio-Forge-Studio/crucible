@@ -3,7 +3,7 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
 	staged: {
 		"*": "vp check --fix",
-		"{.lune,test,crates/compiler/tests}/**/*.luau": ["stylua", "selene"],
+		"{.lune,test,crates/transform/tests}/**/*.luau": ["stylua", "selene"],
 		"probes/**/*.luau": ["stylua", "selene --config probes/engine/selene.toml"],
 	},
 	fmt: {

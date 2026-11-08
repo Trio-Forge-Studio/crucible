@@ -52,13 +52,14 @@ enum Generic {
 }
 
 /// When TypeScript 5's checker made a class or interface type, and whether the type has a `this` type.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Made {
     turn: usize,
     this_type: bool,
 }
 
 /// What the transform reads from `@trioforge/crucible` once per program.
+#[derive(Debug)]
 pub(crate) struct Framework {
     exports: HashMap<P<Symbol>, &'static str>,
     macros: HashMap<P<Symbol>, Macro>,

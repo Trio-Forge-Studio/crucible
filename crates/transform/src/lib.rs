@@ -17,7 +17,7 @@ use crucible_luau::{Expr, Name, Stmt};
 /// The module registration and the macros call, bound to this local in each file that uses it.
 const EMIT: &str = "__crucible";
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Crucible {
     framework: Option<extract::Framework>,
     facts: HashMap<SiteId, Fact>,
@@ -146,11 +146,54 @@ pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure>
 
 /// The compiler's facts and the transform's.
 #[cfg(feature = "test-support")]
-pub fn analyze(
-    tsconfig: &Path,
-    target: Target<'_>,
-) -> Result<(crucible_compiler::Facts, Crucible), Vec<crucible_compiler::Diagnostic>> {
+#[derive(Debug)]
+pub struct Analysis {
+    pub facts: crucible_compiler::Facts,
+    pub crucible: Crucible,
+}
+
+#[cfg(feature = "test-support")]
+impl std::ops::Deref for Analysis {
+    type Target = crucible_compiler::Facts;
+
+    fn deref(&self) -> &crucible_compiler::Facts {
+        &self.facts
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl Analysis {
+    fn file_id(&self, path_suffix: &str) -> Option<crucible_compiler::ext::FileId> {
+        let index = self.facts.files.iter().position(|f| f.path.ends_with(path_suffix))?;
+        Some(crucible_compiler::ext::FileId(index as u32))
+    }
+
+    /// The transform's fact at `span` of the file whose path ends with `path_suffix`.
+    pub fn fact(&self, path_suffix: &str, span: Span) -> Option<&Fact> {
+        let file = self.file_id(path_suffix)?;
+        self.crucible.fact(SiteId { file, span })
+    }
+
+    /// The registered classes of the file whose path ends with `path_suffix`, in source order.
+    pub fn classes(&self, path_suffix: &str) -> Vec<Class> {
+        let file = self.file_id(path_suffix).unwrap_or_else(|| panic!("{path_suffix} has facts"));
+        let mut found: Vec<(Span, Class)> = self
+            .crucible
+            .facts()
+            .filter(|(site, _)| site.file == file)
+            .filter_map(|(site, fact)| match fact {
+                Fact::Class(class) => Some((site.span, class.clone())),
+                _ => None,
+            })
+            .collect();
+        found.sort_by_key(|(span, _)| *span);
+        found.into_iter().map(|(_, class)| class).collect()
+    }
+}
+
+#[cfg(feature = "test-support")]
+pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Analysis, Vec<crucible_compiler::Diagnostic>> {
     let mut crucible = Crucible::default();
     let facts = crucible_compiler::analyze_with(tsconfig, target, &mut [&mut crucible])?;
-    Ok((facts, crucible))
+    Ok(Analysis { facts, crucible })
 }

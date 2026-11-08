@@ -25,7 +25,7 @@ fn fresh() -> Game {
 }
 
 fn fixture(path: &str) -> String {
-    let file = repo().join("crates/compiler/tests/transform-fixtures").join(path);
+    let file = repo().join("crates/transform/tests/transform-fixtures").join(path);
     std::fs::read_to_string(&file).unwrap_or_else(|_| panic!("{} exists", file.display())).replace('\r', "")
 }
 
@@ -3077,7 +3077,7 @@ export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, v
 fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let scratch = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("declarations");
     let _ = std::fs::remove_dir_all(&scratch);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
+    let runtime = crucible_transform::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
         .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
         .modules;
     crucible_compiler::write(&scratch.join("runtime"), &runtime).expect("the runtime is written");
@@ -3094,7 +3094,7 @@ fn compiled_declarations_load_against_the_compiler_built_runtime() {
     let result = std::process::Command::new("lune")
         .current_dir(repo())
         .arg("run")
-        .arg(repo().join("crates/compiler/tests/lowering/declarations.luau"))
+        .arg(repo().join("crates/transform/tests/lowering/declarations.luau"))
         .arg(repo().join("build/sample-game.rbxl"))
         .arg(scratch.join("runtime"))
         .arg(scratch.join("game"))

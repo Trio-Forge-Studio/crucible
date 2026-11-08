@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[test]
 fn methods_cannot_collide_with_opposite_class_properties() {
     let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/class-collisions/tsconfig.json");
-    let Err(Failure::Crucible(errors)) = crucible_compiler::compile(&config, Target::Package) else {
+    let Err(Failure::Crucible(errors)) = crucible_transform::compile(&config, Target::Package) else {
         panic!("static and instance collisions must fail compilation");
     };
     let actual: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();

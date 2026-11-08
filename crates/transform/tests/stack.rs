@@ -21,7 +21,7 @@ fn a_deeply_nested_source_compiles_through_the_library() {
         std::thread::Builder::new()
             .stack_size(1 << 20)
             .spawn_scoped(scope, || {
-                crucible_compiler::compile(&config, Target::Game { project: &project, include: &include })
+                crucible_transform::compile(&config, Target::Game { project: &project, include: &include })
             })
             .unwrap()
             .join()

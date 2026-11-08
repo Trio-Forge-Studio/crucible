@@ -11,7 +11,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 static VIDE: LazyLock<Vec<Module>> = LazyLock::new(|| {
-    crucible_compiler::compile(&fixture("vide/tsconfig.json"), Target::Package)
+    crucible_transform::compile(&fixture("vide/tsconfig.json"), Target::Package)
         .unwrap_or_else(|failure| panic!("the Vide fixtures compile (run pnpm build first):\n{failure}"))
         .modules
 });
@@ -212,7 +212,7 @@ fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
 fn the_compiled_lowering_mounts_updates_and_unmounts_on_the_compiler_built_runtime() {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jsx-ui");
     let _ = std::fs::remove_dir_all(&root);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
+    let runtime = crucible_transform::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
         .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
         .modules;
     let installed = root.join("ReplicatedStorage/rbxts_include/node_modules/@trioforge/crucible/out");

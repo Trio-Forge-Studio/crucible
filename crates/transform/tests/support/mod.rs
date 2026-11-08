@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, Module, Target};
+use crucible_compiler::{Compiled, Diagnostic, Failure, Module, Target};
+use crucible_transform::Analysis;
 use serde_json::{Value, json};
 
 pub fn repo() -> PathBuf {
@@ -102,7 +103,7 @@ impl Game {
         self.write("src/server/main.ts", text)
     }
 
-    pub fn analyze(&self) -> Result<Facts, Vec<Diagnostic>> {
+    pub fn analyze(&self) -> Result<Analysis, Vec<Diagnostic>> {
         self.analyze_at("tsconfig.json")
     }
 
@@ -114,17 +115,17 @@ impl Game {
         self.dir.join("include")
     }
 
-    pub fn analyze_at(&self, tsconfig: &str) -> Result<Facts, Vec<Diagnostic>> {
+    pub fn analyze_at(&self, tsconfig: &str) -> Result<Analysis, Vec<Diagnostic>> {
         let (project, include) = (self.project(), self.include());
-        crucible_compiler::analyze(&self.dir.join(tsconfig), game_or_package(&project, &include))
+        crucible_transform::analyze(&self.dir.join(tsconfig), game_or_package(&project, &include))
     }
 
     pub fn try_compile(&self) -> Result<Compiled, Failure> {
         let (project, include) = (self.project(), self.include());
-        crucible_compiler::compile(&self.dir.join("tsconfig.json"), game_or_package(&project, &include))
+        crucible_transform::compile(&self.dir.join("tsconfig.json"), game_or_package(&project, &include))
     }
 
-    pub fn facts(&self) -> Facts {
+    pub fn facts(&self) -> Analysis {
         self.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)))
     }
 
