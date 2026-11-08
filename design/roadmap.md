@@ -1,6 +1,6 @@
 # Crucible architecture roadmap
 
-The plan in `architecture.md` ships as 11 pull requests in four milestones, plus one deletion-only pull request. Each pull request tells one story, proves itself with the same generated table, and marks which commits you read and which you skim.
+The plan in `architecture.md` ships as 11 pull requests in four milestones, plus one deletion-only pull request. The move onto Charm and Vide in `stack.md` adds milestone "Stack" between milestones A and B. Each pull request tells one story, proves itself with the same generated table, and marks which commits you read and which you skim.
 
 ## How review works
 
@@ -28,7 +28,7 @@ Each commit passes `pnpm check` on its own, so the GitHub commit view works as a
 
 ### Rules that keep the count low
 
-- One pull request is open for review at a time. At most one draft is stacked behind it.
+- One pull request is open for review at a time, across the architecture and Stack milestones. At most one draft is stacked behind it.
 - A pull request over budget splits at a commit boundary into a stacked follow-up. Splitting never scatters one story across unrelated pull requests.
 - Before a pull request leaves draft, two adversarial reviewers (Opus and GPT) try to break it against the real tree. The agent fixes what they prove. Anything left open goes in the body.
 
@@ -41,7 +41,11 @@ The work runs on its own and stops only where it needs you.
 | Each PR | Review and merge it. The next PR waits as a draft until you do. |
 | After PR 1 | Approve the repository setting that makes the release workflow require CI. |
 | Before PR 7's live tests | Provide a staging universe and an Open Cloud API key through the secret prompt. |
-| After PR 9 | Authorize the 0.5.0 release. |
+| S4 and F1 | Review them in Studio on the Mac from the PR's Release artifacts, then merge. |
+| After S4 | Archive the Anvil repository and deprecate `@trioforge/anvil` on npm. |
+| After S7 merges | Push the tag and approve the 0.5.0 publish. |
+| U1 | Approve opening the pull request on `littensy/charm`. |
+| After PR 9 | Authorize the 0.6.0 release. |
 
 The agent makes the remaining choices itself, from objective scores, and records each one in the PR it affects. That covers the `Extension` trait bakeoff and the wording of the TLA+ invariants. You can overturn any of them in review.
 
@@ -51,7 +55,7 @@ The agent makes the remaining choices itself, from objective scores, and records
 | --- | --- |
 | VPS (`hezaerd-vps`, Linux) | Rust compilation: PRs 1 and 3 to 8, PR 11, and the bakeoff prototypes. It matches CI's Linux job, which runs the Lune execution tests. At most two Cargo jobs run there at once, because tsrs is memory-hungry. |
 | Laptop (`laptop-hezaerd`, Windows) | Coordination, PR 2's path move (CI runs on Windows too), TLA+ models (TLC on Java), the Windows check of every PR before it leaves draft, and Rust work that also needs Studio. |
-| Mac (`MacBook Air de Yanne`) | Studio play tests of PRs 9 and 10, using the Release workflow artifacts of the PR. No Rust toolchain. |
+| Mac (`MacBook Air de Yanne`) | Studio play tests of PRs 9 and 10, S4 and F1, using the Release workflow artifacts of the PR. No Rust toolchain. |
 
 ## Milestone A. Foundation
 
@@ -89,17 +93,45 @@ These commits run in this order:
 
 **Read:** the commits that inject the sink, clock and sleeper, and the Mermaid change. The extractions are mechanical.
 
+## Milestone Stack. Charm and Vide
+
+Crucible stops building its own reactive engine and UI renderer, as `stack.md` records. This milestone ends with the 0.5.0 release. It runs as a second lane next to milestones B and C, and you review one queue with the two lanes interleaved. The pull requests use the ids in `stack.md`.
+
+| ID | Pull request | Starts after |
+| --- | --- | --- |
+| S0 | Record the Charm and Vide stack in the design | PR 2 |
+| S1 | Delete Crucible's UI renderer, `className` and `theme.toml` | PR 3. It merges before PR 4 opens. |
+| S2 | Run Crucible's reactivity on Charm | S1 |
+| S3 | Reject Charm lifetime calls in game code (CRU038) | S2 |
+| S4 | Fold Anvil into the `ui` entry on Vide | S2 |
+| S5 | Fail the build on a second Charm or Vide copy | S2 and PR 6 |
+| S6 | Trial replication through Charm Sync behind a gate | S2 |
+| S7 | Release the runtime, compiler types and CLI as 0.5.0 | S1 to S5. S6 merged or closed. |
+| F1 | Move FD onto Crucible 0.5.0, in FD's repository | S7 published |
+| U1 | Make Charm run every effect when one throws, on `littensy/charm` | Nothing |
+
+The two lanes meet at four points.
+
+- S1 is the lane's only compiler change. It deletes the UI JSX lowering, the classes module and CRU037, and lands between PR 3 and PR 4.
+- S2 keeps every function in `packages/crucible/src/emit` unchanged, so PR 4 and PR 5 never see the ABI move.
+- While PR 5 is open, S3's CRU038 goes into PR 5's typed-lint commit instead of its own pull request.
+- S5 waits for PR 6, because PR 6 rewrites how `crucible build` writes.
+
+When a pull request in one lane changes the golden manifest, the other lane's open pull request rebases and reruns its proof against the new base.
+
+S4 and F1 change what players see. Each stops at merge-ready until you review it in Studio.
+
 ## Milestone B. Compiler cut
 
 The compiler stops naming the framework. Output stays identical until the last commit of PR 6.
 
-**Before PR 4:** two or three `Extension` trait prototypes run in separate worktrees and are never opened as pull requests. Each is scored on four things: a golden manifest that stays identical, the arch violation count, FD build time against the 3 s budget, and the size of the trait. The agent picks the best score and puts the comparison in PR 4's body.
+**Before PR 4:** two or three `Extension` trait prototypes run in separate worktrees and are never opened as pull requests. Each is scored on four things: a golden manifest that stays identical, the arch violation count, FD build time against the 3 s budget, and the size of the trait. The agent picks the best score and puts the comparison in PR 4's body. The prototypes treat the UI JSX lowering, the classes module and CRU037 as already deleted, because S1 deletes them before PR 4 opens.
 
 ### PR 4. `refactor(compiler): add the extension seam and the ABI crate`
 
 - The chosen `Extension` trait, wired in with no extension moved yet.
 - `crucible-abi`, the generated `emit/abi.d.ts`, `cargo xtask abi check`, and the `crucibleAbi` handshake.
-- The helper registry that replaces the `uses_crucible` and `uses_ui` flags.
+- The helper registry that replaces the `uses_*` import flags.
 
 **Read:** the trait, the ABI table and the handshake diagnostic.
 
@@ -109,14 +141,13 @@ There is one commit per feature, and each one shrinks the arch count:
 1. Registration and DI.
 2. Declarations and schemas.
 3. Boot.
-4. UI JSX and utility classes.
-5. Typed lints. CRU032 to CRU034 move into the compiler, and CRU035 to CRU037 stay in the transform.
-6. Rojo parsing moves to `crucible-project`, and the compiler takes an instance map.
-7. Virtual modules in the compiler.
+4. Typed lints. CRU032 to CRU034 move into the compiler, and CRU035 and CRU036 stay in the transform. CRU037 is already gone, because S1 deletes it. If S2 has merged and S3 has not, CRU038 joins this commit in the transform.
+5. Rojo parsing moves to `crucible-project`, and the compiler takes an instance map.
+6. Virtual modules in the compiler.
 
-When the pull request is done, arch rule 1 has zero violations.
+The UI JSX lowering and the utility classes have no commit here, because S1 deletes them. When the pull request is done, arch rule 1 has zero violations.
 
-**Read:** the moved logic is mechanical. Read the glue each move adds, plus commits 6 and 7.
+**Read:** the moved logic is mechanical. Read the glue each move adds, plus commits 5 and 6.
 
 ### PR 6. `refactor(compiler): make compiler and build state explicit`
 
@@ -129,7 +160,7 @@ When the pull request is done, arch rule 1 has zero violations.
 
 ## Milestone C. Infrastructure as code
 
-This milestone ends with the 0.5.0 release.
+This milestone ends with the 0.6.0 release.
 
 ### PR 7. `feat(iac): model the experience and plan offline`
 
@@ -161,11 +192,11 @@ Nothing in this pull request writes to Roblox outside the gated tests.
 
 **Read:** the handle types, the one-grant rule and deploy's preflight checks.
 
-After this, you release 0.5.0 and FD adopts it in its own repository.
+After this, you release 0.6.0 and FD adopts it in its own repository.
 
 ## Milestone D. Hardening
 
-This milestone ships in 0.5.x patches and 0.6.
+This milestone ships in 0.6.x patches and 0.7.
 
 ### PR 10. `refactor(runtime): encode the modeled protocols`
 
@@ -177,11 +208,11 @@ The program generator, the two runners, the trace comparison, and a CI job with 
 
 ### Deletion PR. `refactor(cli): remove the roblox-ts migration`
 
-This pull request ships in 0.6, one minor release after 0.5.0, per decision 7. It only deletes code.
+This pull request ships in 0.7. Per decision 7, upgrade's roblox-ts migration stays for one more minor release after the Charm and Vide migration's 0.5.0. That release is 0.6.0, so 0.7 is the first without it. It only deletes code.
 
 ## Not scheduled
 
-The TypeScript config front end (`crucible.config.ts`) waits until 0.5.0 has been used. If you still want it after that, it gets its own milestone, starting with a prototype in a child process.
+The TypeScript config front end (`crucible.config.ts`) waits until 0.6.0 has been used. If you still want it after that, it gets its own milestone, starting with a prototype in a child process.
 
 ## If you flip a decision
 
