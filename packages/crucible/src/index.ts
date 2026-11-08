@@ -13,8 +13,8 @@ export interface BootOptions {
 export { Logging, LogLevel } from "./logging";
 export type { Logger, LogRecord, LogSink, SinkSubscription, LogContext, LogProperties } from "./logging";
 
-export { state, computed, effect, watch, untracked, scope, onCleanup, own } from "./reactive";
-export type { Readable, State, Ownable } from "./reactive";
+export { effect, watch, scope, onCleanup, own } from "./reactive";
+export type { Ownable } from "./reactive";
 
 export { replicated, replicatedPerPlayer, syncStatus } from "./replicated";
 export type { Replicated, ReplicatedPerPlayer, SyncStatus } from "./replicated";

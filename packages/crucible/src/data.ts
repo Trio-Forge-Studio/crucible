@@ -1,5 +1,4 @@
 import { markServerOnly, replicatedPathsOf } from "./internal/data/declarations";
-import type { Readable } from "./reactive";
 
 declare const operationKind: unique symbol;
 declare const storeKind: unique symbol;
@@ -108,7 +107,8 @@ export type ClientProfile<S> = S extends ProfileStore<infer T> ? ClientData<T> :
  * A server handle's own members. `h()` reads, tracked and frozen; while the profile is not writable it returns the
  * template's value at the path. `set` and `update` are one write each through the store's gate and return its result.
  */
-export interface WriteHandle<V, A> extends Readable<V | A> {
+export interface WriteHandle<V, A> {
+	(): V | A;
 	set(value: V): boolean;
 	update(change: (current: V) => V): boolean;
 }
@@ -149,7 +149,7 @@ type ReadChildren<V, A> = [V] extends [Scalar]
 					: { readonly [K in keyof V]-?: ReadHandle<V[K], A> };
 
 /** A client handle: the same paths and reads as the server's, and no writes. */
-export type ReadHandle<V, A = never> = Readable<V | A> & ReadChildren<NonNullable<V>, A | Extract<V, undefined>>;
+export type ReadHandle<V, A = never> = (() => V | A) & ReadChildren<NonNullable<V>, A | Extract<V, undefined>>;
 
 /** Why a profile loaded. */
 export type LoadReason = "join" | "resume";

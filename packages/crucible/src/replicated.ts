@@ -1,5 +1,4 @@
 import { statusOf } from "./internal/sync/declarations";
-import type { Readable } from "./reactive";
 
 declare const replicatedKind: unique symbol;
 
@@ -10,7 +9,8 @@ export type SyncStatus = "pending" | "ready" | "failed";
  * A value every client receives. On the server it reads the authoritative value; on a client, the last value the
  * server sent, or `initial` before the first frame. At runtime it is a plain function, so it composes like any getter.
  */
-export interface Replicated<T> extends Readable<T> {
+export interface Replicated<T> {
+	(): T;
 	readonly [replicatedKind]: { readonly audience: "all"; readonly value: (value: T) => T };
 }
 
@@ -18,7 +18,8 @@ export interface Replicated<T> extends Readable<T> {
  * A value each player receives privately. On a client it reads the local player's value, or `initial` before the
  * first frame. On the server there is no single value, so calling it throws.
  */
-export interface ReplicatedPerPlayer<T> extends Readable<T> {
+export interface ReplicatedPerPlayer<T> {
+	(): T;
 	readonly [replicatedKind]: { readonly audience: "player"; readonly value: (value: T) => T };
 }
 
