@@ -66,18 +66,20 @@ const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
 const sorted = (codes) => [...new Set(codes)].sort();
 test("the diagnostics guide lists every CRU code the compiler reports, in order", () => {
-	const compilerDir = path.join(repo, "crates/compiler/src");
-	const compiler = sorted(
+	const sources = ["crates/compiler/src", "crates/transform/src"].flatMap((dir) =>
 		fs
-			.readdirSync(compilerDir, { recursive: true })
+			.readdirSync(path.join(repo, dir), { recursive: true })
 			.filter((name) => name.endsWith(".rs"))
-			.flatMap((name) => {
-				const code = read(path.join(compilerDir, name));
-				return [
-					...code.matchAll(/Code::Rule\((\d+)\)/g),
-					...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
-				].map((m) => cru(m[1]));
-			}),
+			.map((name) => path.join(repo, dir, name)),
+	);
+	const compiler = sorted(
+		sources.flatMap((file) => {
+			const code = read(file);
+			return [
+				...code.matchAll(/Code::Rule\((\d+)\)/g),
+				...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
+			].map((m) => cru(m[1]));
+		}),
 	);
 	const headings = [...read(path.join(repo, "docs/diagnostics.md")).matchAll(/^## (CRU\d{3})$/gm)].map((m) => m[1]);
 	assert.ok(compiler.length > 0, "found CRU codes in the compiler");
