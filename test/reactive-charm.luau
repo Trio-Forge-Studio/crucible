@@ -5,6 +5,7 @@ local life = require("./lib/reactive-life")
 local loadPlace = require("./lib/place")
 local realm = require("./lib/reactive-world")
 local spec = require("./lib/load")
+local SyncWorld = require("./lib/sync-world")
 
 local function strictLife()
 	return life(nil, true)
@@ -598,6 +599,42 @@ return {
 		end)
 		spec.eq(seen, 1, "the child's cleanup ran inside the hook's batch, at the dispose")
 		spec.eq(cleaned, 1, "and only once")
+	end,
+	["E1 rule 13 strict: an effect that throws on a write does not leave a per-player projection of that write unsent"] = function()
+		local w = SyncWorld.new({
+			declare = function(r)
+				return { Value = r.emit.replicatedPerPlayer("Charm.Value", 0, r.n.f64) }
+			end,
+			serve = function(s, d, world)
+				s.charm.flags.strict = true
+				world.x = s.charm.atom(0)
+				world.pulls = 0
+				s.service("Publisher", function(_self)
+					s.entry.publish(d.Value, function()
+						world.pulls += 1
+						return world.x()
+					end)
+				end, {
+					awake = function()
+						s.api.effect(function()
+							if world.x() == 1 then
+								error("a UI effect broke")
+							end
+						end)
+					end,
+				})
+			end,
+		})
+		local ann = w:join("Ann")
+		local pulls = w.pulls
+		local ok = pcall(w.x, 1)
+		spec.eq(ok, false, "the earlier effect threw to the writer")
+		w:heartbeat()
+		spec.eq(ann.d.Value(), 1, "the next Heartbeat still sent the written value")
+		spec.eq(w.pulls - pulls, 1, "after one pull")
+		w:heartbeat()
+		spec.eq(w.pulls - pulls, 1, "a quiet Heartbeat pulls nothing")
+		w:finish()
 	end,
 	["F1 rule 15 strict: an effect that catches a watch's throwing baseline still tracks what it reads after"] = function()
 		local w = strictLife()

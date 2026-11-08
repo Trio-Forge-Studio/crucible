@@ -1,4 +1,4 @@
-import { effect, setActiveSub } from "@rbxts/charm";
+import { effect, getActiveSub, ReactiveFlags, setActiveSub, type ReactiveNode } from "@rbxts/charm";
 import { ClientReady } from "../../network";
 import { Subsystem } from "../../subsystem";
 import { enginePort } from "../binding";
@@ -38,7 +38,7 @@ const RETIRED = -1;
  * One player's projection of a per-player declaration, pulled when a Heartbeat or a snapshot examines it. A pull runs
  * the projector on a worker inside a Charm effect and moves `version` when the outcome changes: a value that is not
  * `rawequal` to the last one, or a different failure. A throw or a yield is the failure. A write that reaches what the
- * pull read only marks it dirty, so projectors run within the Heartbeat's budgets and never in the code that wrote.
+ * pull read only marks it stale, so projectors run within the Heartbeat's budgets and never in the code that wrote.
  */
 interface Projection {
 	readonly project: (player: Player) => unknown;
@@ -47,12 +47,22 @@ interface Projection {
 	/** The value, or the failure with its traceback. */
 	value: unknown;
 	dirty: boolean;
-	/** Stops the effect that watches what the last pull read. */
+	/** The effect that watches what the last pull read, and what stops it. */
+	node?: ReactiveNode;
 	stop?: () => void;
 }
 
+/**
+ * Charm flags the effect while it propagates the write, before any effect runs. An earlier effect that throws ends the
+ * flush and skips the effect's run, so the flag can be the only mark.
+ */
+function skipped(projection: Projection): boolean {
+	const node = projection.node;
+	return node !== undefined && bit32.btest(node.flags, ReactiveFlags.Dirty | ReactiveFlags.Pending);
+}
+
 function pull(projection: Projection, player: Player, changed: () => void) {
-	if (!projection.dirty) return;
+	if (!projection.dirty && !skipped(projection)) return;
 	projection.dirty = false;
 	projection.stop?.();
 	let pulling = true;
@@ -65,6 +75,7 @@ function pull(projection: Projection, player: Player, changed: () => void) {
 			return;
 		}
 		pulling = false;
+		projection.node = getActiveSub();
 		const [result, value] = call(projection.project, player, undefined);
 		const ok = result === CallResult.Ok;
 		if (projection.version > 0 && ok === projection.ok && rawequal(value, projection.value)) return;
@@ -171,6 +182,7 @@ class ServerSync extends Subsystem {
 		this.spent = 0;
 		const ring = [...this.order];
 		if (ring.size() === 0) return;
+		if (!this.changed) this.changed = this.anySkipped();
 		if (!this.incomplete && !this.retiredSince && !this.changed) return;
 		this.changed = false;
 		this.retiredSince = false;
@@ -210,6 +222,12 @@ class ServerSync extends Subsystem {
 			this.incomplete = false;
 			this.cursor = 0;
 		}
+	}
+
+	private anySkipped(): boolean {
+		for (const view of this.order)
+			for (const [, projection] of view.projections) if (!projection.dirty && skipped(projection)) return true;
+		return false;
 	}
 
 	/** One peer's staged examination, or undefined after failing the peer for passing its visit budget. */
