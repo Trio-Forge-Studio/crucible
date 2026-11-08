@@ -194,6 +194,7 @@ Queued entries are owned resources:
 - Each entry registers with its owner's generation or enable interval when it is queued.
 - Ending that owner cancels the entry, whether by explicit disposal, destruction or the end of an interval. The returned disposer cancels it too, and after commit it stops the created effect.
 - At commit, Crucible skips every cancelled entry and every entry whose lifetime has ended. That includes an object that an earlier entry's body destroys in the same commit.
+- An entry's body runs while Crucible creates its effect, so the body can call its own disposer before Crucible holds the stop function. Crucible checks for cancellation again right after it creates the effect, and stops the effect if it was cancelled.
 
 Crucible must check each entry before it creates the effect. Charm does not refuse a new effect under a stopped scope: it links the effect to the active scope (`init.luau:617` to `:618`) and runs its body at once (`init.luau:623` to `:636`). Disposing the owner's scope therefore cannot cancel an entry that is not yet a Charm effect.
 
