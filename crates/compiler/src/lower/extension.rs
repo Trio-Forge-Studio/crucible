@@ -1,0 +1,54 @@
+//! The lowering half of the extension seam.
+
+use super::Lower;
+use crate::extension::{HelperModule, SiteId};
+use crate::tree::Node;
+use crucible_luau::{Expr, Name};
+
+/// What an extension reads and lowers while the compiler lowers one source file.
+pub struct LowerCx<'l, 'a> {
+    l: &'l mut Lower<'a>,
+}
+
+impl Lower<'_> {
+    /// The first extension's lowering of a call.
+    pub(super) fn extension_call(&mut self, call: Node) -> Option<Expr> {
+        let extensions = self.extensions;
+        extensions.iter().find_map(|e| e.lower_call(&mut LowerCx { l: self }, call))
+    }
+
+    /// Each extension's statements after a class declaration, in the order of the extensions.
+    pub(super) fn extension_class_tail(&mut self, class: Node, local: &Name) {
+        let extensions = self.extensions;
+        for e in extensions {
+            let tail = e.lower_class_tail(&mut LowerCx { l: self }, class, local);
+            self.current_block.extend(tail);
+        }
+    }
+
+    pub(super) fn replacement(&mut self, n: Node) -> Option<Expr> {
+        let at = self.replacements.iter().position(|(node, _)| *node == n)?;
+        Some(self.replacements.swap_remove(at).1)
+    }
+}
+
+impl LowerCx<'_, '_> {
+    /// The id of a node of the file being lowered.
+    pub fn site(&self, n: Node) -> SiteId {
+        SiteId { file: self.l.file_id, span: n.span() }
+    }
+
+    /// A call's arguments in evaluation order, with a last argument that may return several values cut to one. Each
+    /// replacement lowers in place of its node, wherever that node sits in the arguments.
+    pub fn arguments(&mut self, call: Node, replacements: Vec<(Node, Expr)>) -> Vec<Expr> {
+        let outer = std::mem::replace(&mut self.l.replacements, replacements);
+        let arguments = self.l.macro_arguments(call);
+        self.l.replacements = outer;
+        arguments
+    }
+
+    /// `name` in a helper module the extension declared, which the file then imports.
+    pub fn helper(&mut self, module: &HelperModule, name: &'static str) -> Expr {
+        self.l.helper(module, name)
+    }
+}

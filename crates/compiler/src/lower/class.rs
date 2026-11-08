@@ -141,6 +141,7 @@ impl Lower<'_> {
         if let Some(Crucible::Class(registered)) = self.fact(s).and_then(|f| f.crucible.as_deref()) {
             self.register(registered, local.clone());
         }
+        self.extension_class_tail(s, &local);
         if s.is_export() {
             self.export(local);
         }

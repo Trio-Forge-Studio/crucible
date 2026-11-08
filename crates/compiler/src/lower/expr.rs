@@ -45,6 +45,11 @@ fn offset_number(e: Expr, delta: f64) -> Expr {
 
 impl Lower<'_> {
     pub(super) fn expr(&mut self, n: Node) -> Expr {
+        if !self.replacements.is_empty()
+            && let Some(value) = self.replacement(n)
+        {
+            return value;
+        }
         match n.kind() {
             Kind::Identifier => self.identifier(n),
             Kind::NumericLiteral => Expr::Number(n.number()),

@@ -2,6 +2,7 @@ mod call;
 mod class;
 mod crucible;
 mod expr;
+pub(crate) mod extension;
 mod jsx;
 mod pattern;
 mod stmt;
@@ -12,6 +13,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
+use crate::extension::Extension;
 use crate::facts::{Fact, FileFacts, HelperModule, ModulePath, Place, Unanswered};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 use crucible_luau::{Block, Expr, Name, Stmt};
@@ -44,11 +46,16 @@ pub(crate) fn lower(
     unanswered: &[&Unanswered],
     import_base: ImportBase,
     place: &Place,
+    file_id: u32,
+    extensions: &[&dyn Extension],
 ) -> Result<Block, Vec<Error>> {
     let mut l = Lower {
         file,
+        file_id,
         facts,
         place,
+        extensions,
+        replacements: Vec::new(),
         path: file.path(),
         import_base,
         errors: Vec::new(),
@@ -114,8 +121,13 @@ enum Usage {
 
 pub(crate) struct Lower<'a> {
     file: File,
+    /// The file's index in the fact table, which an extension's `SiteId` names.
+    file_id: u32,
     facts: &'a FileFacts,
     place: &'a Place,
+    extensions: &'a [&'a dyn Extension],
+    /// The nodes an extension lowers in place of the compiler while the compiler lowers a call's arguments for it.
+    replacements: Vec<(Node, Expr)>,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,
@@ -449,6 +461,15 @@ impl<'a> Lower<'a> {
 
     fn is_hoisted(&self, name: Node) -> bool {
         self.hoisted_name_starts.contains(&name.span().start)
+    }
+
+    /// A call's arguments in evaluation order, with a last argument that may return several values cut to one.
+    fn macro_arguments(&mut self, n: Node) -> Vec<Expr> {
+        let mut values = self.ordered(n.arguments().iter(), |l, a| l.expr(a));
+        if let Some(last) = values.pop() {
+            values.push(if last.is_multi() { Expr::Paren(Box::new(last)) } else { last });
+        }
+        values
     }
 
     /// `name` in a helper module, which this file then imports.

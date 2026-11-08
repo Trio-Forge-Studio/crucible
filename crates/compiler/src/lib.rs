@@ -1,5 +1,6 @@
 mod declarations;
 mod entities;
+pub mod extension;
 mod extract;
 mod facts;
 mod include;
@@ -13,6 +14,8 @@ mod write;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+use extension::Extension;
 
 // The fact table is internal. Tests read it through `analyze`, which the `test-support` feature exports.
 #[cfg(feature = "test-support")]
@@ -73,8 +76,20 @@ pub enum Target<'a> {
 /// file it compiles. Any diagnostic stops the build before facts are extracted.
 #[cfg(feature = "test-support")]
 pub fn analyze(tsconfig: &Path, target: Target<'_>) -> Result<Facts, Vec<Diagnostic>> {
-    let checked = program::check(tsconfig)?;
-    Ok(extract::extract(checked, target))
+    analyze_with(tsconfig, target, &mut [])
+}
+
+/// `analyze` with extensions, which keep their own facts.
+#[cfg(feature = "test-support")]
+pub fn analyze_with(
+    tsconfig: &Path,
+    target: Target<'_>,
+    extensions: &mut [&mut dyn Extension],
+) -> Result<Facts, Vec<Diagnostic>> {
+    on_compiler_thread(|| {
+        let checked = program::check(tsconfig)?;
+        Ok(extract::extract(checked, target, extensions))
+    })
 }
 
 /// The `outDir` that `tsconfig` sets, read without building its program, with the diagnostics of reading and parsing
@@ -120,32 +135,51 @@ impl fmt::Display for Failure {
 
 /// Any diagnostic, Crucible rule or lowering error fails the whole compile, and no module is returned.
 pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
-    // tsrs's checker recurses with the source, so every caller needs the stack its CLI uses.
+    compile_with(tsconfig, target, &mut [])
+}
+
+/// `compile` with extensions, which the compiler calls in order at each of its hooks.
+pub fn compile_with(
+    tsconfig: &Path,
+    target: Target<'_>,
+    extensions: &mut [&mut dyn Extension],
+) -> Result<Compiled, Failure> {
+    on_compiler_thread(|| compile_on_thread(tsconfig, target, extensions))
+}
+
+/// tsrs's checker recurses with the source, so every caller needs the stack its CLI uses.
+fn on_compiler_thread<T: Send>(run: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(512 << 20)
-            .spawn_scoped(scope, || compile_on_thread(tsconfig, target))
+            .spawn_scoped(scope, run)
             .expect("cannot start the compiler thread")
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
     })
 }
 
-fn compile_on_thread(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure> {
+fn compile_on_thread(
+    tsconfig: &Path,
+    target: Target<'_>,
+    extensions: &mut [&mut dyn Extension],
+) -> Result<Compiled, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
     let files = checked.files();
     let paths: Vec<String> = files.iter().map(|f| f.path()).collect();
     let root = checked.source_root();
     let out_dir = PathBuf::from(checked.out_dir().unwrap_or_else(|| root.clone()));
-    let facts = extract::extract(checked, target);
+    let facts = extract::extract(checked, target, extensions);
     if !facts.diagnostics.is_empty() {
         return Err(Failure::Crucible(facts.diagnostics));
     }
-    let facts_by_path: HashMap<&str, &FileFacts> = facts.files.iter().map(|f| (f.path.as_str(), f)).collect();
+    let extensions: Vec<&dyn Extension> = extensions.iter().map(|e| &**e).collect();
+    let facts_by_path: HashMap<&str, (u32, &FileFacts)> =
+        facts.files.iter().enumerate().map(|(id, f)| (f.path.as_str(), (id as u32, f))).collect();
     let mut modules = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     for (file, path) in files.into_iter().zip(&paths) {
-        let Some(file_facts) = facts_by_path.get(path.as_str()) else {
+        let Some(&(id, file_facts)) = facts_by_path.get(path.as_str()) else {
             let message = "the fact table has no entry for this file".to_owned();
             errors.push(Error { path: path.clone(), line: 1, column: 1, message });
             continue;
@@ -157,7 +191,7 @@ fn compile_on_thread(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Fa
             _ => (stem.to_owned(), ImportBase::ScriptParent),
         };
         let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
-        match lower::lower(file, file_facts, &unanswered, import_base, &facts.place) {
+        match lower::lower(file, file_facts, &unanswered, import_base, &facts.place, id, &extensions) {
             Ok(chunk) => {
                 let mut source = crucible_luau::print(&chunk);
                 source.insert_str(0, HEADER);

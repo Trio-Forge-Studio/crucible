@@ -54,6 +54,8 @@ pub(super) enum Code {
     Setup,
     /// The place cannot hold a module where the program needs it.
     Place,
+    /// An extension's, with its TypeScript error number. It writes the whole message.
+    Extension(i32),
 }
 
 impl Code {
@@ -63,6 +65,7 @@ impl Code {
             Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),
             Code::Setup => (90000, format!("Crucible: {message}")),
             Code::Place => (0, message.to_owned()),
+            Code::Extension(code) => (code, message.to_owned()),
         }
     }
 }
@@ -237,6 +240,16 @@ impl Api {
                 return None;
             }
             entry_types(&owner, entry)
+        })
+    }
+
+    /// The `package.json` of the program's first file from `package`.
+    pub fn manifest(&mut self, package: &str) -> Option<crate::extension::Manifest> {
+        let program = self.program;
+        program.source_files().iter().find_map(|file| {
+            let owner = self.package_of(Path::new(file.file_name()))?;
+            (owner.json["name"] == package)
+                .then(|| crate::extension::Manifest { path: owner.dir.join("package.json"), json: owner.json.clone() })
         })
     }
 

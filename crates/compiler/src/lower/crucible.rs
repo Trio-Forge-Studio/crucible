@@ -169,14 +169,6 @@ impl Lower<'_> {
         }
     }
 
-    fn macro_arguments(&mut self, n: Node) -> Vec<Expr> {
-        let mut values = self.ordered(n.arguments().iter(), |l, a| l.expr(a));
-        if let Some(last) = values.pop() {
-            values.push(if last.is_multi() { Expr::Paren(Box::new(last)) } else { last });
-        }
-        values
-    }
-
     /// `__crucible.defineClass(Class, { kind, id, deps, provides, tag, instance, attributes })`, which the runtime's
     /// registry reads, after a registered class.
     pub(super) fn register(&mut self, class: &Class, name: Name) {

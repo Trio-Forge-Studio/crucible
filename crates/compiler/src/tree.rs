@@ -251,7 +251,7 @@ impl File {
         self.file.file_name().replace('\\', "/")
     }
 
-    pub fn text(&self) -> &'static str {
+    pub(crate) fn text(&self) -> &'static str {
         self.file.text()
     }
 
@@ -313,11 +313,11 @@ pub struct Nodes {
 }
 
 impl Nodes {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
@@ -325,7 +325,7 @@ impl Nodes {
         self.nodes.get(i).map(|&n| Node { n, text: self.text })
     }
 
-    pub fn last(&self) -> Option<Node> {
+    pub(crate) fn last(&self) -> Option<Node> {
         self.nodes.last().map(|&n| Node { n, text: self.text })
     }
 
@@ -336,6 +336,15 @@ impl Nodes {
 }
 
 impl Node {
+    /// A node of any file of the program.
+    pub(crate) fn of(n: P<TsNode>) -> Option<Node> {
+        Some(Node { n, text: tsrs_ast::get_source_file_of_node(n)?.text() })
+    }
+
+    pub(crate) fn raw(&self) -> P<TsNode> {
+        self.n
+    }
+
     fn wrap(&self, n: P<TsNode>) -> Node {
         Node { n, text: self.text }
     }
@@ -352,7 +361,7 @@ impl Node {
         kind_of(self.n.kind())
     }
 
-    pub fn kind_name(&self) -> String {
+    pub(crate) fn kind_name(&self) -> String {
         format!("{:?}", self.n.kind())
     }
 
@@ -360,13 +369,13 @@ impl Node {
         span(self.n, self.text)
     }
 
-    pub fn parent(&self) -> Option<Node> {
+    pub(crate) fn parent(&self) -> Option<Node> {
         self.wrap_opt(self.n.parent())
     }
 
     /// The declaration of the value `name` as seen from this node, through the scopes the binder filled. `None` for a
     /// global.
-    pub fn lookup(&self, name: &str) -> Option<Node> {
+    pub(crate) fn lookup(&self, name: &str) -> Option<Node> {
         let mut scope = Some(self.n);
         while let Some(n) = scope {
             if let Some(symbol) = n.locals().and_then(|locals| locals.lookup(name))
@@ -380,21 +389,21 @@ impl Node {
     }
 
     /// The declaration an identifier refers to.
-    pub fn declaration(&self) -> Option<Node> {
+    pub(crate) fn declaration(&self) -> Option<Node> {
         self.lookup(self.n.text())
     }
 
-    pub fn contains(&self, other: Node) -> bool {
+    pub(crate) fn contains(&self, other: Node) -> bool {
         let (outer, inner) = (self.span(), other.span());
         outer.start <= inner.start && inner.end <= outer.end
     }
 
     /// A string or template literal's text is its cooked value.
-    pub fn text(&self) -> &'static str {
+    pub(crate) fn text(&self) -> &'static str {
         self.n.text()
     }
 
-    pub fn number(&self) -> f64 {
+    pub(crate) fn number(&self) -> f64 {
         let text = self.n.text();
         text.parse().unwrap_or_else(|_| parse_integer(text).unwrap_or(f64::NAN))
     }
@@ -403,7 +412,7 @@ impl Node {
         self.wrap(self.n.expression().expect("the node has an expression"))
     }
 
-    pub fn expression_opt(&self) -> Option<Node> {
+    pub(crate) fn expression_opt(&self) -> Option<Node> {
         self.wrap_opt(self.n.expression())
     }
 
@@ -411,11 +420,11 @@ impl Node {
         self.wrap_opt(self.n.name())
     }
 
-    pub fn property_name(&self) -> Option<Node> {
+    pub(crate) fn property_name(&self) -> Option<Node> {
         self.wrap_opt(self.n.property_name())
     }
 
-    pub fn initializer(&self) -> Option<Node> {
+    pub(crate) fn initializer(&self) -> Option<Node> {
         match self.n.kind() {
             TsKind::ForOfStatement | TsKind::ForInStatement => {
                 Some(self.wrap(self.n.as_for_in_or_of_statement().initializer))
@@ -428,7 +437,7 @@ impl Node {
         }
     }
 
-    pub fn body(&self) -> Option<Node> {
+    pub(crate) fn body(&self) -> Option<Node> {
         match self.n.kind() {
             TsKind::ModuleDeclaration => self.wrap_opt(self.n.as_module_declaration().body()),
             TsKind::ClassStaticBlockDeclaration => Some(self.wrap(self.n.as_class_static_block_declaration().body)),
@@ -436,7 +445,7 @@ impl Node {
         }
     }
 
-    pub fn statements(&self) -> Nodes {
+    pub(crate) fn statements(&self) -> Nodes {
         match self.n.kind() {
             TsKind::CaseClause | TsKind::DefaultClause => {
                 self.list(self.n.as_case_or_default_clause().statements.nodes())
@@ -445,7 +454,7 @@ impl Node {
         }
     }
 
-    pub fn parameters(&self) -> Nodes {
+    pub(crate) fn parameters(&self) -> Nodes {
         self.list(self.n.parameters())
     }
 
@@ -453,7 +462,7 @@ impl Node {
         self.list(self.n.arguments())
     }
 
-    pub fn elements(&self) -> Nodes {
+    pub(crate) fn elements(&self) -> Nodes {
         match self.n.kind() {
             TsKind::NamedImports => self.list(self.n.as_named_imports().elements.nodes()),
             TsKind::NamedExports => self.list(self.n.as_named_exports().elements.nodes()),
@@ -461,15 +470,15 @@ impl Node {
         }
     }
 
-    pub fn properties(&self) -> Nodes {
+    pub(crate) fn properties(&self) -> Nodes {
         self.list(self.n.properties())
     }
 
-    pub fn members(&self) -> Nodes {
+    pub(crate) fn members(&self) -> Nodes {
         self.list(self.n.members())
     }
 
-    pub fn declarations(&self) -> Nodes {
+    pub(crate) fn declarations(&self) -> Nodes {
         let list = match self.n.kind() {
             TsKind::VariableStatement => self.n.as_variable_statement().declaration_list,
             _ => self.n,
@@ -477,11 +486,11 @@ impl Node {
         self.list(list.as_variable_declaration_list().declarations.nodes())
     }
 
-    pub fn is_const(&self) -> bool {
+    pub(crate) fn is_const(&self) -> bool {
         self.declaration_list_flags().contains(NodeFlags::Const)
     }
 
-    pub fn is_var(&self) -> bool {
+    pub(crate) fn is_var(&self) -> bool {
         !self.declaration_list_flags().intersects(NodeFlags::BlockScoped)
     }
 
@@ -492,19 +501,19 @@ impl Node {
         }
     }
 
-    pub fn left(&self) -> Node {
+    pub(crate) fn left(&self) -> Node {
         self.wrap(self.n.as_binary_expression().left)
     }
 
-    pub fn right(&self) -> Node {
+    pub(crate) fn right(&self) -> Node {
         self.wrap(self.n.as_binary_expression().right())
     }
 
-    pub fn operator(&self) -> Op {
+    pub(crate) fn operator(&self) -> Op {
         op_of(self.n.as_binary_expression().operator_token.kind())
     }
 
-    pub fn unary_operator(&self) -> Option<UnaryOp> {
+    pub(crate) fn unary_operator(&self) -> Option<UnaryOp> {
         let kind = match self.n.kind() {
             TsKind::PrefixUnaryExpression => self.n.as_prefix_unary_expression().operator,
             _ => self.n.as_postfix_unary_expression().operator,
@@ -520,14 +529,14 @@ impl Node {
         })
     }
 
-    pub fn operand(&self) -> Node {
+    pub(crate) fn operand(&self) -> Node {
         match self.n.kind() {
             TsKind::PrefixUnaryExpression => self.wrap(self.n.as_prefix_unary_expression().operand),
             _ => self.wrap(self.n.as_postfix_unary_expression().operand),
         }
     }
 
-    pub fn condition(&self) -> Option<Node> {
+    pub(crate) fn condition(&self) -> Option<Node> {
         match self.n.kind() {
             TsKind::ConditionalExpression => Some(self.wrap(self.n.as_conditional_expression().condition)),
             TsKind::ForStatement => self.wrap_opt(self.n.as_for_statement().condition),
@@ -535,80 +544,80 @@ impl Node {
         }
     }
 
-    pub fn incrementor(&self) -> Option<Node> {
+    pub(crate) fn incrementor(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_for_statement().incrementor)
     }
 
-    pub fn when_true(&self) -> Node {
+    pub(crate) fn when_true(&self) -> Node {
         self.wrap(self.n.as_conditional_expression().when_true)
     }
 
-    pub fn when_false(&self) -> Node {
+    pub(crate) fn when_false(&self) -> Node {
         self.wrap(self.n.as_conditional_expression().when_false)
     }
 
-    pub fn then_statement(&self) -> Node {
+    pub(crate) fn then_statement(&self) -> Node {
         self.wrap(self.n.as_if_statement().then_statement)
     }
 
-    pub fn else_statement(&self) -> Option<Node> {
+    pub(crate) fn else_statement(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_if_statement().else_statement)
     }
 
-    pub fn loop_body(&self) -> Node {
+    pub(crate) fn loop_body(&self) -> Node {
         self.wrap(self.n.statement())
     }
 
-    pub fn clauses(&self) -> Nodes {
+    pub(crate) fn clauses(&self) -> Nodes {
         let block = self.n.as_switch_statement().case_block;
         self.list(block.as_case_block().clauses.nodes())
     }
 
-    pub fn try_block(&self) -> Node {
+    pub(crate) fn try_block(&self) -> Node {
         self.wrap(self.n.as_try_statement().try_block)
     }
 
-    pub fn catch_clause(&self) -> Option<Node> {
+    pub(crate) fn catch_clause(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_try_statement().catch_clause)
     }
 
-    pub fn finally_block(&self) -> Option<Node> {
+    pub(crate) fn finally_block(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_try_statement().finally_block)
     }
 
-    pub fn catch_variable(&self) -> Option<Node> {
+    pub(crate) fn catch_variable(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_catch_clause().variable_declaration)
     }
 
-    pub fn catch_block(&self) -> Node {
+    pub(crate) fn catch_block(&self) -> Node {
         self.wrap(self.n.as_catch_clause().block)
     }
 
-    pub fn head(&self) -> Node {
+    pub(crate) fn head(&self) -> Node {
         self.wrap(self.n.as_template_expression().head)
     }
 
-    pub fn template_spans(&self) -> Nodes {
+    pub(crate) fn template_spans(&self) -> Nodes {
         self.list(self.n.as_template_expression().template_spans.nodes())
     }
 
-    pub fn literal(&self) -> Node {
+    pub(crate) fn literal(&self) -> Node {
         self.wrap(self.n.as_template_span().literal)
     }
 
-    pub fn argument_expression(&self) -> Node {
+    pub(crate) fn argument_expression(&self) -> Node {
         self.wrap(self.n.as_element_access_expression().argument_expression)
     }
 
-    pub fn has_question_dot(&self) -> bool {
+    pub(crate) fn has_question_dot(&self) -> bool {
         self.n.question_dot_token().is_some()
     }
 
-    pub fn in_optional_chain(&self) -> bool {
+    pub(crate) fn in_optional_chain(&self) -> bool {
         self.n.flags().contains(NodeFlags::OptionalChain)
     }
 
-    pub fn is_rest(&self) -> bool {
+    pub(crate) fn is_rest(&self) -> bool {
         match self.n.kind() {
             TsKind::Parameter => self.n.as_parameter_declaration().dot_dot_dot_token().is_some(),
             TsKind::BindingElement => self.n.as_binding_element().dot_dot_dot_token().is_some(),
@@ -616,55 +625,55 @@ impl Node {
         }
     }
 
-    pub fn is_export(&self) -> bool {
+    pub(crate) fn is_export(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Export)
     }
 
-    pub fn is_export_equals(&self) -> bool {
+    pub(crate) fn is_export_equals(&self) -> bool {
         self.n.as_export_assignment().is_export_equals
     }
 
-    pub fn is_default(&self) -> bool {
+    pub(crate) fn is_default(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Default)
     }
 
-    pub fn is_static(&self) -> bool {
+    pub(crate) fn is_static(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Static)
     }
 
-    pub fn is_abstract(&self) -> bool {
+    pub(crate) fn is_abstract(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Abstract)
     }
 
-    pub fn is_ambient(&self) -> bool {
+    pub(crate) fn is_ambient(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Ambient) || self.n.flags().contains(NodeFlags::Ambient)
     }
 
-    pub fn is_async(&self) -> bool {
+    pub(crate) fn is_async(&self) -> bool {
         self.n.modifier_flags().contains(ModifierFlags::Async)
     }
 
-    pub fn is_generator(&self) -> bool {
+    pub(crate) fn is_generator(&self) -> bool {
         tsrs_ast::get_function_flags(Some(self.n)).contains(tsrs_ast::FunctionFlags::Generator)
     }
 
-    pub fn is_parameter_property(&self) -> bool {
+    pub(crate) fn is_parameter_property(&self) -> bool {
         self.n.modifier_flags().intersects(ModifierFlags::ParameterPropertyModifier)
     }
 
-    pub fn has_label(&self) -> bool {
+    pub(crate) fn has_label(&self) -> bool {
         self.n.label().is_some()
     }
 
-    pub fn is_type_only(&self) -> bool {
+    pub(crate) fn is_type_only(&self) -> bool {
         self.n.is_type_only()
     }
 
-    pub fn has_decorators(&self) -> bool {
+    pub(crate) fn has_decorators(&self) -> bool {
         !self.n.decorators().is_empty()
     }
 
-    pub fn extends(&self) -> Option<Node> {
+    pub(crate) fn extends(&self) -> Option<Node> {
         let clauses = self.n.as_class_declaration().class_like_base.heritage_clauses.get()?;
         clauses
             .nodes()
@@ -675,24 +684,24 @@ impl Node {
             .map(|e| self.wrap(e))
     }
 
-    pub fn module_specifier(&self) -> Option<Node> {
+    pub(crate) fn module_specifier(&self) -> Option<Node> {
         self.wrap_opt(self.n.module_specifier())
     }
 
-    pub fn import_clause(&self) -> Option<Node> {
+    pub(crate) fn import_clause(&self) -> Option<Node> {
         self.wrap_opt(self.n.import_clause())
     }
 
-    pub fn named_bindings(&self) -> Option<Node> {
+    pub(crate) fn named_bindings(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_import_clause().named_bindings)
     }
 
-    pub fn export_clause(&self) -> Option<Node> {
+    pub(crate) fn export_clause(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_export_declaration().export_clause)
     }
 
     /// The tag of an element, which a fragment has not.
-    pub fn jsx_tag(&self) -> Option<Node> {
+    pub(crate) fn jsx_tag(&self) -> Option<Node> {
         match self.n.kind() {
             TsKind::JsxElement => {
                 Some(self.wrap(self.n.as_jsx_element().opening_element.as_jsx_opening_element().tag_name))
@@ -703,7 +712,7 @@ impl Node {
     }
 
     /// Whether a tag names an intrinsic element, such as `frame`, rather than a component.
-    pub fn is_intrinsic_tag(&self) -> bool {
+    pub(crate) fn is_intrinsic_tag(&self) -> bool {
         match self.n.kind() {
             TsKind::Identifier => tsrs_scanner::is_intrinsic_jsx_name(self.n.text()),
             TsKind::JsxNamespacedName => true,
@@ -712,11 +721,11 @@ impl Node {
     }
 
     /// A tag's or an attribute's name, with a namespace as `namespace:name`.
-    pub fn jsx_name(&self) -> String {
+    pub(crate) fn jsx_name(&self) -> String {
         tsrs_ast::entity_name_to_string(self.n, None)
     }
 
-    pub fn jsx_attributes(&self) -> Nodes {
+    pub(crate) fn jsx_attributes(&self) -> Nodes {
         let attributes = match self.n.kind() {
             TsKind::JsxElement => self.n.as_jsx_element().opening_element.as_jsx_opening_element().attributes,
             TsKind::JsxSelfClosingElement => self.n.as_jsx_self_closing_element().attributes,
@@ -725,7 +734,7 @@ impl Node {
         self.list(attributes.as_jsx_attributes().properties().nodes())
     }
 
-    pub fn jsx_children(&self) -> Nodes {
+    pub(crate) fn jsx_children(&self) -> Nodes {
         match self.n.kind() {
             TsKind::JsxElement => self.list(self.n.as_jsx_element().children.nodes()),
             TsKind::JsxFragment => self.list(self.n.as_jsx_fragment().children.nodes()),
@@ -733,30 +742,30 @@ impl Node {
         }
     }
 
-    pub fn jsx_attribute_name(&self) -> Node {
+    pub(crate) fn jsx_attribute_name(&self) -> Node {
         self.wrap(self.n.as_jsx_attribute().name)
     }
 
-    pub fn jsx_attribute_value(&self) -> Option<Node> {
+    pub(crate) fn jsx_attribute_value(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_jsx_attribute().initializer)
     }
 
-    pub fn jsx_spread_expression(&self) -> Node {
+    pub(crate) fn jsx_spread_expression(&self) -> Node {
         self.wrap(self.n.as_jsx_spread_attribute().expression)
     }
 
     /// A `{...}` child or attribute value's expression, which `{}` has not.
-    pub fn jsx_expression(&self) -> Option<Node> {
+    pub(crate) fn jsx_expression(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_jsx_expression().expression)
     }
 
-    pub fn is_jsx_spread_child(&self) -> bool {
+    pub(crate) fn is_jsx_spread_child(&self) -> bool {
         self.n.as_jsx_expression().dot_dot_dot_token.is_some()
     }
 
     /// The string a text child renders, as TypeScript's JSX emit trims and joins its lines. `None` when it is only
     /// whitespace.
-    pub fn jsx_text(&self) -> Option<String> {
+    pub(crate) fn jsx_text(&self) -> Option<String> {
         let text = self.n.as_jsx_text();
         if text.contains_only_trivia_white_spaces() {
             return None;
@@ -773,7 +782,7 @@ impl Node {
         });
     }
 
-    pub fn is_erased(&self) -> bool {
+    pub(crate) fn is_erased(&self) -> bool {
         tsrs_ast::is_type_node_kind(self.n.kind())
             || matches!(
                 self.n.kind(),

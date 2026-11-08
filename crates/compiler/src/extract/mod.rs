@@ -6,6 +6,7 @@
 mod collisions;
 mod crucible;
 mod data;
+pub(crate) mod extension;
 mod network;
 mod typed_lint;
 mod types;
@@ -21,6 +22,7 @@ use tsrs_compiler::CheckerHandle;
 use tsrs_core::{CompilerOptions, JsxEmit, P, jsnum};
 
 use crate::Diagnostic;
+use crate::extension::Extension;
 use crate::facts::{
     Callee, Fact, Facts, Falsy, FileFacts, Helper, HelperModule, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span,
     Unanswered,
@@ -28,9 +30,11 @@ use crate::facts::{
 use crate::macros::Macro;
 use crate::program::Checked;
 use crate::project::{Game, absolute, installed_module};
+use crate::tree::File;
 use crucible::Code;
+use extension::{ExtractCx, ProgramCx};
 
-pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
+pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Facts {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -83,11 +87,21 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
         jsx: None,
     };
     x.declare_helper(&crate::lower::CRUCIBLE_EMIT);
+    for extension in extensions.iter_mut() {
+        extension.begin_program(&mut ProgramCx { x: &mut x });
+    }
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
             continue;
         }
+        let id = x.facts.files.len() as u32;
         x.source_file(file);
+        for extension in extensions.iter_mut() {
+            extension.extract_file(&mut ExtractCx { x: &mut x, file: id }, File::new(file));
+        }
+    }
+    for extension in extensions.iter_mut() {
+        extension.finish_program(&mut ProgramCx { x: &mut x });
     }
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     x.facts
