@@ -132,6 +132,68 @@ fn inherited_jsx_options_fail_at_the_invoked_tsconfig() {
     assert_jsx_config_error(&game);
 }
 
+#[test]
+fn an_explicitly_empty_jsx_import_source_is_rejected() {
+    for inherited in [false, true] {
+        let game = Game::new();
+        game.write("jsx-options.json", r#"{"compilerOptions":{"jsxImportSource":""}}"#);
+        game.config(|c| {
+            c["compilerOptions"]["jsx"] = "react".into();
+            c["compilerOptions"]["jsxFactory"] = "Vide.jsx".into();
+            if inherited {
+                let base = c["extends"].take();
+                c["extends"] = serde_json::json!([base, "./jsx-options.json"]);
+            } else {
+                c["compilerOptions"]["jsxImportSource"] = "".into();
+            }
+        });
+        game.main("export {};\n");
+        assert_jsx_config_error(&game);
+    }
+}
+
+#[test]
+fn an_automatic_runtime_pragma_is_rejected_at_the_pragma() {
+    assert_jsx_pragma_errors("/** @jsxRuntime automatic */", &[(2, 3)]);
+}
+
+#[test]
+fn an_import_source_pragma_is_rejected_before_resolving_the_removed_ui() {
+    assert_jsx_pragma_errors("/** @jsxImportSource @trioforge/crucible/ui */", &[(2, 3)]);
+}
+
+#[test]
+fn automatic_pragmas_are_rejected_even_when_the_runtime_resolves() {
+    assert_jsx_pragma_errors("/** @jsxRuntime automatic */\n  /** @jsxImportSource fakejsx */", &[(2, 3), (3, 3)]);
+}
+
+fn assert_jsx_pragma_errors(pragmas: &str, locations: &[(u32, u32)]) {
+    let game = Game::new();
+    game.config(|c| {
+        c["compilerOptions"]["jsx"] = "react".into();
+        c["compilerOptions"]["jsxFactory"] = "Vide.jsx".into();
+        c["compilerOptions"]["paths"] = serde_json::json!({ "fakejsx/*": ["./fakejsx/*"] });
+    });
+    game.write(
+        "fakejsx/jsx-runtime.d.ts",
+        "export declare namespace JSX {\n\ttype Element = unknown;\n\tinterface IntrinsicElements { frame: {}; }\n}\n",
+    );
+    game.write("src/client/view.tsx", &format!("\n  {pragmas}\nexport const view = <frame />;\n"));
+    let Err(Failure::Check(errors)) = game.try_compile() else {
+        panic!("automatic JSX pragmas fail before source checking");
+    };
+    assert_eq!(errors.len(), locations.len());
+    for (error, &location) in errors.iter().zip(locations) {
+        assert_eq!(game.relative(error), "src/client/view.tsx");
+        assert_eq!((error.line, error.column), location);
+        assert_eq!(error.code, 0);
+        assert_eq!(
+            error.message,
+            "`@jsxRuntime automatic` and `@jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` in the tsconfig and remove these pragmas."
+        );
+    }
+}
+
 fn assert_jsx_config_error(game: &Game) {
     let Err(Failure::Check(errors)) = game.try_compile() else {
         panic!("automatic JSX options fail before source checking");

@@ -5,7 +5,7 @@ fn rules(game: &Game) -> Vec<(usize, usize, i32)> {
     game.facts()
         .diagnostics
         .iter()
-        .filter(|d| (90032..=90037).contains(&d.code))
+        .filter(|d| (90032..=90036).contains(&d.code))
         .map(|d| (d.line as usize, d.column as usize, d.code))
         .collect()
 }

@@ -684,7 +684,6 @@ dependencies = [
  "crucible-compiler",
  "crucible-luau",
  "serde_json",
- "toml 1.1.8+spec-1.1.0",
  "tsrs_ast",
  "tsrs_checker",
  "tsrs_compiler",

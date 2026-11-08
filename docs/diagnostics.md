@@ -435,6 +435,8 @@ CRU027: <store>.<method> is server-only; the client reads <store>().
 
 A profile store call runs on the wrong side. `store()` and `store.loaded()` with no arguments read the local player's profile, so they belong in client files. `store(player)`, `store.loaded(player)` and every other method, such as `save`, `onLoad` or `grant`, belong in server files. A file with no side fails both ways. To fix it, move the call to a file on the matching side, or call the form for that side. `crucible docs profile-stores` lists the methods.
 
+CRU028 to CRU031 are retired and will never be reused; CRU037 was removed with Crucible UI and will never be reused.
+
 ## Type-aware rules
 
 Only the Crucible compiler reports CRU032 to CRU036. It checks these rules in its fact pass. Each diagnostic is an error and stops compilation. These checks also apply outside registered Crucible classes, except for the lifecycle rules that require Crucible ancestry.
