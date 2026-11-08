@@ -1,16 +1,14 @@
 import {
 	effect as charmEffect,
 	effectScope,
+	endBatch,
 	getActiveSub,
 	onCleanup as charmOnCleanup,
 	ReactiveFlags,
 	setActiveSub,
-	signal,
 	startBatch,
 	untracked,
-	type Getter,
 	type ReactiveNode,
-	type Setter,
 } from "@rbxts/charm";
 import { runtimeDiagnostic } from "../diagnostics";
 import { closeScope, drain, enabling, hasEnded, openScope } from "../lifecycle";
@@ -69,8 +67,8 @@ interface DestroyFields {
  * An owner lists the scopes, and the effects outside every run, that it ends, instead of linking them into its Charm
  * node: Charm 0.11.1's `stopEffect` unlinks a linked node from the wrong parent, which corrupts the parent's
  * dependencies when the node is disposed before it. An effect created inside a run is linked into the running Charm
- * effect, as Charm nests it, and is never stopped: ending it writes its `closed` signal, so Charm reruns it with no
- * body and drops what it read, the effects it created included.
+ * effect, as Charm nests it. Ending it unhooks its node from that link before its own stop runs, so the stop drops
+ * what it read, the effects it created included, at once, and the parent's next run or stop drops the link.
  */
 export interface Owner {
 	readonly role: Role;
@@ -84,15 +82,14 @@ export interface Owner {
 	releases?: unknown[];
 	/** Stops its Charm node: a scope-like owner's scope, or a listed Run's effect. */
 	stop?: () => void;
+	/** A nested Run's Charm stop, which only `halt` calls. */
+	halt?: () => void;
 	/** A Run's body. Disposing the Run clears it, and a run without one reads nothing, so Charm drops it. */
 	body?: () => unknown;
 	/** A Run's cleanup, made once and armed on each run that holds a release or a child scope. */
 	finish?: () => void;
 	/** A Run's cleanup is armed on the run in progress. */
 	armed?: boolean;
-	/** A nested Run's signal, read by each of its runs, that its end writes. */
-	closed?: Getter<boolean>;
-	close?: Setter<boolean>;
 	/** A Run's first run is in progress inside `create`, which throws its failure once Charm returned the stop. */
 	creating?: boolean;
 	failure?: unknown;
@@ -208,13 +205,13 @@ function dispose(owner: Owner) {
 }
 
 /**
- * Ends a Run that has no stop: a nested one, a queued one, or a root still in its first run. The Runs a nested one
- * created end first, then what it lists and holds. Closing it then has Charm drop its dependencies, at once or when
- * the batch or flush in progress ends.
+ * Ends a Run that has no listed stop: a nested one, a queued one, or a root still in its first run. The Runs it
+ * created end first, then what it lists and holds, then a nested one halts. `create` stops a root still in its first
+ * run once Charm returns the stop.
  */
 function endRun(run: Owner) {
 	const node = run.node;
-	if (run.close !== undefined && node !== undefined) {
+	if (node !== undefined) {
 		const children = new Array<Owner>();
 		let link = node.deps;
 		while (link !== undefined) {
@@ -225,7 +222,21 @@ function endRun(run: Owner) {
 		for (const child of children) dispose(child);
 	}
 	finish(run);
-	run.close?.(true);
+	halt(run);
+}
+
+/**
+ * Stops a nested Run's Charm effect now instead of through Charm's queue, which a throwing effect can abort. Its node
+ * forgets the link to its parent first, so `stopEffect` skips the wrong-parent unlink. The parent keeps that link
+ * until its next run or stop drops it.
+ */
+function halt(run: Owner) {
+	const stop = run.halt;
+	if (stop === undefined) return;
+	run.halt = undefined;
+	run.node.subs = undefined;
+	run.node.subsTail = undefined;
+	stop();
 }
 
 function generation(s: ObjectState): Owner {
@@ -450,40 +461,45 @@ function runEffect(run: Owner) {
 	run.failure = failure;
 }
 
-/** A nested Run's Charm body: it reads its `closed` signal while it has a body, so closing it reruns it. */
+/** A nested Run's Charm body, which maps its Charm effect to it on the first run. */
 function runNested(run: Owner) {
-	if (run.body === undefined) return;
 	if (run.node === undefined) nestedRuns.set(getActiveSub()!, run);
-	(run.closed as Getter<boolean>)();
 	runEffect(run);
 }
 
 /**
  * Creates `run`'s Charm effect, whose first run happens now: linked into the running effect when `lifetime` is a Run,
- * else a root that `lifetime` lists. A first run that fails ends the Run, its Charm effect included, and is rethrown.
+ * else a root that `lifetime` lists. A batch holds back the effects the first run's writes reach until Charm has
+ * returned the stop. A first run that fails ends the Run, its Charm effect included, and is rethrown, and an effect
+ * that throws as the batch closes is reported. After a first run that succeeds, such an effect's failure ends the Run
+ * and is rethrown.
  */
 function create(run: Owner, lifetime: Owner) {
 	const nested = lifetime.role === Role.Run;
-	if (nested) {
-		const [closed, close] = signal(false);
-		run.closed = closed;
-		run.close = close;
-	}
 	run.creating = true;
 	const active = setActiveSub(nested ? lifetime.node : undefined);
+	startBatch();
 	const [ok, stop] = pcall(charmEffect, nested ? () => runNested(run) : () => runEffect(run));
 	setActiveSub(active);
 	run.creating = undefined;
-	if (ok && !nested) {
-		run.stop = stop;
-		// Disposed by its own first run, before Charm returned the stop.
-		if (run.body === undefined) stop();
+	if (ok) {
+		if (nested) run.halt = stop;
+		else run.stop = stop;
 	}
 	const failure = ok ? run.failure : stop;
-	if (failure === undefined) return;
 	run.failure = undefined;
+	if (failure !== undefined) {
+		dispose(run);
+		settle("an effect's first run failed");
+		error(failure, 0);
+	}
+	// A root disposed by its own first run, before Charm returned the stop. A nested one can only end then with an
+	// ancestor, whose stop drops it.
+	if (run.body === undefined) run.stop?.();
+	const [flushed, err] = pcall(endBatch);
+	if (flushed) return;
 	dispose(run);
-	error(failure, 0);
+	error(err, 0);
 }
 
 /**

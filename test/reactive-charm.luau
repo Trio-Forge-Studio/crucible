@@ -27,6 +27,41 @@ local function countingRealm()
 	return r, calls
 end
 
+-- An effect whose first run reads a source, holds a cleanup and writes an atom that an earlier effect throws on, then
+-- runs `after`. Checks that it keeps nothing, and returns what effect() threw and the realm.
+local function reachingFirstRun(after: () -> ())
+	local r, calls = countingRealm()
+	local source, trigger = r.charm.atom(0), r.charm.atom(0)
+	local node, err
+	local released = 0
+	local stopRoot = r.root(function()
+		r.api.effect(function()
+			if trigger() ~= 0 then
+				error("a reached effect broke")
+			end
+		end)
+		local ok
+		ok, err = pcall(r.api.effect, function()
+			node = r.charm.getActiveSub()
+			source()
+			r.api.onCleanup(function()
+				released += 1
+			end)
+			trigger(1)
+			after()
+		end)
+		spec.eq(ok, false, "effect threw")
+	end)
+	spec.eq(released, 1, "the new effect released what it acquired")
+	spec.eq(node.deps, nil, "the new effect's Charm node holds no dependency")
+	local before = calls.n
+	source(1)
+	spec.eq(calls.n - before, 0, "a write does not reach the new effect")
+	stopRoot()
+	spec.eq(released, 1, "ending the root released nothing twice")
+	return err, r
+end
+
 -- Three sibling scopes, each holding an effect and a cleanup; the first one's cleanup disposes the second. `mode` ends
 -- their owner by destruction, at disable, or by destruction while boot holds the effects and then a rollback.
 local function siblingEnd(mode: string)
@@ -752,5 +787,89 @@ return {
 			{ "none", "none", "none" },
 			"a write from no Crucible code runs each with no owner"
 		)
+	end,
+	["H1 rule 17 strict: an effect whose first run reaches an effect that throws ends, and throws that failure"] = function()
+		local err = reachingFirstRun(function() end)
+		spec.has(err, "a reached effect broke", "effect threw the reached effect's failure")
+	end,
+	["H2 rule 17 strict: an effect whose first run throws after reaching an effect that throws ends, and throws its own failure"] = function()
+		local err, r = reachingFirstRun(function()
+			error("first run broke")
+		end)
+		spec.has(err, "first run broke", "effect threw the first run's failure")
+		spec.eq(r.logged("a reached effect broke"), 1, "and the reached effect's failure was reported")
+	end,
+	["I1 rule 26 strict: nested effects disposed in a batch that a throwing effect ends keep no subscription"] = function()
+		local r, calls = countingRealm()
+		local y, x, z = r.charm.atom(0), r.charm.atom(0), r.charm.atom(0)
+		local child, leaf, disposeChild
+		local childRuns, cleaned = 0, 0
+		local stopRoot = r.root(function()
+			r.api.effect(function()
+				if y() ~= 0 then
+					error("an earlier effect broke")
+				end
+			end)
+			-- The child is its parent's first dependency, where Charm's own stop would corrupt the parent's list.
+			r.api.effect(function()
+				disposeChild = r.api.effect(function()
+					child = r.charm.getActiveSub()
+					childRuns += 1
+					x()
+					r.api.effect(function()
+						leaf = r.charm.getActiveSub()
+						x()
+						r.api.onCleanup(function()
+							cleaned += 1
+						end)
+					end)
+				end)
+				z()
+			end)
+		end)
+		r.charm.startBatch()
+		y(1)
+		disposeChild()
+		spec.eq(cleaned, 1, "the descendant's cleanup ran inside the batch")
+		spec.eq(pcall(r.charm.endBatch), false, "the earlier effect threw as the batch closed")
+		spec.eq(child.deps, nil, "the disposed effect holds no dependency")
+		spec.eq(leaf.deps, nil, "nor does the effect it created")
+		local before = calls.n
+		x(1)
+		spec.eq(calls.n - before, 0, "a write reaches neither")
+		z(1)
+		spec.eq(childRuns, 2, "the parent's next run creates its child again")
+		x(2)
+		spec.eq(childRuns, 3, "which a write reaches")
+		z(2)
+		spec.eq(childRuns, 4, "and the parent still reruns")
+		stopRoot()
+		before = calls.n
+		x(3)
+		z(3)
+		spec.eq(calls.n - before, 0, "ending the root stops every effect")
+	end,
+	["I2 rule 26 strict: disposing a nested effect ends the effects it created before its own cleanups"] = function()
+		local r = realm(nil, nil, true)
+		local order = {}
+		local disposeNested
+		local stopRoot = r.root(function()
+			r.api.effect(function()
+				disposeNested = r.api.effect(function()
+					r.api.onCleanup(function()
+						table.insert(order, "nested")
+					end)
+					r.api.effect(function()
+						r.api.onCleanup(function()
+							table.insert(order, "child")
+						end)
+					end)
+				end)
+			end)
+		end)
+		disposeNested()
+		spec.list(order, { "child", "nested" }, "the child ended first, then the nested effect's cleanup ran")
+		stopRoot()
+		spec.list(order, { "child", "nested" }, "ending the root released nothing twice")
 	end,
 }

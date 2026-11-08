@@ -85,6 +85,7 @@ export function track(label: TextLabel) {
 - Dependencies are rebuilt each run, so a branch that stops reading a value stops depending on it.
 - Before each rerun, the scopes the last run created end, then its cleanups run, newest first, starting with the cleanup the body returned. The effects the last run created end when the new run finishes. When the effect itself ends, all of them end.
 - A body that throws, yields, or returns anything other than nothing or a function fails its run. A failed first run makes `effect` throw, and nothing is created. A failed later run throws to the code that wrote, and the effect keeps its place: the next write that changes what it read runs it again.
+- The effects that a first run's writes reach run after it, as the `effect` call returns. When one of them throws, `effect` throws that error and nothing is created. When the first run itself failed, `effect` throws the first run's error, and the other is reported as `Crucible: an effect failed after an effect's first run failed: <error>`.
 
 `effect` needs an owner, described below. Without one it throws `effect() needs an owner: create it in a Subsystem or behaviour, or inside scope()`.
 
