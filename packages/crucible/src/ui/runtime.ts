@@ -25,7 +25,7 @@ const [, derived] = root(() => ({
 const modalShown = derived.modalShown;
 const modalAtom = atom(false);
 // Gameplay computeds track this atom. Anvil tracks the Vide derive, because a Charm batch delays the atom's subscribers.
-export const modalOpen: Getter<boolean> = modalAtom;
+export const modalOpen: Getter<boolean> = () => modalAtom();
 function setState(value: ModalState<number>): void {
 	state(value);
 	modalAtom(hasModal(untrack(state)));

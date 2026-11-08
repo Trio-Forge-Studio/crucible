@@ -1,12 +1,18 @@
 -- The ui entry and a Crucible runtime share one strict Charm, so a Crucible effect observes modalOpen as a game's would.
+local fs = require("@lune/fs")
+local luau = require("@lune/luau")
 local Reactive = require("./lib/reactive-world")
 local harness = require("./lib/ui-harness")
+
+-- The game installs vide-charm, so the sample's copy is the one a game reads modalOpen through.
+local VIDE_CHARM = fs.readFile("examples/sample-game/node_modules/@rbxts/vide-charm/src/init.luau")
 
 local function setup()
 	local r = Reactive(nil, nil, true)
 	local h = harness({ charm = r.charm })
 	h.require("focus-scope")
 	h.require("dialog")
+	h.require()
 	return r, h
 end
 
@@ -100,6 +106,53 @@ return {
 		h.flush()
 		assert(not h.runtime.modalOpen() and h.runtime.active("Base"), "the scope is gone")
 		assert(h.gui.SelectedObject == hud, "the close still restores the HUD selection")
+		stop()
+		h.stop()
+	end,
+	["modalOpen ignores an argument, so its export cannot write the modal atom"] = function()
+		local _, h = setup()
+		local modalOpen = h.require().modalOpen
+		-- TypeScript accepts `const w: Atom<boolean> = modalOpen; w(false)`, so the export must drop the argument.
+		local write: any = modalOpen
+		local hud = h.control("Base", "Hud")
+		write(true)
+		assert(not modalOpen() and h.runtime.active("Base"), "a write with no scope opens nothing")
+		local id = h.root(10)
+		write(false)
+		assert(modalOpen(), "a write while a scope is open leaves modalOpen() true")
+		assert(not h.runtime.active("Base") and h.runtime.active(id), "and leaves the Vide state trapped")
+		h.runtime.closeScope(id)
+		assert(not modalOpen() and hud.Selectable, "closing the scope still releases it")
+		h.stop()
+	end,
+	["modalOpen tracks in a Charm computed, a Crucible effect and vide-charm's useAtom"] = function()
+		local r, h = setup()
+		local VideCharm = luau.load(VIDE_CHARM, {
+			debugName = "vide-charm",
+			environment = {
+				require = function(name: string)
+					return if name == "./Charm" then r.charm else h.vide
+				end,
+			},
+		})()
+		local modalOpen = h.require().modalOpen
+		local closed = r.charm.computed(function()
+			return not modalOpen()
+		end)
+		local seen = {}
+		local stop = r.root(function()
+			r.api.effect(function()
+				table.insert(seen, tostring(closed()))
+			end)
+		end)
+		local state = h.mount("Base", function()
+			return VideCharm.useAtom(modalOpen)
+		end)
+		local id = h.root(10)
+		assert(state() == true, "useAtom follows the open")
+		h.runtime.closeScope(id)
+		assert(state() == false, "useAtom follows the close")
+		assert(table.concat(seen, " ") == "true false true", `the effect saw each change: {table.concat(seen, " ")}`)
 		stop()
 		h.stop()
 	end,

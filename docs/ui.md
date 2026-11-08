@@ -104,7 +104,7 @@ export class SettingsScreen extends CrucibleBehaviour<"SettingsScreen", ScreenGu
 
 ## Read modal state from gameplay
 
-`modalOpen` is a Charm atom that is true while any trapped scope is open. Gameplay code reads it in a Charm `computed` or a Crucible `effect`, and they rerun when it changes. The game cannot write it.
+`modalOpen()` is true while any trapped scope is open. It reads a Charm atom that the entry keeps, so gameplay code reads it in a Charm `computed` or a Crucible `effect`, and they rerun when it changes. It takes no argument, so the game cannot write the atom.
 
 ```ts
 import { computed } from "@rbxts/charm";
@@ -122,7 +122,7 @@ export class Pause extends Subsystem {
 }
 ```
 
-The atom turns true when the first trapped scope opens and false when the last one closes. Inside a batch, such as a behaviour's `onEnable`, the effects that read it run when the batch ends, as `crucible docs reactive` describes. The entry decides selection from its own Vide state, so a batch never delays a modal taking the selection.
+`modalOpen()` turns true when the first trapped scope opens and false when the last one closes. Inside a batch, such as a behaviour's `onEnable`, the effects that read it run when the batch ends, as `crucible docs reactive` describes. The entry decides selection from its own Vide state, so a batch never delays a modal taking the selection.
 
 A Vide component reads `modalOpen` through `useAtom` from `@rbxts/vide-charm`, as `crucible docs vide` describes. `useModalActive()` returns a getter that Vide tracks directly. It is true while the calling component's scope is the one on top.
 
@@ -704,7 +704,7 @@ export function mountTopbar() {
 | `import { … } from "@trioforge/anvil"` | `import { … } from "@trioforge/crucible/ui"` |
 | `@trioforge/anvil` and `@rbxts/services` in `dependencies` | Neither. Keep `@rbxts/vide` |
 | The `@trioforge` entry in `typeRoots` and the Rojo `@trioforge` mapping | The mapping that `crucible create` writes for `@trioforge/crucible` |
-| `modalOpen` was a Vide derive | `modalOpen` is a Charm atom |
+| `modalOpen` was a Vide derive | `modalOpen` reads a Charm atom |
 | A Charm atom copied from `modalOpen` in a Vide effect | Read `modalOpen` in the `computed` or `effect` directly |
 | `modalOpen()` in a Vide getter | `useAtom(modalOpen)` from `@rbxts/vide-charm`, or `useModalActive()` |
 
