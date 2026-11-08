@@ -706,6 +706,8 @@ export function mountTopbar() {
 | The `@trioforge` entry in `typeRoots` and the Rojo `@trioforge` mapping | The mapping that `crucible create` writes for `@trioforge/crucible` |
 | `modalOpen` was a Vide derive | `modalOpen` reads a Charm atom |
 | A Charm atom copied from `modalOpen` in a Vide effect | Read `modalOpen` in the `computed` or `effect` directly |
-| `modalOpen()` in a Vide getter | `useAtom(modalOpen)` from `@rbxts/vide-charm`, or `useModalActive()` |
+| `modalOpen()` in a Vide getter | `useAtom(modalOpen)` from `@rbxts/vide-charm` |
+
+`useModalActive()` is unchanged, and it answers a different question. It is true while the calling component's scope is the one on top. For a component outside every trapped scope, that is the opposite of `modalOpen()`: true when no trapped scope is open, and false while one is.
 
 Every other export keeps its name and behaviour, including `installAnvil` and `AnvilAdapter`.
