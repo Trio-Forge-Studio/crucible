@@ -18,8 +18,9 @@ The claims below cite Lune prototypes and source lines. The prototypes ran on 20
 | `strict-probe.luau`, `cleanup-probe.luau` | What goes wrong when every effect and cleanup attaches to the object's scope, and where the owner is lost in strict mode. |
 | `boot-probe.luau` | A batch does not defer a new effect's first run. |
 | `context.luau` | The owner and lifetime rules below, modeled on Charm's own source. |
+| `verify-r2-context.luau` | Raw Charm callbacks see the writer's context, not the registering object's. |
 
-The prototypes in the first seven rows ran with Charm's `strict` off, because Lune has no `game` and Charm turns `strict` on only in Studio (`init.luau:70` to `:81`). The probes in the last three rows came from the S0 review and its fix. They load Charm's unmodified source, and all but `boot-probe.luau` set `Charm.flags.strict = true` before using it. They are small Luau models of the rules, not S2's code, and run no Crucible code. S2's Lune specs run with `Charm.flags.strict = true`.
+The prototypes in the first seven rows ran with Charm's `strict` off, because Lune has no `game` and Charm turns `strict` on only in Studio (`init.luau:70` to `:81`). The probes in the last four rows came from the S0 review and its fix. They load Charm's unmodified source, and all but `boot-probe.luau` set `Charm.flags.strict = true` before using it. They are small Luau models of the rules, not S2's code, and run no Crucible code. S2's Lune specs run with `Charm.flags.strict = true`.
 
 Charm source lines refer to `@rbxts/charm` 0.11.1, file `src/init.luau`. Crucible source lines refer to `main` at `caa8477`.
 
@@ -105,15 +106,27 @@ So lookup reads a synchronous context first and the thread map second.
 - Charm runs cleanups inside whichever write triggers the rerun, so the context there belongs to the writer. Each cleanup runs under the context recorded when it was registered.
 - The thread map stays for entries that can yield, such as start hooks and network handlers. A yield ends any synchronous context, and `yield.luau` shows that nothing module-level survives one. The thread does.
 
-`context.luau` models these rules, with A's effect rerun by a write from B's entry:
+`watch` is built from Crucible's own effect, not from Charm's `subscribe`. Charm's `subscribe` runs its callback through `untracked` inside an internal effect it creates (`init.luau:826` to `:832`), and `untracked` clears `activeSub` (`init.luau:745`), so wrapping only the callback cannot recover that effect's run. Crucible's `watch` instead reads the source in the body of a Crucible effect and calls `onChange` through `untracked` from that body. Both run in the synchronous context of the watch's owner, captured when the watch is created, and their lifetime is the watch's internal effect run, not the lifetime at creation. So a write from another object's entry still runs the source as the watch's owner, and the effects `onChange` creates die on the next change.
+
+Game code that registers raw Charm `subscribe` or `listen` callbacks gets no Crucible ownership. Only Crucible's own entry points wrap the callbacks they hand to Charm, so a raw callback that a later write runs sees the writer's context.
+
+`context.luau` models these rules, with A's effects and watches run by writes from B's entry:
 
 ```text
 cleanup before parent rerun 1
 nested children responding after one parent rerun 1
 owner inside untracked true watch onChange true cleanup true
+watch source retains A on B write true
+watch nested children after two changes 1
 ```
 
-It is a model in Luau, not S2's code. S2's Lune specs test each rule with `Charm.flags.strict = true`: a nested effect that dies on its parent's rerun, `onCleanup` before a rerun, and owner lookup inside `untracked`, a watch's `onChange` and a cleanup.
+The verifier's `verify-r2-context.luau` registers raw callbacks inside A's effect and writes from B:
+
+```text
+raw callback owners untracked true listen false subscribe false
+```
+
+It is a model in Luau, not S2's code. S2's Lune specs test each rule with `Charm.flags.strict = true`: a nested effect that dies on its parent's rerun, `onCleanup` before a rerun, owner lookup inside `untracked`, a watch's source and `onChange` and a cleanup, and an effect created in `onChange` that dies on the watch's next change.
 
 ## Effects run on the write
 
@@ -174,14 +187,29 @@ effect first run before boot batch closes 1
 effect runs after boot batch closes 1
 ```
 
-So while boot is open, Crucible's `effect` and `watch` create no Charm effect. They queue the owner and the body, with a disposer that removes the entry. When boot commits, Crucible creates the queued effects in order inside one `startBatch` and `endBatch`. On rollback it discards the queue, and nothing runs. `context.luau` models the queue:
+So while boot is open, Crucible's `effect` and `watch` create no Charm effect. They queue the owner and the body, and return a disposer. When boot commits, Crucible creates the queued effects in order inside one `startBatch` and `endBatch`. On rollback it discards the queue, and nothing runs.
+
+Queued entries are owned resources:
+
+- Each entry registers with its owner's generation or enable interval when it is queued.
+- Ending that owner cancels the entry, whether by explicit disposal, destruction or the end of an interval. The returned disposer cancels it too, and after commit it stops the created effect.
+- At commit, Crucible skips every cancelled entry and every entry whose lifetime has ended. That includes an object that an earlier entry's body destroys in the same commit.
+
+Crucible must check each entry before it creates the effect. Charm does not refuse a new effect under a stopped scope: it links the effect to the active scope (`init.luau:617` to `:618`) and runs its body at once (`init.luau:623` to `:636`). Disposing the owner's scope therefore cannot cancel an entry that is not yet a Charm effect.
+
+`context.luau` models the queue. A watch is queued like an effect, so its `onChange` waits for commit too:
 
 ```text
 boot effect runs before commit 0 after commit 1
 boot effect runs after rollback 0
+queued effect disposer type function
+watch onChange before boot commit 0
+cancelled queued effect runs at commit 0
+destroyed owner effect runs at commit 0
+object destroyed by an earlier entry at commit runs 0
 ```
 
-Outside boot, an effect runs at creation, as `timing.luau` shows. S2's Lune specs test an effect created during boot that runs only after commit and never after a rollback.
+Outside boot, an effect runs at creation, as `timing.luau` shows. S2's Lune specs test an effect created during boot that runs only after commit and never after a rollback, a watch whose `onChange` waits for commit, and entries cancelled by their disposer, by their owner's end before commit, and by an earlier entry's body during commit.
 
 ### Crucible never batches an entry that can yield
 
