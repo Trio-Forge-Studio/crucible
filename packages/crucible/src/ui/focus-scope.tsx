@@ -6,6 +6,7 @@ import {
 	closeScope,
 	holdRestore,
 	modalOpen,
+	nextScopeId,
 	openScope,
 	ownerContext,
 	textEditing,
@@ -23,8 +24,10 @@ export interface FocusScopeBinding {
 }
 export function useFocusScope(options: FocusScopeOptions): FocusScopeBinding {
 	if (options.trapped) {
-		const id = openScope(options.selection ?? "Native", options.onClose, options.restoreFocus ?? true);
+		const id = nextScopeId();
+		// An effect that reads modalOpen runs inside openScope and can throw out of it after the scope is open.
 		cleanup(() => closeScope(id));
+		openScope(id, options.selection ?? "Native", options.onClose, options.restoreFocus ?? true);
 		return {
 			owner: id,
 			root: (instance) => {

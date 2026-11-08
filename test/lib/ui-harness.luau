@@ -72,7 +72,8 @@ local classes = {
 	uipadding = "UIPadding",
 	uistroke = "UIStroke",
 }
-local function harness(options: { deferredText: boolean }?): Mock
+-- Pass `charm` to share one Charm with a Crucible runtime the spec loaded, so its effects can read the ui entry's atoms.
+local function harness(options: { deferredText: boolean?, charm: Mock? }?): Mock
 	local deferred: { () -> () } = {}
 	local objects: { Mock } = {}
 	local focused: Mock = nil
@@ -389,7 +390,7 @@ local function harness(options: { deferredText: boolean }?): Mock
 		end,
 	}
 	local require = load({
-		packages = { ["@rbxts/vide"] = vide },
+		packages = { ["@rbxts/vide"] = vide, ["@rbxts/charm"] = options and options.charm },
 		services = {
 			GuiService = gui,
 			UserInputService = input,
@@ -509,7 +510,8 @@ local function harness(options: { deferredText: boolean }?): Mock
 		end
 	end
 	function h.root(order, mode, onClose, pending)
-		local id = runtime.openScope(mode or "Native", onClose)
+		local id = runtime.nextScopeId()
+		runtime.openScope(id, mode or "Native", onClose)
 		local root = instance("Frame", if pending then nil else screen(order))
 		roots[id] = root
 		local detach: () -> () = runtime.attachScope(id, root)

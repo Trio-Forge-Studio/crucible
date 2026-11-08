@@ -263,14 +263,15 @@ function restore(target: Snapshot): void {
 	if (typeIs(owner, "number")) dispatch(owner, { kind: "Restore", object });
 	else request(owner, object);
 }
-export function openScope(mode: "Native" | "Pointer", onClose?: () => void, restoreFocus = true): number {
-	const id = ++serial;
+export function nextScopeId(): number {
+	return ++serial;
+}
+export function openScope(id: number, mode: "Native" | "Pointer", onClose?: () => void, restoreFocus = true): void {
 	scopes.set(id, { id, mode, onClose, restore: restoreFocus ? snapshot() : undefined, selection: emptySelection() });
 	// Every control outside a trap stops being selectable, so a selection left on one would outlive the trap unowned.
 	const selected = GuiService.SelectedObject;
 	if (selected && controls.has(selected)) writeSelection();
 	setState(enter(state(), { id, serial: id, order: undefined }));
-	return id;
 }
 export function attachScope(id: number, root: GuiObject): () => void {
 	const record = scopes.get(id);
@@ -286,12 +287,12 @@ export function attachScope(id: number, root: GuiObject): () => void {
 		setState(enter(state(), { id, serial: id, order: gui?.DisplayOrder }));
 	};
 	const connection = root.AncestryChanged.Connect(update);
-	update();
 	const detach = () => {
 		connection.Disconnect();
 		orderConnection?.Disconnect();
 	};
 	record.stopAttachment = detach;
+	update();
 	return detach;
 }
 export function closeScope(id: number): void {
@@ -309,8 +310,11 @@ function close(id: number): void {
 	scopes.delete(id);
 	// A scope opened from inside this one restores where this one would have, so closing out of order still lands home.
 	for (const [, other] of scopes) if (other.restore?.owner === id) other.restore = record.restore;
-	setState(leave(state(), id));
-	if (restoring && record.restore) restore(record.restore);
+	try {
+		setState(leave(state(), id));
+	} finally {
+		if (restoring && record.restore) restore(record.restore);
+	}
 }
 // An untrapped scope adds no owner. It only puts selection back when it unmounts holding it.
 export function holdRestore(): (host?: GuiObject) => void {
