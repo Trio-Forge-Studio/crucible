@@ -10,6 +10,8 @@ mod network;
 mod typed_lint;
 mod types;
 
+pub(crate) use crucible::PACKAGE;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -20,7 +22,8 @@ use tsrs_core::{CompilerOptions, JsxEmit, P, jsnum};
 
 use crate::Diagnostic;
 use crate::facts::{
-    Callee, Fact, Facts, Falsy, FileFacts, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
+    Callee, Fact, Facts, Falsy, FileFacts, Helper, HelperModule, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span,
+    Unanswered,
 };
 use crate::macros::Macro;
 use crate::program::Checked;
@@ -60,8 +63,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
                 message: "roblox-ts's runtime library has no instance path".to_owned(),
             }),
         }
-        facts.place.crucible_emit =
-            crucible.emit.as_deref().and_then(|emit| game.module(emit)).and_then(|r| absolute(&r));
     }
     let mut x = Extractor {
         checker,
@@ -81,6 +82,7 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
         options,
         jsx: None,
     };
+    x.declare_helper(&crate::lower::CRUCIBLE_EMIT);
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
             continue;
@@ -190,6 +192,22 @@ struct Extractor {
 }
 
 impl Extractor {
+    /// Resolves a helper module for the program's place. A second declaration of a local is ignored.
+    fn declare_helper(&mut self, module: &HelperModule) {
+        if self.facts.place.helpers.iter().any(|h| h.module.local == module.local) {
+            return;
+        }
+        let path = match &self.game {
+            Some(game) => self
+                .crucible
+                .entry_declaration(module.package, module.entry)
+                .and_then(|declaration| game.module(&declaration))
+                .and_then(|r| absolute(&r)),
+            None => None,
+        };
+        self.facts.place.helpers.push(Helper { module: *module, path });
+    }
+
     fn source_file(&mut self, file: P<SourceFile>) {
         self.text = file.text();
         self.path = file.file_name().replace('\\', "/");

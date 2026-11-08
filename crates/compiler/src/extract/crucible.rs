@@ -16,7 +16,7 @@ use crate::program::ConfigHost;
 use crate::project::{Game as Place, RbxPath, normalize};
 use crate::tree::{File, Position};
 
-const PACKAGE: &str = "@trioforge/crucible";
+pub(crate) const PACKAGE: &str = "@trioforge/crucible";
 const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "CrucibleObject"];
 /// `@trioforge/crucible/emit` exports a runtime `attribute` and runtime declaration functions that are not the macros.
 const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
@@ -99,8 +99,6 @@ pub(super) struct Api {
     invalid_metadata: bool,
     /// When TypeScript 5 makes each class and interface type, computed when a union of instance classes needs it.
     made: Option<HashMap<P<Symbol>, Made>>,
-    /// The declarations of `@trioforge/crucible/emit`.
-    pub emit: Option<PathBuf>,
     pub widths: HashSet<P<Symbol>>,
     pub entries: HashMap<PathBuf, Side>,
     pub entry_exports: HashMap<P<Symbol>, Side>,
@@ -123,7 +121,6 @@ impl Api {
             host,
             invalid_metadata: false,
             made: None,
-            emit: None,
             widths: HashSet::new(),
             entries: HashMap::new(),
             entry_exports: HashMap::new(),
@@ -134,9 +131,6 @@ impl Api {
             let Some(owner) = api.package_of(&path) else { continue };
             if owner.json["name"] != PACKAGE {
                 continue;
-            }
-            if api.emit.is_none() {
-                api.emit = entry_types(&owner, "./emit");
             }
             widths(c, file.as_node(), &mut api.widths);
             let Some(module) = file.as_node().symbol() else { continue };
@@ -232,6 +226,18 @@ impl Api {
 
     pub fn package_name(&mut self, file: &Path) -> Option<String> {
         self.package_of(file).and_then(|p| p.json["name"].as_str().map(str::to_owned))
+    }
+
+    /// The declaration file of the `entry` export of the program's first file from `package`.
+    pub fn entry_declaration(&mut self, package: &str, entry: &str) -> Option<PathBuf> {
+        let program = self.program;
+        program.source_files().iter().find_map(|file| {
+            let owner = self.package_of(Path::new(file.file_name()))?;
+            if owner.json["name"] != package {
+                return None;
+            }
+            entry_types(&owner, entry)
+        })
     }
 
     fn package_of(&mut self, file: &Path) -> Option<Rc<Package>> {

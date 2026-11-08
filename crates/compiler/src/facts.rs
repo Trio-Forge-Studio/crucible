@@ -270,9 +270,30 @@ pub enum RuntimeLib {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Place {
     pub runtime_lib: RuntimeLib,
-    /// `@trioforge/crucible/emit`, which registration and Crucible's macros call. `None` outside a game that has
-    /// the package.
-    pub crucible_emit: Option<ModulePath>,
+    /// The modules lowerings call into, in the order they were declared.
+    pub helpers: Vec<Helper>,
+}
+
+/// A runtime module that compiled code calls into through one local, such as `__crucible`. A file that uses it imports
+/// it at its top, after roblox-ts's runtime library and in the order of first use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HelperModule {
+    /// The npm package that has the module.
+    pub package: &'static str,
+    /// The key of the package's `exports` whose declarations are the module's, such as `./emit`.
+    pub entry: &'static str,
+    /// The program cannot declare this name.
+    pub local: &'static str,
+    /// The error in a file that uses the module where the place cannot reach it.
+    pub missing: &'static str,
+}
+
+/// A helper module, resolved for the program's place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Helper {
+    pub module: HelperModule,
+    /// `None` outside a game, or where the game has no instance for the module.
+    pub path: Option<ModulePath>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

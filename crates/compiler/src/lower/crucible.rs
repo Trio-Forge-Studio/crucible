@@ -27,8 +27,7 @@ fn keyed(key: &'static str, value: Expr) -> Field {
 
 impl Lower<'_> {
     fn runtime(&mut self, name: &'static str) -> Expr {
-        self.uses_crucible = true;
-        Expr::global("__crucible").field(name)
+        self.helper(&super::CRUCIBLE_EMIT, name)
     }
 
     pub(super) fn crucible_macro(&mut self, m: Macro, n: Node) -> Expr {
