@@ -7,7 +7,7 @@ mod lower;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crucible_compiler::ext::{ExtractCx, Extension, LowerCx, ProgramCx, SiteId};
+use crucible_compiler::ext::{Extension, ExtractCx, LowerCx, ProgramCx, SiteId};
 use crucible_compiler::tree::Node;
 use crucible_compiler::tsrs::ast::SourceFile;
 use crucible_compiler::tsrs::core::P;
@@ -47,7 +47,11 @@ impl Extension for Crucible {
 
     fn finish_program(&mut self, cx: &mut ProgramCx<'_>) {
         let emit = self.framework.as_ref().and_then(|f| f.emit.as_deref()).and_then(|emit| cx.game_module(emit));
-        cx.helper_module(EMIT, emit, "Crucible's macros and registration need a game that maps @trioforge/crucible/emit");
+        cx.helper_module(
+            EMIT,
+            emit,
+            "Crucible's macros and registration need a game that maps @trioforge/crucible/emit",
+        );
     }
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {

@@ -460,9 +460,10 @@ impl X<'_, '_, '_> {
         if name.contains("/node_modules/@rbxts/") || self.cx.program().is_source_file_default_library(file.path()) {
             return true;
         }
-        self.cx.packages().package_of(Path::new(&name)).is_some_and(|p| {
-            p.name().is_some_and(|n| n.starts_with("@rbxts/") || n == "@trioforge/compiler-types")
-        })
+        self.cx
+            .packages()
+            .package_of(Path::new(&name))
+            .is_some_and(|p| p.name().is_some_and(|n| n.starts_with("@rbxts/") || n == "@trioforge/compiler-types"))
     }
 
     /// The nearest folder named for a side in the path from the package of `source` to `file`'s folder.
@@ -765,8 +766,8 @@ impl X<'_, '_, '_> {
                     (Some(name), Some(allowed)) => c.get_property_of_type_exported(allowed, name),
                     _ => None,
                 };
-                let matches =
-                    expected.is_some_and(|e| c.get_type_of_symbol_exported(e).symbol() == part.and_then(|p| p.symbol()));
+                let matches = expected
+                    .is_some_and(|e| c.get_type_of_symbol_exported(e).symbol() == part.and_then(|p| p.symbol()));
                 if !matches {
                     self.cx.report(node, Code::Rule(8), "Instance type must be an Instances class or union of them.");
                 }

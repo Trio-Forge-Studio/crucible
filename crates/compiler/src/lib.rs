@@ -31,17 +31,18 @@ pub use declarations::DeclarationKind;
 #[cfg(feature = "test-support")]
 pub use facts::{
     Callee, ClassKind, ClassStyle, Constant, Crucible, Declaration, Fact, Facts, Falsy, Field, FileFacts, HelperModule,
-    Import, Jsx, KeyLiteral, Literal, MapKey, Place, Prop, Reason, Receiver, RuntimeLib, Schema, Site, Tail, Unanswered,
+    Import, Jsx, KeyLiteral, Literal, MapKey, Place, Prop, Reason, Receiver, RuntimeLib, Schema, Site, Tail,
+    Unanswered,
 };
-pub use facts::{ModulePath, Span};
 #[cfg(not(feature = "test-support"))]
 use facts::{FileFacts, Unanswered};
+pub use facts::{ModulePath, Span};
 pub use include::write_include;
 pub use lower::Error;
-pub use project::{Game, RbxPath, Rojo, normalize};
 use lower::ImportBase;
 #[cfg(feature = "test-support")]
 pub use macros::{Macro, MacroKind};
+pub use project::{Game, RbxPath, Rojo, normalize};
 use write::HEADER;
 pub use write::{Written, write};
 

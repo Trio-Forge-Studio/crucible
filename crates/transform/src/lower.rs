@@ -45,7 +45,9 @@ pub(crate) fn call(cx: &mut LowerCx<'_, '_>, n: Node, fact: &Fact) -> Option<Exp
             let (function, id) = match dependency {
                 Dependency::One(id) => ("resolve", id.as_ref()),
                 Dependency::All(id) => ("resolveAll", id.as_ref()),
-                Dependency::Invalid => return Some(cx.unsupported(n, "inject without a class, interface or All target")),
+                Dependency::Invalid => {
+                    return Some(cx.unsupported(n, "inject without a class, interface or All target"));
+                }
             };
             cx.helper(EMIT, function).call(vec![string(id)])
         }
