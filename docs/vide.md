@@ -25,6 +25,8 @@ import { useAtom } from "@rbxts/vide-charm";
 }
 ```
 
+The linter does not see that JSX uses `Vide`, so a new game's `vite.config.ts` also lets `no-unused-vars` skip an import named `Vide`.
+
 Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail compilation at the tsconfig with this fix. Crucible no longer exports `@trioforge/crucible/ui` or compiles `className` and `theme.toml` into instance styles.
 
 ## Bind a value
