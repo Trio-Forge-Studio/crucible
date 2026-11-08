@@ -5,7 +5,6 @@ mod extract;
 mod facts;
 mod include;
 mod lower;
-pub mod luau;
 mod macros;
 mod program;
 mod project;
@@ -161,7 +160,7 @@ fn compile_on_thread(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Fa
         let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
         match lower::lower(file, file_facts, &unanswered, import_base, &facts.place) {
             Ok(chunk) => {
-                let mut source = luau::print(&chunk);
+                let mut source = crucible_luau::print(&chunk);
                 source.insert_str(0, HEADER);
                 modules.push(Module { path: format!("{stem}.luau"), source });
             }

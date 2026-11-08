@@ -1,6 +1,6 @@
 use crate::child;
-use crate::manifest::{Manifest, ManifestError, Place};
 use crucible_compiler::{Compiled, Module, Target};
+use crucible_project::{Manifest, ManifestError, Place};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io::Read;

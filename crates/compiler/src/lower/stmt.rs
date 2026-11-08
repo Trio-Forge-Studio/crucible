@@ -2,9 +2,9 @@ use std::borrow::Cow;
 
 use super::{Breakable, Exit, ImportBase, Lower, is_hole, skip_parens_and_assertions};
 use crate::facts::{Callee, Constant, Import, Receiver, RuntimeLib};
-use crate::luau::{BinOp, Block, Expr, Field, Function, Name, Stmt, UnOp};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Nodes, Op, UnaryOp};
+use crucible_luau::{BinOp, Block, Expr, Field, Function, Name, Stmt, UnOp};
 
 impl Lower<'_> {
     pub(super) fn module(&mut self, statements: Nodes) -> Block {

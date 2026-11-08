@@ -1,7 +1,7 @@
+use crucible_docs::Slugger;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::LazyLock;
 use syntect::easy::HighlightLines;
@@ -60,33 +60,6 @@ impl Target {
 impl Page {
     pub fn heading(&self, slug: &str) -> Option<&Heading> {
         self.headings.iter().find(|heading| heading.slug == slug)
-    }
-}
-
-/// GitHub's anchor rules: lowercase, drop punctuation, spaces become hyphens, and repeats get `-1`, `-2`.
-#[derive(Default)]
-pub struct Slugger(HashMap<String, usize>);
-
-impl Slugger {
-    pub fn slug(&mut self, text: &str) -> String {
-        let base: String = text
-            .trim()
-            .to_lowercase()
-            .chars()
-            .filter_map(|c| match c {
-                ' ' => Some('-'),
-                c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
-                _ => None,
-            })
-            .collect();
-        let mut slug = base.clone();
-        while self.0.contains_key(&slug) {
-            let count = self.0.get_mut(&base).expect("a taken slug's base is taken");
-            *count += 1;
-            slug = format!("{base}-{count}");
-        }
-        self.0.insert(slug.clone(), 0);
-        slug
     }
 }
 
@@ -784,7 +757,7 @@ mod tests {
 
     fn mermaid_fences() -> Vec<(&'static str, String)> {
         let mut fences = Vec::new();
-        for topic in crate::docs::TOPICS {
+        for topic in crucible_docs::TOPICS {
             let mut fence = None;
             for event in Parser::new(topic.markdown) {
                 match event {
@@ -835,7 +808,7 @@ mod tests {
         use syntect::parsing::ParseState;
         let full = two_face::syntax::extra_newlines();
         let mut checked = 0;
-        for topic in crate::docs::TOPICS {
+        for topic in crucible_docs::TOPICS {
             let mut fence: Option<(String, String)> = None;
             for event in Parser::new(topic.markdown) {
                 match event {
@@ -882,7 +855,7 @@ mod tests {
 
     #[test]
     fn every_topic_renders_at_every_width() {
-        for topic in crate::docs::TOPICS {
+        for topic in crucible_docs::TOPICS {
             for width in [40, 80, 160] {
                 let page = render(topic.markdown, width);
                 assert!(!page.lines.is_empty(), "{}", topic.name);

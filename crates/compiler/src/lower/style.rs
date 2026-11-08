@@ -2,8 +2,8 @@ use super::Lower;
 use crate::classes::{
     Alignment, Axis, Choice, Condition, Direction, InputMode, Offset, Orientation, Style, Target, Value,
 };
-use crate::luau::{BinOp, Expr, Function, Stmt};
 use crate::tree::Node;
+use crucible_luau::{BinOp, Expr, Function, Stmt};
 
 fn constructor(name: &'static str, args: Vec<Expr>) -> Expr {
     Expr::global(name).call(args)

@@ -1,9 +1,12 @@
-use crate::auth;
+use crate::call::Call;
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
-use crate::exec::{Executor, Timing};
-use crate::outcome::{Acceptance, Failure};
+use crate::exec::Executor;
 use crate::output::Output;
-use serde_json::Value;
+use crucible_oc::auth;
+use crucible_oc::outcome::{Acceptance, Failure};
+use crucible_oc::transport::Timing;
+use oc_registry::{Auth, Op};
+use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::path::Path;
 use std::process::ExitCode;
@@ -42,7 +45,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         .map(|name| crate::op_ref(registry, std::slice::from_ref(name)).map(|(resolved, _)| resolved.op))
         .transpose()?;
     let primary = required.unwrap_or_else(|| registry.op("api-keys.introspect").expect("introspection is registered"));
-    let (source, key) = auth::load(root).map_err(|failure| auth::decorate(failure, primary, None))?;
+    let (source, key) = crate::load_key(root).map_err(|failure| auth::decorate(failure, &primary.auth, None))?;
     output.redact_also(&key);
     let acceptance = RefCell::new(Acceptance::default());
     let result = (|| {
@@ -58,7 +61,29 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
             output,
             &acceptance,
         )?;
-        auth::check(&executor, &source, required)
+        check(&executor, &source, required)
     })();
-    acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, primary, Some(&source)))
+    acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, &primary.auth, Some(&source)))
+}
+
+pub fn check(executor: &Executor<'_>, source: &auth::KeySource, require: Option<&Op>) -> Result<Value, Failure> {
+    let introspect = executor.registry.by_key("POST /api-keys/v1/introspect").expect("introspection is registered");
+    let reply = executor.send(&Call::new(introspect, vec![], vec![], None)?)?.json()?;
+    let reply = auth::Introspection::parse(reply)?;
+    let scopes = reply.scopes();
+    if !reply.enabled || reply.expired {
+        return Err(Failure::new(3, "auth", "the key is disabled or expired"));
+    }
+    if let Some(op) = require
+        && let Auth::ApiKey { scopes: Some(required) } = &op.auth
+    {
+        let missing: Vec<_> =
+            required.iter().filter(|scope| !scopes.contains(&scope.name)).map(|scope| scope.name.as_str()).collect();
+        if !missing.is_empty() {
+            return Err(Failure::new(3, "auth", format!("the selected key lacks {}", missing.join(", "))));
+        }
+    }
+    Ok(
+        json!({"keySource":source.label(),"name":reply.name,"enabled":reply.enabled,"expired":reply.expired,"scopes":scopes}),
+    )
 }

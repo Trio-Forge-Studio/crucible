@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use super::Lower;
 use super::stmt::Parameters;
 use crate::facts::Crucible;
-use crate::luau::{BinOp, Expr, Field, Function, Name, Stmt};
 use crate::tree::{Kind, Node};
+use crucible_luau::{BinOp, Expr, Field, Function, Name, Stmt};
 
 /// Arrow functions share `this` with the function around them, so only other functions stop the search.
 fn uses_this(n: Node) -> bool {
@@ -211,17 +211,15 @@ impl Lower<'_> {
 
 fn method_statement(class: Expr, name: Name, function: Function) -> Stmt {
     if function.params.first().is_some_and(|p| p == "self") {
-        Stmt::Function(class, Some(name), function.without_self())
+        Stmt::Function(class, Some(name), without_self(function))
     } else {
         Stmt::Function(class.field(name), None, function)
     }
 }
 
-impl Function {
-    fn without_self(mut self) -> Function {
-        if self.params.first().is_some_and(|p| p == "self") {
-            self.params.remove(0);
-        }
-        self
+fn without_self(mut function: Function) -> Function {
+    if function.params.first().is_some_and(|p| p == "self") {
+        function.params.remove(0);
     }
+    function
 }

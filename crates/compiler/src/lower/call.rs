@@ -3,9 +3,9 @@ use std::borrow::Cow;
 use super::expr::{element_key, keyed_fields, offset};
 use super::{Lower, Usage, skip_parens_and_assertions};
 use crate::facts::{Callee, Receiver};
-use crate::luau::{BinOp, Expr, Field, Name, Stmt, UnOp, is_name};
 use crate::macros::{Macro, MacroKind};
 use crate::tree::{Kind, Node};
+use crucible_luau::{BinOp, Expr, Field, Name, Stmt, UnOp, is_name};
 
 fn calls_super(call: Node) -> bool {
     let callee = skip_parens_and_assertions(call.expression());

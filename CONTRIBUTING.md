@@ -21,7 +21,7 @@ pnpm check
 The repository has these parts:
 
 - `packages/crucible` is the runtime package, `@trioforge/crucible`. Its root entry, `src/index.ts`, loads on both sides, so it must never import server or client code.
-- `crates/cli` holds the `crucible` CLI and `crates/compiler` holds Crucible's compiler, in Rust. `crates/cli/README.md` covers building and packaging the CLI.
+- `crates/cli` holds the `crucible` CLI and `crates/compiler` holds Crucible's compiler, in Rust. `crates/luau`, `crates/oc`, `crates/project` and `crates/docs` hold the libraries they share. `crates/cli/README.md` covers building and packaging the CLI.
 - `docs` holds the guides that `crucible docs` prints.
 - `examples/sample-game` is the game that the specs build and load.
 - `test` holds the Lune specs.

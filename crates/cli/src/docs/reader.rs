@@ -1,6 +1,6 @@
-use super::TOPICS;
 use super::render::{Page, Target, render};
-use super::search::{Hit, Index};
+use crucible_docs::TOPICS;
+use crucible_docs::search::{Hit, Index};
 use ratatui::Frame;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,

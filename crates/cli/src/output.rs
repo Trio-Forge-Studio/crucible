@@ -37,7 +37,7 @@ impl Output {
     pub fn new(verbose: bool) -> Self {
         Self { secrets: vec![], starts: [false; 256], verbose }
     }
-    pub fn redact_also(&mut self, secret: &crate::auth::Secret) {
+    pub fn redact_also(&mut self, secret: &crucible_oc::auth::Secret) {
         let key = secret.expose();
         if key.is_empty() {
             return;
@@ -157,7 +157,7 @@ mod tests {
     fn redaction_handles_five_megabytes_of_prefixes() {
         let key = "sentinel-Key_+/%=NeverPrint";
         let mut output = Output::new(false);
-        output.redact_also(&crate::auth::Secret::from_string(key.into()));
+        output.redact_also(&crucible_oc::auth::Secret::from_string(key.into()));
         let body = key[..1].repeat(5_000_000);
         let start = std::time::Instant::now();
         let redacted = output.redact(&body);
@@ -173,7 +173,7 @@ mod tests {
     fn literal_credentials_win_over_ambiguous_escape_prefixes() {
         for key in [r"Key\\tail", "Key Space", "Key\"\\+/=", "\u{00e9}\u{1f511}", "Key\tline\n"] {
             let mut output = Output::new(false);
-            output.redact_also(&crate::auth::Secret::from_string(key.into()));
+            output.redact_also(&crucible_oc::auth::Secret::from_string(key.into()));
             let json = serde_json::to_string(key).unwrap();
             let percent = percent_encoding::utf8_percent_encode(key, percent_encoding::NON_ALPHANUMERIC).to_string();
             let form = url::form_urlencoded::Serializer::new(String::new()).append_pair("", key).finish();
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn keys_and_signed_urls_are_redacted() {
         let mut output = Output::new(false);
-        output.redact_also(&crate::auth::Secret::from_string("Key\"\\+/=".into()));
+        output.redact_also(&crucible_oc::auth::Secret::from_string("Key\"\\+/=".into()));
         assert_eq!(output.redact("Key\"\\+/="), "<redacted>");
         assert_eq!(output.redact("Key\\\"\\\\+/="), "<redacted>");
         assert_eq!(output.redact("Key%22%5C%2B%2F%3D"), "<redacted>");

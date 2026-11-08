@@ -517,7 +517,7 @@ impl Printer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::luau::Function;
+    use crate::Function;
 
     fn expr(e: Expr) -> String {
         print(&[Stmt::Return(vec![e])]).trim_start_matches("return ").to_owned()

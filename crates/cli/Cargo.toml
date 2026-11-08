@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+crucible-docs = { path = "../docs" }
+crucible-oc = { path = "../oc" }
+crucible-project = { path = "../project" }
 oc-registry = { path = "../oc-registry" }
 crucible-compiler = { path = "../compiler" }
 serde.workspace = true
@@ -13,7 +16,6 @@ serde_json.workspace = true
 jsonc-parser = { version = "0.27", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
-toml = "1"
 dotenvy = "0.15"
 percent-encoding = "2"
 url = "2"
@@ -25,13 +27,12 @@ env_logger = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
-nucleo-matcher = "0.3"
 open = "5"
 unicode-width = "0.2"
 
 [build-dependencies]
+crucible-docs = { path = "../docs" }
 mermaid-text = "0.58"
-pulldown-cmark = { version = "0.13", default-features = false }
 serde_json.workspace = true
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-create"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }

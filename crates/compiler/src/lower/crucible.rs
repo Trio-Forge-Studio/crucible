@@ -5,9 +5,9 @@ use crate::declarations::DeclarationKind;
 use crate::facts::{
     Check, Class, ClassKind, Crucible, Declaration, Dependency, KeyLiteral, Literal, MapKey, Schema, Tail,
 };
-use crate::luau::{Expr, Field, Name, Stmt};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node};
+use crucible_luau::{Expr, Field, Name, Stmt};
 
 fn string(text: &str) -> Expr {
     Expr::String(Cow::Owned(text.to_owned()))

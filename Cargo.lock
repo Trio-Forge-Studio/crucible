@@ -646,13 +646,15 @@ version = "0.4.0"
 dependencies = [
  "clap 4.6.7",
  "crucible-compiler",
+ "crucible-docs",
+ "crucible-oc",
+ "crucible-project",
  "dotenvy",
  "env_logger",
  "httpmock",
  "jsonc-parser",
  "libc",
  "mermaid-text",
- "nucleo-matcher",
  "oc-registry",
  "open",
  "percent-encoding",
@@ -667,7 +669,6 @@ dependencies = [
  "sha2",
  "syntect",
  "tempfile",
- "toml 1.1.8+spec-1.1.0",
  "two-face",
  "unicode-width",
  "ureq",
@@ -681,6 +682,7 @@ name = "crucible-compiler"
 version = "0.4.0"
 dependencies = [
  "crucible-compiler",
+ "crucible-luau",
  "serde_json",
  "toml 1.1.8+spec-1.1.0",
  "tsrs_ast",
@@ -691,6 +693,40 @@ dependencies = [
  "tsrs_scanner",
  "tsrs_tsoptions",
  "tsrs_vfs",
+]
+
+[[package]]
+name = "crucible-docs"
+version = "0.4.0"
+dependencies = [
+ "mermaid-text",
+ "nucleo-matcher",
+ "pulldown-cmark",
+]
+
+[[package]]
+name = "crucible-luau"
+version = "0.4.0"
+
+[[package]]
+name = "crucible-oc"
+version = "0.4.0"
+dependencies = [
+ "httpmock",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+ "url",
+]
+
+[[package]]
+name = "crucible-project"
+version = "0.4.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -2218,6 +2254,7 @@ dependencies = [
 name = "oc-registry"
 version = "0.4.0"
 dependencies = [
+ "crucible-oc",
  "serde",
  "serde_json",
 ]

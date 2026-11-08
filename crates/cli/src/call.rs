@@ -1,4 +1,4 @@
-use crate::outcome::Failure;
+use crucible_oc::outcome::Failure;
 use oc_registry::path::{Template, fold};
 use oc_registry::{BodyMedia, Location, Op, PartKind, ValueKind};
 use std::collections::BTreeMap;
@@ -130,12 +130,12 @@ impl<'r> Call<'r> {
             values: values.into_iter().flat_map(|(k, vs)| vs.into_iter().map(move |v| (k.clone(), v))).collect(),
         })
     }
-    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.until = Some(std::time::Instant::now() + timeout);
+    pub fn with_deadline(mut self, until: std::time::Instant) -> Self {
+        self.until = Some(until);
         self
     }
-    pub fn timeout(&self) -> Option<std::time::Duration> {
-        self.until.map(|until| until.saturating_duration_since(std::time::Instant::now()))
+    pub fn deadline(&self) -> Option<std::time::Instant> {
+        self.until
     }
     pub fn path(&self) -> &str {
         &self.path

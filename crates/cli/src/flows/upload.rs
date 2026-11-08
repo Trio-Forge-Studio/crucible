@@ -1,6 +1,6 @@
 use crate::call::{BodyInput, Call, PartContent, PartInput};
 use crate::exec::Executor;
-use crate::outcome::Failure;
+use crucible_oc::outcome::Failure;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 

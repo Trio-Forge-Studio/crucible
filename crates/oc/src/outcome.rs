@@ -1,4 +1,4 @@
-use oc_registry::{Op, RetryPolicy, Safety};
+use crate::{RetryPolicy, Safety};
 use serde_json::{Value, json};
 
 pub const DEFAULT_ATTEMPTS: u8 = 3;
@@ -90,13 +90,10 @@ pub enum Verdict {
     Fail(Failure),
 }
 
-pub fn judge(op: &Op, attempt: Attempt, history: History) -> Verdict {
-    judge_policy(op.safety, op.retry.as_ref(), attempt, history)
-}
 pub fn judge_read(attempt: Attempt, history: History) -> Verdict {
-    judge_policy(Safety::Read, None, attempt, history)
+    judge(Safety::Read, None, attempt, history)
 }
-fn judge_policy(safety: Safety, retry: Option<&RetryPolicy>, attempt: Attempt, history: History) -> Verdict {
+pub fn judge(safety: Safety, retry: Option<&RetryPolicy>, attempt: Attempt, history: History) -> Verdict {
     let unsafe_write = safety == Safety::Unsafe;
     let (failure, retryable, uncertain, retry_after) = match attempt {
         Attempt::PageOverflow { can_resize } => {
@@ -172,13 +169,7 @@ fn judge_policy(safety: Safety, retry: Option<&RetryPolicy>, attempt: Attempt, h
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oc_registry::Registry;
-    fn op(safety: Safety) -> Op {
-        let r: Registry = serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).unwrap();
-        let mut op = r.op("assets.get").unwrap().clone();
-        op.safety = safety;
-        op
-    }
+    use crate::{ClassName, StatusClass};
     fn response(status: u16) -> Attempt {
         Attempt::Response { status, retry_after: None, body: b"reply".to_vec() }
     }
@@ -201,43 +192,47 @@ mod tests {
     #[test]
     fn success_row() {
         for s in [Safety::Read, Safety::Idempotent, Safety::Unsafe] {
-            assert!(matches!(judge(&op(s), response(200), History::default()), Verdict::Success(_)));
+            assert!(matches!(judge(s, None, response(200), History::default()), Verdict::Success(_)));
         }
     }
     #[test]
     fn redirect_row() {
         assert!(
-            matches!(judge(&op(Safety::Read),Attempt::Redirect("/next".into()),History::default()),Verdict::Redirect(location) if location=="/next")
+            matches!(judge(Safety::Read, None, Attempt::Redirect("/next".into()),History::default()),Verdict::Redirect(location) if location=="/next")
         );
     }
     #[test]
     fn page_overflow_row() {
         assert!(matches!(
-            judge(&op(Safety::Read), Attempt::PageOverflow { can_resize: true }, History::default()),
+            judge(Safety::Read, None, Attempt::PageOverflow { can_resize: true }, History::default()),
             Verdict::Retry { after_seconds: 0, .. }
         ));
-        assert_eq!(code(judge(&op(Safety::Unsafe), Attempt::PageOverflow { can_resize: true }, History::default())), 5);
-        assert_eq!(code(judge(&op(Safety::Read), Attempt::PageOverflow { can_resize: false }, History::default())), 2);
+        assert_eq!(
+            code(judge(Safety::Unsafe, None, Attempt::PageOverflow { can_resize: true }, History::default())),
+            5
+        );
+        assert_eq!(code(judge(Safety::Read, None, Attempt::PageOverflow { can_resize: false }, History::default())), 2);
     }
     #[test]
     fn auth_row() {
         for status in [401, 403] {
-            assert_eq!(code(judge(&op(Safety::Unsafe), response(status), History::default())), 3);
+            assert_eq!(code(judge(Safety::Unsafe, None, response(status), History::default())), 3);
         }
     }
     #[test]
     fn rejection_row() {
-        assert_eq!(code(judge(&op(Safety::Unsafe), response(400), History::default())), 4);
+        assert_eq!(code(judge(Safety::Unsafe, None, response(400), History::default())), 4);
     }
     #[test]
     fn unsafe_429_row() {
-        assert_eq!(code(judge(&op(Safety::Unsafe), response(429), History::default())), 7);
+        assert_eq!(code(judge(Safety::Unsafe, None, response(429), History::default())), 7);
     }
     #[test]
     fn unsafe_not_sent_row() {
         assert_eq!(
             code(judge(
-                &op(Safety::Unsafe),
+                Safety::Unsafe,
+                None,
                 Attempt::Transport { sent: false, message: "refused".into() },
                 History::default()
             )),
@@ -248,7 +243,8 @@ mod tests {
     fn unsafe_lost_row() {
         assert_eq!(
             code(judge(
-                &op(Safety::Unsafe),
+                Safety::Unsafe,
+                None,
                 Attempt::Transport { sent: true, message: "reset".into() },
                 History::default()
             )),
@@ -257,13 +253,13 @@ mod tests {
     }
     #[test]
     fn unsafe_server_error_row() {
-        assert_eq!(code(judge(&op(Safety::Unsafe), response(503), History::default())), 5);
+        assert_eq!(code(judge(Safety::Unsafe, None, response(503), History::default())), 5);
     }
     #[test]
     fn read_retry_row() {
         for status in [429, 503] {
             assert!(matches!(
-                judge(&op(Safety::Read), response(status), History::default()),
+                judge(Safety::Read, None, response(status), History::default()),
                 Verdict::Retry { after_seconds: 1, .. }
             ));
         }
@@ -272,7 +268,8 @@ mod tests {
     fn read_transport_retry_row() {
         assert!(matches!(
             judge(
-                &op(Safety::Read),
+                Safety::Read,
+                None,
                 Attempt::Transport { sent: true, message: "reset".into() },
                 History { attempts: 1, uncertain: false }
             ),
@@ -281,13 +278,14 @@ mod tests {
     }
     #[test]
     fn exhaustion_row() {
-        assert_eq!(code(judge(&op(Safety::Read), response(503), History { attempts: 2, uncertain: false })), 7);
+        assert_eq!(code(judge(Safety::Read, None, response(503), History { attempts: 2, uncertain: false })), 7);
     }
     #[test]
     fn retry_after_row() {
         assert!(matches!(
             judge(
-                &op(Safety::Read),
+                Safety::Read,
+                None,
                 Attempt::Response { status: 429, retry_after: Some("9".into()), body: vec![] },
                 History::default()
             ),
@@ -296,13 +294,20 @@ mod tests {
     }
     #[test]
     fn publish_uncertainty_row() {
-        let r: Registry = serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).unwrap();
-        let p = r.op("universes.create-place-version").unwrap();
-        let Verdict::Retry { history, .. } = judge(p, response(503), History::default()) else {
+        let retry = RetryPolicy {
+            statuses: vec![StatusClass::Exact(409), StatusClass::Class(ClassName::ServerError)],
+            attempts: 4,
+            delay_seconds: 60,
+        };
+        let Verdict::Retry { history, .. } = judge(Safety::Unsafe, Some(&retry), response(503), History::default())
+        else {
             panic!("publish retries 5xx")
         };
-        assert_eq!(code(judge(p, response(400), history)), 5);
-        assert!(matches!(judge(p, response(200), history), Verdict::Success(_)));
-        assert_eq!(code(judge(p, response(409), History { attempts: 3, uncertain: false })), 4);
+        assert_eq!(code(judge(Safety::Unsafe, Some(&retry), response(400), history)), 5);
+        assert!(matches!(judge(Safety::Unsafe, Some(&retry), response(200), history), Verdict::Success(_)));
+        assert_eq!(
+            code(judge(Safety::Unsafe, Some(&retry), response(409), History { attempts: 3, uncertain: false })),
+            4
+        );
     }
 }

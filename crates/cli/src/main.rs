@@ -1,4 +1,3 @@
-mod auth;
 mod build;
 mod call;
 mod child;
@@ -8,8 +7,6 @@ mod discover;
 mod docs;
 mod exec;
 mod flows;
-mod manifest;
-mod outcome;
 mod output;
 mod publish;
 mod upgrade;
@@ -17,10 +14,12 @@ mod whoami;
 
 use crate::call::{Call, Source};
 use crate::cli::{AssetCommand, Cli, Command, LuauCommand, Oc, OcCommand, PlaceCommand};
-use crate::exec::{Executor, Timing};
-use crate::outcome::{Acceptance, Failure};
+use crate::exec::Executor;
 use crate::output::Output;
 use clap::Parser;
+use crucible_oc::auth;
+use crucible_oc::outcome::{Acceptance, Failure};
+use crucible_oc::transport::Timing;
 use oc_registry::{Auth, Method, OpRef, Registry, Resolved};
 use serde_json::{Value, json};
 use std::process::ExitCode;
@@ -117,7 +116,7 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
         } else {
             let root =
                 std::env::current_dir().map_err(|_| Failure::unavailable("cannot read the current directory"))?;
-            let (found, key) = auth::load(&root)?;
+            let (found, key) = load_key(&root)?;
             source = Some(found);
             output.redact_also(&key);
             Some(key)
@@ -168,7 +167,28 @@ fn run(cli: Oc, output: &mut Output, acceptance: &std::cell::RefCell<Acceptance>
             _ => unreachable!("discovery returned before execution"),
         }
     })();
-    result.map_err(|failure| auth::decorate(failure, primary, source.as_ref()))
+    result.map_err(|failure| auth::decorate(failure, &primary.auth, source.as_ref()))
+}
+fn load_key(root: &std::path::Path) -> Result<(auth::KeySource, auth::Secret), Failure> {
+    auth::load(std::env::var_os(auth::KEY), || dot_env(root))
+}
+fn dot_env(root: &std::path::Path) -> Result<Option<String>, Failure> {
+    let entries = match dotenvy::from_path_iter(root.join(".env")) {
+        Ok(entries) => entries,
+        Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(Failure::usage("cannot read .env")),
+    };
+    let mut found = None;
+    for entry in entries {
+        let (name, value) = entry.map_err(|error| match error {
+            dotenvy::Error::Io(_) => Failure::usage("cannot read .env"),
+            _ => Failure::usage("cannot parse .env"),
+        })?;
+        if name == auth::KEY && found.is_none() {
+            found = Some(value);
+        }
+    }
+    Ok(found)
 }
 fn op_ref<'r>(registry: &'r Registry, words: &[String]) -> Result<(Resolved<'r>, usize), Failure> {
     let first = words.first().ok_or_else(|| Failure::usage("an operation name or METHOD and URL is required"))?;
