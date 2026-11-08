@@ -182,10 +182,19 @@ test(
 			serverEntry,
 			`import { coins } from "../shared/coins";\n${readFileSync(serverEntry, "utf8")}\nprint(coins);\n`,
 		);
+		writeFileSync(
+			join(game, "src", "client", "greeting.tsx"),
+			'import Vide from "@rbxts/vide";\n\nexport function Greeting() {\n\treturn (\n\t\t<>\n\t\t\t<textlabel Text="Hello" />\n\t\t</>\n\t);\n}\n',
+		);
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
 		assert.match(checked.stdout, /vp check/);
 		assert.ok(existsSync(join(game, "out", "shared", "coins.luau")), "the build emits the shared module");
+		assert.match(
+			readFileSync(join(game, "out", "client", "greeting.luau"), "utf8"),
+			/Vide\.jsx\(Vide\.Fragment/,
+			"a component that imports Vide only for JSX passes the check and builds",
+		);
 		assert.ok(
 			readFileSync(join(game, "build", "start.rbxl"))
 				.subarray(0, 8)
@@ -203,6 +212,33 @@ test(
 				pending.push(dependency);
 			}
 		}
+		const unusedNames =
+			'import VideAlias from "@rbxts/vide";\nimport Vide from "@rbxts/vide";\n\nconst OtherUnused = 1;\n';
+		const unusedModule = join(game, "src", "client", "unused.ts");
+		const unusedComponent = join(game, "src", "client", "unused-component.tsx");
+		writeFileSync(unusedModule, `${unusedNames}\nexport const used = 1;\n`);
+		writeFileSync(unusedComponent, `${unusedNames}\nexport function Shown() {\n\treturn <frame />;\n}\n`);
+		const unused = run("npm", ["run", "check"], game);
+		const report = `${unused.stdout}\n${unused.stderr}`;
+		assert.notEqual(unused.status, 0, report);
+		const count = (pattern) => report.split(pattern).length - 1;
+		assert.equal(
+			count("'VideAlias' is imported but never used"),
+			2,
+			`an unused alias fails in both files\n${report}`,
+		);
+		assert.equal(
+			count("'OtherUnused' is declared but never used"),
+			2,
+			`another unused name fails in both\n${report}`,
+		);
+		assert.equal(
+			count("'Vide' is imported but never used"),
+			1,
+			`an unused Vide fails only outside .tsx\n${report}`,
+		);
+		rmSync(unusedModule);
+		rmSync(unusedComponent);
 		writeFileSync(join(game, "src", "server", "main.server.ts"), "const x=1;\n");
 		rmSync(join(game, "build"), { recursive: true });
 		const unformatted = run("npm", ["run", "check"], game);

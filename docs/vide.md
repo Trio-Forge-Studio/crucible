@@ -25,7 +25,7 @@ import { useAtom } from "@rbxts/vide-charm";
 }
 ```
 
-The linter does not see that JSX uses `Vide`, so a new game's `vite.config.ts` also lets `no-unused-vars` skip an import named `Vide`.
+The linter does not see that JSX uses `Vide`, so a new game's `vite.config.ts` also lets `no-unused-vars` skip a name `Vide` in `.tsx` files. Every other unused import or variable still fails `vp check`, and so does an unused `Vide` in a `.ts` file. Inside a pnpm workspace whose root holds a `vite.config.ts`, `vp check` lints with the root's config instead of the game's, so copy that override there.
 
 Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail compilation at the tsconfig with this fix. Crucible no longer exports `@trioforge/crucible/ui` or compiles `className` and `theme.toml` into instance styles.
 
