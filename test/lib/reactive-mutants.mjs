@@ -388,7 +388,14 @@ const mutants = [
 		"guard",
 		[70],
 		SERVER_SYNC,
-		[["peers < size && reads < SYNC_HEARTBEAT_SCAN", "peers < size"]],
+		[["peers < size && visits < SYNC_HEARTBEAT_SCAN", "peers < size"]],
+	],
+	[
+		"a quiet scan's peers are not visits",
+		"guard",
+		[70],
+		SERVER_SYNC,
+		[["			this.scanned += 1;\n			visits += 1;\n", "			this.scanned += 1;\n"]],
 	],
 	[
 		"a quiet scan's reads are not visits",
@@ -404,8 +411,8 @@ const mutants = [
 		SERVER_SYNC,
 		[
 			[
-				"		const size = this.order.size();\n		let reads = 0;",
-				"		const size = this.order.size();\n		this.scanned = 0;\n		let reads = 0;",
+				"		const size = this.order.size();\n		let visits = 0;",
+				"		const size = this.order.size();\n		this.scanned = 0;\n		let visits = 0;",
 			],
 		],
 	],
@@ -446,6 +453,40 @@ const mutants = [
 	["a Charm whose stop keeps a nested effect's reads loads", "guard", [26], CHARM, [["	checkHalt();\n", ""]]],
 	["a Charm that runs every queued effect refused", "guard", [13], CHARM, [["runs === 2 || ", ""]]],
 	["Charm never checked", "guard", [13, 26], CHARM, [["	if (checked) return;\n", "	if (!checked) return;\n"]]],
+	[
+		"a check inside a batch or a flush runs on",
+		"guard",
+		[13],
+		CHARM,
+		[["		if (runs === 1) unflushed();\n", ""]],
+	],
+	[
+		"a batch end that runs no effect passes the check",
+		"guard",
+		[13],
+		CHARM,
+		[["	if (!threw) unflushed();\n", ""]],
+	],
+	["a check leaves its caller's subscriber unset", "guard", [13], CHARM, [["	setActiveSub(active);\n", ""]]],
+	[
+		"a refused check leaves its effects subscribed",
+		"swap",
+		[13],
+		CHARM,
+		[
+			[
+				"	stopParent();\n	stopChild?.();\n	if (!ok) error(err, 0);",
+				"	if (!ok) error(err, 0);\n	stopParent();\n	stopChild?.();",
+			],
+		],
+	],
+	[
+		"a refused check marks Charm checked",
+		"guard",
+		[13],
+		CHARM,
+		[["	if (checked) return;\n", "	if (checked) return;\n	checked = true;\n"]],
+	],
 ];
 
 function run(command, args, timeout = 300000) {
