@@ -20,9 +20,10 @@ import {
 	SYNC_PEER_VISITS,
 } from "../reactive/limits";
 import { define, type TypeId } from "../registry";
-import { declarations, useChanged, useRetired, type Declaration } from "./declarations";
+import { declarationNamed, declarations, useChanged, useRetired, type Declaration } from "./declarations";
 import { frameCost, overBudget, SyncFaultMessage, SyncFrameMessage, type SyncFrame, type SyncValue } from "./frame";
-import { admit, equal, isOverBudget, spend, type Work } from "./values";
+import { beginPatches, difference, snapshot } from "./patches";
+import { admit, isOverBudget, spend, type Work } from "./values";
 
 checkCharm();
 
@@ -151,6 +152,7 @@ class ServerSync extends Subsystem {
 	}
 
 	private snapshot(player: Player): (() => void) | undefined {
+		beginPatches();
 		if (!declarations().some((declaration) => declaration.publication !== undefined)) return undefined;
 		const view: View = {
 			player,
@@ -190,6 +192,7 @@ class ServerSync extends Subsystem {
 	 * send scans instead, and its visits count against the round that a skipped projection starts.
 	 */
 	private pace() {
+		beginPatches();
 		this.spent = 0;
 		this.examined = 0;
 		if (this.order.size() === 0) return;
@@ -333,20 +336,31 @@ class ServerSync extends Subsystem {
 					continue;
 				}
 				if (failedAt !== undefined) {
-					staged.values.push({ key: declaration.name, value });
+					staged.values.push({ key: declaration.name, mode: "full", value });
 					staged.accept.set(declaration, { version, value });
 					staged.recovered.push(declaration);
 					continue;
 				}
 			}
-			if (accepted !== undefined && equal(accepted.value, value, work))
+			if (accepted !== undefined && difference(accepted.value, value, work) === undefined)
 				staged.accept.set(declaration, { version, value: accepted.value });
 			else {
-				staged.values.push({ key: declaration.name, value });
+				staged.values.push({ key: declaration.name, mode: "full", value });
 				staged.accept.set(declaration, { version, value });
 			}
 		}
 		this.examining = "";
+		for (const entry of staged.values) {
+			const declaration = declarationNamed(entry.key)!;
+			const accepted = view.accepted.get(declaration);
+			const before = accepted !== undefined ? accepted.value : declaration.initial;
+			if (view.revision === 0) entry.value = snapshot(entry.value);
+			else {
+				const delta = difference(before, entry.value, work);
+				entry.mode = delta === undefined ? "same" : "patch";
+				entry.value = delta;
+			}
+		}
 		return staged;
 	}
 

@@ -46,10 +46,12 @@
 		"@rbxts/charm": "0.11.1",
 		"@rbxts/types": "1.0.959",
 		"@rbxts/vide": "0.6.1",
-		"@trioforge/compiler-types": "workspace:*"
+		"@trioforge/compiler-types": "workspace:*",
+		"@rbxts/charm-sync": "0.4.1"
 	},
 	"peerDependencies": {
 		"@rbxts/charm": "0.11.1",
+		"@rbxts/charm-sync": "0.4.1",
 		"@rbxts/vide": "^0.6.1"
 	},
 	"peerDependenciesMeta": {

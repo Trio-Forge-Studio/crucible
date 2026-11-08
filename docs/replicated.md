@@ -4,6 +4,8 @@ Declare game state once in shared code, write it from one server Subsystem, and 
 
 Import the declarations and `syncStatus` from the root of `@trioforge/crucible`. Import `publish` from `@trioforge/crucible/server`. The client entry adds nothing: clients only read.
 
+Install `@rbxts/charm-sync` at exactly `0.4.1` alongside `@rbxts/charm` `0.11.1` in the game's dependencies. Both are required peers, included by `crucible create`. Map the game's `node_modules/@rbxts` into the place so Charm Sync finds the same Charm copy as the game.
+
 ```ts
 import { replicated, replicatedPerPlayer, syncStatus } from "@trioforge/crucible";
 import type { Replicated, ReplicatedPerPlayer, SyncStatus } from "@trioforge/crucible";
@@ -106,6 +108,7 @@ A per-player declaration that failed becomes `"ready"` again when its next value
 
 - The server sends each ready player one frame per Heartbeat at most, holding every value that changed since the last frame that player accepted. A frame is atomic: an effect on the client never sees part of it.
 - A value equal to the one the player already holds is not resent.
+- Snapshots carry complete values; updates carry Charm Sync patches through Crucible's network. Root `undefined`, deleted keys, and arrays keep the same game-facing behavior. Crucible escapes Charm Sync's internal marker keys, so a map may use those names as ordinary data.
 - A declaration nobody publishes is never sent. Its clients keep `initial` with status `"pending"`.
 - When a publishing Subsystem faults, its declarations become `"failed"` for every client, and writes through its handle throw.
 - A frame over the sync budgets, or a client that reports a broken frame, stops that player's sync and kicks the player with "Connection problem, please rejoin." No other player is affected.

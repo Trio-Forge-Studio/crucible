@@ -5,7 +5,8 @@ import { peek, store, type Write } from "../reactive/store";
 import { define, type TypeId } from "../registry";
 import { assignment, declarationNamed, declarations } from "./declarations";
 import { SyncFrameMessage, type SyncFrame } from "./frame";
-import { reuse } from "./values";
+import { apply } from "./patches";
+import { admit } from "./values";
 
 /** @internal How ClientSync reports its last applied revision: exactly `Network.send` on the fault message. */
 export type FaultSender = (revision: number) => void;
@@ -53,7 +54,10 @@ class ClientSync extends Subsystem {
 				const declaration = declarationNamed(entry.key);
 				if (declaration === undefined) continue;
 				const current = peek(declaration.node);
-				const reused = reuse(current, entry.value);
+				const reused =
+					entry.mode === "same"
+						? current
+						: admit(declaration.plan, declaration.name, apply(current, entry.value, entry.mode === "full"));
 				if (!rawequal(reused, current)) out.push(assignment(declaration, reused));
 				out.push([declaration.status, "ready"]);
 			}

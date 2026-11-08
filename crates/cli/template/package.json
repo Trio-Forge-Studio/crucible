@@ -10,6 +10,7 @@
 	},
 	"dependencies": {
 		"@rbxts/charm": "__CHARM__",
+		"@rbxts/charm-sync": "__CHARM_SYNC__",
 		"@rbxts/vide": "__VIDE__",
 		"@rbxts/vide-charm": "__VIDE_CHARM__",
 		"@trioforge/crucible": "__VERSION__"

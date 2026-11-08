@@ -140,7 +140,7 @@ return {
 		spec.list(seen, { "nil 0", "Running 300" }, "one run with both new values, never one alone")
 		w:finish()
 	end,
-	["T12 the worked update frame of three values is 72 bytes"] = function()
+	["T12 the update frame of three values and their modes is 75 bytes"] = function()
 		local w = newWorld()
 		local ann = w:join("Ann")
 		w.job.started(12)
@@ -149,7 +149,7 @@ return {
 		w:heartbeat()
 		local frames = w:frames(ann)
 		spec.list(World.keys(frames[2]), { "Job.EndsAt", "Job.Phase", "Job.StartedAt" }, "the three values")
-		spec.eq(frames[2].bytes, 72, "sync.md's worked frame")
+		spec.eq(frames[2].bytes, 75, "three modes add one byte each")
 		w:finish()
 	end,
 	["61 an equal fresh table sends nothing and a changed one sends the whole value"] = function()

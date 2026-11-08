@@ -120,10 +120,25 @@ end
 -- Every sync frame on the wire to `client`, decoded by networking's codec, in order.
 function world:frames(client)
 	local out = {}
+	local state = {}
+	local apply = self.server.graph.package("@rbxts/charm-sync/src").patch.apply
+	local unpackValue = self.server.graph.module("internal/sync/patches").apply
 	for _, entry in self.link.log do
 		if entry.to == client.name and type(entry.packet) == "buffer" then
 			local decoded = decode(self.wire, entry.packet)
 			if decoded then
+				local values = {}
+				for _, value in decoded.frame.values do
+					local previous = state[value.key]
+					local before = if previous then previous.value else nil
+					local raw = if value.mode == "full"
+						then value.value
+						elseif value.mode == "same" then before
+						else apply(before, value.value)
+					state[value.key] = { value = raw }
+					table.insert(values, { key = value.key, value = unpackValue(nil, raw, true) })
+				end
+				decoded.frame.values = values
 				decoded.injected = entry.injected
 				table.insert(out, decoded)
 			end
@@ -154,6 +169,24 @@ end
 function world:inject(client, frame)
 	local wire = decoder(client)
 	local message = wire.frame.SyncFrameMessage
+	frame = table.clone(frame)
+	frame.values = table.clone(frame.values)
+	local patches = client.graph.module("internal/sync/patches")
+	local declarations = client.graph.module("internal/sync/declarations")
+	local peek = client.graph.module("internal/reactive/store").peek
+	local diff = client.graph.package("@rbxts/charm-sync/src").patch.diff
+	for i, value in frame.values do
+		local declaration = declarations.declarationNamed(value.key)
+		local before = if declaration then peek(declaration.node) else nil
+		local delta = if frame.kind == "snapshot"
+			then patches.snapshot(value.value)
+			else diff(patches.snapshot(before), patches.snapshot(value.value))
+		frame.values[i] = {
+			key = value.key,
+			mode = if frame.kind == "snapshot" then "full" elseif delta == nil then "same" else "patch",
+			value = delta,
+		}
+	end
 	local body = wire.envelope.encodeBody(message.name, message.input, "payload", frame)
 	local packet = wire.envelope.frame(body, EVENT, { message.index })
 	self.link:injectToClient(client, packet.bytes, packet.sidecar)

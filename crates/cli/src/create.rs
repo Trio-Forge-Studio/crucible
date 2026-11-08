@@ -173,6 +173,7 @@ pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
         ("__VITE_PLUS__", "vite-plus", &workspace, "devDependencies"),
         ("__RBXTS_TYPES__", "@rbxts/types", &sample, "devDependencies"),
         ("__CHARM__", "@rbxts/charm", &sample, "dependencies"),
+        ("__CHARM_SYNC__", "@rbxts/charm-sync", &sample, "dependencies"),
         ("__VIDE__", "@rbxts/vide", &sample, "dependencies"),
         ("__VIDE_CHARM__", "@rbxts/vide-charm", &sample, "dependencies"),
     ] {
