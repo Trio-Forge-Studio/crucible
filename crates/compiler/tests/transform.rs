@@ -1490,3 +1490,20 @@ fn exports_only_consumers_compile_public_entries_and_reject_reserved_entries() {
         assert!(errors.iter().any(|error| error.code == 2307), "{entry}: {errors:?}");
     }
 }
+
+#[test]
+fn a_declared_vide_entry_is_rejected_under_cru004() {
+    let game = Game::new();
+    game.write("src/shared/vide.d.ts", "declare module \"@trioforge/crucible/vide\" { export const value: number; }");
+    game.main(
+        "import { Subsystem } from \"@trioforge/crucible\";\n\
+         import { value } from \"@trioforge/crucible/vide\";\n\
+         export const use = [Subsystem, value];\n",
+    );
+    let facts = game.facts();
+    let messages: Vec<_> = facts.diagnostics.iter().filter(|d| d.code == 90004).map(|d| d.message.clone()).collect();
+    assert_eq!(
+        messages,
+        ["CRU004: Import only the root, server, client, util/random or maths/spline Crucible entries."]
+    );
+}
