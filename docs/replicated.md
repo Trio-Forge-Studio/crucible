@@ -56,7 +56,7 @@ export class JobService extends Subsystem {
 - A write checks the value against the declared type before it stores it. Fields the type does not declare are dropped and never sent. A value that cannot replicate throws at the write and names the declaration and the path, never the value: `Data.Profile.settings.music: expected boolean, got number`.
 - Every table in a published value is frozen. Code that later mutates one of those tables in place throws at that line.
 - Every server reader sees the new value at once. Clients see it in the next Heartbeat's frame. Several writes between two Heartbeats send only the last value.
-- A call with no argument reads, so `h(undefined)` cannot write. The type refuses it. Write `undefined` with `h(() => undefined)`.
+- A call with no argument reads, so `h(undefined)` cannot write. The type refuses any value whose type includes `undefined`, such as a `number | undefined` variable, not only the literal. Write such a value with the function form: `h(() => next)`.
 - An update function runs untracked and is called with the current value. A write after the publisher ended throws `<name>'s publisher <Subsystem> has ended`.
 
 `publish(declaration, project)` supplies a per-player value as a projection. It returns an opaque `Publication`.

@@ -37,7 +37,27 @@ print(coins()); // 15
 
 `computed(read)` makes a cached value derived from others, `untracked(read)` reads without tracking, and `batch(run)` holds the effects that the writes inside `run` reach until it returns. Charm's documentation describes the rest of its API.
 
-An atom, a computed, a replicated declaration and a profile handle are all plain functions of no arguments. A getter that reads them, such as `() => this.open() && !this.locked()`, tracks the same way.
+An atom, a computed and a replicated declaration are plain functions of no arguments. A getter that reads them, such as `() => this.open() && !this.locked()`, tracks the same way.
+
+A profile handle reads the same way, with `handle()`, but it is a callable table, not a function. Charm's `computed`, `listen` and `subscribe`, and `useAtom` from `vide-charm`, fail at run time when they are given one, so pass them `() => handle()`. The types do not catch it, because a handle's call signature matches `() => T`. Crucible's `effect` and `watch` call their source themselves, so `watch(handle, onChange)` works.
+
+```ts
+import { computed } from "@rbxts/charm";
+import { profileStore } from "@trioforge/crucible";
+
+const PlayerData = profileStore("Game.Computed", { template: { coins: 0 } });
+
+export function isRich(player: Player) {
+	const coins = PlayerData(player).coins;
+	return computed(() => coins() >= 100);
+}
+```
+
+### Keep computeds pure
+
+Crucible no longer checks what a `computed` does. Its `read` can write an atom, a published value or profile data, or hand a profile off, and nothing throws. The write happens whenever a read finds the computed stale, which depends on who reads it and when. Keep `read` to deriving a value, and write from an effect, a hook or a handler instead.
+
+Do not create an `effect`, `watch`, `scope`, `onCleanup` or `own` inside a computed either. It attaches to whichever code's read ran the computed, and that changes from one run to the next.
 
 ## Effects
 
@@ -129,7 +149,7 @@ A Subsystem has no `onEnable`, so its reactions live for the session. A disabled
 The owner follows the code Crucible runs, not one thread:
 
 - A `start` hook keeps its object as owner across yields, for its whole life.
-- A thread that a hook or callback starts with `task.spawn` or `coroutine.wrap` has the hook's owner until it first yields. After it resumes it has no owner and tracks nothing. A thread made with `task.defer` never has one.
+- A thread that a hook or callback starts with `task.spawn` or `coroutine.wrap` has the hook's owner until it first yields. After it resumes, it runs as the code that resumed it. The engine resuming it, such as after `task.wait` or an event, gives it no owner. A Crucible callback that resumes it synchronously, such as another object's hook calling `coroutine.resume`, gives it that callback's owner, and what it creates then belongs to that callback. A thread made with `task.defer` never has an owner of its own.
 - Server `onShutdown` hooks run on threads with no owner, so `effect` throws there while writes still work.
 
 ### Charm's own callbacks
@@ -198,7 +218,28 @@ Crucible's own writes are batched the same way, so their readers see every value
 
 A `start` hook, a `receive` handler and a thread can yield, so Crucible never batches them: a batch left open across a yield would hold every effect in the place. A write there runs its effects at once. When one of them fails, the write throws in that code. Wrap writes in `batch` there yourself when the code between them cannot yield.
 
-Charm 0.11.1 runs a write's effects in order and stops at the first that throws. The effects after it miss that write, and see the next one.
+Charm 0.11.1 runs a write's effects in order and stops at the first that throws. The effects after it miss that write, and see the next one. Replication is not affected: a per-player projection that such a write reaches is still sent at the next Heartbeat.
+
+Nothing limits how often an effect reruns. Crucible's old engine stopped an effect after 64 runs in one flush and reported a feedback loop. Charm has no such check. An effect that writes a value it also reads reruns after its own write, and when every run writes a new value, it never stops: the place hangs until the script times out. Two effects that write each other's values loop the same way. Derive such a value with `computed`, or write it with an updater, which reads the current value without tracking it.
+
+```ts
+import { atom } from "@rbxts/charm";
+import { effect } from "@trioforge/crucible";
+
+const score = atom(0);
+const history = atom<readonly number[]>([]);
+
+export function recordScores() {
+	// Never ends: each run reads history and writes it a new table.
+	// effect(() => history([...history(), score()]));
+
+	// Tracks only score: the updater reads history untracked.
+	return effect(() => {
+		const value = score();
+		history((previous) => [...previous, value]);
+	});
+}
+```
 
 Each effect run is its own lifecycle step: the lifecycle requests it makes, such as `setEnabled`, apply after it returns.
 

@@ -10,8 +10,9 @@ export interface Publication {
 
 /**
  * What a public `publish` returns, read and written like a Charm atom. `h()` reads, tracked. `h(value)` writes a value,
- * and `h(update)` writes what `update` returns for the current value, called untracked. Write `undefined` with
- * `h(() => undefined)`: a call cannot tell `h(undefined)` from `h()`, so the type refuses it.
+ * and `h(update)` writes what `update` returns for the current value, called untracked. A call cannot tell
+ * `h(undefined)` from `h()`, so the type refuses any value whose type includes `undefined`. Write one with the function
+ * form: `h(() => next)`.
  */
 export interface Published<T> {
 	(): T;

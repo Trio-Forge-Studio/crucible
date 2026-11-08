@@ -13,7 +13,7 @@ import { useAtom } from "@rbxts/vide-charm";
 
 ## Compile JSX
 
-Set these options in the game's tsconfig:
+`crucible create` writes these options into a new game's tsconfig, and `crucible upgrade` adds them to a tsconfig you have not edited. Otherwise, set them yourself:
 
 ```json
 {
@@ -29,7 +29,7 @@ Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail 
 
 ## Bind a value
 
-`useAtom(getter)` returns a Vide source that follows a Charm value. `getter` is any function of no arguments that reads Charm values: an atom, a computed, a replicated declaration, a profile handle, or a getter that reads them.
+`useAtom(getter)` returns a Vide source that follows a Charm value. `getter` is a function of no arguments that reads Charm values: an atom, a computed, a replicated declaration, or a getter that reads them. A profile handle is a callable table, not a function, and `useAtom` throws when it is given one. Pass `useAtom(() => handle())` instead. The types do not catch it.
 
 ```tsx
 import { atom, computed } from "@rbxts/charm";

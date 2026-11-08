@@ -131,7 +131,7 @@ While a profile is not writable, every read returns the template's value at that
 
 A key a newer build saved is kept in place. Spread a table to change it (`{ ...d, currency: 1 }`); a table rebuilt from scratch drops what it leaves out.
 
-A handle is a callable table, not a function. Pass `() => h()` to code that tests `typeof(x) == "function"`.
+A handle is a callable table, not a function. Pass `() => h()` to code that tests `typeof(x) == "function"`, such as Charm's `computed`, `listen` and `subscribe` and `useAtom` from `vide-charm`. The types do not catch it.
 
 ## Store members
 
@@ -200,6 +200,7 @@ export class RewardService extends Subsystem {
 - A throwing `onLoad` claim fails the load and kicks the player. A throwing `onRelease` claim is skipped, keeping its input, and the other claims still run.
 - `profileMessage<P>(name)` declares a durable message in a server module. `send(userId, message, payload, id?)` queues it for a player who is online, elsewhere or offline. Each message has one receiver per server.
 - `grant(productId, apply)` owns Roblox's `ProcessReceipt` for that product. A purchase is acknowledged only after its change is durably saved, and `afterGrant` effects run once, after that.
+- A Charm atom or published value that a claim or a handle callback writes is not rolled back when its data change fails: when the callback throws, or returns a value the store rejects. A `grant` callback also runs again each time Roblox retries an unsaved purchase. Players can then see a reward their profile does not hold. Write what players see in `afterGrant`, or after a handle write returns true.
 - `quarantined(userId)` and `clearQuarantined(userId, ids, action)` recover messages a receiver kept failing on.
 
 ## The owner's client
