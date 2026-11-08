@@ -12,6 +12,7 @@ const LIFECYCLE = "packages/crucible/src/internal/lifecycle.ts";
 const RUNNER = "packages/crucible/src/internal/runner.ts";
 const BOOT = "packages/crucible/src/internal/boot.ts";
 const SERVER_SYNC = "packages/crucible/src/internal/sync/server-sync.ts";
+const CHARM = "packages/crucible/src/internal/reactive/charm.ts";
 
 // [name, kind, rules, file, [[before, after], ...]]. Kinds: guard (a reset or guard deleted), swap (two operands of
 // the same type exchanged), pair (one half of a paired operation short-circuited). Charm owns values, so the targets
@@ -105,7 +106,12 @@ const mutants = [
 		"pair",
 		[17, 36],
 		OWNERSHIP,
-		[["	dispose(run);\n	error(failure, 0);", "	dispose(run);"]],
+		[
+			[
+				'		settle("an effect\'s first run failed");\n		error(failure, 0);',
+				'		settle("an effect\'s first run failed");',
+			],
+		],
 	],
 	[
 		"a nested effect created as a root",
@@ -121,27 +127,81 @@ const mutants = [
 		OWNERSHIP,
 		[["		for (const child of children) dispose(child);\n", ""]],
 	],
-	["a disposed nested effect is never closed", "pair", [17, 26], OWNERSHIP, [["	run.close?.(true);\n", ""]]],
 	[
-		"a nested effect reads no close signal",
-		"pair",
+		"a disposed nested effect never halts",
+		"guard",
 		[26],
 		OWNERSHIP,
-		[["	(run.closed as Getter<boolean>)();\n", ""]],
+		[["	finish(run);\n	halt(run);\n}", "	finish(run);\n}"]],
+	],
+	[
+		"a halted nested effect keeps its parent link",
+		"guard",
+		[26],
+		OWNERSHIP,
+		[["	run.node.subs = undefined;\n	run.node.subsTail = undefined;\n", ""]],
 	],
 	[
 		"a self-disposed entry is never stopped",
 		"guard",
 		[36],
 		OWNERSHIP,
-		[["		if (run.body === undefined) stop();\n", ""]],
+		[["	if (run.body === undefined) run.stop?.();\n", ""]],
 	],
 	[
 		"a failed first run keeps its run",
 		"guard",
 		[36],
 		OWNERSHIP,
-		[["	dispose(run);\n	error(failure, 0);", "	error(failure, 0);"]],
+		[["		dispose(run);\n		settle(", "		settle("]],
+	],
+	[
+		"a first run's reached failure keeps its run",
+		"guard",
+		[17],
+		OWNERSHIP,
+		[
+			[
+				"	if (flushed) return;\n	dispose(run);\n	error(err, 0);",
+				"	if (flushed) return;\n	error(err, 0);",
+			],
+		],
+	],
+	[
+		"a first run's reached failure not rethrown",
+		"pair",
+		[17],
+		OWNERSHIP,
+		[
+			[
+				"	if (flushed) return;\n	dispose(run);\n	error(err, 0);",
+				"	if (flushed) return;\n	dispose(run);",
+			],
+		],
+	],
+	[
+		"a first run not batched",
+		"pair",
+		[17],
+		OWNERSHIP,
+		[
+			[
+				"	startBatch();\n	const [ok, stop] = pcall(charmEffect,",
+				"	const [ok, stop] = pcall(charmEffect,",
+			],
+			['		settle("an effect\'s first run failed");\n', ""],
+			[
+				"	const [flushed, err] = pcall(endBatch);\n	if (flushed) return;\n	dispose(run);\n	error(err, 0);\n",
+				"",
+			],
+		],
+	],
+	[
+		"a failed first run's reached failure unreported",
+		"guard",
+		[17],
+		OWNERSHIP,
+		[['		settle("an effect\'s first run failed");', "		pcall(endBatch);"]],
 	],
 	[
 		"boot holds nothing",
@@ -321,7 +381,40 @@ const mutants = [
 		"guard",
 		[13],
 		SERVER_SYNC,
-		[["		if (!this.changed) this.changed = this.anySkipped();\n", ""]],
+		[["				if (!projection.dirty && skipped(projection)) this.changed = true;\n", ""]],
+	],
+	[
+		"a quiet scan reads every peer",
+		"guard",
+		[70],
+		SERVER_SYNC,
+		[["peers < size && reads < SYNC_HEARTBEAT_SCAN", "peers < size"]],
+	],
+	[
+		"a quiet scan's reads are not visits",
+		"pair",
+		[70],
+		SERVER_SYNC,
+		[["			visits = this.scan();", "			this.scan();"]],
+	],
+	[
+		"a quiet scan starts at the first peer",
+		"swap",
+		[70],
+		SERVER_SYNC,
+		[
+			[
+				"		const size = this.order.size();\n		let reads = 0;",
+				"		const size = this.order.size();\n		this.scanned = 0;\n		let reads = 0;",
+			],
+		],
+	],
+	[
+		"a leaving peer moves the scan past the next peer",
+		"guard",
+		[70],
+		SERVER_SYNC,
+		[["		if (index < this.scanned) this.scanned -= 1;\n", ""]],
 	],
 	[
 		"a projection a failed flush skipped is never pulled",
@@ -349,6 +442,10 @@ const mutants = [
 			],
 		],
 	],
+	["a Charm that clears skipped flags loads", "guard", [13], CHARM, [["	checkSkip();\n", ""]]],
+	["a Charm whose stop keeps a nested effect's reads loads", "guard", [26], CHARM, [["	checkHalt();\n", ""]]],
+	["a Charm that runs every queued effect refused", "guard", [13], CHARM, [["runs === 2 || ", ""]]],
+	["Charm never checked", "guard", [13, 26], CHARM, [["	if (checked) return;\n", "	if (!checked) return;\n"]]],
 ];
 
 function run(command, args, timeout = 300000) {

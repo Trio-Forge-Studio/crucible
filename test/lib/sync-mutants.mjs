@@ -285,7 +285,18 @@ const rules = [
 		],
 		["swap", SS, "\t\t\t\tthis.commit(view, staged, false);", "\t\t\t\tthis.commit(view, staged, true);"],
 		["pair", SS, "\t\tthis.commit(view, staged, true);\n\t\treturn cost.bytes;", "\t\treturn cost.bytes;"],
-		["guard quiet", SS, "\t\tif (!this.incomplete && !this.retiredSince && !this.changed) return;\n", "\n"],
+		[
+			"guard quiet",
+			SS,
+			"\t\t\tif (!this.changed) {\n\t\t\t\tthis.spent = visits;\n\t\t\t\treturn;\n\t\t\t}\n",
+			"\n",
+		],
+		[
+			"guard scan skipped",
+			SS,
+			"\t\tif (!this.incomplete && !this.retiredSince && !this.changed) {\n",
+			"\t\tif (!this.changed) {\n",
+		],
 		["guard retirement cleared", SS, "\t\tthis.retiredSince = false;\n", "\n"],
 		["guard incomplete cleared", SS, "\t\t\tthis.incomplete = false;\n", "\n"],
 	],
@@ -396,7 +407,7 @@ const rules = [
 	[
 		"68",
 		["guard", SS, "\t\tif (this.peers.get(view.player) === view) this.peers.delete(view.player);\n", "\n"],
-		["guard order", SS, "\t\tif (index !== -1) this.order.remove(index);\n", "\n"],
+		["guard order", SS, "\t\tthis.order.remove(index);\n", "\n"],
 		["swap", "a peer is keyed by one Player with nothing to swap"],
 		["pair", "the cleanup ClientReady returns is rule 57's pair mutant"],
 	],
