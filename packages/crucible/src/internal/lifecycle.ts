@@ -1,4 +1,5 @@
-import { call, CallResult, disown, own, ownerOf } from "./runner";
+import { endBatch, setActiveSub, startBatch } from "@rbxts/charm";
+import { call, CallResult, disown, enter, leave, own, running } from "./runner";
 import type { Batch, LifeEffects, LifeObject, LifeRecord, LifeState, ObjectState } from "./state";
 import { Gate, Hook, Kind, Phase, StartPhase, Step, Sweep, Want, Work } from "./state";
 
@@ -92,11 +93,12 @@ export function track(record: LifeRecord, instance?: Instance, attributes?: Reco
 
 /**
  * @internal
- * The object whose code is running: the owner of a runner worker during a hook or callback, or of a start
- * thread for its whole life. A thread made with `task.spawn` inside a hook has no owner.
+ * The object whose code is running: the owner of a hook or callback until it returns, including threads it starts
+ * that no one owns until they first yield, or of a start thread for its whole life.
  */
 export function current(): ObjectState | undefined {
-	return ownerOf(coroutine.running());
+	const [s] = running();
+	return s;
 }
 
 function note(s: ObjectState, hook: Hook, err: unknown) {
@@ -112,11 +114,29 @@ function cleanup(s: ObjectState, hook: Hook, err: unknown) {
 
 const subsystemLacks: ReadonlySet<Hook> = new Set([Hook.OnEnable, Hook.OnDisable, Hook.OnDestroy]);
 
+/**
+ * Runs a callback that cannot yield inside a Charm batch, so the effects its writes reach run once it returns. An
+ * effect that throws then is reported against the callback, which has finished.
+ */
+function batched<A, B>(
+	callback: (a: A, b: B) => unknown,
+	a: A,
+	b: B,
+	owner: ObjectState | undefined,
+	hook: Hook,
+): LuaTuple<[result: CallResult, value: unknown]> {
+	startBatch();
+	const [result, value] = call(callback, a, b, owner);
+	const [ok, err] = pcall(endBatch);
+	if (!ok) effects().effectFailed(owner, hook, err);
+	return $tuple(result, value);
+}
+
 function run(s: ObjectState, hook: Hook) {
 	if (s.record.kind === Kind.Subsystem && subsystemLacks.has(hook)) return;
 	const caller = effects().hook(s, hook);
 	if (caller === undefined) return;
-	const [result, value] = call(caller, s, undefined, s);
+	const [result, value] = batched(caller, s, undefined, s, hook);
 	if (result !== CallResult.Ok) note(s, hook, value);
 }
 
@@ -181,7 +201,7 @@ function perform(s: ObjectState, step: Step) {
 	const fx = effects();
 	switch (step) {
 		case Step.Construct: {
-			const [result, value] = call(construct, s, undefined, s);
+			const [result, value] = batched(construct, s, undefined, s, Hook.Construct);
 			if (result !== CallResult.Ok) {
 				note(s, Hook.Construct, value);
 			} else {
@@ -216,7 +236,9 @@ function perform(s: ObjectState, step: Step) {
 			const thread = coroutine.create(runStart);
 			s.startThread = thread;
 			own(thread, s);
+			enter(thread, s, undefined);
 			const [ok, err] = coroutine.resume(thread, s);
+			leave();
 			if (!ok) note(s, Hook.Start, err);
 			return;
 		}
@@ -341,7 +363,10 @@ class Reconciler {
 		return this.depth === 0 && (this.stack.size() > 0 || this.fresh.size() > 0 || this.pairsQueued);
 	}
 
-	/** `call` never throws, so the decrement always runs. */
+	/**
+	 * `call` never throws, so the decrement always runs. Nothing it runs is tracked by an effect that started the
+	 * drain.
+	 */
 	private enter<A, B>(
 		callback: (a: A, b: B) => unknown,
 		a: A,
@@ -349,7 +374,9 @@ class Reconciler {
 		owner?: ObjectState,
 	): LuaTuple<[result: CallResult, value: unknown]> {
 		this.depth += 1;
+		const active = setActiveSub(undefined);
 		const [result, value] = call(callback, a, b, owner);
+		setActiveSub(active);
 		this.depth -= 1;
 		return $tuple(result, value);
 	}
@@ -627,7 +654,10 @@ class Reconciler {
 		b: B,
 	): LuaTuple<[result: CallResult, value: unknown]> {
 		const outer = this.depth > 0;
+		startBatch();
 		const [result, value] = this.enter(callback, a, b, owner);
+		const [ok, err] = pcall(endBatch);
+		if (!ok) effects().effectFailed(owner ?? blame, hook, err);
 		if (result !== CallResult.Ok && blame !== undefined) fault(blame, hook, value);
 		if (!outer) this.drain();
 		return $tuple(result, value);
