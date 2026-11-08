@@ -1,9 +1,10 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-7bbd8a827271a40870fef034b718149acc8c7165c88b6175a9f6a89baa0022a4  build/sample-game.rbxl
+261ed68675bbaa9a53698da444d7af7d6f779900f1235319afc404ac26d74e96  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
 cccc73f108a671b398de5fa8aba78c2c0f12a4965763eeca4aa66fcfbd887b1b  examples/sample-game/out/client/systems/hud.luau
+9f07bba4f306ca9900fa5447d72ba20fe29d9119497472fccb75c4042bec95cf  examples/sample-game/out/client/systems/menu.luau
 86c256762c38a4ad5500c69eb34c28b5516a4031cb77c80a37c3f5453fd02b78  examples/sample-game/out/client/systems/renderer.luau
 35177f16be8f4bcc17e20d3f54c10a9fb7adf708e90ed5a4bd53048e50f87ba3  examples/sample-game/out/server/main.server.luau
 6bbed0ae22f1bdb0c806b72942dd591bcc9568ee2d4f5d7eea37854f43ca9f6a  examples/sample-game/out/server/systems/controller.luau

@@ -164,6 +164,7 @@ fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
         [
             "client/main.client.luau",
             "client/systems/hud.luau",
+            "client/systems/menu.luau",
             "client/systems/renderer.luau",
             "server/main.server.luau",
             "server/systems/controller.luau",

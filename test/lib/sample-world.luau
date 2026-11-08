@@ -9,6 +9,10 @@ local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
 local ConfigBackend = require("./config-backend")
 local ProfileWorld = require("./profile-world")
+local UiLoad = require("./ui-load")
+
+-- Gives Lune's Instances the events the ui entry connects.
+require("./ui-instances")
 
 -- Defines Instance:WaitForChild for Lune once per process.
 require("./place")
@@ -68,6 +72,23 @@ local function signal()
 	}
 end
 
+-- The classes the sample's JSX names. Vide maps each lowercase tag to its class through ReflectionService.
+local UI_CLASSES = { "Frame", "ScreenGui", "TextButton", "TextLabel", "UIListLayout" }
+
+-- A GuiService that holds the selection and the Roblox menu flag, without moving either itself.
+local function guiService()
+	local changed = {}
+	return {
+		SelectedObject = nil,
+		MenuIsOpen = false,
+		GetPropertyChangedSignal = function(_, name: string)
+			changed[name] = changed[name] or signal()
+			return changed[name]
+		end,
+		Select = function() end,
+	}
+end
+
 -- One realm's view of the place: its services, its module loader and the prints its scripts made.
 local function attach(self, realm, runtimeLib)
 	realm.messages = {}
@@ -75,13 +96,23 @@ local function attach(self, realm, runtimeLib)
 	realm.place = self.place
 	realm.sample = {}
 	realm.inputs = signal()
-	realm.userInput = { InputBegan = realm.inputs }
+	realm.userInput = {
+		InputBegan = realm.inputs,
+		InputEnded = signal(),
+		LastInputTypeChanged = signal(),
+		TextBoxFocused = signal(),
+		TextBoxFocusReleased = signal(),
+		GamepadDisconnected = signal(),
+		IsGamepadButtonDown = function()
+			return false
+		end,
+		GetFocusedTextBox = function()
+			return nil
+		end,
+	}
 	local place = self.place
-	local playerGui
 	if realm.player then
-		playerGui = roblox.Instance.new("Folder")
-		playerGui.Name = "PlayerGui"
-		playerGui.Parent = realm.player
+		roblox.Instance.new("PlayerGui").Parent = realm.player
 	end
 	local services = {
 		RunService = {
@@ -91,9 +122,25 @@ local function attach(self, realm, runtimeLib)
 			IsClient = function()
 				return realm.side == "client"
 			end,
+			IsStudio = function()
+				return false
+			end,
+			Heartbeat = signal(),
+			PreRender = signal(),
 		},
 		Players = { LocalPlayer = realm.player },
 		UserInputService = realm.userInput,
+		GuiService = guiService(),
+		TextService = {},
+		ReflectionService = {
+			GetClasses = function()
+				local classes = {}
+				for _, name in UI_CLASSES do
+					table.insert(classes, { Name = name })
+				end
+				return classes
+			end,
+		},
 	}
 	local game = {
 		GetService = function(_, name: string)
@@ -102,11 +149,42 @@ local function attach(self, realm, runtimeLib)
 	}
 	local env
 	local load
+	-- The runtime's ui entry, with the place's Vide that the sample renders with and the runtime's Charm.
+	local uiRequire
+	local function ui(relative: string)
+		if uiRequire == nil then
+			local vide = resolve(place:GetService("ReplicatedStorage"), {
+				"rbxts_include",
+				"node_modules",
+				"@rbxts",
+				"vide",
+				"src",
+			})
+			uiRequire = UiLoad({
+				packages = { ["@rbxts/vide"] = load(vide), ["@rbxts/charm"] = realm.graph.package("@rbxts/charm/src") },
+				services = services,
+				globals = {
+					Instance = roblox.Instance,
+					Enum = roblox.Enum,
+					Color3 = roblox.Color3,
+					Font = roblox.Font,
+					UDim = roblox.UDim,
+					UDim2 = roblox.UDim2,
+					Vector2 = roblox.Vector2,
+					task = env.task,
+				},
+			})
+		end
+		return uiRequire(table.unpack(string.split(relative, "/"), 2))
+	end
 	local function import(_, base, ...)
 		local node = resolve(base, { ... })
 		local relative = runtimeRelative(node)
 		if relative ~= nil then
 			realm.imported[relative] = true
+			if relative == "ui" or string.sub(relative, 1, 3) == "ui/" then
+				return ui(relative)
+			end
 			return realm.graph.module(relative)
 		end
 		-- The runtime finds Charm with TS.getModule, so in the place the sample and the runtime share one copy.
@@ -130,12 +208,21 @@ local function attach(self, realm, runtimeLib)
 				environment = {
 					game = game,
 					script = module,
-					require = sampleRequire,
+					-- Vide requires its siblings by `./name`.
+					require = function(target)
+						if type(target) == "string" then
+							local name = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
+							target = assert(module.Parent:FindFirstChild(name), `{module:GetFullName()} has no {name}`)
+						end
+						return sampleRequire(target)
+					end,
 					task = env.task,
 					typeof = roblox.typeof,
+					Vector2 = roblox.Vector2,
 					Vector3 = roblox.Vector3,
 					Color3 = roblox.Color3,
 					CFrame = roblox.CFrame,
+					UDim = roblox.UDim,
 					UDim2 = roblox.UDim2,
 					Instance = roblox.Instance,
 					Enum = roblox.Enum,
