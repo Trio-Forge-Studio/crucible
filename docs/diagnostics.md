@@ -6,7 +6,7 @@ Crucible's compiler checks game code while `crucible build` compiles it, so a ga
 
 Each error is a TypeScript error whose code is 90000 plus the rule's number. CRU009 prints as `error TS90009: CRU009: Method resembles a lifecycle hook. Use its exact Crucible declaration name.` Every error fails the build.
 
-An error that starts with `Crucible:` instead of a code is TS90000. It means the compiler could not run. It cannot read a `package.json`, cannot compute a type id for a declaring package, or failed on the input file. Fix the package metadata it names. A type id needs the declaring package's `name` and the same folder layout for its sources and its declarations.
+An error that starts with `Crucible:` instead of a code is TS90000. It means the compiler could not run. It cannot read a `package.json`, cannot compute a type id for a declaring package, or failed on the input file. Fix the package metadata it names. A type id needs the declaring package's `name` and the same folder layout for its sources and its declarations. An error that names two ABI versions means the installed `@trioforge/crucible` was built for another compiler. Install the `@trioforge/crucible` release with the same version as your `crucible` CLI.
 
 Several rules depend on the file's side. The side is the nearest folder named `server`, `client` or `shared` that holds the file, counted from the package root. A file under `src/server/systems` is a server file. A file under no such folder has no side.
 

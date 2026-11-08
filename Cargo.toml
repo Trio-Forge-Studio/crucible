@@ -9,6 +9,7 @@ members = [
 	"crates/oc-registry",
 	"crates/cli",
 	"crates/compiler",
+	"crates/transform",
 	"xtask",
 ]
 

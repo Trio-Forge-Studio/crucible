@@ -11,6 +11,7 @@ crucible-oc = { path = "../oc" }
 crucible-project = { path = "../project" }
 oc-registry = { path = "../oc-registry" }
 crucible-compiler = { path = "../compiler" }
+crucible-transform = { path = "../transform" }
 serde.workspace = true
 serde_json.workspace = true
 jsonc-parser = { version = "0.27", features = ["serde"] }

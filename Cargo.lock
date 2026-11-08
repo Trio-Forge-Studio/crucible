@@ -649,6 +649,7 @@ dependencies = [
  "crucible-docs",
  "crucible-oc",
  "crucible-project",
+ "crucible-transform",
  "dotenvy",
  "env_logger",
  "httpmock",
@@ -730,6 +731,15 @@ dependencies = [
  "serde",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "crucible-transform"
+version = "0.4.0"
+dependencies = [
+ "crucible-abi",
+ "crucible-compiler",
+ "serde_json",
 ]
 
 [[package]]
