@@ -208,7 +208,7 @@ The program generator, the two runners, the trace comparison, and a CI job with 
 
 ### Deletion PR. `refactor(cli): remove the roblox-ts migration`
 
-This pull request ships in 0.6, one minor release after 0.5.0, per decision 7. It only deletes code.
+This pull request ships in 0.7. Per decision 7, upgrade's roblox-ts migration stays for one more minor release after the Charm and Vide migration's 0.5.0. That release is 0.6.0, so 0.7 is the first without it. It only deletes code.
 
 ## Not scheduled
 

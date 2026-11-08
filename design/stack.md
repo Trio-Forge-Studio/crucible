@@ -15,8 +15,13 @@ The claims below cite Lune prototypes and source lines. The prototypes ran on 20
 | `yield.luau` | Charm's active scope does not follow a thread across a yield. |
 | `stall.luau` | A `batch` that yields holds every effect in the VM. |
 | `types.luau` | A Charm atom and a computed are plain Luau functions. |
+| `strict-probe.luau`, `cleanup-probe.luau` | What goes wrong when every effect and cleanup attaches to the object's scope, and where the owner is lost in strict mode. |
+| `boot-probe.luau` | A batch does not defer a new effect's first run. |
+| `context.luau` | The owner and lifetime rules below, modeled on Charm's own source. |
 
-Charm source lines refer to `@rbxts/charm` 0.11.1, file `src/init.luau`. Crucible source lines refer to `main` at `f4d573b`.
+The prototypes in the first seven rows ran with Charm's `strict` off, because Lune has no `game` and Charm turns `strict` on only in Studio (`init.luau:70` to `:81`). The probes in the last three rows came from the S0 review and its fix. They load Charm's unmodified source, and all but `boot-probe.luau` set `Charm.flags.strict = true` before using it. They are small Luau models of the rules, not S2's code, and run no Crucible code. S2's Lune specs run with `Charm.flags.strict = true`.
+
+Charm source lines refer to `@rbxts/charm` 0.11.1, file `src/init.luau`. Crucible source lines refer to `main` at `caa8477`.
 
 ## The stack
 
@@ -39,9 +44,11 @@ Charm's `atom`, `computed`, `untracked` and `batch` replace Crucible's `state`, 
 
 ## Lifetimes stay in Crucible
 
-Crucible keeps `effect`, `watch`, `scope`, `onCleanup` and `own`. Each finds its owner by thread and creates the Charm effect inside that owner's `effectScope`.
+Crucible keeps `effect`, `watch`, `scope`, `onCleanup` and `own`. Each one tracks two separate things. The owner is the object, generation or enable interval that the running code belongs to, which lookup and disposal use. The lifetime is what a new effect, watch, scope or cleanup attaches to, and so what ends it.
 
-Crucible finds the owner of running code from the thread: `current()` returns `ownerOf(coroutine.running())` (`packages/crucible/src/internal/lifecycle.ts:98`). Charm finds the owner from one module-level variable, `activeSub` (`init.luau:69`), which `setActiveSub` swaps (`init.luau:155`). A new effect attaches to whatever `activeSub` holds when it is created (`init.luau:617`).
+Today Crucible finds the owner of running code from the thread: `current()` returns `ownerOf(coroutine.running())` (`packages/crucible/src/internal/lifecycle.ts:98`). The lifetime comes from the innermost frame first, and from `current()` only outside every frame (`packages/crucible/src/internal/reactive/ownership.ts:254` to `:261`). So an effect ends with its object, its parent effect run or its scope (`packages/crucible/src/reactive.ts:69` to `:70`).
+
+Charm finds the lifetime from one module-level variable, `activeSub` (`init.luau:69`), which `setActiveSub` swaps (`init.luau:155`). A new effect links to whatever `activeSub` holds when it is created (`init.luau:614` to `:618`), so an effect created inside another effect is disposed when its parent reruns (`init.luau:600` to `:601`). `onCleanup` adds its function to the cleanups of `activeSub` (`init.luau:722` to `:724`), and an effect runs its cleanups before each rerun (`init.luau:212`).
 
 That variable does not follow a thread. `yield.luau` sets object A's scope, yields, then resumes the thread while object B's scope is active, and creates an effect:
 
@@ -53,7 +60,14 @@ after B disposed, runs 2
 
 The effect A's code created belongs to B. Disposing A leaves it running, and disposing B stops it. Game code that calls Charm's `effect` directly attaches to whatever scope is active when the call runs, not to the object whose code made the call. S3 adds CRU038, which rejects `effect`, `effectScope` and `onCleanup` imported from `@rbxts/charm` in game code.
 
-Crucible's `effect` does it the other way round. It resolves the owner by thread with `current()`, then sets that owner's scope as `activeSub` around the `charm.effect` call only. Each generation and each enable interval gets one detached Charm `effectScope`, created on first use. `ownership.luau` shows the mechanism, with one detached scope set active around each entry:
+### The lifetime depends on where the code runs
+
+S2 picks the lifetime from where the code runs:
+
+- **Inside a running Crucible effect or watch callback**, the lifetime is that effect's current run. Crucible leaves `activeSub` as the running Charm effect, which is Charm's default. A nested effect then dies on its parent's rerun, and `onCleanup` attaches to the current run, so it runs before the next one.
+- **Outside any effect run**, the lifetime is the owner's detached `effectScope`. Each generation and each enable interval gets one, created on first use. Only then does Crucible set `activeSub` to the owner's scope, around the `charm.effect` call only.
+
+`ownership.luau` shows the second case, with one detached scope set active around each entry:
 
 ```text
 effect created in a hook ran 1
@@ -63,13 +77,43 @@ dispose ran onCleanup 1
 after dispose, runs unchanged: 6
 ```
 
-Effects created in a hook and in a later callback both belong to the object. Disposing its scope runs `onCleanup` once and stops both effects. `scope`, `onCleanup` and `own` keep their meaning for games. S2 rebuilds them on the owner's scope.
+Effects created in a hook and in a later callback both belong to the object. Disposing its scope runs `onCleanup` once and stops both effects.
 
-### In Studio, Charm runs user code on a new thread
+The owner's scope is wrong inside an effect run. `strict-probe.luau` and `cleanup-probe.luau` set it as `activeSub` around every effect and every cleanup, nested ones included:
 
-Charm turns on `strict` when it runs in Studio (`init.luau:72`, `:81`). In strict mode it wraps user callbacks so that each runs on a new coroutine, and a yield raises an error (`init.luau:125` to `:127`, `:119`). Effect bodies (`init.luau:609`) and `batch` callbacks (`init.luau:770`) are wrapped this way. Inside either one, `coroutine.running()` is not the thread of the entry that called it, so a lookup by thread finds no object there.
+```text
+nested children responding after one parent rerun 2
+cleanup via object scope after effect rerun 0
+cleanup via object scope after object dispose 2
+```
 
-Two rules follow for S2. Crucible opens its entry batches with Charm's `startBatch` and `endBatch` (`init.luau:285`, `:293`), which run no callback, instead of `batch(fn)`. Code inside an effect body finds its owner from what Crucible recorded when it created the effect, not from the thread. The prototypes ran with `strict` off, because Lune has no `game`, so none of them exercises this path.
+The nested effect becomes a sibling of its parent, so each parent rerun adds another child, and two children respond where one should. The cleanups wait for the object's disposal instead of running before each rerun. `scope`, `onCleanup` and `own` keep their meaning for games. S2 rebuilds them on these two lifetimes.
+
+### Lookup reads a synchronous context first
+
+Charm turns on `strict` when it runs in Studio (`init.luau:72`, `:81`). In strict mode it wraps user callbacks so that each runs on a new coroutine, and a yield raises an error (`init.luau:125` to `:127`, `:119`). Effect bodies (`init.luau:609`) and `batch` callbacks (`init.luau:770`) are wrapped this way. So is `untracked`'s callback whenever an effect or scope is active (`init.luau:743` to `:755`), and `subscribe` and `listen` call their callbacks through `untracked` (`init.luau:832`, `:807`). Inside any of these, `coroutine.running()` is not the entry's thread, so a lookup by thread finds no object there. `strict-probe.luau` restores the owner by thread in an effect body and loses it one level down:
+
+```text
+effect body owner restored true
+untracked body retains owner false
+```
+
+So lookup reads a synchronous context first and the thread map second.
+
+- Crucible keeps one module-level context: the owner and the lifetime. It sets the context, saved and restored in a `try`/`finally`, around every callback it hands to Charm: effect bodies, watch source and `onChange`, scope setup, and cleanups. Inside an effect run, the lifetime is the running Charm effect, read with `getActiveSub` when the run starts. A nested effect takes its lifetime from the context, not from `activeSub`, which `untracked` clears (`init.luau:745`).
+- In strict mode Charm runs those callbacks on a new coroutine, but synchronously, and a yield raises an error (`init.luau:118` to `:119`). The context stays set for exactly as long as the callback runs, so it reaches through Charm's `untracked`, `subscribe` and `listen`, which add coroutines but never resume one later.
+- Charm runs cleanups inside whichever write triggers the rerun, so the context there belongs to the writer. Each cleanup runs under the context recorded when it was registered.
+- The thread map stays for entries that can yield, such as start hooks and network handlers. A yield ends any synchronous context, and `yield.luau` shows that nothing module-level survives one. The thread does.
+
+`context.luau` models these rules, with A's effect rerun by a write from B's entry:
+
+```text
+cleanup before parent rerun 1
+nested children responding after one parent rerun 1
+owner inside untracked true watch onChange true cleanup true
+```
+
+It is a model in Luau, not S2's code. S2's Lune specs test each rule with `Charm.flags.strict = true`: a nested effect that dies on its parent's rerun, `onCleanup` before a rerun, and owner lookup inside `untracked`, a watch's `onChange` and a cleanup.
 
 ## Effects run on the write
 
@@ -106,7 +150,38 @@ handler in batch: handler finished=true, gold=10, effect runs after create=1, er
 
 Unbatched, the handler stops at the write and the gold is never awarded. Batched, the handler finishes, the effect runs once, and the error still surfaces when the batch ends.
 
-So Crucible wraps every entry that cannot yield in `batch`. These are `Reconciler.enter`, which runs lifecycle hooks (`packages/crucible/src/internal/lifecycle.ts:345`), and boot. Boot holds its effects from before it constructs objects until it commits or rolls back. Today that hold is `holdBarrier` and `releaseBarrier` (`packages/crucible/src/internal/boot.ts:228`, `:308`, `:313`). S2 makes it `startBatch` and `endBatch`.
+So Crucible batches every entry that cannot yield. These are `Reconciler.enter`, which runs lifecycle hooks (`packages/crucible/src/internal/lifecycle.ts:345`), and boot.
+
+Crucible opens these batches with Charm's `startBatch` and `endBatch` (`init.luau:285`, `:293`), which run no callback, instead of `batch(fn)`, whose callback strict mode moves to a new thread (`init.luau:770`). The pair brackets the `runner.call` boundary (`packages/crucible/src/internal/runner.ts:44` to `:64`): the batch opens before `call` resumes its worker and closes after the resume returns, whatever the result. `call` already detects a yield and cancels the worker, so a `Yielded` result or a cancellation closes the batch too. A batch is never left open inside a coroutine that can be suspended.
+
+Charm's strict mode does not guard this. It catches yields only in the callbacks it wraps, and `startBatch` and `endBatch` wrap none. `strict-probe.luau` opens a manual batch in a coroutine with `strict` on, yields, then writes an unrelated atom:
+
+```text
+strict manual entry yield accepted true unrelated seen 0
+seen after resume 1
+```
+
+The yield is accepted, and the unrelated effect waits for the batch's thread. Crucible's runner is the guard, in Studio as in Lune.
+
+### Boot keeps its deferred first run
+
+Today no effect runs before boot commits. An effect's first run waits for the next flush, never inside the call that created it (`packages/crucible/src/reactive.ts:67`), and boot holds that flush from before it constructs objects until it commits or rolls back: `holdBarrier` sets `held`, and a flush is never requested while `held` is set (`packages/crucible/src/internal/reactive/flush.ts:79` to `:92`, called at `packages/crucible/src/internal/boot.ts:228`, `:308`, `:313`).
+
+A batch cannot replace that hold. Charm runs a new effect's body inside `effect` itself, batch or not (`init.luau:623` to `:636`). `boot-probe.luau` creates an effect inside `startBatch`:
+
+```text
+effect first run before boot batch closes 1
+effect runs after boot batch closes 1
+```
+
+So while boot is open, Crucible's `effect` and `watch` create no Charm effect. They queue the owner and the body, with a disposer that removes the entry. When boot commits, Crucible creates the queued effects in order inside one `startBatch` and `endBatch`. On rollback it discards the queue, and nothing runs. `context.luau` models the queue:
+
+```text
+boot effect runs before commit 0 after commit 1
+boot effect runs after rollback 0
+```
+
+Outside boot, an effect runs at creation, as `timing.luau` shows. S2's Lune specs test an effect created during boot that runs only after commit and never after a rollback.
 
 ### Crucible never batches an entry that can yield
 
@@ -117,7 +192,7 @@ while another thread's batch is yielded, an unrelated write reached its effect: 
 after that thread resumed and closed its batch, seen 1
 ```
 
-A yielded batch holds every effect in the place until its thread resumes. In Roblox Studio it fails instead: Charm enables `strict` there (`init.luau:81`), and in strict mode a yield inside `batch` raises "Attempted to yield in an effect or scope" (`init.luau:119`). Network handler threads and `runStart` can yield, so Crucible never wraps them. A write in a yielding entry runs its effects at once, as in `timing.luau`.
+A yielded batch holds every effect in the place until its thread resumes. A `batch(fn)` fails instead in Roblox Studio: Charm enables `strict` there (`init.luau:81`), and in strict mode a yield inside `batch` raises "Attempted to yield in an effect or scope" (`init.luau:119`). A manual `startBatch` stalls in Studio too, as `strict-probe.luau` shows above. Network handler threads and `runStart` can yield, so Crucible never batches them. A write in a yielding entry runs its effects at once, as in `timing.luau`.
 
 ### A throwing effect skips its siblings for that write
 
@@ -185,7 +260,7 @@ S4 and F1 change what players see, so each waits for a Studio review before merg
 
 ## What stays in Crucible
 
-- **Lifecycle.** Subsystems, behaviours, generations and enable intervals stay Crucible's, and they own effects by thread (`yield.luau`, `packages/crucible/src/internal/lifecycle.ts:98`). Charm has no owner that survives a yield.
+- **Lifecycle.** Subsystems, behaviours, generations and enable intervals stay Crucible's. Crucible finds the owner from its synchronous context, and by thread in entries that can yield (`yield.luau`, `packages/crucible/src/internal/lifecycle.ts:98`). Charm has no owner that survives a yield.
 - **The compiler.** Registration, `inject`, `boot`, the declaration macros and the CRU rules depend on TypeScript types the compiler reads. The transform emits calls into `@trioforge/crucible/emit`, and S2 keeps every one of them unchanged, so the architecture lane's PR 4 and PR 5 work against the same ABI.
 - **Data.** Profile stores keep Crucible's session protocol (`packages/crucible/src/internal/data/session.ts:19`). Moving saved profiles to another library needs its own migration plan.
 - **The network.** `toServer`, `toClient`, `askServer` and `receive` are compiler macros (`crates/compiler/src/macros.rs:162` to `:165`), and the transform builds each message's schema from its TypeScript type (`crates/compiler/src/lower/crucible.rs:102`). No measurement shows that another network library is faster.
@@ -196,4 +271,5 @@ S4 and F1 change what players see, so each waits for a Studio review before merg
 - Charm's cost per write and per value against Crucible's engine. S2's benchmark measures it.
 - Charm Sync's bandwidth and Heartbeat cost. S6's gate measures it.
 - Behavior in Studio. Lune proves lifecycle and resolution, not layout or input. S4 and F1 end with a Studio review.
-- That no hook behind `Reconciler.enter` yields. If one does, its batch stalls the place, or fails in Studio. S2 tests a yielding network handler next to another object's writes.
+- That no hook behind `Reconciler.enter` yields. If one does, the runner cancels it and its batch closes, so the hook fails instead of stalling the place. S2 tests a yielding entry that closes its batch, and a yielding network handler next to another object's writes.
+- The ownership rules on Crucible's own code. `context.luau` models them. S2's Lune specs with `Charm.flags.strict = true` prove them.
