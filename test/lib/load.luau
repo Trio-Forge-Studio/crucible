@@ -20,6 +20,17 @@ local optimization: number? = nil
 -- Changes each module's source as it loads, after `spec.rewrite` sets it, such as a changed copy of Charm.
 local rewrite: ((path: string, source: string) -> string)? = nil
 
+-- Every Luau file of the runtime and Charm, read before `spec.readAhead(true)` returns. Lune's fs calls yield, and a
+-- yield inside a strict Charm batch or effect is an error, so while it is set, modules load from it alone.
+local sources: { [string]: string }? = nil
+
+local function isFile(path: string): boolean
+	if sources then
+		return sources[path] ~= nil
+	end
+	return fs.isFile(path)
+end
+
 local function node(path: string): Node
 	local existing = nodes[path]
 	if existing then
@@ -41,9 +52,9 @@ local function node(path: string): Node
 end
 
 local function fileOf(path: string): string
-	if fs.isFile(path .. ".luau") then
+	if isFile(path .. ".luau") then
 		return path .. ".luau"
-	elseif fs.isFile(path .. "/init.luau") then
+	elseif isFile(path .. "/init.luau") then
 		return path .. "/init.luau"
 	end
 	error(`no compiled module at {path}; run the package build first`)
@@ -146,7 +157,8 @@ local function graph(defaults, loggingPort, configPort, network, dataPort, root:
 					return load(target.path)
 				end
 			end
-			local source = fs.readFile(fileOf(path))
+			local file = fileOf(path)
+			local source = if sources then sources[file] else fs.readFile(file)
 			if rewrite then
 				source = rewrite(path, source)
 			end
@@ -193,6 +205,30 @@ end
 
 function spec.rewrite(transform: ((path: string, source: string) -> string)?)
 	rewrite = transform
+end
+
+local function readTree(folder: string, into: { [string]: string })
+	for _, name in fs.readDir(folder) do
+		local path = `{folder}/{name}`
+		if fs.isDir(path) then
+			readTree(path, into)
+		elseif string.match(name, "%.luau$") then
+			into[path] = fs.readFile(path)
+		end
+	end
+end
+
+-- On, reads the runtime and Charm now and loads every later module from memory, so a spec can load the runtime where
+-- a yield is an error. Off, loads from disk again.
+function spec.readAhead(on: boolean)
+	if not on then
+		sources = nil
+		return
+	end
+	local read = {}
+	readTree(ROOT, read)
+	readTree(`{PACKAGES}/@rbxts/charm/src`, read)
+	sources = read
 end
 
 -- Loads `packages/crucible/out/<relative>` once per process.

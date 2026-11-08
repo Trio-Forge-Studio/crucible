@@ -1,5 +1,6 @@
 -- Crucible's lifetimes on Charm 0.11.1, with Charm's strict mode on, as Studio runs it: each user callback Charm calls
 -- runs on a new coroutine that must not yield.
+local Engine = require("./lib/engine")
 local Link = require("./lib/network-link")
 local life = require("./lib/reactive-life")
 local loadPlace = require("./lib/place")
@@ -27,9 +28,15 @@ local function countingRealm()
 	return r, calls
 end
 
--- Loads a strict realm on a copy of Charm whose init.luau has each `{from, to}` change applied once. Returns pcall's
--- result.
-local function changedCharm(changes: { { string } })
+-- J1's Charm: a failed flush resets a skipped effect's flags to `Watching | Recursed`, dropping its Dirty or Pending.
+local SKIPPED_FLAGS_CLEARED = {
+	"effect.flags = bit32.bor(effect.flags, bit32.bor(WATCHING, RECURSED))",
+	"effect.flags = bit32.bor(WATCHING, RECURSED)",
+}
+
+-- Until `spec.rewrite(nil)`, each graph loads a copy of Charm whose init.luau has each `{from, to}` change applied
+-- once. Returns how many changes applied so far.
+local function rewriteCharm(changes: { { string } }): () -> number
 	local applied = 0
 	spec.rewrite(function(path, source)
 		if string.sub(path, -#"@rbxts/charm/src") ~= "@rbxts/charm/src" then
@@ -44,10 +51,98 @@ local function changedCharm(changes: { { string } })
 		end
 		return source
 	end)
+	return function()
+		return applied
+	end
+end
+
+-- Loads a strict realm on a copy of Charm changed as `rewriteCharm` does. Returns pcall's result.
+local function changedCharm(changes: { { string } })
+	local applied = rewriteCharm(changes)
 	local ok, result = pcall(realm, nil, nil, true)
 	spec.rewrite(nil)
-	spec.eq(applied, #changes, "every change applied to Charm")
+	spec.eq(applied(), #changes, "every change applied to Charm")
 	return ok, result
+end
+
+-- The runtime's first load on a strict copy of Charm changed as `rewriteCharm` does, inside a batch or inside an
+-- effect's run in a flush. Checks that the load fails, restores the active subscriber and stops the check's effects,
+-- that Charm runs effects once the batch or flush ends, and that the next check runs again.
+local function firstLoadInside(context: string, changes: { { string } })
+	local label = `{if #changes == 0 then "Charm 0.11.1" else "J1's Charm"}, first loaded in a {context}`
+	local applied = rewriteCharm(changes)
+	local graph = spec.runtime(nil, Engine.new().loggingPort)
+	local charm = graph.package("@rbxts/charm/src")
+	spec.rewrite(nil)
+	spec.eq(applied(), #changes, "every change applied to Charm")
+	charm.flags.strict = true
+	local effect = charm.effect
+	local nodes = {}
+	charm.effect = function(fn)
+		return effect(function()
+			nodes[charm.getActiveSub()] = true
+			return fn()
+		end)
+	end
+	local function census()
+		local count, live = 0, 0
+		for node in nodes do
+			count += 1
+			if node.flags ~= 0 or node.deps ~= nil or node.subs ~= nil then
+				live += 1
+			end
+		end
+		return count, live
+	end
+	local ok, err, outer, after, count, live
+	local function load()
+		outer = charm.getActiveSub()
+		ok, err = pcall(graph.module, "")
+		after = charm.getActiveSub()
+		count, live = census()
+	end
+	if context == "batch" then
+		charm.batch(load)
+	else
+		local x = charm.atom(0)
+		local stop = effect(function()
+			if x() == 1 then
+				load()
+			end
+		end)
+		x(1)
+		stop()
+		spec.eq(outer ~= nil, true, `{label}: the load ran inside an effect`)
+	end
+	spec.eq(ok, false, `{label}: the runtime did not load`)
+	spec.has(err, "require @trioforge/crucible outside both", `{label}: the failure says where to load it`)
+	spec.eq(after, outer, `{label}: the check restored the active subscriber`)
+	spec.eq(count, 2, `{label}: the check stopped at its first write, which ran no effect`)
+	spec.eq(live, 0, `{label}: the check left no effect with a flag, a dependency or a subscriber`)
+	for node in nodes do
+		spec.eq(node.deps == nil and node.subs == nil, true, `{label}: no check effect is linked after the {context}`)
+	end
+	local y = charm.atom(0)
+	local seen
+	local stopSeen = effect(function()
+		seen = y()
+	end)
+	y(2)
+	spec.eq(seen, 2, `{label}: Charm runs a write's effects after the {context}`)
+	stopSeen()
+	table.clear(nodes)
+	local checked, failure = pcall(graph.module("internal/reactive/charm").checkCharm)
+	if #changes == 0 then
+		spec.eq(checked, true, `{label}: the next check passes: {failure}`)
+		count, live = census()
+		spec.eq(count, 4, `{label}: the next check ran in full`)
+		spec.eq(live, 0, `{label}: and stopped every effect it created`)
+		local loaded, api = pcall(graph.module, "")
+		spec.eq(loaded, true, `{label}: the runtime then loads: {api}`)
+	else
+		spec.eq(checked, false, `{label}: the next check refuses J1's Charm`)
+		spec.has(failure, "forgets a write", `{label}: on the write it forgets`)
+	end
 end
 
 -- An effect whose first run reads a source, holds a cleanup and writes an atom that an earlier effect throws on, then
@@ -898,12 +993,7 @@ return {
 		spec.list(order, { "child", "nested" }, "ending the root released nothing twice")
 	end,
 	["J1 rule 13 strict: the runtime refuses to load on a Charm whose failed flush clears a skipped effect's flags"] = function()
-		local ok, err = changedCharm({
-			{
-				"effect.flags = bit32.bor(effect.flags, bit32.bor(WATCHING, RECURSED))",
-				"effect.flags = bit32.bor(WATCHING, RECURSED)",
-			},
-		})
+		local ok, err = changedCharm({ SKIPPED_FLAGS_CLEARED })
 		spec.eq(ok, false, "the runtime did not load")
 		spec.has(err, "Crucible needs @rbxts/charm 0.11.1", "the failure names the version")
 		spec.has(err, "forgets a write", "and what differs")
@@ -941,6 +1031,24 @@ return {
 		end)
 		spec.eq(pcall(x, 1), false, "the earlier effect threw to the writer")
 		spec.eq(seen, 1, "and the later one still ran")
+	end,
+	["J4 rule 13 strict: a first load inside a Charm batch or flush fails, stops the check's effects and checks again next time"] = function()
+		spec.readAhead(true)
+		local ok, err = pcall(function()
+			for _, changes in { {}, { SKIPPED_FLAGS_CLEARED } } do
+				firstLoadInside("batch", changes)
+				firstLoadInside("flush", changes)
+			end
+		end)
+		spec.readAhead(false)
+		if not ok then
+			error(err, 0)
+		end
+	end,
+	["J5 rule 13 strict: the runtime refuses to load on a Charm whose batch end runs no effect"] = function()
+		local ok, err = changedCharm({ { "\tbatchDepth -= 1\n\tflush()\n", "\tbatchDepth -= 1\n" } })
+		spec.eq(ok, false, "the runtime did not load")
+		spec.has(err, "Charm ran no effect for the check's write", "the failure says the check could not run")
 	end,
 	["K1 rule 70 strict: a quiet Heartbeat reads a bounded share of projections, and a sweep still finds a skipped one"] = function()
 		local PEERS, DECLARATIONS = 9, 256

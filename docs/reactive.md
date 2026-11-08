@@ -16,6 +16,8 @@ import type { Ownable } from "@trioforge/crucible";
 
 The peer is exact because Crucible reads and edits Charm's internal nodes, which no Charm API covers. When the runtime loads, it checks that Charm behaves as it assumes, and it fails with `Crucible needs @rbxts/charm 0.11.1, and the installed Charm <what differs>` when it does not. A Crucible release that supports a newer Charm moves the pin.
 
+The check writes an atom and needs its effects to run before the write returns. Inside a batch or an effect, Charm holds them until the batch or the flush ends, so the check cannot run there. Require `@trioforge/crucible` outside both, as a script's top level does. A first load inside one fails with `Crucible checks @rbxts/charm as it first loads, and Charm ran no effect for the check's write`, and the next load outside checks again.
+
 A place must hold one copy of Charm. Charm keeps its graph in module variables, so an atom from a second copy is invisible to Crucible's effects. The Rojo project `crucible create` writes maps the game's `node_modules/@rbxts` folder once, and the runtime finds Charm there.
 
 Leave `Charm.flags.trackInnerEffects` on, as it is by default. Crucible relies on it to end the effects a run created when the run's effect reruns.
