@@ -273,12 +273,13 @@ fn a_helper_the_place_cannot_reach_fails_with_its_message() {
 
 /// Each function `Scopes` lowers, the global its calls lower to, and what replaces a `HERE` while its arguments lower.
 /// `outer` and `claim` replace each `HERE` in their own arguments. `reach` replaces every `HERE` of its file, even one
-/// outside its call, and `inner` replaces none.
+/// outside its call, and `inner` replaces none. `peek` lowers its arguments and then leaves the call to the compiler.
 const SCOPED: &[(&str, &str, &str)] = &[
     ("outer", "out", "REPLACED"),
     ("claim", "claimed", "CLAIMED"),
     ("reach", "reached", "REACHED"),
     ("inner", "inside", ""),
+    ("peek", "peek", ""),
 ];
 
 #[derive(Default)]
@@ -313,7 +314,7 @@ impl Extension for Scopes {
                 continue;
             };
             let replaced = match function {
-                "inner" => Vec::new(),
+                "inner" | "peek" => Vec::new(),
                 "reach" => heres.clone(),
                 _ => {
                     let inside = n.arguments().iter().flat_map(descendants).collect::<Vec<_>>();
@@ -328,6 +329,9 @@ impl Extension for Scopes {
         let (global, replacement, replaced) = self.calls.get(&cx.site(call))?;
         let replacements = replaced.iter().map(|&n| (n, Expr::string(*replacement))).collect();
         let arguments = cx.arguments(call, replacements);
+        if *global == "peek" {
+            return None;
+        }
         Some(Expr::global(global).call(arguments))
     }
 }
@@ -360,4 +364,10 @@ fn replacements_end_with_the_call_that_supplies_them() {
     let main = compile_scopes("outer(reach(), inner(HERE));\nreach();\ninner(HERE);\n");
     has(&main, "out(reached(), (inside(\"REPLACED\")))");
     has(&main, "\nreached()\ninside(HERE)\n");
+}
+
+#[test]
+#[should_panic(expected = "extension `scopes` lowered the arguments of a call and then left the call to the compiler")]
+fn declining_a_call_after_lowering_its_arguments_panics() {
+    compile_scopes("outer(peek(HERE), HERE);\n");
 }

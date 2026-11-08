@@ -30,7 +30,8 @@ pub trait Extension: Send {
     fn finish_program(&mut self, _cx: &mut ProgramCx<'_>) {}
 
     /// Lowers a call the extension owns in place of the compiler, or returns `None` to leave it to the compiler and
-    /// the next extension. The compiler never asks about an optional-chain call, such as `a?.b()`, a `super(..)` or
+    /// the next extension. Decide before lowering anything: returning `None` after [`LowerCx::arguments`] panics. The
+    /// compiler never asks about an optional-chain call, such as `a?.b()`, a `super(..)` or
     /// `super.m(..)` call, or a dynamic `import(..)`.
     fn lower_call(&self, _cx: &mut LowerCx<'_, '_>, _call: Node) -> Option<Expr> {
         None
