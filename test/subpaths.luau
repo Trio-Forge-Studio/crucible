@@ -16,7 +16,7 @@ return {
 		client.place:Destroy()
 		h.place:Destroy()
 	end,
-	["no entry loads Vide, and the removed vide subpath is absent"] = function()
+	["no entry but ui loads Vide, and the removed vide subpath is absent"] = function()
 		local function videLoaded(h): boolean
 			local vide = h.place:GetService("ReplicatedStorage").rbxts_include.node_modules["@rbxts"].vide
 			for module in h.loaded do
@@ -81,10 +81,30 @@ return {
 		assert(spline.loaded[spline.crucible.server] == nil, "spline does not load the server")
 		spline.place:Destroy()
 	end,
-	["the removed ui subpath is absent from the place"] = function()
-		local h = loadPlace()
-		assert(h.crucible:FindFirstChild("ui") == nil, "the package no longer includes Crucible UI")
-		h.place:Destroy()
+	["the ui subpath resolves, and every other entry loads without Vide installed"] = function()
+		local ui = loadPlace(true)
+		local exports = ui.import(ui.crucible.ui)
+		assert(type(exports.Checkbox) == "table" and type(exports.Dialog) == "table", "the ui subpath resolves")
+		assert(exports.modalOpen() == false, "no modal is open after load")
+		ui.place:Destroy()
+
+		local function withoutVide(client: boolean)
+			local h = loadPlace(client)
+			h.place:GetService("ReplicatedStorage").rbxts_include.node_modules["@rbxts"].vide:Destroy()
+			return h
+		end
+		local server = withoutVide(false)
+		server.import(server.crucible)
+		server.import(server.crucible.server)
+		server.import(server.crucible.emit)
+		local client = withoutVide(true)
+		client.import(client.crucible)
+		client.import(client.crucible.client)
+		local missing = withoutVide(true)
+		assert(not pcall(missing.import, missing.crucible.ui), "the ui subpath needs Vide")
+		missing.place:Destroy()
+		client.place:Destroy()
+		server.place:Destroy()
 	end,
 	["no entry but the testing subpath loads it, and the subpath resolves"] = function()
 		local function testingLoaded(h): boolean

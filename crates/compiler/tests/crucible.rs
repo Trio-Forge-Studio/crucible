@@ -124,7 +124,10 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
         .iter()
         .map(|path| {
             let relative = path.strip_prefix(&format!("{src}/")).expect("the source is under src");
-            let stem = relative.strip_suffix(".ts").expect("the runtime is TypeScript");
+            let stem = relative
+                .strip_suffix(".ts")
+                .or_else(|| relative.strip_suffix(".tsx"))
+                .expect("the runtime is TypeScript");
             let stem = match stem.strip_suffix("index") {
                 Some(dir) if dir.is_empty() || dir.ends_with('/') => format!("{dir}init"),
                 _ => stem.to_owned(),

@@ -1471,7 +1471,7 @@ fn exports_only_consumers_compile_public_entries_and_reject_reserved_entries() {
     game.main(&source);
     game.write(
         "src/client/imports.ts",
-        "import * as client from \"@trioforge/crucible/client\"; export const use = client;",
+        "import * as client from \"@trioforge/crucible/client\"; import * as ui from \"@trioforge/crucible/ui\"; export const use = [client, ui];",
     );
     let modules = game.compile();
     assert!(modules.iter().any(|m| m.path == "server/main.luau"));
@@ -1483,7 +1483,7 @@ fn exports_only_consumers_compile_public_entries_and_reject_reserved_entries() {
         let codes: Vec<i32> = facts.diagnostics.iter().map(|d| d.code).collect();
         assert_eq!(codes, [90004], "{entry} resolves its types but is compiler-owned");
     }
-    for entry in ["ui", "ui/jsx-runtime", "vide"] {
+    for entry in ["ui/jsx-runtime", "vide"] {
         let removed = Game::new();
         removed.main(&format!("import * as entry from \"@trioforge/crucible/{entry}\"; export const use = entry;"));
         let errors = removed.analyze().expect_err("the subpath is no longer exported");
@@ -1504,6 +1504,6 @@ fn a_declared_vide_entry_is_rejected_under_cru004() {
     let messages: Vec<_> = facts.diagnostics.iter().filter(|d| d.code == 90004).map(|d| d.message.clone()).collect();
     assert_eq!(
         messages,
-        ["CRU004: Import only the root, server, client, util/random or maths/spline Crucible entries."]
+        ["CRU004: Import only the root, server, client, ui, util/random or maths/spline Crucible entries."]
     );
 }
