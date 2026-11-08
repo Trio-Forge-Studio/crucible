@@ -1,6 +1,6 @@
 # Crucible architecture
 
-Crucible becomes four products with hard edges: a game framework, a compiler, an infrastructure-as-code (IaC) engine, and a command line that composes them. Each lives in its own crates or package, and a check in CI rejects a dependency edge the design does not allow. The compiler stops knowing Crucible's names, and the framework's transform plugs into it through one internal extension trait. The runtime ABI between the transform and the framework gets one source of truth instead of matching strings in Rust and TypeScript. IaC adds declared products, badges, passes and experience settings to `crucible.toml`, records Roblox's IDs in a committed `crucible.lock`, and hands game code typed handles, never raw IDs. Every refactor step keeps the emitted Luau byte-identical, and the riskiest protocols get TLA+ models before code. This document records the audit at `2ead6cd` on 2026-11-06, the target design, the pitfalls, and the order of work. It replaces two settled decisions in `design/compiler.md`, the absence of a plugin seam and the transform living inside the compiler.
+Crucible becomes four products with hard edges: a game framework, a compiler, an infrastructure-as-code (IaC) engine, and a command line that composes them. Each lives in its own crates or package, and a check in CI rejects a dependency edge the design does not allow. The compiler stops knowing Crucible's names, and the framework's transform plugs into it through one internal extension trait. The runtime ABI between the transform and the framework gets one source of truth instead of matching strings in Rust and TypeScript. IaC adds declared products, badges, passes and experience settings to `crucible.toml`, records Roblox's IDs in a committed `crucible.lock`, and hands game code typed handles, never raw IDs. Every refactor step keeps the emitted Luau byte-identical, and the riskiest protocols get TLA+ models before code. This document records the audit at `2ead6cd` on 2026-11-06, the target design, the pitfalls, and the order of work. It replaces two settled decisions in `design/compiler.md`, the absence of a plugin seam and the transform living inside the compiler. `design/stack.md` records the libraries the framework builds on, Charm for state and Vide for UI, and the UI code that is deleted instead of moved.
 
 ## What the audit found
 
@@ -8,7 +8,7 @@ Five read-only audits covered the compiler crate, the CLI crate and Open Cloud l
 
 ### The compiler knows the framework by name
 
-`cli/crates/compiler` holds a generic TypeScript-to-Luau compiler, a Roblox backend, Crucible's transform, the UI class compiler and a Rojo resolver in one crate. About twenty places in generic lowering branch on framework knowledge. Examples are the `MacroKind::Crucible` dispatch in `src/lower/call.rs:302`, the `Crucible::Load` string case in `src/lower/expr.rs:51`, registration appended after ordinary class emission in `src/lower/class.rs:141`, and the `uses_crucible` and `uses_ui` flags in `src/lower/mod.rs:58`. The core `Fact` and `Jsx` types carry Crucible schema and style types (`src/facts.rs:43`, `:177`). The macro enum mixes generic compiler macros with fourteen framework macros (`src/macros.rs:159`). `design/compiler.md:152` made this deliberate. No seam exists that a transform could plug into, because `Api` and `Extractor` are private concrete types and public `Facts` cannot be fed to lowering.
+`cli/crates/compiler` holds a generic TypeScript-to-Luau compiler, a Roblox backend, Crucible's transform, the UI class compiler and a Rojo resolver in one crate. About twenty places in generic lowering branch on framework knowledge. Examples are the `MacroKind::Crucible` dispatch in `src/lower/call.rs:302`, the `Crucible::Load` string case in `src/lower/expr.rs:51`, registration appended after ordinary class emission in `src/lower/class.rs:141`, and the `uses_crucible` flag in `src/lower/mod.rs:58`. The UI class compiler and its import flag are deleted, not moved, as `design/stack.md` records. The core `Fact` and `Jsx` types carry Crucible schema and style types (`src/facts.rs:43`, `:177`). The macro enum mixes generic compiler macros with fourteen framework macros (`src/macros.rs:159`). `design/compiler.md:152` made this deliberate. No seam exists that a transform could plug into, because `Api` and `Extractor` are private concrete types and public `Facts` cannot be fed to lowering.
 
 ### The runtime ABI lives as matching strings
 
@@ -45,13 +45,13 @@ Each product owns one body of knowledge. The table is the rule a reviewer applie
 
 | Product | Owns | Never owns | Ships as |
 | --- | --- | --- | --- |
-| Framework | Lifecycles, DI, subsystems, behaviours, networking, replication, profile stores, configs, reactive values, UI runtime, the ABI's runtime half, product and badge handle types | Roblox IDs, Open Cloud, file system access, compiler internals | `@trioforge/crucible` |
+| Framework | Lifecycles, DI, subsystems, behaviours, networking, replication, profile stores, configs, effect lifetimes over Charm values, the `ui` entry on Vide (see `design/stack.md`), the ABI's runtime half, product and badge handle types | Roblox IDs, Open Cloud, file system access, compiler internals | `@trioforge/crucible` |
 | Compiler | TypeScript 7 checking through tsrs, lowering to Luau, the roblox-ts RuntimeLib ABI, module resolution against an instance map, virtual modules, the extension trait | Any `@trioforge/crucible` name, `crucible.toml`, Open Cloud | `crucible-compiler`, `crucible-luau` |
-| Transform | Framework semantics at compile time: registration, DI IDs, declaration macros and schemas, boot globs, CRU rules, Crucible UI JSX, utility classes and themes | Generic lowering, Rojo, Open Cloud | `crucible-transform`, `crucible-abi` |
+| Transform | Framework semantics at compile time: registration, DI IDs, declaration macros and schemas, boot globs, CRU rules | Generic lowering, Rojo, Open Cloud, UI rendering (see `design/stack.md`) | `crucible-transform`, `crucible-abi` |
 | IaC | The experience model, the lock file, plan, provision, retirement, Open Cloud typed operations, generated handle types and per-environment bindings | Compiling, building places, game runtime behavior | `crucible-iac`, `crucible-oc` |
 | CLI | Commands, argument parsing, output formats, exit codes, docs reader, scaffolding and upgrade, composing build and deploy | Business rules that a library could test without a terminal | `crucible` binary, `@trioforge/crucible-cli` |
 
-The transform is the fourth box's "transformer(s)". It is listed separately because it has its own dependency rule. It may depend on the compiler, and the compiler may never depend on it. The UI transform and the framework transform are two implementations of one trait, which proves the seam has more than one user.
+The transform is the fourth box's "transformer(s)". It is listed separately because it has its own dependency rule. It may depend on the compiler, and the compiler may never depend on it. `design/stack.md` deletes the UI transform, so the framework transform is the trait's one implementation.
 
 ## Target layout
 
@@ -63,7 +63,7 @@ crates/
   luau/                    crucible-luau        Luau AST and printer
   compiler/                crucible-compiler    tsrs frontend, generic lowering, RuntimeLib ABI, virtual modules, Extension trait
   abi/                     crucible-abi         runtime ABI table, generates packages/crucible/src/emit/abi.d.ts
-  transform/               crucible-transform   framework and UI extensions, CRU rules, themes
+  transform/               crucible-transform   the framework extension and CRU rules
   project/                 crucible-project     crucible.toml model and parser, Rojo project to instance map
   oc/                      crucible-oc          Open Cloud transport, outcome policy, credentials, typed operations
   oc-registry/             crucible-oc-registry the pinned 301-operation spec behind `crucible oc` (see decision 2)
@@ -118,14 +118,13 @@ pub trait Extension {
     fn finish_program(&mut self, cx: &mut ProgramCx<'_>);
     fn lower_call(&self, cx: &mut LowerCx<'_>, site: Site) -> Option<Expr>;
     fn lower_class_tail(&self, cx: &mut LowerCx<'_>, class: Site) -> Vec<Stmt>;
-    fn lower_jsx(&self, cx: &mut LowerCx<'_>, element: Site) -> Option<Expr>;
 }
 ```
 
 - `ExtractCx` exposes checker queries. A facade that hides every tsrs type is probably too costly. Review counted what framework extraction uses today, 27 checker methods, 35 node accessors and 68 syntax kinds, so a facade would re-expose nearly the whole syntax tree. The likelier shape is that the compiler publishes its `tree` view and the transform depends on it, with tsrs pinned in one place. The bakeoff decides.
 - Extension facts live in the extension, keyed by site. The generic `Fact` loses its `Crucible`, schema and style variants.
-- `LowerCx::helper(module, name)` returns the expression for a helper and records the import as a side effect. That deletes the `uses_ts`, `uses_crucible` and `uses_ui` flags, because emitting a reference is what creates the import. A flag that must agree with the emitted code is the hidden state this redesign removes.
-- Diagnostics get one type with a code namespace per extension. CRU032 to CRU034 are generic Luau pitfalls and move to the compiler. CRU035 to CRU037 are framework or game policy and stay in the transform (`src/extract/typed_lint.rs:8` to `:25`).
+- `LowerCx::helper(module, name)` returns the expression for a helper and records the import as a side effect. That deletes the `uses_ts` and `uses_crucible` flags, because emitting a reference is what creates the import. The UI flag goes with the UI lowering, per `design/stack.md`. A flag that must agree with the emitted code is the hidden state this redesign removes.
+- Diagnostics get one type with a code namespace per extension. CRU032 to CRU034 are generic Luau pitfalls and move to the compiler. CRU035 and CRU036 are framework or game policy and stay in the transform (`src/extract/typed_lint.rs:8` to `:25`). CRU037 is deleted, per `design/stack.md`.
 
 Flamework's transformer rewrites the TypeScript tree and hands it to roblox-ts, which reprints and checks the program a second time. `design/compiler.md` measured that second check as the largest cost of FD's old build. The trait above works on facts and Luau, so the program is checked once.
 
@@ -133,7 +132,7 @@ The trait is internal. Rust has no stable plugin ABI, and a public plugin API co
 
 ### Transform and framework meet at a versioned ABI
 
-`crucible-abi` holds one table: every emit function with its parameters, the registration record fields, the `n` schema kinds, the `t` checks, the UI functions and the public subpaths that CRU004 allows. Three things come from it.
+`crucible-abi` holds one table: every emit function with its parameters, the registration record fields, the `n` schema kinds, the `t` checks and the public subpaths that CRU004 allows. Three things come from it.
 
 1. The transform's emitter uses its constants, so a Rust typo fails to compile.
 2. `cargo xtask abi` generates `packages/crucible/src/emit/abi.d.ts`, a declaration of the same functions. The runtime's `emit/index.ts` must satisfy it through a type-only import, so a TypeScript change that breaks the ABI fails `tsrs` checking. It is a `.d.ts` on purpose. A `.ts` file compiles to an `abi.luau` even when it declares only types, which changes the runtime's output.
@@ -159,7 +158,7 @@ The IDs still exist in the compiled place, because Roblox APIs need them. Hiding
 The model is Rust types in `crucible-iac`, independent of the file syntax. TOML is the first front end, because it exists, parses strictly today, and needs no evaluation. A JSON Schema generated from the model gives editors completion through Taplo.
 
 ```toml
-crucible = "0.5"                    # minimum CLI version, read before the strict parse
+crucible = "0.6"                    # minimum CLI version, read before the strict parse
 
 [places.start]
 project = "default.project.json"
@@ -196,7 +195,7 @@ enabled = false                     # an overlay may change listed fields only
 - Universes and places keep hand-typed IDs. Open Cloud has no create endpoint for either, in the pinned spec or the current reference.
 - An environment overlay may set only fields the model marks as overridable. An overlay key that names no declared resource is an error, so a typo cannot make a phantom resource. Bedrock records this failure mode.
 - Universe name and description are read-only on the universe resource. They change through the root place. The model puts them on the place so the plan does not promise a write Roblox refuses.
-- `crucible.toml` already rejects unknown keys (`src/manifest.rs:88`). From 0.5 on, the CLI reads the `crucible` minimum-version key in a lenient pass before the strict parse, so a newer config names the version to install instead of failing on an unknown table. Binaries up to 0.4.0 cannot do that. They print ``unknown field `crucible`, expected `places` or `env` ``.
+- `crucible.toml` already rejects unknown keys (`src/manifest.rs:88`). From 0.6 on, the CLI reads the `crucible` minimum-version key in a lenient pass before the strict parse, so a newer config names the version to install instead of failing on an unknown table. Binaries up to 0.5.x cannot do that. They print ``unknown field `crucible`, expected `places` or `env` ``.
 - Resource keys use lowercase letters, digits and `-`, starting with a letter. The handle name is the key in PascalCase, so `coin-pack` becomes `Products.CoinPack`. Today's place and env name rule also accepts `_` and capitals (`src/manifest.rs:165`). Under that rule `coin-pack`, `coin_pack` and `CoinPack` would all become `CoinPack`, so resource keys get the narrower rule, and the parser rejects two keys whose handle names collide.
 
 A TypeScript front end, `crucible.config.ts`, can come later and produce the same model. See decision 1.
@@ -316,7 +315,7 @@ The steps below are the work items. `roadmap.md` groups them into 11 pull reques
 1. Bakeoff of the `Extension` trait, two or three prototypes in separate worktrees. The scores are an identical golden manifest, the arch violation count, FD build time against the 3 s budget, and the size of the trait.
 2. `crucible-abi`, the generated `emit/abi.d.ts`, and the `crucibleAbi` version handshake.
 3. The helper registry that replaces the `uses_*` flags.
-4. Move one feature at a time behind the trait: registration and DI, then declarations and schemas, then boot, then UI JSX and classes, then the typed lints. Each move shrinks the violation list.
+4. Move one feature at a time behind the trait: registration and DI, then declarations and schemas, then boot, then the typed lints. Each move shrinks the violation list. The UI JSX lowering and the classes are deleted before this phase, per `design/stack.md`.
 5. Move Rojo parsing to `crucible-project`. The compiler takes an instance map.
 6. Virtual modules in the compiler.
 
