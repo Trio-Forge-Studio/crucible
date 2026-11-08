@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-644837df25e22df0d4adf555d32d2e8417419e1aa3714489c8d7778bb45d4d27  build/sample-game.rbxl
+71c4cd79b0450491098e53898cd02cf827077f5b66c9149f36d776b5588cc8cb  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -188,10 +188,6 @@ d7cf59ddb87ecfaead788a5b791351fef3b412b65485a57931303f2d60fd4c05  packages/cruci
 7a3b2e3d89979c41e83dacd9b3f7ad49df8ccf259d64ace41822b6eae008bae3  packages/crucible/out/subsystem.luau
 cb2556fa8154f9c8f5cb730f5d2bd7f03a11a6a0ed159dee370ccf76ef94fd66  packages/crucible/out/testing/index.d.ts
 beaa7757c6eed377a232ec6726f192ed98dce07b7223990f9e39257b64efdf86  packages/crucible/out/testing/init.luau
-256842ad77793e9e2a798e562312fdf2ade0882bdf9de6a8ba0fa8a33ab4bc75  packages/crucible/out/ui/index.d.ts
-22a08a1eea25d829446888e6c78d16c757bdfa47b0cd18e6605695ebe0fdc71f  packages/crucible/out/ui/init.luau
-309fcb7b629f0f7f41f208bbf43b5f9234321f06235aac0bb97e8ff915db2234  packages/crucible/out/ui/jsx-runtime.d.ts
-96ac64f9843ee89dfa6d96316df59d0cb2c177cad02e3407ce8708d52c9cc45c  packages/crucible/out/ui/jsx-runtime.luau
 566f22af67e9a062a156a87dcd8417eb8b9ce6495bb755d882d0b36e0da27ea8  packages/crucible/out/util/random/index.d.ts
 695b95e1cf29c93a4099db9736530f0147c11c84dcd8c99755f08e314dd8ba35  packages/crucible/out/util/random/init.luau
 a0a9ebd5034b84faff9c5976d2631106aa9577c6e2a965bf9c7814720c821131  packages/crucible/out/vide/index.d.ts

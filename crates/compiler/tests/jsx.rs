@@ -93,11 +93,118 @@ fn jsx_needs_the_react_setting_and_a_factory() {
         panic!("JSX without a factory fails the compile");
     };
     let found: Vec<String> = errors.iter().map(|e| format!("{}:{} {}", e.line, e.column, e.message)).collect();
+    assert_eq!(found, ["8:21 JSX without `jsx: \"react\"` and a `jsxFactory` is not supported"]);
+}
+
+#[test]
+fn automatic_jsx_options_fail_at_the_tsconfig_before_checking_ui_imports() {
+    for (jsx, source) in [
+        ("react-jsx", None),
+        ("react-jsxdev", None),
+        ("react-jsx", Some("@trioforge/crucible/ui")),
+        ("react", Some("@rbxts/vide")),
+        ("preserve", Some("another-renderer")),
+    ] {
+        let game = Game::new();
+        game.config(|c| {
+            c["compilerOptions"]["jsx"] = jsx.into();
+            if let Some(source) = source {
+                c["compilerOptions"]["jsxImportSource"] = source.into();
+            }
+        });
+        game.write(
+            "src/client/view.tsx",
+            "import { mount } from \"@trioforge/crucible/ui\";\nexport const view = <frame />;\n",
+        );
+        assert_jsx_config_error(&game);
+    }
+}
+
+#[test]
+fn inherited_jsx_options_fail_at_the_invoked_tsconfig() {
+    let game = Game::new();
+    game.write("jsx-options.json", r#"{"compilerOptions":{"jsx":"react-jsx"}}"#);
+    game.config(|c| {
+        let base = c["extends"].take();
+        c["extends"] = serde_json::json!([base, "./jsx-options.json"]);
+    });
+    game.main("export {};\n");
+    assert_jsx_config_error(&game);
+}
+
+#[test]
+fn an_explicitly_empty_jsx_import_source_is_rejected() {
+    for inherited in [false, true] {
+        let game = Game::new();
+        game.write("jsx-options.json", r#"{"compilerOptions":{"jsxImportSource":""}}"#);
+        game.config(|c| {
+            c["compilerOptions"]["jsx"] = "react".into();
+            c["compilerOptions"]["jsxFactory"] = "Vide.jsx".into();
+            if inherited {
+                let base = c["extends"].take();
+                c["extends"] = serde_json::json!([base, "./jsx-options.json"]);
+            } else {
+                c["compilerOptions"]["jsxImportSource"] = "".into();
+            }
+        });
+        game.main("export {};\n");
+        assert_jsx_config_error(&game);
+    }
+}
+
+#[test]
+fn an_automatic_runtime_pragma_is_rejected_at_the_pragma() {
+    assert_jsx_pragma_errors("/** @jsxRuntime automatic */", &[(2, 3)]);
+}
+
+#[test]
+fn an_import_source_pragma_is_rejected_before_resolving_the_removed_ui() {
+    assert_jsx_pragma_errors("/** @jsxImportSource @trioforge/crucible/ui */", &[(2, 3)]);
+}
+
+#[test]
+fn automatic_pragmas_are_rejected_even_when_the_runtime_resolves() {
+    assert_jsx_pragma_errors("/** @jsxRuntime automatic */\n  /** @jsxImportSource fakejsx */", &[(2, 3), (3, 3)]);
+}
+
+fn assert_jsx_pragma_errors(pragmas: &str, locations: &[(u32, u32)]) {
+    let game = Game::new();
+    game.config(|c| {
+        c["compilerOptions"]["jsx"] = "react".into();
+        c["compilerOptions"]["jsxFactory"] = "Vide.jsx".into();
+        c["compilerOptions"]["paths"] = serde_json::json!({ "fakejsx/*": ["./fakejsx/*"] });
+    });
+    game.write(
+        "fakejsx/jsx-runtime.d.ts",
+        "export declare namespace JSX {\n\ttype Element = unknown;\n\tinterface IntrinsicElements { frame: {}; }\n}\n",
+    );
+    game.write("src/client/view.tsx", &format!("\n  {pragmas}\nexport const view = <frame />;\n"));
+    let Err(Failure::Check(errors)) = game.try_compile() else {
+        panic!("automatic JSX pragmas fail before source checking");
+    };
+    assert_eq!(errors.len(), locations.len());
+    for (error, &location) in errors.iter().zip(locations) {
+        assert_eq!(game.relative(error), "src/client/view.tsx");
+        assert_eq!((error.line, error.column), location);
+        assert_eq!(error.code, 0);
+        assert_eq!(
+            error.message,
+            "`@jsxRuntime automatic` and `@jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` in the tsconfig and remove these pragmas."
+        );
+    }
+}
+
+fn assert_jsx_config_error(game: &Game) {
+    let Err(Failure::Check(errors)) = game.try_compile() else {
+        panic!("automatic JSX options fail before source checking");
+    };
+    assert_eq!(errors.len(), 1);
+    let error = &errors[0];
+    assert_eq!(game.relative(error), "tsconfig.json");
+    assert_eq!((error.line, error.column, error.code), (1, 1, 0));
     assert_eq!(
-        found,
-        [
-            "8:21 JSX without `jsx: \"react\"` and a `jsxFactory`, or `jsx: \"react-jsx\"` and `jsxImportSource: \"@trioforge/crucible/ui\"` is not supported"
-        ]
+        error.message,
+        "`jsx: \"react-jsx\"`, `jsx: \"react-jsxdev\"` and `jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` and remove `jsxImportSource` in the tsconfig."
     );
 }
 
@@ -118,118 +225,4 @@ fn the_vide_lowering_mounts_updates_and_connects_through_vide() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(result.status.success(), "{stdout}{}", String::from_utf8_lossy(&result.stderr));
     assert!(stdout.contains("vide fixtures pass"), "{stdout}");
-}
-
-fn ui_game() -> Game {
-    let game = Game::ui();
-    game.write("theme.toml", include_str!("classes/theme.toml"));
-    for entry in std::fs::read_dir(fixture("ui")).expect("the UI fixtures exist") {
-        let path = entry.expect("the entry is readable").path();
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        game.write(&format!("src/client/{name}"), &std::fs::read_to_string(&path).unwrap());
-    }
-    game
-}
-
-static UI: LazyLock<(Game, Vec<Module>)> = LazyLock::new(|| {
-    let game = ui_game();
-    let modules = game.compile();
-    (game, modules)
-});
-
-fn ui(path: &str) -> &'static str {
-    &UI.1.iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} is emitted")).source
-}
-
-#[test]
-fn an_intrinsic_element_sets_fixed_props_binds_readables_and_connects_events() {
-    has(
-        ui("client/counter.luau"),
-        "local _0 = Instance.new(\"TextButton\")\n\t_0.Name = \"Counter\"\n\t__ui.bind(_0, \"Text\", function()\n\t\treturn `Coins {props.coins()}`\n\tend)\n\t_0.TextSize = 18\n\t_0.Activated:Connect(props.onBuy)\n\treturn _0",
-    );
-    has(ui("client/panel.luau"), "__ui.bind(_3, \"Text\", title)");
-    has(ui("client/list.luau"), "_3.Text = item\n\t\t\t\t__ui.bind(_3, \"LayoutOrder\", index)");
-}
-
-#[test]
-fn compiled_jsx_imports_the_ui_entry_from_the_place() {
-    has(
-        ui("client/counter.luau"),
-        "local __ui = TS.import(script, game:GetService(\"ReplicatedStorage\"), \"rbxts_include\", \"node_modules\", \"@trioforge\", \"crucible\", \"out\", \"ui\")",
-    );
-}
-
-#[test]
-fn children_parent_an_element_and_append_any_other_node() {
-    has(
-        ui("client/list.luau"),
-        "local _2 = Instance.new(\"UIListLayout\")\n\t\t_2.Name = \"Layout\"\n\t\t_2.Parent = _1\n\t\t__ui.append(_1, For({",
-    );
-    has(ui("client/cards.luau"), "_0.Name = props.title\n\t__ui.append(_0, props.children)");
-}
-
-#[test]
-fn a_component_takes_a_props_table_with_its_children_and_a_fragment_is_an_array() {
-    has(ui("client/cards.luau"), "_2.children = _1\n\t\treturn { Card(_2), Card({\n\t\t\ttitle = \"B\",\n\t\t}) }");
-    has(ui("client/panel.luau"), "Show({\n\t\t\twhen = open,\n\t\t\tfallback = function()");
-}
-
-#[test]
-fn a_value_that_may_be_nil_is_set_bound_or_connected_only_when_it_is_not_nil() {
-    has(
-        ui("client/optional.luau"),
-        "local _1 = props.label\n\tif _1 ~= nil then\n\t\t_0.Text = _1\n\tend\n\tlocal _2 = props.size\n\tif _2 ~= nil then\n\t\t__ui.bind(_0, \"TextSize\", _2)\n\tend\n\tlocal _3 = props.onClick\n\tif _3 ~= nil then\n\t\t_0.Activated:Connect(_3)\n\tend",
-    );
-    has(ui("client/optional.luau"), "_0.Name = \"Button\"\n\tlocal _1");
-}
-
-#[test]
-fn an_intrinsic_element_refuses_mixed_props_and_spreads() {
-    let game = ui_game();
-    game.write(
-        "src/client/mixed.tsx",
-        "import type { Readable } from \"@trioforge/crucible\";\nexport const mixed = (text: string | Readable<string>) => [\n\t<textlabel Text={text} />,\n\t<textlabel {...{ Text: \"x\" }} />,\n];\n",
-    );
-    let Err(Failure::Lower(errors)) = game.try_compile() else {
-        panic!("the refused props fail the compile");
-    };
-    let mut found: Vec<String> = errors
-        .iter()
-        .filter(|e| e.path.ends_with("/mixed.tsx"))
-        .map(|e| format!("{}:{} {}", e.line, e.column, e.message))
-        .collect();
-    found.sort();
-    let expected = [
-        "3:13 the type facts cannot answer this Jsx site (Mixed)",
-        "3:13 the type facts do not say how this attribute lowers",
-        "4:17 a spread attribute on an intrinsic element is not supported",
-    ];
-    assert_eq!(found, expected);
-}
-
-#[test]
-#[ignore = "runs the emitted Luau in Lune, which must be on PATH"]
-fn the_compiled_lowering_mounts_updates_and_unmounts_on_the_compiler_built_runtime() {
-    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jsx-ui");
-    let _ = std::fs::remove_dir_all(&root);
-    let runtime = crucible_compiler::compile(&repo().join("packages/crucible/tsconfig.json"), Target::Package)
-        .unwrap_or_else(|f| panic!("the runtime compiles:\n{f}"))
-        .modules;
-    let installed = root.join("ReplicatedStorage/rbxts_include/node_modules/@trioforge/crucible/out");
-    crucible_compiler::write(&installed, &runtime).expect("the runtime is written");
-    let client: Vec<Module> =
-        UI.1.iter()
-            .filter_map(|m| Some(Module { path: m.path.strip_prefix("client/")?.to_owned(), source: m.source.clone() }))
-            .collect();
-    crucible_compiler::write(&root.join("StarterPlayer/StarterPlayerScripts/TS"), &client).expect("the UI is written");
-    let result = std::process::Command::new("lune")
-        .current_dir(fixture(""))
-        .arg("run")
-        .arg("ui.luau")
-        .arg(&root)
-        .output()
-        .expect("lune runs");
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(result.status.success(), "{stdout}{}", String::from_utf8_lossy(&result.stderr));
-    assert!(stdout.contains("ui specs pass"), "{stdout}");
 }

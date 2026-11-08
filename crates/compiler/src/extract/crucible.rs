@@ -101,8 +101,6 @@ pub(super) struct Api {
     made: Option<HashMap<P<Symbol>, Made>>,
     /// The declarations of `@trioforge/crucible/emit`.
     pub emit: Option<PathBuf>,
-    /// The declarations of `@trioforge/crucible/ui`.
-    pub ui: Option<PathBuf>,
     pub widths: HashSet<P<Symbol>>,
     pub entries: HashMap<PathBuf, Side>,
     pub entry_exports: HashMap<P<Symbol>, Side>,
@@ -126,7 +124,6 @@ impl Api {
             invalid_metadata: false,
             made: None,
             emit: None,
-            ui: None,
             widths: HashSet::new(),
             entries: HashMap::new(),
             entry_exports: HashMap::new(),
@@ -140,7 +137,6 @@ impl Api {
             }
             if api.emit.is_none() {
                 api.emit = entry_types(&owner, "./emit");
-                api.ui = entry_types(&owner, "./ui");
             }
             widths(c, file.as_node(), &mut api.widths);
             let Some(module) = file.as_node().symbol() else { continue };
@@ -596,14 +592,6 @@ impl Extractor {
         let span = crate::tree::span(at, file.text());
         let path = file.file_name().replace('\\', "/");
         if self.reported.insert((path, span.start, code)) {
-            self.push_diagnostic(at, span, code, message);
-        }
-    }
-
-    pub(super) fn report_span(&mut self, at: P<Node>, span: crate::facts::Span, code: Code, message: &str) {
-        let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
-        let path = file.file_name().replace('\\', "/");
-        if self.reported_classes.insert((path, span, code, message.to_owned())) {
             self.push_diagnostic(at, span, code, message);
         }
     }
@@ -1243,12 +1231,12 @@ impl Extractor {
         if let Some(specifier) = specifier
             && specifier.kind() == Kind::StringLiteral
             && let Some(entry) = specifier.text().strip_prefix("@trioforge/crucible/")
-            && !matches!(entry, "server" | "client" | "vide" | "ui" | "util/random" | "maths/spline")
+            && !matches!(entry, "server" | "client" | "vide" | "util/random" | "maths/spline")
         {
             self.report(
                 n,
                 Code::Rule(4),
-                "Import only the root, server, client, vide, ui, util/random or maths/spline Crucible entries.",
+                "Import only the root, server, client, vide, util/random or maths/spline Crucible entries.",
             );
         }
     }

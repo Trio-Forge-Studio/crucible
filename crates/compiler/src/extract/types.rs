@@ -21,8 +21,6 @@ pub(super) struct Globals {
     lua_tuple: Option<P<Symbol>>,
     pub vector3: Option<P<Symbol>>,
     pub color3: Option<P<Symbol>>,
-    pub creatable_instances: Option<P<Symbol>>,
-    pub signal: Option<P<Symbol>>,
 }
 
 impl Globals {
@@ -40,8 +38,6 @@ impl Globals {
             lua_tuple: None,
             vector3: None,
             color3: None,
-            creatable_instances: None,
-            signal: None,
         };
         for &m in Macro::ALL {
             match m.kind() {
@@ -77,8 +73,6 @@ impl Globals {
         globals.iterable_function = resolve("IterableFunction", SymbolFlags::All);
         globals.vector3 = resolve("Vector3", SymbolFlags::Type);
         globals.color3 = resolve("Color3", SymbolFlags::Type);
-        globals.creatable_instances = resolve("CreatableInstances", SymbolFlags::Interface);
-        globals.signal = resolve("RBXScriptSignal", SymbolFlags::Interface);
         globals.lua_tuple = resolve("LuaTuple", SymbolFlags::All).and_then(|s| {
             let t = c.get_declared_type_of_symbol_exported(s);
             c.get_property_of_type_exported(t, "_nominal_LuaTuple")

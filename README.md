@@ -82,7 +82,7 @@ The `crucible` CLI carries every guide. `npx crucible docs` lists them, and `npx
 - Structure a game with [boot](docs/boot.md), [lifecycle](docs/lifecycle.md), [reactive state](docs/reactive.md), and [logging](docs/logging.md).
 - Talk between the server and clients with [networking](docs/networking.md) and [replicated state](docs/replicated.md).
 - Save and load data with [profile stores](docs/profile-stores.md), [data stores](docs/data-stores.md), and [configs](docs/configs.md).
-- Build UI with [Crucible UI](docs/ui.md) or [Vide](docs/vide.md).
+- Build UI with [Vide](docs/vide.md).
 - Draw seeded numbers and curves with [random](docs/random.md) and [spline](docs/spline.md).
 - Build, test, and ship with the [CLI](docs/cli.md), [Open Cloud](docs/oc.md), [testing](docs/testing.md), and the [compile errors](docs/diagnostics.md).
 

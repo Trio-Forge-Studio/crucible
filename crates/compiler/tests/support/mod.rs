@@ -34,15 +34,6 @@ pub fn copy_declarations(from: &Path, to: &Path) {
 }
 
 impl Game {
-    pub fn ui() -> Game {
-        let game = Self::new();
-        game.config(|c| {
-            c["compilerOptions"]["jsx"] = "react-jsx".into();
-            c["compilerOptions"]["jsxImportSource"] = "@trioforge/crucible/ui".into();
-        });
-        game
-    }
-
     pub fn new() -> Game {
         Game::under("client")
     }

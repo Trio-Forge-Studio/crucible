@@ -41,24 +41,13 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 		[...files.keys()].some((file) => file.includes("/vide-block-") && file.endsWith(".tsx")),
 		"the vide guide has tsx blocks",
 	);
-	assert.ok(
-		[...files.keys()].some((file) => file.includes("/ui-block-") && file.endsWith(".tsx")),
-		"the ui guide has tsx blocks",
-	);
 	for (const guide of ["random", "spline"])
 		assert.ok(
 			[...files.keys()].some((file) => file.includes(`/${guide}-block-`)),
 			`the ${guide} guide has ts blocks`,
 		);
-	const ui = new Map([...files].filter(([file]) => file.includes("/ui-block-")));
-	const rest = new Map([...files].filter(([file]) => !ui.has(file)));
-	for (const [blocks, jsx] of [
-		[rest, { jsx: "react", jsxFactory: "Vide.jsx", jsxFragmentFactory: "Vide.Fragment" }],
-		[ui, { jsx: "react-jsx", jsxImportSource: "@trioforge/crucible/ui" }],
-	]) {
-		const result = typecheck(blocks, jsx);
-		assert.equal(result.status, 0, result.output);
-	}
+	const result = typecheck(files, { jsx: "react", jsxFactory: "Vide.jsx", jsxFragmentFactory: "Vide.Fragment" });
+	assert.equal(result.status, 0, result.output);
 });
 
 const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");

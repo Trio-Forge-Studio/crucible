@@ -55,19 +55,6 @@ impl Lower<'_> {
                 }
             }
         }
-        if self.uses_ui {
-            match &self.place.crucible_ui {
-                Some(ui) => {
-                    self.uses_ts = true;
-                    let import = Expr::global("TS.import").call(super::import_arguments(ui));
-                    body.insert(0, Stmt::Local(vec![Cow::Borrowed("__ui")], vec![import]));
-                }
-                None => {
-                    let root = self.file.root();
-                    self.error(root, "Crucible UI's JSX needs @trioforge/crucible/ui where the program can reach it");
-                }
-            }
-        }
         if self.uses_ts {
             let runtime = match &self.place.runtime_lib {
                 RuntimeLib::Global => Expr::global("_G").index(Expr::global("script")),

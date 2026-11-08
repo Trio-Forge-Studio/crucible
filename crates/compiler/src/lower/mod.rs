@@ -5,10 +5,9 @@ mod expr;
 mod jsx;
 mod pattern;
 mod stmt;
-mod style;
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
@@ -56,7 +55,6 @@ pub(crate) fn lower(
         temps: 0,
         uses_ts: false,
         uses_crucible: false,
-        uses_ui: false,
         refs: references(file.root()),
         closure_assigned: closure_assigned(file.root()),
         hoisted_name_starts: HashSet::new(),
@@ -65,7 +63,6 @@ pub(crate) fn lower(
         export_stars: Vec::new(),
         namespace: None,
         breakables: Vec::new(),
-        groups: Vec::new(),
     };
     for u in unanswered {
         let Position { line, column } = file.position(u.span.start);
@@ -125,7 +122,6 @@ pub(crate) struct Lower<'a> {
     temps: u32,
     uses_ts: bool,
     uses_crucible: bool,
-    uses_ui: bool,
     refs: Vec<Reference>,
     closure_assigned: HashSet<&'static str>,
     hoisted_name_starts: HashSet<u32>,
@@ -134,9 +130,6 @@ pub(crate) struct Lower<'a> {
     export_stars: Vec<Expr>,
     namespace: Option<Name>,
     breakables: Vec<Breakable>,
-    /// The group names and `interaction` local of each group element whose children are being lowered, outermost
-    /// first.
-    groups: Vec<(BTreeSet<Option<String>>, Expr)>,
 }
 
 fn temp_prefix(text: &str) -> String {

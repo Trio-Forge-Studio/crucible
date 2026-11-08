@@ -5,7 +5,7 @@ fn rules(game: &Game) -> Vec<(usize, usize, i32)> {
     game.facts()
         .diagnostics
         .iter()
-        .filter(|d| (90032..=90037).contains(&d.code))
+        .filter(|d| (90032..=90036).contains(&d.code))
         .map(|d| (d.line as usize, d.column as usize, d.code))
         .collect()
 }
@@ -43,16 +43,6 @@ fn fd_crucible_lifetime_rules_follow_abstract_bases() {
         .collect();
     assert_eq!(rules(&game).iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), expected);
 }
-#[test]
-fn fd_state_passed_where_plain_function_expected() {
-    let game = Game::new();
-    let source = include_str!("fixtures/typed-lint/state.ts.txt");
-    game.main(source);
-    let expected: Vec<_> =
-        source.lines().enumerate().filter_map(|(i, l)| l.ends_with("// fires").then_some((i + 1, 90037))).collect();
-    assert_eq!(rules(&game).iter().map(|&(l, _, c)| (l, c)).collect::<Vec<_>>(), expected);
-}
-
 #[test]
 fn explicit_boolean_coercion_and_discarded_steps_are_safe() {
     let game = Game::new();

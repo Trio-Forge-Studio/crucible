@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tsrs_ast::Diagnostic as TsDiagnostic;
 use tsrs_compiler::{CheckerHandle, Context, Program, ProgramOptions, new_cached_fs_compiler_host, new_program};
-use tsrs_core::{CompilerOptions, P, tspath};
+use tsrs_core::{CompilerOptions, JsxEmit, P, tspath};
 use tsrs_tsoptions::{self as tsoptions, ParseConfigHost};
 use tsrs_vfs::{FS, bundled::embed as bundled, osvfs};
 
@@ -122,8 +122,23 @@ pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {
     let Some(config) = config else {
         return Err(vec![plain(&format!("cannot read {path}"))]);
     };
+    if let Some(options) = config.compiler_options()
+        && (matches!(options.jsx, JsxEmit::REACT_JSX | JsxEmit::REACT_JSX_DEV) || jsx_import_source_set(&config, &host))
+    {
+        return Err(vec![Diagnostic {
+            path: Some(path),
+            line: 1,
+            column: 1,
+            code: 0,
+            message: "`jsx: \"react-jsx\"`, `jsx: \"react-jsxdev\"` and `jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` and remove `jsxImportSource` in the tsconfig.".to_owned(),
+        }]);
+    }
     let compiler_host = new_cached_fs_compiler_host(&cwd, fs, &bundled::lib_path(), None, None, None);
     let program = new_program(ProgramOptions::new(P::new(config), compiler_host));
+    let pragma_errors = jsx_pragma_errors(program);
+    if !pragma_errors.is_empty() {
+        return Err(pragma_errors);
+    }
     let ctx = Context::default();
     let diagnostics = tsrs_compiler::get_diagnostics_of_any_program(
         &ctx,
@@ -137,6 +152,50 @@ pub(crate) fn check(tsconfig: &Path) -> Result<Checked, Vec<Diagnostic>> {
         return Err(diagnostics.iter().map(convert).collect());
     }
     Ok(Checked { program, checker: program.get_type_checker(&ctx), host })
+}
+
+fn jsx_import_source_set(config: &tsoptions::ParsedCommandLine, host: &ConfigHost) -> bool {
+    let has_source = |raw: &tsoptions::CompilerOptionsValue| {
+        raw.as_object()
+            .and_then(|raw| raw.get("compilerOptions"))
+            .and_then(|options| options.as_object())
+            .is_some_and(|options| options.contains_key("jsxImportSource"))
+    };
+    has_source(&config.raw)
+        || config.config_file.is_some_and(|file| {
+            file.extended_source_files.lock().unwrap().iter().any(|path| {
+                let Some(text) = host.fs.read_file(path) else { return false };
+                let (raw, _) = tsoptions::parse_config_file_text_to_json(
+                    path,
+                    tspath::to_path(path, &host.cwd, host.fs.use_case_sensitive_file_names()),
+                    &text,
+                );
+                has_source(&raw)
+            })
+        })
+}
+
+fn jsx_pragma_errors(program: &Program) -> Vec<Diagnostic> {
+    let mut errors = Vec::new();
+    for &file in program.source_files().iter().filter(|file| !file.is_declaration_file() && !file.is_js()) {
+        let automatic = !tsrs_ast::get_jsx_implicit_import_base(&program.options(), Some(file)).is_empty();
+        let runtime = tsrs_ast::get_pragma_from_source_file(Some(file), "jsxruntime").filter(|pragma| {
+            automatic && pragma.args.get("factory").is_some_and(|argument| argument.value == "automatic")
+        });
+        let source = tsrs_ast::get_pragma_from_source_file(Some(file), "jsximportsource");
+        for pragma in runtime.into_iter().chain(source) {
+            let pos = pragma.comment_range.pos() as usize;
+            let before = &file.text()[..pos];
+            errors.push(Diagnostic {
+                path: Some(file.file_name().replace('\\', "/")),
+                line: (before.matches('\n').count() + 1) as u32,
+                column: (pos - before.rfind('\n').map_or(0, |i| i + 1) + 1) as u32,
+                code: 0,
+                message: "`@jsxRuntime automatic` and `@jsxImportSource` are not supported; use `jsx: \"react\"` with `jsxFactory: \"Vide.jsx\"` in the tsconfig and remove these pragmas.".to_owned(),
+            });
+        }
+    }
+    errors
 }
 
 fn plain(message: &str) -> Diagnostic {
