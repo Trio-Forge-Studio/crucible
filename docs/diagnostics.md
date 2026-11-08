@@ -89,12 +89,12 @@ A non-abstract class that extends `Subsystem` or `CrucibleBehaviour` is a class 
 ## CRU004
 
 ```text
-CRU004: Import only the root, server, client, vide, util/random or maths/spline Crucible entries.
+CRU004: Import only the root, server, client, util/random or maths/spline Crucible entries.
 ```
 
-An `import`, `export ... from`, `import type`, `import()` call or `import x = require()` names a path under `@trioforge/crucible/` other than `server`, `client`, `vide`, `util/random` and `maths/spline`. This covers `@trioforge/crucible/emit`, internal paths, and `@trioforge/crucible/testing`, which only specs import, as `crucible docs testing` describes. To fix it, import from `@trioforge/crucible` or from one of the five entries.
+An `import`, `export ... from`, `import type`, `import()` call or `import x = require()` names a path under `@trioforge/crucible/` other than `server`, `client`, `util/random` and `maths/spline`. This covers `@trioforge/crucible/emit`, internal paths, and `@trioforge/crucible/testing`, which only specs import, as `crucible docs testing` describes. To fix it, import from `@trioforge/crucible` or from one of the four entries.
 
-The runtime no longer ships the `vide` entry, so an import of `@trioforge/crucible/vide` passes this rule and then fails to resolve. Read Charm values in Vide with `@rbxts/vide-charm`, as `crucible docs vide` describes.
+The runtime no longer ships a `vide` entry, so this rule rejects `@trioforge/crucible/vide` too. Read Charm values in Vide with `@rbxts/vide-charm`, as `crucible docs vide` describes.
 
 ## CRU005
 

@@ -24,7 +24,7 @@ pub const PACKAGE: &str = "@trioforge/crucible";
 pub const EMIT: &str = "./emit";
 
 /// The subpaths of the runtime a game may import besides its root. CRU004 rejects every other one.
-pub const SUBPATHS: &[&str] = &["server", "client", "vide", "util/random", "maths/spline"];
+pub const SUBPATHS: &[&str] = &["server", "client", "util/random", "maths/spline"];
 
 /// A function compiled code calls, with the parameters the compiler passes in order.
 #[derive(Clone, Copy, Debug)]
