@@ -10,6 +10,63 @@ local function strictLife()
 	return life(nil, true)
 end
 
+-- A strict realm whose `calls.n` counts every call Charm makes into a Crucible effect, including runs whose body is gone.
+local function countingRealm()
+	local calls = { n = 0 }
+	local r = realm(function(graph)
+		local charm = graph.package("@rbxts/charm/src")
+		local effect = charm.effect
+		charm.effect = function(fn)
+			return effect(function()
+				calls.n += 1
+				return fn()
+			end)
+		end
+	end, nil, true)
+	return r, calls
+end
+
+-- Three sibling scopes, each holding an effect and a cleanup; the first one's cleanup disposes the second. `mode` ends
+-- their owner by destruction, at disable, or by destruction while boot holds the effects and then a rollback.
+local function siblingEnd(mode: string)
+	local w = strictLife()
+	local x = w.charm.atom(0)
+	local disposeSecond
+	local runs, cleaned = 0, { 0, 0, 0 }
+	local function setup()
+		for i = 1, 3 do
+			local dispose = w.api.scope(function()
+				w.api.onCleanup(function()
+					cleaned[i] += 1
+					if i == 1 then
+						disposeSecond()
+					end
+				end)
+				w.api.effect(function()
+					x()
+					runs += 1
+				end)
+			end)
+			if i == 2 then
+				disposeSecond = dispose
+			end
+		end
+	end
+	if mode == "rollback" then
+		w.ownership.holdEffects()
+	end
+	local object = w.make("Siblings", if mode == "interval" then { onEnable = setup } else { awake = setup })
+	w.boot(object)
+	w.life.request(object, if mode == "interval" then w.Want.Disabled else w.Want.Destroyed)
+	if mode == "rollback" then
+		w.ownership.releaseEffects(false)
+	end
+	spec.list(cleaned, { 1, 1, 1 }, "each scope's cleanup ran once, the third included")
+	local before = runs
+	x(1)
+	spec.eq(runs - before, 0, "no effect responds after its owner ended")
+end
+
 return {
 	["P1 rule 20 an effect created after a yield in start ends when its object is destroyed, not before"] = function()
 		local w = strictLife()
@@ -476,5 +533,121 @@ return {
 		spec.eq(calls, 1, "Charm ran the entry once, at commit")
 		s(1)
 		spec.eq(calls, 1, "the write did not reach the stopped entry")
+	end,
+	["C1 rule 23 strict: a cleanup that disposes a later sibling at destruction still ends every child"] = function()
+		siblingEnd("generation")
+	end,
+	["C2 rule 21 rule 23 strict: a cleanup that disposes a later sibling at disable still ends every child"] = function()
+		siblingEnd("interval")
+	end,
+	["C3 rule 36 rule 23 strict: a cleanup that disposes a later sibling before a rollback still ends every child"] = function()
+		siblingEnd("rollback")
+	end,
+	["D1 rule 26 strict: disposing a nested effect ends what it created at once, and no later write reaches either"] = function()
+		local r, calls = countingRealm()
+		local trigger, child = r.charm.atom(0), r.charm.atom(0)
+		local disposeNested
+		local childRuns, cleaned = 0, 0
+		local stopRoot = r.root(function()
+			r.api.effect(function()
+				disposeNested = r.api.effect(function()
+					trigger()
+					r.api.effect(function()
+						child()
+						childRuns += 1
+						r.api.onCleanup(function()
+							cleaned += 1
+						end)
+					end)
+				end)
+			end)
+		end)
+		disposeNested()
+		spec.eq(cleaned, 1, "the nested effect's child ended inside the dispose")
+		local before = calls.n
+		child(1)
+		trigger(1)
+		spec.eq(calls.n - before, 0, "neither the disposed effect nor its child ran again")
+		spec.eq(childRuns, 1, "the child's body ran only at creation")
+		stopRoot()
+		spec.eq(cleaned, 1, "ending the root released nothing twice")
+	end,
+	["D2 rule 26 strict: a nested effect disposed inside a batched hook ends what it created before the hook returns"] = function()
+		local w = strictLife()
+		local child = w.charm.atom(0)
+		local disposeNested
+		local cleaned, seen = 0, nil
+		local object = w.make("Nest", {
+			awake = function()
+				w.api.effect(function()
+					disposeNested = w.api.effect(function()
+						w.api.effect(function()
+							child()
+							w.api.onCleanup(function()
+								cleaned += 1
+							end)
+						end)
+					end)
+				end)
+			end,
+		})
+		w.boot(object)
+		w.life.within(object, object, w.Hook.Frame, function()
+			disposeNested()
+			seen = cleaned
+		end)
+		spec.eq(seen, 1, "the child's cleanup ran inside the hook's batch, at the dispose")
+		spec.eq(cleaned, 1, "and only once")
+	end,
+	["F1 rule 15 strict: an effect that catches a watch's throwing baseline still tracks what it reads after"] = function()
+		local w = strictLife()
+		local tail = w.charm.atom(0)
+		local runs, caught = 0, 0
+		w.boot(w.make("Catcher", {
+			awake = function()
+				w.api.effect(function()
+					runs += 1
+					local ok = pcall(w.api.watch, function()
+						error("baseline broke")
+					end, function() end)
+					if not ok then
+						caught += 1
+					end
+					tail()
+				end)
+			end,
+		}))
+		tail(1)
+		spec.eq(caught, 2, "each run caught the watch's failure")
+		spec.eq(runs, 2, "the write after the catch reran the effect")
+	end,
+	["F2 rule 17 strict: an effect whose first run throws keeps no subscription, at the root or nested"] = function()
+		local r, calls = countingRealm()
+		local source = r.charm.atom(0)
+		local released = 0
+		local function failing()
+			local ok = pcall(r.api.effect, function()
+				source()
+				r.api.onCleanup(function()
+					released += 1
+				end)
+				error("first run broke")
+			end)
+			spec.eq(ok, false, "effect threw the first run's failure")
+		end
+		local stopRoot = r.root(failing)
+		spec.eq(released, 1, "the failed root effect released what it acquired")
+		local before = calls.n
+		source(1)
+		spec.eq(calls.n - before, 0, "a write does not reach the failed root effect")
+		local stopNested = r.root(function()
+			r.api.effect(failing)
+		end)
+		spec.eq(released, 2, "the failed nested effect released what it acquired")
+		before = calls.n
+		source(2)
+		spec.eq(calls.n - before, 0, "a write does not reach the failed nested effect")
+		stopRoot()
+		stopNested()
 	end,
 }

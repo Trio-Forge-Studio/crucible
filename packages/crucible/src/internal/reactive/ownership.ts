@@ -5,9 +5,12 @@ import {
 	onCleanup as charmOnCleanup,
 	ReactiveFlags,
 	setActiveSub,
+	signal,
 	startBatch,
 	untracked,
+	type Getter,
 	type ReactiveNode,
+	type Setter,
 } from "@rbxts/charm";
 import { runtimeDiagnostic } from "../diagnostics";
 import { closeScope, drain, enabling, hasEnded, openScope } from "../lifecycle";
@@ -66,7 +69,8 @@ interface DestroyFields {
  * An owner lists the scopes, and the effects outside every run, that it ends, instead of linking them into its Charm
  * node: Charm 0.11.1's `stopEffect` unlinks a linked node from the wrong parent, which corrupts the parent's
  * dependencies when the node is disposed before it. An effect created inside a run is linked into the running Charm
- * effect, as Charm nests it.
+ * effect, as Charm nests it, and is never stopped: ending it writes its `closed` signal, so Charm reruns it with no
+ * body and drops what it read, the effects it created included.
  */
 export interface Owner {
 	readonly role: Role;
@@ -86,6 +90,12 @@ export interface Owner {
 	finish?: () => void;
 	/** A Run's cleanup is armed on the run in progress. */
 	armed?: boolean;
+	/** A nested Run's signal, read by each of its runs, that its end writes. */
+	closed?: Getter<boolean>;
+	close?: Setter<boolean>;
+	/** A Run's first run is in progress inside `create`, which throws its failure once Charm returned the stop. */
+	creating?: boolean;
+	failure?: unknown;
 	/** The owner whose list holds this one. */
 	parent?: Owner;
 	/** What it ends before its releases, oldest first, linked through `prev` and `next`. */
@@ -99,6 +109,8 @@ export interface Owner {
 export const NO_OWNER = "effect() needs an owner: create it in a Subsystem or behaviour, or inside scope()";
 
 const generations = setmetatable(new Map<ObjectState, Owner>(), { __mode: "k" });
+/** Nested Runs by their Charm effect, so ending one finds the Runs it created among its dependencies. */
+const nestedRuns = setmetatable(new Map<ReactiveNode, Owner>(), { __mode: "kv" });
 const intervals = setmetatable(new Map<ObjectState, Owner>(), { __mode: "k" });
 
 /** Listed Runs created while boot is open, in creation order, waiting for the commit to create their effects. */
@@ -135,16 +147,12 @@ export function isEnded(owner: Owner): boolean {
 function finish(owner: Owner) {
 	owner.ended = true;
 	owner.armed = undefined;
+	// A child's end can end any sibling, so each turn takes the head of the list as it is then.
 	let child = owner.first;
-	owner.first = undefined;
-	owner.last = undefined;
 	while (child !== undefined) {
-		const after = child.next;
-		child.parent = undefined;
-		child.prev = undefined;
-		child.next = undefined;
+		unlist(child);
 		dispose(child);
-		child = after;
+		child = owner.first;
 	}
 	const releases = owner.releases;
 	owner.releases = undefined;
@@ -185,17 +193,39 @@ function scopeOwner(role: Role, parent: Owner | undefined, state: ObjectState | 
 }
 
 /**
- * Idempotent. Latches the owner first, so a release that runs while it ends creates nothing under it. A Run nested
- * in another run keeps its Charm effect, linked into the parent's, until the parent's next run drops it; with no body
- * it never runs again.
+ * Idempotent. Latches the owner first, so a release that runs while it ends creates nothing under it. A Run is latched
+ * by its body, because `ended` also marks the releases it runs before each rerun.
  */
 function dispose(owner: Owner) {
-	if (owner.ended) return;
+	if (owner.role === Role.Run) {
+		if (owner.body === undefined) return;
+		owner.body = undefined;
+	} else if (owner.ended) return;
 	owner.ended = true;
-	owner.body = undefined;
 	unlist(owner);
 	if (owner.stop !== undefined) owner.stop();
-	else if (owner.role === Role.Run) finish(owner);
+	else if (owner.role === Role.Run) endRun(owner);
+}
+
+/**
+ * Ends a Run that has no stop: a nested one, a queued one, or a root still in its first run. The Runs a nested one
+ * created end first, then what it lists and holds. Closing it then has Charm drop its dependencies, at once or when
+ * the batch or flush in progress ends.
+ */
+function endRun(run: Owner) {
+	const node = run.node;
+	if (run.close !== undefined && node !== undefined) {
+		const children = new Array<Owner>();
+		let link = node.deps;
+		while (link !== undefined) {
+			const child = nestedRuns.get(link.dep);
+			if (child !== undefined) children.push(child);
+			link = link.nextDep;
+		}
+		for (const child of children) dispose(child);
+	}
+	finish(run);
+	run.close?.(true);
 }
 
 function generation(s: ObjectState): Owner {
@@ -415,27 +445,45 @@ function runEffect(run: Owner) {
 		}
 	}
 	if (closeScope()) drain();
-	if (failed) error(failure, 0);
+	if (!failed) return;
+	if (!run.creating) error(failure, 0);
+	run.failure = failure;
+}
+
+/** A nested Run's Charm body: it reads its `closed` signal while it has a body, so closing it reruns it. */
+function runNested(run: Owner) {
+	if (run.body === undefined) return;
+	if (run.node === undefined) nestedRuns.set(getActiveSub()!, run);
+	(run.closed as Getter<boolean>)();
+	runEffect(run);
 }
 
 /**
  * Creates `run`'s Charm effect, whose first run happens now: linked into the running effect when `lifetime` is a Run,
- * else a root that `lifetime` lists. A first run that fails ends the Run and is rethrown.
+ * else a root that `lifetime` lists. A first run that fails ends the Run, its Charm effect included, and is rethrown.
  */
 function create(run: Owner, lifetime: Owner) {
 	const nested = lifetime.role === Role.Run;
+	if (nested) {
+		const [closed, close] = signal(false);
+		run.closed = closed;
+		run.close = close;
+	}
+	run.creating = true;
 	const active = setActiveSub(nested ? lifetime.node : undefined);
-	const [ok, stop] = pcall(charmEffect, () => runEffect(run));
+	const [ok, stop] = pcall(charmEffect, nested ? () => runNested(run) : () => runEffect(run));
 	setActiveSub(active);
-	if (ok) {
-		if (nested) return;
+	run.creating = undefined;
+	if (ok && !nested) {
 		run.stop = stop;
 		// Disposed by its own first run, before Charm returned the stop.
 		if (run.body === undefined) stop();
-		return;
 	}
+	const failure = ok ? run.failure : stop;
+	if (failure === undefined) return;
+	run.failure = undefined;
 	dispose(run);
-	error(stop, 0);
+	error(failure, 0);
 }
 
 /**
@@ -512,7 +560,10 @@ export function createEffect(body: () => unknown): () => void {
 export function createWatch<T>(source: () => T, onChange: (value: T, previous: T) => void): () => void {
 	const owner = resolveOwner();
 	if (owner === undefined) error(NO_OWNER, 0);
+	const active = getActiveSub();
 	const [result, baseline] = call(peek, source, undefined, owner.state, owner);
+	// A source that throws or yields leaves its worker before `peek` restores the running effect's tracking.
+	setActiveSub(active);
 	if (result !== CallResult.Ok) error(baseline, 0);
 	if (isEnded(owner)) return noop;
 	let previous = baseline as T;
