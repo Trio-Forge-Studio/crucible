@@ -244,8 +244,7 @@ fn shown(literal: &str, needle: &str) -> String {
 }
 
 /// The names the transform emits calls to: the value exports of the runtime's emit entry. Rule 4 skips the one-letter
-/// ones, the `n` and `t` namespaces, because a one-letter string is too common to scan for. `cargo xtask abi check`
-/// covers them.
+/// ones, the `n` and `t` namespaces, because a one-letter string is too common to scan for.
 fn abi_names(root: &Path) -> Result<BTreeSet<String>, String> {
     ts::value_exports(root, &root.join("packages/crucible/src/emit/index.ts"))
 }

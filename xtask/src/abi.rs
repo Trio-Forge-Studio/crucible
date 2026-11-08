@@ -1,6 +1,7 @@
 //! `cargo xtask abi` writes the runtime's `abi.d.ts` from `crates/abi`. `cargo xtask abi check` fails when that file is
 //! stale, when the runtime's `package.json` records another ABI version, or when the runtime exports no entry for a
-//! subpath the table lets games import.
+//! subpath the table lets games import. It never reads the runtime's code. `emit/index.ts` imports the declaration's
+//! types, so tsrs fails `pnpm check` when the runtime drifts from the table.
 
 use std::fs;
 use std::path::Path;
@@ -46,7 +47,12 @@ pub fn check(root: &Path) -> Result<String, String> {
         }
     }
     if problems.is_empty() {
-        Ok(format!("{DECLARATION} and {MANIFEST} match ABI {}", crucible_abi::VERSION))
+        Ok(format!(
+            "{DECLARATION} is current with crates/abi, and {MANIFEST} records ABI {} and exports every subpath games \
+             may import. This does not check the runtime's code: tsrs checks emit/index.ts against {DECLARATION} in \
+             `pnpm check`.",
+            crucible_abi::VERSION
+        ))
     } else {
         Err(format!("abi: the runtime does not match crates/abi:\n{}", problems.join("\n")))
     }
