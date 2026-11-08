@@ -169,11 +169,14 @@ pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
     let sample: serde_json::Value = serde_json::from_str(include_str!("../../../examples/sample-game/package.json"))
         .expect("sample package.json is valid");
     let mut tokens = vec![("__NAME__", name.into()), ("__VERSION__", env!("CARGO_PKG_VERSION").into())];
-    for (token, package, manifest) in
-        [("__VITE_PLUS__", "vite-plus", &workspace), ("__RBXTS_TYPES__", "@rbxts/types", &sample)]
-    {
-        tokens
-            .push((token, manifest["devDependencies"][package].as_str().expect("toolchain version is pinned").into()));
+    for (token, package, manifest, group) in [
+        ("__VITE_PLUS__", "vite-plus", &workspace, "devDependencies"),
+        ("__RBXTS_TYPES__", "@rbxts/types", &sample, "devDependencies"),
+        ("__CHARM__", "@rbxts/charm", &sample, "dependencies"),
+        ("__VIDE__", "@rbxts/vide", &sample, "dependencies"),
+        ("__VIDE_CHARM__", "@rbxts/vide-charm", &sample, "dependencies"),
+    ] {
+        tokens.push((token, manifest[group][package].as_str().expect("package version is pinned").into()));
     }
     tokens
 }

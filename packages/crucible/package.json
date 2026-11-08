@@ -21,10 +21,6 @@
 			"types": "./out/client/index.d.ts",
 			"default": "./out/client/init.luau"
 		},
-		"./vide": {
-			"types": "./out/vide/index.d.ts",
-			"default": "./out/vide/init.luau"
-		},
 		"./util/random": {
 			"types": "./out/util/random/index.d.ts",
 			"default": "./out/util/random/init.luau"
@@ -42,17 +38,13 @@
 		"build": "node ../../test/compiler/package.mjs ."
 	},
 	"devDependencies": {
+		"@rbxts/charm": "0.11.1",
 		"@rbxts/types": "1.0.959",
 		"@rbxts/vide": "0.6.1",
 		"@trioforge/compiler-types": "workspace:*"
 	},
 	"peerDependencies": {
-		"@rbxts/vide": "^0.6.1"
-	},
-	"peerDependenciesMeta": {
-		"@rbxts/vide": {
-			"optional": true
-		}
+		"@rbxts/charm": "^0.11.1"
 	},
 	"files": [
 		"out",
