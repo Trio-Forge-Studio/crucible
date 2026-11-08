@@ -3,9 +3,15 @@
 // Version 1 of the ABI between Crucible's transform and this runtime: every call compiled code makes into the emit
 // entry. emit/index.ts must satisfy `Abi`, and `Arguments` must satisfy its functions' `ParametersOf`, so a change on
 // either side that breaks those calls fails the type check. `Passed` is a value the compiler passes on without
-// building it, such as a game's own value or what another call returned, so only its position is checked.
+// building it, such as a game's own value or what another call returned, so only its position is checked. `Check` is
+// what the runtime calls with a behaviour attribute's value. `Schema` is a wire schema node, which compiled code only
+// passes on, so only that it is a table is checked.
 
 type Passed = never;
+
+type Check = (value: unknown) => boolean;
+
+type Schema = object;
 
 type Literal = string | number | boolean;
 
@@ -13,7 +19,7 @@ type Dependency = string | { readonly all: string };
 
 interface AttributeRecord {
 	readonly name: string;
-	readonly check: Passed;
+	readonly check: Check;
 	readonly required: boolean;
 }
 
@@ -59,36 +65,36 @@ export interface Abi {
 	readonly config: (name: string, fallback: Passed, value: Passed) => unknown;
 	readonly playerConfig: (name: string, fallback: Passed, value: Passed) => unknown;
 	readonly n: {
-		readonly nil: unknown;
-		readonly bool: unknown;
-		readonly f64: unknown;
-		readonly f32: unknown;
-		readonly u8: unknown;
-		readonly u16: unknown;
-		readonly u32: unknown;
-		readonly string: unknown;
-		readonly dynamic: unknown;
-		readonly vector3: unknown;
-		readonly color3: unknown;
-		readonly cframe: unknown;
-		readonly literal: (value: Literal) => unknown;
-		readonly instance: (classes: readonly (keyof Instances)[]) => unknown;
-		readonly object: (fields: readonly (readonly [string, Passed])[]) => unknown;
-		readonly array: (element: Passed) => unknown;
-		readonly tuple: (elements: readonly Passed[]) => unknown;
-		readonly map: (key: Passed, value: Passed) => unknown;
-		readonly union: (branches: readonly Passed[]) => unknown;
-		readonly variant: (key: string, value: Literal, body: Passed) => unknown;
+		readonly nil: Schema;
+		readonly bool: Schema;
+		readonly f64: Schema;
+		readonly f32: Schema;
+		readonly u8: Schema;
+		readonly u16: Schema;
+		readonly u32: Schema;
+		readonly string: Schema;
+		readonly dynamic: Schema;
+		readonly vector3: Schema;
+		readonly color3: Schema;
+		readonly cframe: Schema;
+		readonly literal: (value: Literal) => Schema;
+		readonly instance: (classes: readonly (keyof Instances)[]) => Schema;
+		readonly object: (fields: readonly (readonly [string, Passed])[]) => Schema;
+		readonly array: (element: Passed) => Schema;
+		readonly tuple: (elements: readonly Passed[]) => Schema;
+		readonly map: (key: Passed, value: Passed) => Schema;
+		readonly union: (branches: readonly Passed[]) => Schema;
+		readonly variant: (key: string, value: Literal, body: Passed) => Schema;
 	};
 	readonly t: {
-		readonly string: unknown;
-		readonly number: unknown;
-		readonly boolean: unknown;
-		readonly vector3: unknown;
-		readonly color3: unknown;
-		readonly literal: (expected: Literal) => unknown;
-		readonly optional: (check: Passed) => unknown;
-		readonly union: (...checks: Passed[]) => unknown;
+		readonly string: Check;
+		readonly number: Check;
+		readonly boolean: Check;
+		readonly vector3: Check;
+		readonly color3: Check;
+		readonly literal: (expected: Literal) => Check;
+		readonly optional: (check: Check) => Check;
+		readonly union: (...checks: Check[]) => Check;
 	};
 }
 

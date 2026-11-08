@@ -14,9 +14,15 @@ pub fn declaration() -> String {
 // Version {VERSION} of the ABI between Crucible's transform and this runtime: every call compiled code makes into the emit
 // entry. emit/index.ts must satisfy `Abi`, and `Arguments` must satisfy its functions' `ParametersOf`, so a change on
 // either side that breaks those calls fails the type check. `Passed` is a value the compiler passes on without
-// building it, such as a game's own value or what another call returned, so only its position is checked.
+// building it, such as a game's own value or what another call returned, so only its position is checked. `Check` is
+// what the runtime calls with a behaviour attribute's value. `Schema` is a wire schema node, which compiled code only
+// passes on, so only that it is a table is checked.
 
 type Passed = never;
+
+type Check = (value: unknown) => boolean;
+
+type Schema = object;
 
 type Literal = string | number | boolean;
 
@@ -29,15 +35,15 @@ type Dependency = string | {{ readonly {all}: string }};
     interface(&mut out, "BehaviourRecord", Some(record::BEHAVIOUR), &[record::CLASS, record::BEHAVIOUR_FIELDS]);
     out.push_str("\ntype ClassRecord = SubsystemRecord | BehaviourRecord;\n\nexport interface Abi {\n");
     for function in FUNCTIONS {
-        member(&mut out, 1, function);
+        member(&mut out, 1, function, "unknown");
     }
     for namespace in NAMESPACES {
         out.push_str(&format!("\treadonly {}: {{\n", namespace.name));
         for value in namespace.values {
-            out.push_str(&format!("\t\treadonly {value}: unknown;\n"));
+            out.push_str(&format!("\t\treadonly {value}: {};\n", namespace.ty));
         }
         for function in namespace.functions {
-            member(&mut out, 2, function);
+            member(&mut out, 2, function, namespace.ty);
         }
         out.push_str("\t};\n");
     }
@@ -84,11 +90,11 @@ fn interface(out: &mut String, name: &str, kind: Option<&str>, fields: &[&[Field
     out.push_str("}\n");
 }
 
-/// A function as a property, not a method, so its parameters are checked contravariantly. Its result is `unknown`,
-/// because compiled code only passes it on.
-fn member(out: &mut String, depth: usize, function: &Function) {
+/// A function as a property, not a method, so its parameters are checked contravariantly. A top-level function returns
+/// `unknown`, because compiled code only passes its result on, and a namespace's function returns the namespace's type.
+fn member(out: &mut String, depth: usize, function: &Function, result: &str) {
     let parameters: Vec<String> = function.parameters.iter().map(|p| parameter(p, p.ty)).collect();
-    list(out, depth, &format!("readonly {}: ", function.name), ("(", ") => unknown;"), &parameters);
+    list(out, depth, &format!("readonly {}: ", function.name), ("(", &format!(") => {result};")), &parameters);
 }
 
 fn parameter(parameter: &Parameter, ty: &str) -> String {
@@ -135,6 +141,6 @@ mod tests {
         let text = declaration();
         assert!(text.contains("\treadonly profileStore: (\n\t\tname: string,\n"), "{text}");
         assert!(text.contains("\t\tserverOnlyPaths: readonly (readonly string[])[],\n\t) => unknown;\n"), "{text}");
-        assert!(text.contains("\t\treadonly union: (...checks: Passed[]) => unknown;\n"), "{text}");
+        assert!(text.contains("\t\treadonly union: (...checks: Check[]) => Check;\n"), "{text}");
     }
 }

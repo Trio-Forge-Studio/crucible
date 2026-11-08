@@ -66,6 +66,11 @@ const fn rest(name: &'static str, ty: &'static str) -> Parameter {
 /// A value the compiler passes on without building it, such as a game's own value or what another call of this table
 /// returned. `abi.d.ts` declares it `never`, so the check covers its position and not its type.
 const PASSED: &str = "Passed";
+/// The check the runtime calls with a behaviour attribute's value: each `t` value, and what each `t` function returns.
+const ATTRIBUTE_CHECK: &str = "Check";
+/// A wire schema node: each `n` value, and what each `n` function returns. Compiled code only passes it on, so
+/// `abi.d.ts` declares it `object`, which keeps it a table and not a primitive.
+const SCHEMA_NODE: &str = "Schema";
 const STRING: &str = "string";
 const LITERAL: &str = "Literal";
 const CLASS_NAMES: &str = "readonly (keyof Instances)[]";
@@ -160,6 +165,8 @@ pub const FUNCTIONS: &[Function] = &[
 #[derive(Clone, Copy, Debug)]
 pub struct Namespace {
     pub name: &'static str,
+    /// The type of each value, and of what each function returns, as `abi.d.ts` spells it.
+    pub ty: &'static str,
     pub values: &'static [&'static str],
     pub functions: &'static [Function],
 }
@@ -167,6 +174,7 @@ pub struct Namespace {
 /// The builders of a declaration's wire schema.
 pub const N: Namespace = Namespace {
     name: "n",
+    ty: SCHEMA_NODE,
     values: &["nil", "bool", "f64", "f32", "u8", "u16", "u32", "string", "dynamic", "vector3", "color3", "cframe"],
     functions: &[
         Function { name: "literal", parameters: &[required("value", LITERAL)] },
@@ -186,11 +194,12 @@ pub const N: Namespace = Namespace {
 /// The checks a behaviour attribute's value must pass.
 pub const T: Namespace = Namespace {
     name: "t",
+    ty: ATTRIBUTE_CHECK,
     values: &["string", "number", "boolean", "vector3", "color3"],
     functions: &[
         Function { name: "literal", parameters: &[required("expected", LITERAL)] },
-        Function { name: "optional", parameters: &[required("check", PASSED)] },
-        Function { name: "union", parameters: &[rest("checks", PASSED)] },
+        Function { name: "optional", parameters: &[required("check", ATTRIBUTE_CHECK)] },
+        Function { name: "union", parameters: &[rest("checks", ATTRIBUTE_CHECK)] },
     ],
 };
 
@@ -211,7 +220,7 @@ const fn field(name: &'static str, ty: &'static str) -> Field {
 
 /// The record `defineClass` registers a class with. Its `kind` picks a subsystem's fields or a behaviour's.
 pub mod record {
-    use super::{CLASS_NAMES, Field, PASSED, STRING, field};
+    use super::{ATTRIBUTE_CHECK, CLASS_NAMES, Field, STRING, field};
 
     pub const KIND: &str = "kind";
     pub const SUBSYSTEM: &str = "subsystem";
@@ -242,7 +251,7 @@ pub mod record {
         Field { name: ATTRIBUTES, ty: "{ readonly [field: string]: AttributeRecord }", optional: true },
     ];
     /// An entry of `attributes`.
-    pub const ATTRIBUTE: &[Field] = &[field(NAME, STRING), field(CHECK, PASSED), field(REQUIRED, "boolean")];
+    pub const ATTRIBUTE: &[Field] = &[field(NAME, STRING), field(CHECK, ATTRIBUTE_CHECK), field(REQUIRED, "boolean")];
 }
 
 #[cfg(test)]
