@@ -1,5 +1,6 @@
+import { startBatch } from "@rbxts/charm";
 import { bootClock } from "../boot";
-import { createStateNode, update } from "../reactive/graph";
+import { settle } from "../reactive/store";
 import { call, CallResult } from "../runner";
 import { admitWrite, type Schema } from "./admission";
 import { jsonBytes, type InboxItem } from "./envelope";
@@ -30,33 +31,28 @@ export type SealReason = "leave" | "handoff" | "shutdown" | "authority" | "fence
 export type Released = "committed" | "fenced" | "given up";
 
 const callbackThreads = new Set<thread>();
-/** Data never writes this state: its `update` frame is what makes reactive reject a nested write (rule 13, K7). */
-const transaction = createStateNode(0);
 let depth = 0;
 
 /**
- * @internal Runs a data callback on a no-yield worker whose thread may not write data, inside the `update` of a private
- * reactive state so a state, publish or apply write throws (rule 13); a yield or throw is thrown here.
+ * @internal Runs a data callback on a no-yield worker whose thread may not write data (rule 13), inside a Charm batch
+ * so no effect its writes reach runs until it has returned; a yield or throw is thrown here.
  */
 export function dataCallback<A, B>(work: (a: A, b: B) => unknown, a: A, b: B): unknown {
 	let worker: thread | undefined;
 	depth += 1;
+	startBatch();
 	const [status, value] = call(
 		(x: A, y: B) => {
 			worker = coroutine.running();
 			callbackThreads.add(worker);
-			let result: unknown;
-			update(transaction, (current) => {
-				result = work(x, y);
-				return current;
-			});
-			return result;
+			return work(x, y);
 		},
 		a,
 		b,
 	);
 	depth -= 1;
 	if (worker !== undefined) callbackThreads.delete(worker);
+	settle("a data callback");
 	if (status !== CallResult.Ok) error(value, 0);
 	return value;
 }

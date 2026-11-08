@@ -160,7 +160,7 @@ return {
 	end,
 	["rule 26 own inside an effect run releases before the next run, after the returned cleanup"] = function()
 		local r = world()
-		local s = r.api.state(1)
+		local s = r.charm.atom(1)
 		local events = {}
 		r.root(function()
 			r.api.effect(function()
@@ -174,16 +174,20 @@ return {
 			end)
 		end)
 		r.flush()
-		s:set(2)
+		s(2)
 		r.flush()
 		spec.list(events, { "cleanup 1", "connection 1" }, "the run's values ended before the next run")
 	end,
 	["rule 27 own under an ended owner releases at once and still returns its argument"] = function()
 		local r = world()
+		local s = r.charm.atom(1)
 		local events = {}
 		local dispose
 		dispose = r.root(function()
 			r.api.effect(function()
+				if s() == 1 then
+					return
+				end
 				dispose()
 				local connection = ownable.connection(function()
 					table.insert(events, "disconnected")
@@ -197,7 +201,7 @@ return {
 				table.insert(events, "after own")
 			end)
 		end)
-		r.flush()
+		s(2)
 		spec.list(events, { "disconnected", "returned it", "destroyed", "after own" }, "released inside each call")
 	end,
 	["rule 20 own needs an owner and a value it can release"] = function()
@@ -215,7 +219,6 @@ return {
 			{ "string", "Door" },
 			{ "table", {} },
 			{ "table", { destroy = true } },
-			{ "table", r.api.state(1) },
 		}
 		r.root(function()
 			for _, case in rejected do
@@ -225,11 +228,5 @@ return {
 				spec.has(errOwn, `got a {case[1]}`, case[1])
 			end
 		end)()
-		local okPure, errPure = pcall(r.api.computed(function()
-			r.api.own(function() end)
-			return 1
-		end))
-		spec.eq(okPure, false, "own inside a computed throws")
-		spec.has(errPure, "must not register cleanups", "the purity error")
 	end,
 }

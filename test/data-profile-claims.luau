@@ -179,39 +179,28 @@ return {
 		spec.has(g.bootError, "product 77 is granted by SkinA and SkinB", "both grants named")
 	end,
 
-	["13 A4 K7 a state, publish and update write inside every kind of data callback throws"] = function()
+	["13 A4 K7 atom and publish writes inside every kind of data callback land, and their effects wait for it"] = function()
 		local results = {}
 		local w
 		local function probe(kind: string)
-			local writes = {
-				state = function()
-					w.localState:set(1)
-				end,
-				stateUpdate = function()
-					w.localState:update(function(v)
-						return v + 1
-					end)
-				end,
-				publish = function()
-					w.score:set(1)
-				end,
-				publishUpdate = function()
-					w.score:update(function(v)
-						return v + 1
-					end)
-				end,
-			}
-			local out = {}
-			for name, write in writes do
-				local ok, err = pcall(write)
-				out[name] = if ok then "wrote" else tostring(err)
-			end
-			results[kind] = out
+			local before = w.seen
+			w.localState(function(v)
+				return v + 1
+			end)
+			w.score(function(v)
+				return v + 1
+			end)
+			results[kind] = w.seen == before
 		end
 		w = newWorld(function(s, d, world)
 			s.service("Probe", function(self)
 				world.score = s.entry.publish(d.Score)
-				world.localState = s.api.state(0)
+				world.localState = s.charm.atom(0)
+				world.seen = 0
+				s.api.effect(function()
+					world.localState()
+					world.seen += 1
+				end)
 				self.load = d.PlayerData:onLoad(function(_, data)
 					probe("onLoad")
 					return data
@@ -252,14 +241,10 @@ return {
 		w:leave(ann)
 		w:settle(2)
 		for _, kind in { "gate", "handle update", "onLoad", "onRelease", "receive", "grant" } do
-			local out = results[kind]
-			assert(out, `{kind} ran`)
-			for _, name in { "state", "stateUpdate", "publish", "publishUpdate" } do
-				spec.has(out[name], "must not write state", `{kind}: a {name} write throws`)
-			end
+			spec.eq(results[kind], true, `{kind}: the write's effect waited for the callback`)
 		end
-		spec.eq(w.localState(), 0, "the local state is unchanged")
-		spec.eq(w.score(), 0, "the published state is unchanged")
+		spec.eq(w.localState(), 6, "every atom write landed")
+		spec.eq(w.score(), 6, "every publish write landed")
 		w:finish()
 	end,
 
@@ -469,6 +454,28 @@ return {
 		spec.has(outcomes.clear, "a write inside a data callback", "clearQuarantined")
 		spec.has(outcomes.save, "a write inside a data callback", "save")
 		spec.has(outcomes.handoff, "inside a data callback", "handoff")
+		w:finish()
+	end,
+
+	["13 a handoff of another player from a thread a data callback spawned throws"] = function()
+		local w = newWorld()
+		local ann = w:player("Ann", 4120)
+		local bea = w:player("Bea", 4121)
+		w:settle()
+		local data = w.server.d.PlayerData
+		local spawned
+		data(ann.player):update(function(d)
+			World.spawn(function()
+				spawned = { pcall(function()
+					return data:handoff(bea.player)
+				end) }
+			end)
+			return d
+		end)
+		spec.eq(type(spawned), "table", "the spawned thread's handoff ended at once instead of waiting on a release")
+		spec.eq(spawned[1], false, "the spawned thread's handoff throws")
+		spec.has(spawned[2], "a write inside a data callback", "with the callback message")
+		spec.eq(data:loaded(bea.player), true, "Bea's session is still open")
 		w:finish()
 	end,
 

@@ -18,7 +18,7 @@ export const BOOTED_ATTRIBUTE = "CrucibleBooted";
 export { config, playerConfig, configReady, refreshConfigs } from "../configs";
 export type { Config, PlayerConfig } from "../configs";
 export { publish } from "./publish";
-export type { Publication } from "./publish";
+export type { Publication, Published } from "./publish";
 export { dataStore, operationId, profileMessage } from "./data";
 export type { DataStore, StoreOptions, UpdateResult } from "./data";
 export type { OperationId, StoreFailure, StoreResult } from "../data";

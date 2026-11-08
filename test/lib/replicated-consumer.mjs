@@ -13,15 +13,19 @@ const accepted = {
 	"src/shared/state.ts": `import { replicated, replicatedPerPlayer } from "@trioforge/crucible";
 export const Score = replicated<number>("Job.Score", 0);
 export const Owner = replicatedPerPlayer<{ coins: number } | undefined>("Data.Owner", undefined);
+export const Round = replicated<string | undefined>("Job.Round", undefined);
 `,
 	"src/server/job.ts": `import { Subsystem } from "@trioforge/crucible";
 import { publish } from "@trioforge/crucible/server";
-import { Owner, Score } from "../shared/state";
+import { Owner, Round, Score } from "../shared/state";
 export class JobService extends Subsystem {
 	private readonly score = publish(Score);
 	private readonly owner = publish(Owner, () => ({ coins: 1 }));
+	private readonly round = publish(Round);
 	bump() {
-		this.score.update((value) => value + 1);
+		this.score((value) => value + 1);
+		this.round("first");
+		this.round(() => undefined);
 	}
 }
 `,
@@ -46,6 +50,20 @@ Score.set(1);
 		2339,
 		"Property 'set' does not exist on type 'Replicated<number>'.",
 	],
+	"src/server/clear.ts": [
+		`import { Subsystem } from "@trioforge/crucible";
+import { publish } from "@trioforge/crucible/server";
+import { Round } from "../shared/state";
+export class RoundService extends Subsystem {
+	private readonly round = publish(Round);
+	clear() {
+		this.round(undefined);
+	}
+}
+`,
+		2345,
+		"Argument of type 'undefined' is not assignable to parameter of type 'string | ((current: string | undefined) => string | undefined)'.",
+	],
 	"src/client/publish.ts": [
 		`import { publish } from "@trioforge/crucible/client";
 publish;
@@ -55,7 +73,7 @@ publish;
 	],
 };
 
-function build(name, files) {
+function build(name, files, check = false) {
 	const game = path.join(scratch, name);
 	const write = (file, text) => {
 		fs.mkdirSync(path.dirname(path.join(game, file)), { recursive: true });
@@ -115,10 +133,14 @@ function build(name, files) {
 		include: ["src"],
 	});
 	for (const [file, text] of Object.entries(files)) write(file, text);
-	const result = spawnSync(process.execPath, [path.join(repo, "test/lib/compile.mjs"), game], {
-		cwd: game,
-		encoding: "utf8",
-	});
+	const result = spawnSync(
+		process.execPath,
+		[path.join(repo, "test/lib/compile.mjs"), game, ...(check ? ["--check"] : [])],
+		{
+			cwd: game,
+			encoding: "utf8",
+		},
+	);
 	return {
 		game,
 		status: result.status,
@@ -146,6 +168,22 @@ try {
 		const reported = bad.output.slice(at).replace(/^.*?\): /, "");
 		assert.ok(reported.startsWith(`error TS${code}: ${message}`), `${file}\n${bad.output}`);
 	}
+	// The compiler lowers replicated to the emit form after type-checking the root's signature, so nothing else checks
+	// the emit form's own signature.
+	const direct = build(
+		"emit",
+		{
+			"src/shared/emit.ts": [
+				'import { replicated } from "@trioforge/crucible/emit";',
+				'export const score = replicated<number>("Job.Score", 0, undefined as never);',
+				"// @ts-expect-error the initial value has the declared type",
+				'export const wrong = replicated<number>("Job.Wrong", "zero", undefined as never);',
+				"",
+			].join("\n"),
+		},
+		true,
+	);
+	assert.equal(direct.status, 0, `the emit form refuses an initial value of another type\n${direct.output}`);
 	console.log(
 		`the transformed build accepts replicated declarations and rejects ${Object.keys(rejected).length} wrong lines`,
 	);

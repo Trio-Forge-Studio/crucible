@@ -160,29 +160,4 @@ return {
 		w.life.request(door, w.Want.Destroyed)
 		spec.eq(table.find(w.since(mark), "frame callback's cleanup") ~= nil, true, "it owned into the Door")
 	end,
-	["rule 13 rule 28 a release that yields inside a computed leaves it finished for the next release"] = function()
-		local r = realm()
-		local x = r.api.state(0)
-		local c = r.api.computed(function()
-			if x() == 0 then
-				coroutine.yield()
-			end
-			return x()
-		end)
-		local seen
-		r.root(function()
-			r.api.onCleanup(function()
-				local ok, err = pcall(c)
-				seen = if ok then "a value" else tostring(err)
-			end)
-			r.api.onCleanup(function()
-				c()
-			end)
-		end)()
-		spec.eq(r.logged("yielded"), 1, "the yielding release reported")
-		spec.has(seen, "yielded", "the older release read the computed's cached yield")
-		spec.eq(string.find(seen, "reads itself", 1, true), nil, "not a cycle left by an open evaluation")
-		x:set(1)
-		spec.eq(c(), 1, "the computed recovers")
-	end,
 }

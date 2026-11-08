@@ -77,9 +77,9 @@ fn the_emit_literal_declaration_accepts_boolean_string_and_number_literals() {
 }
 
 #[test]
-fn the_vide_random_and_spline_subpaths_are_importable_in_a_game() {
+fn the_random_and_spline_subpaths_are_importable_in_a_game() {
     let game = Game::new();
-    game.main("import { useReadable } from \"@trioforge/crucible/vide\";\nexport const use = useReadable;\nimport { Rng } from \"@trioforge/crucible/util/random\";\nimport { catmullRom } from \"@trioforge/crucible/maths/spline\";\nexport const draw = new Rng(\"x\").uint32();\nexport const curve = catmullRom([new Vector3(0, 0, 0), new Vector3(1, 1, 1)]);\n");
+    game.main("import { Rng } from \"@trioforge/crucible/util/random\";\nimport { catmullRom } from \"@trioforge/crucible/maths/spline\";\nexport const draw = new Rng(\"x\").uint32();\nexport const curve = catmullRom([new Vector3(0, 0, 0), new Vector3(1, 1, 1)]);\n");
     let facts = game.analyze().unwrap_or_else(|d| panic!("the subpaths type-check:\n{}", lines(&d)));
     let found: Vec<i32> = facts.diagnostics.iter().map(|d| d.code).collect();
     assert!(found.is_empty(), "importing the subpaths reports nothing: {found:?}");
@@ -1461,7 +1461,7 @@ fn instance_classes_list_in_the_order_typescript_5_first_makes_their_types() {
 #[test]
 fn exports_only_consumers_compile_public_entries_and_reject_reserved_entries() {
     let game = Game::new();
-    let entries = ["", "/server", "/vide", "/util/random", "/maths/spline"];
+    let entries = ["", "/server", "/util/random", "/maths/spline"];
     let mut source = String::new();
     for (index, entry) in entries.iter().enumerate() {
         source.push_str(&format!(
@@ -1483,10 +1483,10 @@ fn exports_only_consumers_compile_public_entries_and_reject_reserved_entries() {
         let codes: Vec<i32> = facts.diagnostics.iter().map(|d| d.code).collect();
         assert_eq!(codes, [90004], "{entry} resolves its types but is compiler-owned");
     }
-    for entry in ["ui", "ui/jsx-runtime"] {
+    for entry in ["ui", "ui/jsx-runtime", "vide"] {
         let removed = Game::new();
         removed.main(&format!("import * as entry from \"@trioforge/crucible/{entry}\"; export const use = entry;"));
-        let errors = removed.analyze().expect_err("the UI subpaths are no longer exported");
+        let errors = removed.analyze().expect_err("the subpath is no longer exported");
         assert!(errors.iter().any(|error| error.code == 2307), "{entry}: {errors:?}");
     }
 }

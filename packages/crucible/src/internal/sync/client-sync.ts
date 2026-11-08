@@ -1,9 +1,9 @@
 import { Subsystem } from "../../subsystem";
 import { runtimeDiagnostic } from "../diagnostics";
 import { claim } from "../network/claims";
-import { commitPrepared, type PreparedWrite } from "../reactive/graph";
+import { peek, store, type Write } from "../reactive/store";
 import { define, type TypeId } from "../registry";
-import { declarationNamed, declarations } from "./declarations";
+import { assignment, declarationNamed, declarations } from "./declarations";
 import { SyncFrameMessage, type SyncFrame } from "./frame";
 import { reuse } from "./values";
 
@@ -48,12 +48,13 @@ class ClientSync extends Subsystem {
 		if (!ascending(keys) || !ascending(frame.failed) || !disjoint(keys, frame.failed))
 			return this.latch(`revision ${frame.revision} lists keys out of order or twice`, true);
 		const [prepared, writes] = pcall(() => {
-			const out = new Array<PreparedWrite>();
+			const out = new Array<Write>();
 			for (const entry of frame.values) {
 				const declaration = declarationNamed(entry.key);
 				if (declaration === undefined) continue;
-				const reused = reuse(declaration.node.value, entry.value);
-				if (!rawequal(reused, declaration.node.value)) out.push([declaration.node, reused]);
+				const current = peek(declaration.node);
+				const reused = reuse(current, entry.value);
+				if (!rawequal(reused, current)) out.push(assignment(declaration, reused));
 				out.push([declaration.status, "ready"]);
 			}
 			for (const key of frame.failed) {
@@ -64,7 +65,7 @@ class ClientSync extends Subsystem {
 		});
 		if (!prepared)
 			return this.latch(`internal error while preparing revision ${frame.revision}: ${tostring(writes)}`, true);
-		commitPrepared(writes);
+		store(writes, `sync revision ${frame.revision} applied`);
 		this.snapshotted = true;
 		this.revision = frame.revision;
 	}
@@ -73,7 +74,10 @@ class ClientSync extends Subsystem {
 	private latch(reason: string, fault: boolean) {
 		this.failed = true;
 		const [, err] = pcall(() =>
-			commitPrepared(declarations().map((declaration): PreparedWrite => [declaration.status, "failed"])),
+			store(
+				declarations().map((declaration): Write => [declaration.status, "failed"]),
+				"sync stopped",
+			),
 		);
 		if (fault) pcall(sendFault, this.revision);
 		runtimeDiagnostic(

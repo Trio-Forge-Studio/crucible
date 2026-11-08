@@ -21,5 +21,12 @@ export default defineConfig({
 		categories: { correctness: "error", suspicious: "error" },
 		plugins: ["typescript"],
 		ignorePatterns: ["**/out/**", "**/include/**", "build/**"],
+		overrides: [
+			{
+				// JSX compiles to Vide.jsx calls, which the linter does not see.
+				files: ["**/*.tsx"],
+				rules: { "no-unused-vars": ["error", { varsIgnorePattern: "^Vide$" }] },
+			},
+		],
 	},
 });

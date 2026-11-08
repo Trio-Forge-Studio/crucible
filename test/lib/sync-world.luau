@@ -27,6 +27,7 @@ function world.new(options)
 	local server = link.server
 	self.server = server
 	server.api = server.graph.module("")
+	server.charm = server.graph.package("@rbxts/charm/src")
 	server.declarations = server.graph.module("internal/sync/declarations")
 	server.values = server.graph.module("internal/sync/values")
 	server.reactiveLimits = server.graph.module("internal/reactive/limits")
@@ -82,6 +83,7 @@ function world:join(name: string, options)
 		c.d = declare(c)
 	end, { boot = false, userId = options.userId })
 	client.api = client.graph.module("")
+	client.charm = client.graph.package("@rbxts/charm/src")
 	if options.patch then
 		options.patch(client)
 	end

@@ -71,7 +71,18 @@ local game = {
 }
 local realm = {}
 local loaded = {}
-local function load(target)
+local load
+-- Charm requires its children by `@self/name`.
+local function requireFrom(script)
+	return function(target)
+		if type(target) == "string" then
+			local child = assert(string.match(target, "^@self/(.+)$"), `unsupported require {target}`)
+			target = assert(script:FindFirstChild(child), `{script:GetFullName()} has no child {child}`)
+		end
+		return load(target)
+	end
+end
+function load(target)
 	if target.Name == "roblox-port" and target.Parent.Name == "internal" then
 		return {
 			robloxPort = function()
@@ -82,7 +93,7 @@ local function load(target)
 	if loaded[target] == nil then
 		local chunk = luau.load(target.Source, {
 			debugName = target:GetFullName(),
-			environment = { _G = realm, game = game, script = target, require = load, task = task },
+			environment = { _G = realm, game = game, script = target, require = requireFrom(target), task = task },
 		})
 		loaded[target] = { value = chunk() }
 		if target.Name == "port" and target.Parent.Name == "network" then

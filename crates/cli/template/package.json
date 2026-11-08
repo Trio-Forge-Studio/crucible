@@ -9,6 +9,9 @@
 		"fmt": "vp fmt"
 	},
 	"dependencies": {
+		"@rbxts/charm": "__CHARM__",
+		"@rbxts/vide": "__VIDE__",
+		"@rbxts/vide-charm": "__VIDE_CHARM__",
 		"@trioforge/crucible": "__VERSION__"
 	},
 	"devDependencies": {

@@ -2,7 +2,7 @@
 
 Crucible is a TypeScript game framework for Roblox, built by Trio Forge Studio.
 
-You write a game as Subsystems, which are classes that `boot` constructs on the server and the client. Crucible connects them with typed messages and replicated state, saves player data, and builds UI from JSX. It checks the framework's rules when the game compiles, so a `boot` glob that matches no module fails the build instead of leaving a Subsystem unbooted in Studio.
+You write a game as Subsystems, which are classes that `boot` constructs on the server and the client. Crucible connects them with typed messages and replicated state, ties effects on [Charm](https://github.com/littensy/charm) atoms to their lifetimes, saves player data, and renders UI with Vide. It checks the framework's rules when the game compiles, so a `boot` glob that matches no module fails the build instead of leaving a Subsystem unbooted in Studio.
 
 ## See it in code
 
@@ -29,7 +29,7 @@ export class Wallet extends Subsystem {
 	private readonly total = publish(TotalCoins);
 
 	private readonly collect = receive(Collect, (_player, { size }) => {
-		this.total.update((total) => total + size);
+		this.total((total) => total + size);
 	});
 }
 ```

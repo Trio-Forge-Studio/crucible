@@ -1,91 +1,25 @@
-import { createEffect, createWatch } from "./internal/reactive/flush";
-import {
-	createComputedNode,
-	createStateNode,
-	readComputed,
-	readState,
-	readUntracked,
-	update,
-	write,
-	type StateNode,
-} from "./internal/reactive/graph";
-import { createScope, registerCleanup, registerOwned } from "./internal/reactive/ownership";
-
-declare const stateKind: unique symbol;
+import { createEffect, createScope, createWatch, registerCleanup, registerOwned } from "./internal/reactive/ownership";
 
 /**
- * A value read by calling it. Any function of no arguments is one, so a getter that reads state, such as
- * `() => this.open() && !this.locked()`, tracks like a state or a computed.
+ * Keeps something outside Charm's graph in step with the atoms and computeds it reads. The body runs once now, and
+ * again inside every write that changes what it last read, or once when the outermost batch ends. While boot is open
+ * the first run waits for boot to commit, and never happens if boot rolls back. The body may return a cleanup, which
+ * runs before the next run and when the effect ends. It belongs to the code that created it: inside `onEnable` it ends
+ * at disable; otherwise it ends with its object, its parent effect run or its scope. Returns an idempotent dispose
+ * that ends it sooner. A throw, a yield or another return value is thrown by Charm to the code that wrote, or here on
+ * the first run. With no owner it throws.
  */
-export interface Readable<T> {
-	(): T;
+export function effect(body: () => void | (() => void)): () => void {
+	return createEffect(body);
 }
 
 /**
- * A writable local value. `set` stores its argument as is, and `update` stores what its callback returns for the
- * current value. A write equal (`rawequal`) to the current value does nothing, so replace tables instead of
- * mutating them. At runtime a State is a callable table, not a function: pass `() => s()` to code that tests
- * `type(x) == "function"`.
+ * Calls `onChange(value, previous)` on the runs where `source()` is not `rawequal` to the last value seen. The source
+ * is read now, untracked, as the baseline. The source and `onChange` run as the watch's owner whoever wrote, and what
+ * `onChange` creates ends at the next change. Owned, deferred during boot and disposed like `effect`.
  */
-export interface State<T> extends Readable<T> {
-	readonly [stateKind]: { readonly value: (value: T) => T };
-	set(value: T): void;
-	update(change: (current: T) => T): void;
-}
-
-const stateMethods = {
-	set(this: StateNode, value: unknown) {
-		write(this, value);
-	},
-	update(this: StateNode, change: (current: unknown) => unknown) {
-		update(this, change);
-	},
-};
-
-const stateMeta: LuaMetatable<StateNode> = {
-	__index: stateMethods as never,
-	__call: (node) => readState(node),
-};
-
-/** A local source of truth. It needs no owner: a field initializer, a local or a module constant. */
-export function state<T>(initial: T): State<T> {
-	return setmetatable(createStateNode(initial), stateMeta) as unknown as State<T>;
-}
-
-/**
- * A cached value derived from other readables. It evaluates on its first read and again only when read after a
- * dependency changed. A result equal to the cached one stops propagation. A throw or a yield is cached and rethrown
- * to every reader until a dependency changes. Writing state or creating an effect, watch, scope or cleanup inside
- * `read` throws. It needs no owner.
- */
-export function computed<T>(read: () => T): Readable<T> {
-	const node = createComputedNode(read);
-	return () => readComputed(node) as T;
-}
-
-/**
- * Keeps something outside the graph in step with state. The body runs on the next reactive flush, never inside
- * the call that created it, and again after anything it read changed. It may return a cleanup, which runs before
- * the next run and when the effect ends. It belongs to the code that created it: inside `onEnable` it ends at
- * disable; otherwise it ends with its object, its parent effect run or its scope. A throw, a yield or another
- * return value stops it for good, after what its run created is released. With no owner it throws.
- */
-export function effect(body: () => void | (() => void)): void {
-	createEffect(body);
-}
-
-/**
- * Calls `onChange(value, previous)` on the flushes where `source()` differs from the last value seen. The source is
- * read now as the baseline, so a change before the first flush is seen. It observes the value at each flush, not
- * each write. Owned and stopped like `effect`.
- */
-export function watch<T>(source: Readable<T>, onChange: (value: T, previous: T) => void): void {
-	createWatch(source, onChange);
-}
-
-/** Calls `read` without tracking what it reads. Ownership is unchanged. */
-export function untracked<T>(read: () => T): T {
-	return readUntracked(read);
+export function watch<T>(source: () => T, onChange: (value: T, previous: T) => void): () => void {
+	return createWatch(source, onChange);
 }
 
 /**
@@ -107,11 +41,10 @@ export function onCleanup(release: () => void): void {
 
 /**
  * What `own` releases: a function, called with no arguments; a connection, disconnected; an Instance, destroyed; a
- * thread, cancelled with `task.cancel`; or an object, through its `destroy()` or else its `Destroy()`. A `State` is a
- * callable table, not a function, so it is not one.
+ * thread, cancelled with `task.cancel`; or an object, through its `destroy()` or else its `Destroy()`.
  */
 export type Ownable =
-	| ((() => void) & { readonly [stateKind]?: never })
+	| (() => void)
 	| RBXScriptConnection
 	| Instance
 	| thread

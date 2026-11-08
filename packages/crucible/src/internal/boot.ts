@@ -13,8 +13,7 @@ import type { NetworkLifecycle } from "./network/session";
 import { robloxPort, type BootPort } from "./roblox-port";
 import { Scheduler } from "./scheduler";
 import { Hook, Kind, Want, type ObjectState } from "./state";
-import { holdBarrier, releaseBarrier, useReactivePort } from "./reactive/flush";
-import { endInterval } from "./reactive/ownership";
+import { endInterval, holdEffects, releaseEffects, useDescribe } from "./reactive/ownership";
 import { rollbackDeclarations, sealDeclarations } from "./sync/declarations";
 import { Logging } from "../logging";
 
@@ -225,8 +224,9 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		for (const state of owned) request(state, Want.Destroyed);
 	}
 	useEngine(port);
-	holdBarrier();
-	useReactivePort(port);
+	// Under `boot`, which holds effects from before load, the effects run once `boot` has logged.
+	const holding = holdEffects();
+	useDescribe((instance) => port.describe(instance));
 	useImplementerPort(port);
 	useEffects({
 		construct: (s) => {
@@ -264,6 +264,11 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		},
 		diagnose: (s, hook, err) =>
 			runtimeDiagnostic("error", `${where(port, s)} ${HOOK_NAMES[hook]} failed: ${tostring(err)}`),
+		effectFailed: (s, hook, err) =>
+			runtimeDiagnostic(
+				"error",
+				`Crucible: an effect failed after ${s === undefined ? "" : `${where(port, s)} `}${HOOK_NAMES[hook]}: ${tostring(err)}`,
+			),
 		disabled: endInterval,
 	});
 	const [ok, err] = pcall(() => {
@@ -305,16 +310,17 @@ export function ignite(port: BootPort, side: Side, options: Pick<BootOptions, "f
 		for (const s of owned) if (!hasEnded(s)) request(s, Want.Destroyed);
 		drain();
 		owned.clear();
-		releaseBarrier();
+		releaseEffects(false);
 		error(`Crucible boot failed: ${failure}`, 0);
 	}
 	stage = "committed";
 	owned.clear();
-	releaseBarrier();
+	if (holding) releaseEffects(true);
 }
 
 /** @internal */
 export function boot(side: Side, options: BootOptions) {
+	holdEffects();
 	const [ok, err] = pcall(() => {
 		side.network.open();
 		load(options.load);
@@ -324,8 +330,10 @@ export function boot(side: Side, options: BootOptions) {
 	});
 	if (ok) {
 		log.debug("Crucible booted on the {side}", { side: side.name });
+		releaseEffects(true);
 		return;
 	}
+	releaseEffects(false);
 	side.network.close();
 	rollbackDeclarations();
 	error(err, 0);

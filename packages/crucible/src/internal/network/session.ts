@@ -1,6 +1,6 @@
 import { runtimeDiagnostic } from "../diagnostics";
 import { defer, within } from "../lifecycle";
-import { CallResult, disown, own } from "../runner";
+import { CallResult, disown, enter, leave, own } from "../runner";
 import { Hook } from "../state";
 import type { Definition } from "./catalog";
 import { type Claim, isLive } from "./claims";
@@ -147,7 +147,9 @@ export abstract class Session implements NetworkLifecycle {
 			this.finish(peer, entry, ok, value);
 		});
 		own(thread, claim.owner);
+		enter(thread, claim.owner, undefined);
 		this.port.resume(thread);
+		leave();
 		if (!entry.done && peer.state !== PeerState.Ended)
 			entry.lifetime = this.port.delay(L.HANDLER_LIFETIME_SECONDS, () => this.overrun(peer, entry));
 	}

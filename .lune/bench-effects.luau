@@ -1,6 +1,6 @@
--- Times one flush that reruns 10,000 effects, each with its own state, so every run goes through the protected
--- boundary once. "with a cleanup" effects also return a function, which the next run releases. Build the runtime
--- first with `pnpm build`.
+-- Times the end of one Charm batch that reruns 10,000 effects, each with its own atom, so every run goes through the
+-- protected boundary once. "with a cleanup" effects also return a function, which the next run releases. Build the
+-- runtime first with `pnpm build`.
 --
 --   lune run bench-effects [runs]
 local process = require("@lune/process")
@@ -23,6 +23,7 @@ end
 local function subject(withCleanup: boolean)
 	local r = realm()
 	local api = r.api
+	local charm = r.charm
 	local states = table.create(COUNT)
 	local ran = 0
 	local released = 0
@@ -31,7 +32,7 @@ local function subject(withCleanup: boolean)
 	end
 	r.root(function()
 		for i = 1, COUNT do
-			local s = api.state(0)
+			local s = charm.atom(0)
 			states[i] = s
 			if withCleanup then
 				api.effect(function()
@@ -47,14 +48,14 @@ local function subject(withCleanup: boolean)
 			end
 		end
 	end)
-	r.flush()
 	return function(round: number): number
+		charm.startBatch()
 		for i = 1, COUNT do
-			states[i]:set(round)
+			states[i](round)
 		end
 		ran, released = 0, 0
 		local start = os.clock()
-		r.flush()
+		charm.endBatch()
 		local elapsed = os.clock() - start
 		assert(ran == COUNT, `{ran} of {COUNT} effects ran`)
 		assert(not withCleanup or released == COUNT, `{released} of {COUNT} cleanups released`)

@@ -4,7 +4,8 @@ local world = require("./lib/boot-world")
 local function setup()
 	local w = world()
 	w.api = w.graph.module("")
-	w.limits = w.graph.module("internal/reactive/limits")
+	w.charm = w.graph.package("@rbxts/charm/src")
+	w.ownership = w.graph.module("internal/reactive/ownership")
 	function w.log(entry)
 		table.insert(w.events, entry)
 	end
@@ -27,60 +28,45 @@ return {
 				api.effect(function()
 					w.log(self.label())
 				end)
-				self.level:set(1)
+				self.level(1)
 			end,
 			start = function(self)
-				self.level:set(2)
+				self.level(2)
 				coroutine.yield()
-				self.level:set(3)
+				self.level(3)
 			end,
 		}, {
 			init = function(self)
-				self.level = api.state(0)
-				self.label = api.computed(function()
+				self.level = w.charm.atom(0)
+				self.label = w.charm.computed(function()
 					return `L{self.level()}`
 				end)
 			end,
 		})
 		local _ = Gauge
 		w.boot()
-		w.engine.flush()
 		spec.list(w.events, { "booted", "L2" }, "nothing ran before the commit; one run with the latest value")
 		assert(coroutine.resume(record.state.startThread))
-		w.engine.flush()
-		spec.list(w.events, { "booted", "L2", "L3" }, "a later start segment's write runs on the next flush")
+		spec.list(w.events, { "booted", "L2", "L3" }, "a later start segment's write runs its effect at once")
 	end,
-	["rule 76 E2 boot holds the barrier again before admission and releases it after booted"] = function()
+	["rule 76 E2 an effect created during boot runs after booted, not inside effect()"] = function()
 		local w = setup()
 		local api = w.api
-		local reactive = w.graph.module("internal/reactive/flush")
-		reactive.useReactivePort(w.engine.port)
-		reactive.releaseBarrier()
-		local requested
+		local ranAtCreation
 		w.service("Maker", {
 			awake = function()
-				local before = #w.engine.deferred
+				local before = #w.events
 				api.effect(function()
 					w.log("effect")
 				end)
-				requested = #w.engine.deferred - before
+				ranAtCreation = #w.events - before
 			end,
 		})
-		local deferredAtBooted
-		w.bootModule.ignite(w.engine.port, {
-			name = "server",
-			renders = false,
-			booted = function()
-				deferredAtBooted = #w.engine.deferred
-				w.log("booted")
-			end,
-		}, {})
-		spec.eq(requested, 0, "a barrier released before boot is held again during boot")
-		spec.eq(#w.engine.deferred, deferredAtBooted + 1, "released after booted, requesting one flush")
-		w.engine.flush()
+		w.boot()
+		spec.eq(ranAtCreation, 0, "effect() only queued it")
 		spec.list(w.events, { "booted", "effect" }, "the effect ran after the commit")
 	end,
-	["rule 76 E2 boot releases the barrier after the network commit, not before it"] = function()
+	["rule 76 E2 boot runs its effects after the network commit, not before it"] = function()
 		local w = setup()
 		local api = w.api
 		w.service("Maker", {
@@ -90,29 +76,23 @@ return {
 				end)
 			end,
 		})
-		local deferredAtCommit
 		w.boot(nil, false, {
 			commit = function()
-				deferredAtCommit = #w.engine.deferred
 				w.log("commit")
 			end,
 		})
-		spec.eq(type(deferredAtCommit), "number", "the network committed")
-		spec.eq(#w.engine.deferred, deferredAtCommit + 1, "the barrier was still held at the commit, then released")
-		w.engine.flush()
 		spec.list(w.events, { "booted", "commit", "effect" }, "the effect ran after the commit")
 	end,
-	["rule 76 E2 a network commit that throws rolls back before the barrier releases"] = function()
+	["rule 76 E2 a network commit that throws rolls back, and the effects boot held never run"] = function()
 		local w = setup()
 		local api = w.api
-		local deferredAtRollback
 		w.service("Maker", {
 			awake = function()
 				api.effect(function()
 					w.log("effect")
 				end)
 				api.onCleanup(function()
-					deferredAtRollback = #w.engine.deferred
+					w.log("released")
 				end)
 			end,
 		})
@@ -123,49 +103,51 @@ return {
 		})
 		spec.eq(ok, false, "boot failed")
 		spec.has(err, "commit fault", "with the commit's fault")
-		spec.eq(type(deferredAtRollback), "number", "the rollback ended the service")
-		spec.eq(#w.engine.deferred, deferredAtRollback + 1, "the barrier was held through the rollback, then released")
-		w.engine.flush()
-		spec.list(w.events, { "booted" }, "the rolled-back effect never ran")
+		spec.list(w.events, { "booted", "released" }, "the rollback ended the service; its effect never ran")
 	end,
-	["rule 36 T11 a module-level watch made during load runs after the commit with the baseline"] = function()
+	["rule 36 T11 a module-level watch made during load runs when boot's hold ends, with the baseline"] = function()
 		local w = setup()
 		local api = w.api
-		local device = api.state("keyboard")
+		w.ownership.holdEffects()
+		local device = w.charm.atom("keyboard")
 		local calls = {}
 		api.scope(function()
 			api.watch(device, function(value, previous)
 				table.insert(calls, `{previous}>{value}`)
 			end)
 		end)
-		spec.eq(#w.engine.deferred, 0, "no flush requested before boot")
 		w.service("Input", {
 			awake = function()
-				device:set("touch")
-				device:set("gamepad")
+				device("touch")
+				device("gamepad")
+				table.insert(calls, "awake")
 			end,
 		})
 		w.boot()
-		spec.list(calls, {}, "nothing ran during boot")
-		w.engine.flush()
-		spec.list(calls, { "keyboard>gamepad" }, "once, with the final and the baseline values")
+		spec.list(calls, { "awake" }, "under a hold boot did not open, nothing ran at the commit")
+		w.ownership.releaseEffects(true)
+		spec.list(
+			calls,
+			{ "awake", "keyboard>gamepad" },
+			"once, when the hold ended, with the final and the baseline values"
+		)
 	end,
-	["rule 36 T11 a failed boot releases the barrier after rollback; module roots keep their effects"] = function()
+	["rule 36 T11 a failed boot discards the effects it held, module roots included"] = function()
 		local w = setup()
 		local api = w.api
+		w.ownership.holdEffects()
 		api.scope(function()
 			api.effect(function()
 				w.log("module root")
 			end)
 		end)
-		local deferredAtRollback
 		w.service("Good", {
 			awake = function()
 				api.effect(function()
 					w.log("rolled back")
 				end)
 				api.onCleanup(function()
-					deferredAtRollback = #w.engine.deferred
+					w.log("released")
 				end)
 			end,
 		})
@@ -177,10 +159,7 @@ return {
 		local ok, err = pcall(w.boot)
 		spec.eq(ok, false, "boot failed")
 		spec.has(err, "bad awake", "with the fault")
-		spec.eq(type(deferredAtRollback), "number", "the rollback ended the rolled-back service")
-		spec.eq(#w.engine.deferred, deferredAtRollback + 1, "the flush is requested after the rollback")
-		w.engine.flush()
-		spec.list(w.events, { "module root" }, "only the module root's effect ran")
+		spec.list(w.events, { "released" }, "the rollback ended the service, and no held effect ran")
 	end,
 	["rule 13 rule 16 rule 32 a run is its own outermost within, owned by its generation"] = function()
 		local w = setup()
@@ -196,18 +175,17 @@ return {
 			end,
 		})
 		w.boot()
-		w.engine.flush()
 		spec.eq(seen.current, record.state, "current() is the generation at the root of the owner chain")
 		spec.eq(seen.draining, true, "inside its own within")
 	end,
 	["rule 13 T3 an effect's lifecycle requests settle before the next effect runs"] = function()
 		local w = setup()
 		local api = w.api
-		local x, y = api.state(0), api.state(0)
+		local x, y = w.charm.atom(0), w.charm.atom(0)
 		local Door = w.define("Door", {
 			onDisable = function()
 				w.log("door onDisable")
-				y:set(1)
+				y(1)
 			end,
 		})
 		local instance = w.tagged("D1", "Door")
@@ -218,7 +196,7 @@ return {
 				end)
 				api.effect(function()
 					Door:get(instance):setEnabled(false)
-					x:set(1)
+					x(1)
 					return function()
 						w.log("R")
 					end
@@ -229,14 +207,13 @@ return {
 			end,
 		})
 		w.boot()
-		local mark = #w.events
-		w.engine.flush()
-		spec.list(w.since(mark), {
+		spec.list(w.events, {
+			"booted",
 			"G y=0",
 			"door onDisable",
 			"F x=1 enabled=false",
 			"G y=1",
-		}, "the drain ran after E's completion; a hook's write joined the next round")
+		}, "the drain ran after E's run; a hook's write reached G when the commit's batch ended")
 	end,
 	["rule 13 T3 a returned cleanup is registered before its owner's Disable step, and a re-enable waits for it"] = function()
 		local w = setup()
@@ -266,7 +243,6 @@ return {
 		local _ = Mover
 		w.tagged("M1", "Mover")
 		w.boot()
-		w.engine.flush()
 		spec.list(
 			w.events,
 			{ "onEnable", "booted", "lock", "onDisable", "unlock", "onEnable", "lock" },
@@ -309,7 +285,7 @@ return {
 	["rule 21 T5 enable, disable, re-enable and destroy end each interval and the generation in order"] = function()
 		local w = setup()
 		local api = w.api
-		local s = api.state(1)
+		local s = w.charm.atom(1)
 		local Prompt = w.define("Prompt", {
 			awake = function()
 				api.onCleanup(function()
@@ -341,19 +317,15 @@ return {
 		})
 		local instance = w.tagged("P1", "Prompt")
 		w.boot()
-		w.engine.flush()
 		local prompt = Prompt:get(instance)
 		local mark = #w.events
 		prompt:setEnabled(false)
 		spec.list(w.since(mark), { "onDisable", "E cleanup", "R4", "R3", "R2", "R1" }, "disable")
-		s:set(2)
-		w.engine.flush()
+		s(2)
 		spec.list(w.since(mark + 6), { "G 2" }, "the generation's effect kept running; the interval's did not")
 		prompt:setEnabled(true)
-		w.engine.flush()
 		mark = #w.events
-		s:set(3)
-		w.engine.flush()
+		s(3)
 		spec.list(w.since(mark), { "G 3", "E cleanup", "E 3" }, "one fresh interval effect")
 		mark = #w.events
 		prompt:remove()
@@ -367,14 +339,13 @@ return {
 			"onDestroy",
 			"generation release",
 		}, "destroy from enabled")
-		s:set(4)
-		w.engine.flush()
+		s(4)
 		spec.eq(#w.since(mark), 8, "nothing of a destroyed object runs again")
 	end,
 	["rule 21 rule 22 T5 observe deliveries during onEnable join the interval; the subscription outlives it"] = function()
 		local w = setup()
 		local api = w.api
-		local s = api.state(1)
+		local s = w.charm.atom(1)
 		w.define("Member", {}, { provides = { "I" } })
 		w.tagged("A", "Member")
 		w.tagged("B", "Member")
@@ -398,15 +369,12 @@ return {
 		local watcher = Watcher:get(instance)
 		watcher:setEnabled(false)
 		local mark = #w.events
-		s:set(2)
-		w.engine.flush()
+		s(2)
 		spec.eq(#w.since(mark), 0, "per-member effects ended at disable")
 		spec.eq(table.find(w.events, "release A") ~= nil and table.find(w.events, "release B") ~= nil, true, "released")
 		watcher:setEnabled(true)
-		w.engine.flush()
 		mark = #w.events
-		s:set(3)
-		w.engine.flush()
+		s(3)
 		local runs = w.since(mark)
 		table.sort(runs)
 		spec.list(runs, { "run A 3", "run B 3" }, "exactly one effect per member after re-enable")
@@ -465,67 +433,47 @@ return {
 		table.sort(started)
 		spec.list(started, { "highlight A", "highlight B" }, "exactly one per member after re-enable")
 	end,
-	["rule 13 T6 a yielding effect is completed before the drain its requests cause"] = function()
+	["rule 13 T6 a yielding effect run is cancelled before the drain its requests cause"] = function()
 		local w = setup()
 		local api = w.api
-		local x, y = api.state(0), api.state(0)
-		local c = api.computed(function()
-			local v = x()
-			if v == 0 then
-				coroutine.yield()
-			end
-			return v
-		end)
+		local x = w.charm.atom(0)
 		local Door = w.define("Door", {
 			onDisable = function()
 				w.log("onDisable")
-				x:set(1)
-				local ok, value = pcall(c)
-				w.log(`read {tostring(ok)} {tostring(value)}`)
 			end,
 		})
 		local instance = w.tagged("D1", "Door")
-		local fRuns = 0
-		w.service("S", {
-			awake = function()
-				api.effect(function()
-					api.onCleanup(function()
-						w.log("E release")
-					end)
-					Door:get(instance):setEnabled(false)
-					c()
-					w.log("E continued")
-				end)
-				api.effect(function()
-					y()
-					fRuns += 1
-				end)
-			end,
-		})
 		w.boot()
-		local mark = #w.events
-		w.engine.flush()
-		spec.list(w.since(mark), { "E release", "onDisable", "read true 1" }, "no cycle error, no stale frame")
-		spec.eq(w.engine.logged("yielded"), 1, "the effect stopped with one diagnostic")
-		x:set(0)
-		y:set(1)
-		w.engine.flush()
-		spec.eq(fRuns, 2, "the next effect tracks only what it reads")
-		local ok, err = pcall(api.effect, function() end)
-		spec.eq(ok, false, "no owner leaked to this thread")
-		spec.has(err, "needs an owner", "ownerless")
+		api.scope(function()
+			api.effect(function()
+				api.onCleanup(function()
+					w.log("E release")
+				end)
+				if x() == 1 then
+					Door:get(instance):setEnabled(false)
+					coroutine.yield()
+					w.log("E continued")
+				end
+			end)
+		end)
+		local ok, err = pcall(x, 1)
+		spec.eq(ok, false, "the write threw")
+		spec.has(err, "yielded", "the yield")
+		spec.list(w.events, { "booted", "E release", "onDisable" }, "the request applied once the run was cancelled")
+		local created, ownerError = pcall(api.effect, function() end)
+		spec.eq(created, false, "no owner leaked to this thread")
+		spec.has(ownerError, "needs an owner", "ownerless")
 	end,
-	["rule 13 T6 a yielding scope setup, release and outermost computed are finished before the drain"] = function()
+	["rule 13 T6 a yielding scope setup and release are finished before the drain"] = function()
 		local w = setup()
 		local api = w.api
-		local x = api.state(0)
 		local handlers = {}
 		local Door = w.define("Door", {
 			onDisable = function(self)
 				handlers[self.instance.Name]()
 			end,
 		})
-		local d1, d2, d3 = w.tagged("D1", "Door"), w.tagged("D2", "Door"), w.tagged("D3", "Door")
+		local d1, d2 = w.tagged("D1", "Door"), w.tagged("D2", "Door")
 		w.boot()
 		local released = false
 		handlers.D1 = function()
@@ -555,31 +503,16 @@ return {
 		end)
 		dispose()
 		spec.eq(reported, 1, "the yielding release was reported before the drain ran")
-		local c = api.computed(function()
-			local v = x()
-			if v == 0 then
-				Door:get(d3):setEnabled(false)
-				coroutine.yield()
-			end
-			return v
-		end)
-		handlers.D3 = function()
-			x:set(1)
-			local readOk, value = pcall(c)
-			w.log(`D3 read {tostring(readOk)} {tostring(value)}`)
-		end
-		pcall(c)
 		spec.list(w.events, {
 			"booted",
 			"D1 off, setup released true",
 			"older release",
-			"D3 read true 1",
 		}, "each body was complete before its drain")
 	end,
-	["rule 37 T4 a lane write is fresh for later members; its effect runs on the flush"] = function()
+	["rule 37 T4 a lane write is fresh for later members; its effect runs when the writer's callback returns"] = function()
 		local w = setup()
 		local api = w.api
-		local speed = api.state(0)
+		local speed = w.charm.atom(0)
 		local wrote = false
 		w.define("Car", {
 			update = function()
@@ -587,7 +520,8 @@ return {
 					w.log(`later member reads {speed()}`)
 				else
 					wrote = true
-					speed:set(5)
+					speed(5)
+					w.log("wrote")
 				end
 			end,
 		})
@@ -601,30 +535,29 @@ return {
 		w.tagged("Van", "Car")
 		w.tagged("Trailer", "Car")
 		w.boot()
-		w.engine.flush()
 		local mark = #w.events
 		w.engine.cycle(1 / 60, false)
-		spec.list(w.since(mark), { "later member reads 5" }, "fresh read; the needle has not moved")
-		w.engine.flush()
-		spec.list(w.since(mark), { "later member reads 5", "needle 5" }, "the effect ran after the callback")
+		spec.list(
+			w.since(mark),
+			{ "wrote", "needle 5", "later member reads 5" },
+			"the writer's batch ended before the next member ran"
+		)
 	end,
-	["rule 38 T13 the render commit is reserved: a client boot binds no render step"] = function()
+	["rule 38 T13 a client boot binds no render step"] = function()
 		local w = setup()
 		local api = w.api
-		spec.eq(w.limits.RENDER_COMMIT_PRIORITY, 2001, "Enum.RenderPriority.Last.Value + 1")
 		w.service("Ui", {
 			awake = function()
 				api.effect(function() end)
 			end,
 		})
 		w.boot(nil, true)
-		w.engine.flush()
 		spec.eq(#w.engine.renderSteps, 0, "v1 binds no render step")
 	end,
 	["rule 39 onShutdown has no owner: effect throws, writes work and session effects keep running"] = function()
 		local w = setup()
 		local api = w.api
-		local phase = api.state("running")
+		local phase = w.charm.atom("running")
 		w.service("Session", {
 			awake = function()
 				api.effect(function()
@@ -632,15 +565,13 @@ return {
 				end)
 			end,
 			onShutdown = function()
-				phase:set("closing")
+				phase("closing")
 				api.effect(function() end)
 			end,
 		})
 		w.boot()
-		w.engine.flush()
 		w.closers[1]()
 		spec.eq(w.engine.logged("needs an owner"), 1, "effect threw in onShutdown")
-		w.engine.flush()
 		spec.list(w.events, { "booted", "phase running", "phase closing" }, "the write ran the Subsystem's effect")
 	end,
 }

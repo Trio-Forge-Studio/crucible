@@ -94,6 +94,8 @@ CRU004: Import only the root, server, client, vide, util/random or maths/spline 
 
 An `import`, `export ... from`, `import type`, `import()` call or `import x = require()` names a path under `@trioforge/crucible/` other than `server`, `client`, `vide`, `util/random` and `maths/spline`. This covers `@trioforge/crucible/emit`, internal paths, and `@trioforge/crucible/testing`, which only specs import, as `crucible docs testing` describes. To fix it, import from `@trioforge/crucible` or from one of the five entries.
 
+The runtime no longer ships the `vide` entry, so an import of `@trioforge/crucible/vide` passes this rule and then fails to resolve. Read Charm values in Vide with `@rbxts/vide-charm`, as `crucible docs vide` describes.
+
 ## CRU005
 
 ```text

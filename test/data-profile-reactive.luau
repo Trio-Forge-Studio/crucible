@@ -20,7 +20,7 @@ return {
 		local w, ann, bea, data = twoLoaded()
 		local api = w.server.api
 		local runs = 0
-		local beaCoins = api.computed(function()
+		local beaCoins = w.server.charm.computed(function()
 			runs += 1
 			return data(bea.player).currency()
 		end)

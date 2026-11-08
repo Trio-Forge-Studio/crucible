@@ -1,20 +1,24 @@
-import { runtimeDiagnostic } from "../diagnostics";
-import { closeScope, current, drain, enabling, hasEnded, openScope } from "../lifecycle";
-import type { ClassRecord } from "../registry";
-import { call, CallResult } from "../runner";
-import type { ObjectState } from "../state";
-import { boundary, discard, FrameKind, pop, push, top, type Completion, type Frame } from "./context";
 import {
-	finishOpen,
-	guardPure,
-	Mark,
-	NodeKind,
-	originOf,
-	releaseEdges,
-	type BindingFields,
-	type EffectFields,
-} from "./graph";
-import { OWNER_CHILDREN_WARNING } from "./limits";
+	effect as charmEffect,
+	effectScope,
+	endBatch,
+	getActiveSub,
+	onCleanup as charmOnCleanup,
+	ReactiveFlags,
+	setActiveSub,
+	startBatch,
+	untracked,
+	type ReactiveNode,
+} from "@rbxts/charm";
+import { runtimeDiagnostic } from "../diagnostics";
+import { closeScope, drain, enabling, hasEnded, openScope } from "../lifecycle";
+import type { ClassRecord } from "../registry";
+import { call, CallResult, running } from "../runner";
+import type { ObjectState } from "../state";
+import { checkCharm } from "./charm";
+import { peek, settle } from "./store";
+
+checkCharm();
 
 /** @internal */
 export const enum Role {
@@ -22,7 +26,7 @@ export const enum Role {
 	Generation,
 	/** A behaviour's enable interval. Ends right after `onDisable`, or when the generation is released. */
 	Interval,
-	/** One run of an effect. Ends before the next run, or when the effect stops. */
+	/** One Crucible effect. Its releases are its current run's, and end before the next run. */
 	Run,
 	/** `scope(setup)`: a child of its owner, or a root. */
 	Scope,
@@ -30,7 +34,7 @@ export const enum Role {
 
 /**
  * @internal
- * How a lifetime releases one owned value. `own` decides it once, when the value is owned. The engine's kinds come
+ * How an owner releases one owned value. `own` decides it once, when the value is owned. The engine's kinds come
  * last, so `kind >= Release.Disconnect` is a release that runs no Luau.
  */
 export const enum Release {
@@ -57,80 +61,64 @@ interface DestroyFields {
 	readonly Destroy?: unknown;
 }
 
-interface Linked {
-	/** The lifetime that owns it. A run's parent is its effect's owner; a run is not in any child list. */
-	readonly parent?: Lifetime;
-	prev?: Owned;
-	next?: Owned;
-	linked: boolean;
-}
-
-/** @internal Everything that must end, ends exactly once, through one of these. */
-export interface Lifetime extends Linked {
-	readonly kind: NodeKind.Lifetime;
-	readonly role: Role;
-	/** The Crucible generation at the root of the chain, which boundaries pass to `within`. None for a root. */
-	readonly owner?: ObjectState;
-	/** The effect a Run lifetime belongs to. */
-	readonly effect?: EffectNode;
-	head?: Owned;
-	tail?: Owned;
-	count: number;
-	/** What it releases when it ends, oldest first, as pairs of a `Release` and its value. */
-	readonly releases: unknown[];
-	/** Latched first when it starts ending: nothing new attaches and no queued run of its effects starts. */
-	ended: boolean;
-	/** Its children and releases have been ended. */
-	finished: boolean;
-	/** Endings that wait for this body's completion, because they reached it while it ran. */
-	deferred?: Lifetime[];
-	warned: boolean;
-	/** Inherited context for the UI layer. Unused in v1. */
-	context?: Map<unknown, unknown>;
-	/** Its bindings, in no order. Ending one runs no code, so they need no place among the children. */
-	bindings?: BindingNode[];
-}
-
-/** @internal */
-export interface EffectNode extends EffectFields, Linked {
-	readonly parent: Lifetime;
-	readonly body: () => unknown;
-	readonly origin: string;
-	/** The current run's lifetime: what the run created. */
-	run?: Lifetime;
-}
-
 /**
  * @internal
- * Calls `sink(target, value)` on the flush where its source's value is not `rawequal` to the last one it passed. No
- * worker, run lifetime or cleanups: it runs on the flush's thread and ends with its parent, or by `retire`. Keep it
- * at eight fields: a ninth doubles Luau's hash for it to 16 slots.
+ * What effects, scopes and releases are created into. A generation, an interval or a scope is a detached Charm effect
+ * scope, whose one cleanup ends the owner. A Run is one Crucible effect: its node is the Charm effect, and it arms a
+ * cleanup on that effect for each run that holds a release or a child scope.
+ *
+ * An owner lists the scopes, and the effects outside every run, that it ends, instead of linking them into its Charm
+ * node: Charm 0.11.1's `stopEffect` unlinks a linked node from the wrong parent, which corrupts the parent's
+ * dependencies when the node is disposed before it. An effect created inside a run is linked into the running Charm
+ * effect, as Charm nests it. Ending it unhooks its node from that link before its own stop runs, so the stop drops
+ * what it read, the effects it created included, at once, and the parent's next run or stop drops the link.
  */
-export interface BindingNode extends BindingFields {
-	/** None for a root binding, which only `retire` ends. Otherwise it is in the parent's `bindings`. */
-	readonly parent?: Lifetime;
-	readonly sink: (target: unknown, value: unknown) => void;
-	readonly target: unknown;
-	/** The value last passed to `sink`, or the caller's baseline. */
-	value: unknown;
+export interface Owner {
+	readonly role: Role;
+	/** The Charm node: a scope-like owner's scope, or a Run's effect once its first run started. */
+	node: ReactiveNode;
+	/** The Crucible generation at the root of the chain: what `current()` reports inside it, and diagnostics name. */
+	readonly state: ObjectState | undefined;
+	/** Latched when it starts ending, and for a Run while its releases run. */
+	ended: boolean;
+	/** What it releases when it ends, as pairs of a `Release` and its value, oldest first. */
+	releases?: unknown[];
+	/** Stops its Charm node: a scope-like owner's scope, or a listed Run's effect. */
+	stop?: () => void;
+	/** A nested Run's Charm stop, which only `halt` calls. */
+	halt?: () => void;
+	/** A Run's body. Disposing the Run clears it, and a run without one reads nothing, so Charm drops it. */
+	body?: () => unknown;
+	/** A Run's cleanup, made once and armed on each run that holds a release or a child scope. */
+	finish?: () => void;
+	/** A Run's cleanup is armed on the run in progress. */
+	armed?: boolean;
+	/** A Run's first run is in progress inside `create`, which throws its failure once Charm returned the stop. */
+	creating?: boolean;
+	failure?: unknown;
+	/** The owner whose list holds this one. */
+	parent?: Owner;
+	/** What it ends before its releases, oldest first, linked through `prev` and `next`. */
+	first?: Owner;
+	last?: Owner;
+	prev?: Owner;
+	next?: Owner;
 }
-
-/** @internal */
-export type ReactionNode = EffectNode | BindingNode;
-
-type Owned = Lifetime | EffectNode;
 
 /** @internal */
 export const NO_OWNER = "effect() needs an owner: create it in a Subsystem or behaviour, or inside scope()";
 
-const generations = setmetatable(new Map<ObjectState, Lifetime>(), { __mode: "k" });
-const intervals = setmetatable(new Map<ObjectState, Lifetime>(), { __mode: "k" });
-/** Bodies running now, outermost first. Boundaries nest synchronously, so one stack serves every thread. */
-const bodies = new Array<Lifetime>();
+const generations = setmetatable(new Map<ObjectState, Owner>(), { __mode: "k" });
+/** Nested Runs by their Charm effect, so ending one finds the Runs it created among its dependencies. */
+const nestedRuns = setmetatable(new Map<ReactiveNode, Owner>(), { __mode: "kv" });
+const intervals = setmetatable(new Map<ObjectState, Owner>(), { __mode: "k" });
+
+/** Listed Runs created while boot is open, in creation order, waiting for the commit to create their effects. */
+let pending: Owner[] | undefined;
 
 let describe: (instance: Instance) => string = tostring;
 
-/** @internal */
+/** @internal Boot installs the engine's describer, so a failed release names its Instance. */
 export function useDescribe(port: (instance: Instance) => string) {
 	describe = port;
 }
@@ -143,233 +131,161 @@ export function ownerLabel(owner: ObjectState | undefined): string {
 }
 
 /** @internal */
-export function newLifetime(
-	role: Role,
-	parent: Lifetime | undefined,
-	owner: ObjectState | undefined,
-	effect?: EffectNode,
-) {
-	const lifetime: Lifetime = {
-		kind: NodeKind.Lifetime,
-		role,
-		parent,
-		owner,
-		effect,
-		count: 0,
-		releases: [],
-		ended: false,
-		finished: false,
-		linked: false,
-		warned: false,
-	};
-	return lifetime;
+export function originOf(callback: Callback): string {
+	const [source, line] = debug.info(callback, "sl");
+	return `${source}:${line}`;
 }
 
-/** @internal Appends `child` to `parent`'s children, newest last. */
-export function adopt(parent: Lifetime, child: Owned) {
-	child.prev = parent.tail;
-	child.next = undefined;
-	if (parent.tail === undefined) parent.head = child;
-	else parent.tail.next = child;
-	parent.tail = child;
-	child.linked = true;
-	counted(parent);
+/** @internal An owner that has ended takes nothing new: a Run has when its Charm effect has stopped. */
+export function isEnded(owner: Owner): boolean {
+	return (
+		owner.ended || (owner.role === Role.Run && owner.node !== undefined && owner.node.flags === ReactiveFlags.None)
+	);
 }
 
-/** @internal */
-export function adoptBinding(parent: Lifetime, binding: BindingNode) {
-	const bindings = parent.bindings;
-	if (bindings === undefined) parent.bindings = [binding];
-	else bindings.push(binding);
-	counted(parent);
-}
-
-function counted(parent: Lifetime) {
-	parent.count += 1;
-	if (parent.role === Role.Generation && parent.count >= OWNER_CHILDREN_WARNING && !parent.warned) {
-		parent.warned = true;
-		runtimeDiagnostic(
-			"warning",
-			`Crucible: ${ownerLabel(parent.owner)} owns ${OWNER_CHILDREN_WARNING} live effects and scopes; one may be created every frame`,
-		);
+/** Ends what an owner lists, oldest first, then runs the releases it holds, newest first, once. */
+function finish(owner: Owner) {
+	owner.ended = true;
+	owner.armed = undefined;
+	// A child's end can end any sibling, so each turn takes the head of the list as it is then.
+	let child = owner.first;
+	while (child !== undefined) {
+		unlist(child);
+		dispose(child);
+		child = owner.first;
 	}
+	const releases = owner.releases;
+	owner.releases = undefined;
+	if (releases !== undefined) runReleases(owner, releases, releases.size() - 2);
 }
 
-/** Swaps a binding out of its parent's bindings, unless its parent's ending already dropped them. */
-function leaveBinding(binding: BindingNode) {
-	const parent = binding.parent;
-	const bindings = parent?.bindings;
-	if (bindings === undefined) return;
-	const index = bindings.indexOf(binding);
-	if (index < 0) return;
-	bindings[index] = bindings[bindings.size() - 1];
-	bindings.pop();
-	parent!.count -= 1;
+/** Lists `child` last on `parent`, which ends it. A Run lists only for its current run. */
+function adopt(parent: Owner, child: Owner) {
+	if (parent.role === Role.Run) arm(parent);
+	child.parent = parent;
+	child.prev = parent.last;
+	if (parent.last === undefined) parent.first = child;
+	else parent.last.next = child;
+	parent.last = child;
 }
 
-function leave(child: Owned) {
-	const parent = child.parent;
-	if (!child.linked || parent === undefined) return;
-	child.linked = false;
-	if (child.prev === undefined) parent.head = child.next;
-	else child.prev.next = child.next;
-	if (child.next === undefined) parent.tail = child.prev;
-	else child.next.prev = child.prev;
-	child.prev = undefined;
-	child.next = undefined;
-	parent.count -= 1;
+function unlist(owner: Owner) {
+	const parent = owner.parent;
+	if (parent === undefined) return;
+	owner.parent = undefined;
+	if (owner.prev === undefined) parent.first = owner.next;
+	else owner.prev.next = owner.next;
+	if (owner.next === undefined) parent.last = owner.prev;
+	else owner.next.prev = owner.prev;
+	owner.prev = undefined;
+	owner.next = undefined;
 }
 
-function generation(s: ObjectState): Lifetime {
-	let lifetime = generations.get(s);
-	if (lifetime === undefined) {
-		const created = newLifetime(Role.Generation, undefined, s);
-		lifetime = created;
+/** A scope-like owner on a detached Charm effect scope, whose cleanup ends it. Listed on `parent` when given. */
+function scopeOwner(role: Role, parent: Owner | undefined, state: ObjectState | undefined): Owner {
+	const owner: Owner = { role, node: undefined!, state, ended: false };
+	owner.stop = effectScope(() => {
+		owner.node = getActiveSub()!;
+		return () => finish(owner);
+	}, true);
+	if (parent !== undefined) adopt(parent, owner);
+	return owner;
+}
+
+/**
+ * Idempotent. Latches the owner first, so a release that runs while it ends creates nothing under it. A Run is latched
+ * by its body, because `ended` also marks the releases it runs before each rerun.
+ */
+function dispose(owner: Owner) {
+	if (owner.role === Role.Run) {
+		if (owner.body === undefined) return;
+		owner.body = undefined;
+	} else if (owner.ended) return;
+	owner.ended = true;
+	unlist(owner);
+	if (owner.stop !== undefined) owner.stop();
+	else if (owner.role === Role.Run) endRun(owner);
+}
+
+/**
+ * Ends a Run that has no listed stop: a nested one, a queued one, or a root still in its first run. The Runs it
+ * created end first, then what it lists and holds, then a nested one halts. `create` stops a root still in its first
+ * run once Charm returns the stop.
+ */
+function endRun(run: Owner) {
+	const node = run.node;
+	if (node !== undefined) {
+		const children = new Array<Owner>();
+		let link = node.deps;
+		while (link !== undefined) {
+			const child = nestedRuns.get(link.dep);
+			if (child !== undefined) children.push(child);
+			link = link.nextDep;
+		}
+		for (const child of children) dispose(child);
+	}
+	finish(run);
+	halt(run);
+}
+
+/**
+ * Stops a nested Run's Charm effect now instead of through Charm's queue, which a throwing effect can abort. Its node
+ * forgets the link to its parent first, so `stopEffect` skips the wrong-parent unlink. The parent keeps that link
+ * until its next run or stop drops it.
+ */
+function halt(run: Owner) {
+	const stop = run.halt;
+	if (stop === undefined) return;
+	run.halt = undefined;
+	run.node.subs = undefined;
+	run.node.subsTail = undefined;
+	stop();
+}
+
+function generation(s: ObjectState): Owner {
+	let owner = generations.get(s);
+	if (owner === undefined) {
+		const created = scopeOwner(Role.Generation, undefined, s);
+		owner = created;
 		generations.set(s, created);
 		if (s.subscriptions === undefined) s.subscriptions = [];
 		s.subscriptions.push(() => {
 			generations.delete(s);
-			endLifetime(created);
+			dispose(created);
 		});
 	}
-	return lifetime;
+	return owner;
 }
 
-function interval(s: ObjectState): Lifetime {
-	let lifetime = intervals.get(s);
-	if (lifetime === undefined) {
-		const parent = generation(s);
-		lifetime = newLifetime(Role.Interval, parent, s);
-		adopt(parent, lifetime);
-		intervals.set(s, lifetime);
+function interval(s: ObjectState): Owner {
+	let owner = intervals.get(s);
+	if (owner === undefined) {
+		owner = scopeOwner(Role.Interval, undefined, s);
+		intervals.set(s, owner);
 	}
-	return lifetime;
+	return owner;
 }
 
 /**
  * @internal
- * The owner of something created now: the innermost frame's lifetime; else the running Crucible object's enable
- * interval while its Enable step runs, or its generation; else none. A returned lifetime may have ended.
+ * The owner of something created now: the effect run, scope or release Crucible is running; else the running
+ * Crucible object's enable interval while its Enable step runs, or its generation; else none. A returned owner may
+ * have ended.
  */
-export function resolveOwner(): Lifetime | undefined {
-	return ownerAt(top());
-}
-
-function ownerAt(frame: Frame | undefined): Lifetime | undefined {
-	if (frame?.lifetime !== undefined) return frame.lifetime;
-	const s = current();
+export function resolveOwner(): Owner | undefined {
+	const [s, context] = running();
+	if (context !== undefined) return context as Owner;
 	if (s === undefined) return undefined;
-	if (hasEnded(s)) {
-		const ended = newLifetime(Role.Generation, undefined, s);
-		ended.ended = true;
-		ended.finished = true;
-		return ended;
-	}
+	if (hasEnded(s)) return { role: Role.Generation, node: undefined!, state: s, ended: true };
 	return enabling() === s ? interval(s) : generation(s);
 }
 
 /** @internal Core edit E1: lifecycle calls it after `onDisable` and when it releases a generation. Idempotent. */
 export function endInterval(s: ObjectState) {
-	const lifetime = intervals.get(s);
-	if (lifetime === undefined) return;
+	const owner = intervals.get(s);
+	if (owner === undefined) return;
 	intervals.delete(s);
-	endLifetime(lifetime);
-}
-
-/** @internal Detaches a reaction from the graph for good. No diagnostic: an ending is not a failure. */
-function halt(reaction: ReactionNode) {
-	if (reaction.mark === Mark.Stopped) return;
-	reaction.mark = Mark.Stopped;
-	releaseEdges(reaction);
-}
-
-/** Halts newest first, the order in which a shared source's observers leave from the end. */
-function latch(root: Lifetime) {
-	if (root.tail === undefined && root.bindings === undefined) {
-		root.ended = true;
-		return;
-	}
-	const pending = [root];
-	while (pending.size() > 0) {
-		const lifetime = pending.pop()!;
-		lifetime.ended = true;
-		const bindings = lifetime.bindings;
-		if (bindings !== undefined) for (let i = bindings.size() - 1; i >= 0; i--) halt(bindings[i]);
-		let child = lifetime.tail;
-		while (child !== undefined) {
-			if (child.kind === NodeKind.Lifetime) {
-				if (!child.ended) pending.push(child);
-			} else {
-				halt(child);
-				if (child.run !== undefined && !child.run.ended) pending.push(child.run);
-			}
-			child = child.prev;
-		}
-	}
-}
-
-function under(body: Lifetime, lifetime: Lifetime): boolean {
-	let at: Lifetime | undefined = body;
-	while (at !== undefined) {
-		if (at === lifetime) return true;
-		at = at.parent;
-	}
-	return false;
-}
-
-/**
- * @internal
- * Ends a lifetime once: latch it and everything under it, then, unless a body under it is still running, end its
- * children newest first, run its releases newest first, and unlink it. A running body defers those steps to its
- * completion.
- */
-export function endLifetime(lifetime: Lifetime) {
-	if (lifetime.ended) return;
-	latch(lifetime);
-	for (const body of bodies) {
-		if (!under(body, lifetime)) continue;
-		if (body.deferred === undefined) body.deferred = [];
-		body.deferred.push(lifetime);
-		return;
-	}
-	finish(lifetime);
-}
-
-function finish(lifetime: Lifetime) {
-	if (lifetime.finished) return;
-	lifetime.finished = true;
-	let child = lifetime.tail;
-	while (child !== undefined) {
-		const previous: Owned | undefined = child.prev;
-		if (child.kind === NodeKind.Lifetime) finish(child);
-		else retire(child);
-		child = previous;
-	}
-	const bindings = lifetime.bindings;
-	if (bindings !== undefined) {
-		lifetime.bindings = undefined;
-		lifetime.count -= bindings.size();
-	}
-	const releases = lifetime.releases;
-	runReleases(lifetime, releases, releases.size() - 2);
-	releases.clear();
-	leave(lifetime);
-}
-
-/** @internal Stops a reaction for good: detached, an effect's current run ended, unlinked from its owner. */
-export function retire(reaction: ReactionNode) {
-	halt(reaction);
-	if (reaction.kind === NodeKind.Binding) {
-		leaveBinding(reaction);
-		return;
-	}
-	const run = reaction.run;
-	reaction.run = undefined;
-	if (run !== undefined) {
-		latch(run);
-		finish(run);
-	}
-	leave(reaction);
+	dispose(owner);
 }
 
 function releaseLabel(kind: Release, value: unknown): string {
@@ -385,10 +301,10 @@ function releaseLabel(kind: Release, value: unknown): string {
 	return typeIs(code, "function") ? `at ${originOf(code)}` : `of ${tostring(value)}`;
 }
 
-function reportRelease(lifetime: Lifetime, kind: Release, value: unknown, err: unknown) {
+function reportRelease(owner: Owner, kind: Release, value: unknown, err: unknown) {
 	runtimeDiagnostic(
 		"error",
-		`Crucible: cleanup ${releaseLabel(kind, value)} (${ownerLabel(lifetime.owner)}) failed: ${tostring(err)}`,
+		`Crucible: cleanup ${releaseLabel(kind, value)} (${ownerLabel(owner.state)}) failed: ${tostring(err)}`,
 	);
 }
 
@@ -404,43 +320,39 @@ function destroyInstance(instance: Instance) {
  * `Disconnect`, `Destroy` and `task.cancel` run no Luau on this thread and cannot yield, so a `pcall` is their
  * boundary. A throw is reported and nobody is faulted.
  */
-function releaseEngine(lifetime: Lifetime, kind: Release, value: unknown) {
+function releaseEngine(owner: Owner, kind: Release, value: unknown) {
 	let engine: (value: never) => void;
 	if (kind === Release.Disconnect) engine = disconnect;
 	else if (kind === Release.DestroyInstance) engine = destroyInstance;
 	else engine = task.cancel;
 	const [ok, err] = pcall(engine, value as never);
-	if (!ok) pcall(reportRelease, lifetime, kind, value, err);
+	if (!ok) pcall(reportRelease, owner, kind, value, err);
 }
 
-/** A lifetime's releases that run code, newest first, on one worker until one fails or yields. Its own frame. */
-interface Batch extends Frame {
-	readonly kind: FrameKind.Owning;
-	readonly lifetime: Lifetime;
+/** An owner's releases that run code, newest first, on one worker until one fails or yields. */
+interface Batch {
+	readonly owner: Owner;
 	readonly releases: readonly unknown[];
 	/** The index of the release running now. */
 	at: number;
 	/** That release's lifecycle scope is open. */
 	scoped: boolean;
-	worker?: thread;
 }
 
 /**
- * Runs `batch` from `batch.at` down on the running worker, as its ended lifetime. A release that runs code opens its
- * own lifecycle scope, as `within` would. One that leaves requests for a drain outside any other scope stops the
- * batch with `true`, so the caller drains before the next release, as that release's own `within` would have.
+ * Runs `batch` from `batch.at` down on the running worker. A release that runs code opens its own lifecycle scope, as
+ * `within` would. One that leaves requests for a drain outside any other scope stops the batch with `true`, so the
+ * caller drains before the next release, as that release's own `within` would have.
  */
 function releaseBatch(batch: Batch): boolean {
-	batch.worker = coroutine.running();
-	const lifetime = batch.lifetime;
+	const owner = batch.owner;
 	const releases = batch.releases;
-	push(batch);
 	for (let i = batch.at; i >= 0; i -= 2) {
 		batch.at = i;
 		const kind = releases[i] as Release;
 		const value = releases[i + 1];
 		if (kind >= Release.Disconnect) {
-			releaseEngine(lifetime, kind, value);
+			releaseEngine(owner, kind, value);
 			continue;
 		}
 		batch.scoped = true;
@@ -449,141 +361,262 @@ function releaseBatch(batch: Batch): boolean {
 		else if (kind === Release.DestroyMethod) (value as Destroyable).destroy();
 		else (value as UpperDestroyable).Destroy();
 		batch.scoped = false;
-		if (closeScope()) {
-			pop(batch);
-			return true;
-		}
+		if (closeScope()) return true;
 	}
-	pop(batch);
 	return false;
 }
 
-/** The release at `batch.at` threw or yielded, and its worker is gone: finish what it left open and report it. */
-function failRelease(batch: Batch, result: CallResult, value: unknown) {
-	finishOpen({ frame: undefined, result, value, open: discard(batch.worker, false), after: undefined });
+/** The release at `batch.at` threw or yielded, and its worker is gone: report it and close its scope. */
+function failRelease(batch: Batch, value: unknown) {
 	const at = batch.at;
-	reportRelease(batch.lifetime, batch.releases[at] as Release, batch.releases[at + 1], value);
+	reportRelease(batch.owner, batch.releases[at] as Release, batch.releases[at + 1], value);
 	if (!batch.scoped) return;
 	batch.scoped = false;
 	if (closeScope()) drain();
 }
 
 /**
- * Releases `releases` from index `from` down, as their ended lifetime. Engine values before the first function or
+ * Releases `releases` from index `from` down, under their ended owner. Engine values before the first function or
  * `destroy()` release here. From there one worker runs the rest as a batch. A release that throws or yields loses
  * that worker: it is cancelled and reported, and the batch goes on from the next release on a fresh one. Each
  * release's requests still apply when it returns, before the next one runs.
  */
-function runReleases(lifetime: Lifetime, releases: readonly unknown[], from: number) {
+function runReleases(owner: Owner, releases: readonly unknown[], from: number) {
 	let batch: Batch | undefined;
 	let i = from;
 	while (i >= 0) {
 		const kind = releases[i] as Release;
 		if (kind >= Release.Disconnect) {
-			releaseEngine(lifetime, kind, releases[i + 1]);
+			releaseEngine(owner, kind, releases[i + 1]);
 			i -= 2;
 			continue;
 		}
-		if (batch === undefined) batch = { kind: FrameKind.Owning, lifetime, releases, at: i, scoped: false };
+		if (batch === undefined) batch = { owner, releases, at: i, scoped: false };
 		else batch.at = i;
-		const [result, value] = call(releaseBatch, batch, undefined, lifetime.owner);
-		if (result !== CallResult.Ok) failRelease(batch, result, value);
+		const [result, value] = call(releaseBatch, batch, undefined, owner.state, owner);
+		if (result !== CallResult.Ok) failRelease(batch, value);
 		else if (value === true) drain();
 		i = batch.at - 2;
 	}
 }
 
-/** Releases one value now, as its ended lifetime: a throw or a yield is reported and nobody is faulted. */
-function releaseValue(lifetime: Lifetime, kind: Release, value: unknown) {
-	if (kind >= Release.Disconnect) releaseEngine(lifetime, kind, value);
-	else runReleases(lifetime, [kind, value], 0);
+/** Releases one value now, under its ended owner: a throw or a yield is reported and nobody is faulted. */
+function releaseValue(owner: Owner, kind: Release, value: unknown) {
+	if (kind >= Release.Disconnect) releaseEngine(owner, kind, value);
+	else runReleases(owner, [kind, value], 0);
 }
 
-/** @internal */
-export function hold(lifetime: Lifetime, kind: Release, value: unknown) {
-	const releases = lifetime.releases;
+/** Arms a Run's cleanup on its Charm effect for the run now in progress, once. Charm clears it after it runs. */
+function arm(run: Owner) {
+	if (run.armed) return;
+	run.armed = true;
+	let release = run.finish;
+	if (release === undefined) {
+		release = () => finish(run);
+		run.finish = release;
+	}
+	const active = setActiveSub(run.node);
+	charmOnCleanup(release);
+	setActiveSub(active);
+}
+
+function hold(owner: Owner, kind: Release, value: unknown) {
+	let releases = owner.releases;
+	if (releases === undefined) {
+		releases = [];
+		owner.releases = releases;
+		if (owner.role === Role.Run) arm(owner);
+	}
 	const size = releases.size();
 	releases[size] = kind;
 	releases[size + 1] = value;
 }
 
+function register(owner: Owner | undefined, kind: Release, value: unknown) {
+	if (owner === undefined) error(NO_OWNER, 0);
+	if (isEnded(owner)) releaseValue(owner, kind, value);
+	else hold(owner, kind, value);
+}
+
+/**
+ * One run of a Crucible effect: its body on a worker, as its Run, in its own lifecycle scope, with what it returns
+ * held as the first release. Lifecycle requests the body makes apply after it returns and its cleanup is held.
+ */
+function runEffect(run: Owner) {
+	const body = run.body;
+	if (body === undefined) return;
+	run.node = getActiveSub()!;
+	run.ended = false;
+	openScope();
+	const [result, value] = call(body, undefined, undefined, run.state, run);
+	let failed = result !== CallResult.Ok;
+	let failure = value;
+	if (!failed && value !== undefined) {
+		if (typeIs(value, "function")) register(run, Release.Call, value);
+		else {
+			failed = true;
+			failure = `an effect returns nothing or a cleanup function; this one returned a ${typeOf(value)}`;
+		}
+	}
+	if (closeScope()) drain();
+	if (!failed) return;
+	if (!run.creating) error(failure, 0);
+	run.failure = failure;
+}
+
+/** A nested Run's Charm body, which maps its Charm effect to it on the first run. */
+function runNested(run: Owner) {
+	if (run.node === undefined) nestedRuns.set(getActiveSub()!, run);
+	runEffect(run);
+}
+
+/**
+ * Creates `run`'s Charm effect, whose first run happens now: linked into the running effect when `lifetime` is a Run,
+ * else a root that `lifetime` lists. A batch holds back the effects the first run's writes reach until Charm has
+ * returned the stop. A first run that fails ends the Run, its Charm effect included, and is rethrown, and an effect
+ * that throws as the batch closes is reported. After a first run that succeeds, such an effect's failure ends the Run
+ * and is rethrown.
+ */
+function create(run: Owner, lifetime: Owner) {
+	const nested = lifetime.role === Role.Run;
+	run.creating = true;
+	const active = setActiveSub(nested ? lifetime.node : undefined);
+	startBatch();
+	const [ok, stop] = pcall(charmEffect, nested ? () => runNested(run) : () => runEffect(run));
+	setActiveSub(active);
+	run.creating = undefined;
+	if (ok) {
+		if (nested) run.halt = stop;
+		else run.stop = stop;
+	}
+	const failure = ok ? run.failure : stop;
+	run.failure = undefined;
+	if (failure !== undefined) {
+		dispose(run);
+		settle("an effect's first run failed");
+		error(failure, 0);
+	}
+	// A root disposed by its own first run, before Charm returned the stop. A nested one can only end then with an
+	// ancestor, whose stop drops it.
+	if (run.body === undefined) run.stop?.();
+	const [flushed, err] = pcall(endBatch);
+	if (flushed) return;
+	dispose(run);
+	error(err, 0);
+}
+
+/**
+ * A new Run under `owner`, created now, or listed and created at boot's commit while boot is open. Inside a run it is
+ * created at once, as the run's child.
+ */
+function startEffect(owner: Owner, body: () => unknown): () => void {
+	const run: Owner = { role: Role.Run, node: undefined!, state: owner.state, ended: false, body };
+	if (owner.role === Role.Run) create(run, owner);
+	else {
+		adopt(owner, run);
+		if (pending !== undefined) pending.push(run);
+		else create(run, owner);
+	}
+	return () => dispose(run);
+}
+
 /**
  * @internal
- * Runs a lifetime's own body in a boundary, under `frame`, whose lifetime it is. While it runs, endings that reach
- * it wait; at completion `after` runs, then those endings.
+ * Boot opens: effects created from now on outside every run wait for `releaseEffects`. True when this call opened the
+ * hold, false when one was already open.
  */
-export function runBody<A>(frame: Frame, body: (arg: A) => unknown, arg: A, after: (completion: Completion) => void) {
-	const lifetime = frame.lifetime!;
-	bodies.push(lifetime);
-	boundary(lifetime.owner, frame, body, arg, completeBody, after);
+export function holdEffects(): boolean {
+	if (pending !== undefined) return false;
+	pending = [];
+	return true;
 }
 
-function settleBody(completion: Completion) {
-	finishOpen(completion);
-	completion.after!(completion);
+/**
+ * @internal
+ * Boot closes. On commit, the waiting effects that are still live start in creation order inside one Charm batch, so
+ * what their first runs write reaches other effects once. Each is checked as its turn comes, so one that an earlier
+ * first run ended is skipped, and `create` stops one that its own first run disposed. A first run that throws is
+ * reported with its owner and ends that effect, and the rest still start: a commit is never rolled back. On rollback
+ * each one ends without running. Idempotent.
+ */
+export function releaseEffects(commit: boolean) {
+	const waiting = pending;
+	pending = undefined;
+	if (waiting === undefined) return;
+	if (!commit) {
+		for (const run of waiting) dispose(run);
+		return;
+	}
+	startBatch();
+	for (const run of waiting) {
+		// Ending an entry, or the owner that lists it, unlists it.
+		const lifetime = run.parent;
+		if (lifetime === undefined) continue;
+		const [ok, err] = pcall(create, run, lifetime);
+		if (!ok)
+			runtimeDiagnostic(
+				"error",
+				`Crucible: an effect of ${ownerLabel(run.state)} failed at boot's commit: ${tostring(err)}`,
+			);
+	}
+	settle("boot committed");
 }
 
-function completeBody(completion: Completion) {
-	const lifetime = completion.frame!.lifetime!;
-	const index = bodies.indexOf(lifetime);
-	if (index >= 0) bodies.remove(index);
-	const [ok, err] = pcall(settleBody, completion);
-	const deferred = lifetime.deferred;
-	lifetime.deferred = undefined;
-	if (deferred !== undefined) for (const ending of deferred) finish(ending);
-	if (!ok) error(err, 0);
-}
+function noop() {}
 
 /** @internal */
-export function createScope(setup: () => void): () => void {
-	guardPure("create scopes");
-	const parent = resolveOwner();
-	if (parent?.ended) return () => {};
-	return startScope(parent, setup);
-}
-
-/** @internal A scope that only its dispose ends, whatever owner is current. */
-export function createRootScope(setup: () => void): () => void {
-	guardPure("create scopes");
-	return startScope(undefined, setup);
-}
-
-function startScope(parent: Lifetime | undefined, setup: () => void): () => void {
-	const scope = newLifetime(Role.Scope, parent, parent?.owner);
-	if (parent !== undefined) adopt(parent, scope);
-	let failed = false;
-	let failure: unknown;
-	runBody({ kind: FrameKind.Owning, lifetime: scope }, setup, undefined, (completion) => {
-		if (completion.result === CallResult.Ok) return;
-		failed = true;
-		failure = completion.value;
-		endLifetime(scope);
-	});
-	if (failed) error(failure, 0);
-	return () => endLifetime(scope);
-}
-
-/** `guardPure("register cleanups")` that returns the frame it read, so `register` does not read it again. */
-function cleanupFrame(): Frame | undefined {
-	const frame = top();
-	const pure = frame?.pure;
-	if (pure !== undefined) error(`${pure} must not register cleanups`, 0);
-	return frame;
-}
-
-function register(frame: Frame | undefined, kind: Release, value: unknown) {
-	const owner = ownerAt(frame);
+export function createEffect(body: () => unknown): () => void {
+	const owner = resolveOwner();
 	if (owner === undefined) error(NO_OWNER, 0);
-	if (owner.ended) releaseValue(owner, kind, value);
-	else hold(owner, kind, value);
+	if (isEnded(owner)) return noop;
+	return startEffect(owner, body);
+}
+
+/**
+ * @internal
+ * The baseline is read now, untracked, as the owner: its source runs as the owner on every run too, whoever wrote.
+ */
+export function createWatch<T>(source: () => T, onChange: (value: T, previous: T) => void): () => void {
+	const owner = resolveOwner();
+	if (owner === undefined) error(NO_OWNER, 0);
+	const active = getActiveSub();
+	const [result, baseline] = call(peek, source, undefined, owner.state, owner);
+	// A source that throws or yields leaves its worker before `peek` restores the running effect's tracking.
+	setActiveSub(active);
+	if (result !== CallResult.Ok) error(baseline, 0);
+	if (isEnded(owner)) return noop;
+	let previous = baseline as T;
+	return startEffect(owner, () => {
+		const value = source();
+		// A source that disposed its own watch ends it before onChange.
+		if ((running()[1] as Owner).body === undefined || rawequal(value, previous)) return;
+		const before = previous;
+		previous = value;
+		untracked(onChange, value, before);
+	});
+}
+
+/** @internal Lifecycle requests the setup makes apply after it returns, and after a failed setup's releases. */
+export function createScope(setup: () => void): () => void {
+	const parent = resolveOwner();
+	if (parent !== undefined && isEnded(parent)) return noop;
+	const scope = scopeOwner(Role.Scope, parent, parent?.state);
+	const active = setActiveSub(scope.node);
+	openScope();
+	const [result, value] = call(setup, undefined, undefined, scope.state, scope);
+	setActiveSub(active);
+	if (result !== CallResult.Ok) dispose(scope);
+	if (closeScope()) drain();
+	if (result !== CallResult.Ok) error(value, 0);
+	return () => dispose(scope);
 }
 
 /** @internal */
 export function registerCleanup(release: () => void) {
-	const frame = cleanupFrame();
+	const owner = resolveOwner();
 	// A nil from untyped Luau would shift every pair after it, so it is dropped.
 	if (release === undefined) return;
-	register(frame, Release.Call, release);
+	register(owner, Release.Call, release);
 }
 
 const NOT_OWNABLE =
@@ -604,6 +637,6 @@ function classify(value: unknown): Release {
 
 /** @internal */
 export function registerOwned(value: unknown) {
-	const frame = cleanupFrame();
-	register(frame, classify(value), value);
+	const owner = resolveOwner();
+	register(owner, classify(value), value);
 }

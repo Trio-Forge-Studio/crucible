@@ -7,15 +7,29 @@ local networkPort = require("./network-port")
 type Node = { path: string, Parent: Node }
 
 local ROOT = "packages/crucible/out"
--- Where `TS.getModule` finds a package, such as @rbxts/vide for the vide subpath. Its modules see a `game` with
--- only the services Vide reads, Lune's `Instance`, `Enum` and `Color3`, and a `require` that takes a child node or a
--- `./` path.
+-- Where `TS.getModule` finds a package, such as @rbxts/charm. Its modules see a `game` with only the services Charm
+-- reads, Lune's `Instance`, `Enum` and `Color3`, and a `require` that takes a child node, a `./` path or an
+-- `@self/` path.
 local PACKAGES = "packages/crucible/node_modules"
 
 local nodes: { [string]: Node } = {}
 
 -- The bytecode optimization level for modules loaded after `spec.optimize` sets it. Unset, Lune's default applies.
 local optimization: number? = nil
+
+-- Changes each module's source as it loads, after `spec.rewrite` sets it, such as a changed copy of Charm.
+local rewrite: ((path: string, source: string) -> string)? = nil
+
+-- Every Luau file of the runtime and Charm, read before `spec.readAhead(true)` returns. Lune's fs calls yield, and a
+-- yield inside a strict Charm batch or effect is an error, so while it is set, modules load from it alone.
+local sources: { [string]: string }? = nil
+
+local function isFile(path: string): boolean
+	if sources then
+		return sources[path] ~= nil
+	end
+	return fs.isFile(path)
+end
 
 local function node(path: string): Node
 	local existing = nodes[path]
@@ -38,9 +52,9 @@ local function node(path: string): Node
 end
 
 local function fileOf(path: string): string
-	if fs.isFile(path .. ".luau") then
+	if isFile(path .. ".luau") then
 		return path .. ".luau"
-	elseif fs.isFile(path .. "/init.luau") then
+	elseif isFile(path .. "/init.luau") then
 		return path .. "/init.luau"
 	end
 	error(`no compiled module at {path}; run the package build first`)
@@ -77,15 +91,10 @@ local function Promise()
 	return promise
 end
 
--- Vide connects to RunService.Heartbeat and lists ReflectionService's classes when it loads.
+-- Charm asks RunService whether it runs in Studio, which turns on its strict and frozen flags. Specs set them.
 local PACKAGE_SERVICE = {
-	Heartbeat = {
-		Connect = function()
-			return { Disconnect = function() end }
-		end,
-	},
-	GetClasses = function()
-		return {}
+	IsStudio = function()
+		return false
 	end,
 }
 local PACKAGE_GAME = {
@@ -96,7 +105,8 @@ local PACKAGE_GAME = {
 
 -- One isolated module graph. Module-level state (the reconciler, the worker pool) is per graph, so each test
 -- that builds a runtime starts clean. Each graph gets its own network port: the given one, or the default fake.
-local function graph(defaults, loggingPort, configPort, network, dataPort)
+local function graph(defaults, loggingPort, configPort, network, dataPort, root: string?)
+	local folder = root or ROOT
 	network = network or networkPort()
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
@@ -136,6 +146,10 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 				env.Color3 = roblox.Color3
 				env.require = function(target: Node | string)
 					if type(target) == "string" then
+						local child = string.match(target, "^@self/(.+)$")
+						if child then
+							return load(`{path}/{child}`)
+						end
 						local relative =
 							assert(string.match(target, "^%./(.+)$"), `unsupported require {target} from {path}`)
 						return load(`{node(path).Parent.path}/{relative}`)
@@ -143,7 +157,11 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 					return load(target.path)
 				end
 			end
-			local source = fs.readFile(fileOf(path))
+			local file = fileOf(path)
+			local source = if sources then sources[file] else fs.readFile(file)
+			if rewrite then
+				source = rewrite(path, source)
+			end
 			if optimization then
 				source = luau.compile(source, { optimizationLevel = optimization })
 			end
@@ -168,7 +186,7 @@ local function graph(defaults, loggingPort, configPort, network, dataPort)
 	return {
 		network = network,
 		module = function(relative: string, globals: { [string]: any }?): any
-			return load(if relative == "" then ROOT else ROOT .. "/" .. relative, globals)
+			return load(if relative == "" then folder else folder .. "/" .. relative, globals)
 		end,
 		-- A module of an installed package, the same instance the runtime's imports of it get.
 		package = function(relative: string): any
@@ -185,6 +203,34 @@ function spec.optimize(level: number)
 	optimization = level
 end
 
+function spec.rewrite(transform: ((path: string, source: string) -> string)?)
+	rewrite = transform
+end
+
+local function readTree(folder: string, into: { [string]: string })
+	for _, name in fs.readDir(folder) do
+		local path = `{folder}/{name}`
+		if fs.isDir(path) then
+			readTree(path, into)
+		elseif string.match(name, "%.luau$") then
+			into[path] = fs.readFile(path)
+		end
+	end
+end
+
+-- On, reads the runtime and Charm now and loads every later module from memory, so a spec can load the runtime where
+-- a yield is an error. Off, loads from disk again.
+function spec.readAhead(on: boolean)
+	if not on then
+		sources = nil
+		return
+	end
+	local read = {}
+	readTree(ROOT, read)
+	readTree(`{PACKAGES}/@rbxts/charm/src`, read)
+	sources = read
+end
+
 -- Loads `packages/crucible/out/<relative>` once per process.
 function spec.module(relative: string, globals: { [string]: any }?): any
 	return shared.module(relative, globals)
@@ -199,6 +245,11 @@ end
 -- A fresh graph to load several modules that must share state, such as lifecycle and its runner.
 function spec.runtime(defaults, loggingPort, configPort, network, dataPort)
 	return graph(defaults, loggingPort, configPort, network, dataPort)
+end
+
+-- A fresh graph of the compiled runtime in `root` instead of packages/crucible/out, such as another commit's build.
+function spec.runtimeAt(root: string, defaults, loggingPort)
+	return graph(defaults, loggingPort, nil, nil, nil, root)
 end
 
 spec.Promise = Promise

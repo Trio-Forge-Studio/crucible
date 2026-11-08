@@ -142,7 +142,7 @@ return {
 		local s = w.server
 		spec.eq(s.api.syncStatus(s.d.Spare), "pending", "server: pending with no publication")
 		spec.eq(s.api.syncStatus(s.d.Score), "ready", "server: ready while published")
-		w.score:set(4)
+		w.score(4)
 		spec.eq(s.d.Score(), 4, "server: the authoritative value, including a write a moment ago")
 		rejects(
 			function()
@@ -165,7 +165,7 @@ return {
 		spec.eq(before, 0, "client: initial before the snapshot")
 		spec.eq(ann.d.Score(), 4, "client: the last frame applied")
 		w.owned.Ann = { coins = 3 }
-		w.score:set(5)
+		w.score(5)
 		local statuses = {}
 		ann.api.scope(function()
 			ann.api.effect(function()
@@ -205,7 +205,7 @@ return {
 				world.door = Door
 			end,
 		})
-		w.score:set(2)
+		w.score(2)
 		spec.eq(w.server.d.Score(), 2, "a helper the constructor calls publishes")
 		local message = "publish runs while a server Subsystem is constructed; make it a field initializer"
 		spec.has(placements.awake, message, "awake")
@@ -287,7 +287,7 @@ return {
 			}
 		do
 			local err = rejects(function()
-				case[1]:set(case[2])
+				case[1](case[2])
 			end, case[3], case[3])
 			if type(case[2]) == "string" then
 				spec.eq(string.find(err, case[2], 1, true), nil, "the value is never in the message")
@@ -302,7 +302,7 @@ return {
 		spec.eq(table.isfrozen(s.d.Profile()), true, "the declared initial is frozen")
 		local settings = { music = false, volume = 0.5 }
 		local value = { coins = 2, settings = settings, tags = { "a" } }
-		w.profile:set(value)
+		w.profile(value)
 		spec.eq(rawequal(s.d.Profile(), value), true, "a conforming table is kept by identity")
 		spec.eq(
 			table.isfrozen(value) and table.isfrozen(settings) and table.isfrozen(value.tags),
@@ -320,11 +320,11 @@ return {
 			end)
 		end)
 		w.link:flush()
-		w.profile:set(value)
+		w.profile(value)
 		w.link:flush()
 		spec.eq(runs, 1, "admitting an admitted value returns it unchanged")
 		local extra = { coins = 3, settings = settings, tags = value.tags, legacy = { [1] = 1, [3] = 3 } }
-		w.profile:set(extra)
+		w.profile(extra)
 		local stored = s.d.Profile()
 		spec.eq(rawequal(stored, extra), false, "a table with an undeclared key is replaced")
 		spec.eq(stored.legacy, nil, "by one holding exactly its declared fields")
@@ -332,10 +332,10 @@ return {
 		spec.eq(table.isfrozen(stored), true, "frozen")
 		spec.eq(table.isfrozen(extra), false, "the caller's table with the undeclared key is untouched")
 		local nested = { coins = 3, settings = { music = true, volume = 1, secret = "hidden" }, tags = value.tags }
-		w.profile:set(nested)
+		w.profile(nested)
 		spec.eq(s.d.Profile().settings.secret, nil, "an undeclared key below the root is dropped too")
 		spec.eq(rawequal(s.d.Profile(), nested), false, "so the parent holding the copied subtree is copied")
-		w.profile:update(function(current)
+		w.profile(function(current)
 			return { coins = current.coins + 1, settings = current.settings, tags = { "b" } }
 		end)
 		spec.eq(table.isfrozen(s.d.Profile().tags), true, "update's result is frozen")
@@ -354,7 +354,7 @@ return {
 		spec.eq(next(w.owner), nil, "holding nothing")
 		spec.eq(table.isfrozen(w.owner), true, "frozen")
 		spec.eq(getmetatable(w.owner), nil, "not callable")
-		w.score:set(8)
+		w.score(8)
 		spec.eq(w.score(), 8, "the State reads the same node")
 		spec.eq(w.server.d.Score(), 8, "as every server reader")
 		w:finish()
@@ -369,7 +369,7 @@ return {
 		local frames = w:frames(ann)
 		spec.eq(frames[#frames].frame.kind, "failed", "a failed frame")
 		spec.eq(ann.api.syncStatus(ann.d.Score), "failed", "the client fails every status")
-		w.score:set(4)
+		w.score(4)
 		w:heartbeat()
 		spec.eq(#w:frames(ann), #frames, "nothing after it")
 		w:finish()
@@ -390,7 +390,7 @@ return {
 			serve = function(s, d, world)
 				s.service("JobService", function()
 					world.score = s.entry.publish(d.Score)
-					world.score:set(5)
+					world.score(5)
 					world.profile = s.entry.publish(d.Profile)
 				end)
 				s.service("Broken", function()

@@ -136,10 +136,14 @@ fn the_runtime_lowers_to_one_module_per_source_file() {
     expected.sort();
     paths.sort();
     assert_eq!(paths, expected);
-    let vide = &modules.iter().find(|m| m.path == "vide/init.luau").expect("the vide entry is emitted").source;
+    let ownership = &modules
+        .iter()
+        .find(|m| m.path == "internal/reactive/ownership.luau")
+        .expect("the ownership module is emitted")
+        .source;
     assert!(
-        vide.contains("local _0 = TS.import(script, TS.getModule(script, \"@rbxts\", \"vide\").src)"),
-        "an installed package is found with TS.getModule, as roblox-ts emits it:\n{vide}"
+        ownership.contains("local _0 = TS.import(script, TS.getModule(script, \"@rbxts\", \"charm\").src)"),
+        "an installed package is found with TS.getModule, as roblox-ts emits it:\n{ownership}"
     );
 }
 

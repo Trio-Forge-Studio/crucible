@@ -1,15 +1,8 @@
 import { Subsystem } from "../../subsystem";
 import { readClaim } from "../construction-claim";
 import { isLive, stateOf } from "../lifecycle";
-import {
-	createComputedNode,
-	createStateNode,
-	guardPure,
-	readComputed,
-	readState,
-	write,
-	type StateNode,
-} from "../reactive/graph";
+import { atom, computed, startBatch } from "@rbxts/charm";
+import { peek, settle } from "../reactive/store";
 import { define, type ClassRecord, type TypeId } from "../registry";
 import { Kind, type ObjectState } from "../state";
 import { claimPublication } from "../sync/declarations";
@@ -85,9 +78,9 @@ function varuintSize(value: number): number {
 
 /** A player's slot: one state holding the admitted value while writable, else undefined (rule 9). */
 class Slot implements HandleSource {
-	readonly node: StateNode = createStateNode(undefined);
+	readonly node = atom<object | undefined>(undefined);
 	/** Whether the node holds a value, cut off so a data write never reruns a reader of `loaded` (rule 9). */
-	readonly live = createComputedNode(() => readState(this.node) !== undefined);
+	readonly live = computed(() => this.node() !== undefined);
 	readonly client = false;
 	readonly name: string;
 	readonly root: object;
@@ -101,7 +94,7 @@ class Slot implements HandleSource {
 	}
 
 	read(path: readonly Segment[]) {
-		return getPath(readState(this.node) ?? this.binding.declaration.schema.defaults, path);
+		return getPath(this.node() ?? this.binding.declaration.schema.defaults, path);
 	}
 
 	beforeRead() {
@@ -132,7 +125,7 @@ function inertSource(binding: ProfileBinding): HandleSource {
 /** One profile store's server side: slots, the gate, claims and the owner's views (rules 6, 9 to 12, 115 to 127). */
 class ProfileBinding {
 	readonly slots = new Map<Player, Slot>();
-	readonly playersNode = createStateNode(table.freeze(new Array<Player>()));
+	readonly playersNode = atom<readonly Player[]>(table.freeze(new Array<Player>()));
 	readonly claims = new Array<Claim>();
 	/** The players whose own claims are running now, and which kind (rule 123). */
 	readonly claiming = new Map<Player, string>();
@@ -157,12 +150,11 @@ class ProfileBinding {
 		return this.slot(player)?.root ?? rootHandle(inertSource(this), this.declaration.persist);
 	}
 
-	/** Rule 13's checks, then RX 7's: inside a computed a handle write is a state write. */
+	/** Rule 13's checks. */
 	guard(session: Session | undefined) {
 		session?.assertIdle();
 		assertOutsideCallback();
 		if (insideDataCallback()) error("a write inside a data callback; return the data instead", 0);
-		guardPure("write state");
 	}
 
 	/** Rule 12: the one gate. Before activation there is no session, so a write returns false. */
@@ -182,31 +174,38 @@ class ProfileBinding {
 			);
 	}
 
-	/** The engine's slot hook: every committed value, a load's publish and a seal's undefined (rule 9). */
+	/**
+	 * The engine's slot hook: every committed value, a load's publish and a seal's undefined (rule 9). Its readers run
+	 * after the engine's bookkeeping, and one that throws is reported.
+	 */
 	publish(player: Player, value: object | undefined) {
 		const slot = value === undefined ? this.slots.get(player) : this.slot(player);
 		if (slot === undefined) return;
-		const before = slot.node.value !== undefined;
-		write(slot.node, value);
+		startBatch();
+		const before = peek(slot.node) !== undefined;
+		slot.node(value);
 		if (before !== (value !== undefined)) this.refreshPlayers();
+		settle(`${this.declaration.name} changed`);
 	}
 
 	refreshPlayers() {
-		write(this.playersNode, table.freeze([...(this.runtime?.players() ?? [])]));
+		this.playersNode(table.freeze([...(this.runtime?.players() ?? [])]));
 	}
 
 	/** Rule 9: the node is written undefined first, so readers settle, then the slot is forgotten. */
 	drop(player: Player) {
 		const slot = this.slots.get(player);
 		if (slot === undefined) return;
-		write(slot.node, undefined);
+		startBatch();
+		slot.node(undefined);
 		this.slots.delete(player);
 		this.refreshPlayers();
+		settle(`${this.declaration.name} dropped a player`);
 	}
 
 	loaded(player: Player): boolean {
 		const slot = this.slot(player);
-		if (slot === undefined || readComputed(slot.live) !== true) return false;
+		if (slot === undefined || slot.live() !== true) return false;
 		return this.runtime?.writable(player) === true;
 	}
 
@@ -430,7 +429,7 @@ function member(declaration: ProfileDeclaration, key: string): unknown {
 		case "loaded":
 			return (_: unknown, who?: Player) => binding.loaded(player(name, "loaded", who));
 		case "players":
-			return () => readState(binding.playersNode);
+			return () => binding.playersNode();
 		case "await":
 			return (_: unknown, who?: Player) => {
 				const target = player(name, "await", who);
@@ -557,12 +556,12 @@ function construct() {
 		);
 		claimPublication(declaration.live, (who: Player) => {
 			const slot = binding.slot(who);
-			return slot !== undefined && readComputed(slot.live) === true;
+			return slot !== undefined && slot.live() === true;
 		});
 		for (const field of declaration.fields)
 			claimPublication(field.handle, (who: Player) => {
 				const slot = binding.slot(who);
-				const value = slot === undefined ? undefined : readState(slot.node);
+				const value = slot === undefined ? undefined : slot.node();
 				return value === undefined ? undefined : (value as Record<string, unknown>)[field.name];
 			});
 	}

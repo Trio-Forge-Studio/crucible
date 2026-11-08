@@ -129,7 +129,7 @@ const mutants = [
 	[
 		"sample total publication deleted",
 		"examples/sample-game/src/server/systems/wallet.ts",
-		"this.total.set(sum);",
+		"this.total(sum);",
 		"",
 		lune,
 	],
@@ -143,8 +143,8 @@ const mutants = [
 	[
 		"sample config multiplier ignored",
 		"examples/sample-game/src/server/systems/wallet.ts",
-		"const multiplier = live ? event.multiplier : 1;",
-		"const multiplier = 1;",
+		"return live ? event.multiplier : 1;",
+		"return 1;",
 		lune,
 	],
 	[

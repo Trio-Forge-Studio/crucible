@@ -1,4 +1,5 @@
-import { effect, Logging, receive, state, Subsystem } from "@trioforge/crucible";
+import { atom } from "@rbxts/charm";
+import { effect, Logging, receive, Subsystem } from "@trioforge/crucible";
 import { Network } from "@trioforge/crucible/client";
 import { Collect, Collected } from "../../shared/messages";
 import { PlayerData } from "../../shared/profile";
@@ -9,10 +10,10 @@ const Players = game.GetService("Players");
 const UserInputService = game.GetService("UserInputService");
 
 export class Hud extends Subsystem {
-	private readonly lastGain = state(0);
+	private readonly lastGain = atom(0);
 
 	private readonly collected = receive(Collected, ({ gained }) => {
-		this.lastGain.set(gained);
+		this.lastGain(gained);
 	});
 
 	protected override start() {

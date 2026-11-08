@@ -2,7 +2,8 @@ import { readClaim } from "../construction-claim";
 import { compile } from "../network/codec";
 import { MESSAGE_NAME_MAX_BYTES } from "../network/limits";
 import { assertDescriptor, type Node } from "../network/schema";
-import { createStateNode, guardPure, readState, readUntracked, write, type StateNode } from "../reactive/graph";
+import { atom, untracked, type Atom } from "@rbxts/charm";
+import { peek, store, type Write } from "../reactive/store";
 import { MAX_REPLICATED_DECLARATIONS } from "../reactive/limits";
 import type { ClassRecord } from "../registry";
 import { Kind, type ObjectState } from "../state";
@@ -29,8 +30,10 @@ export interface Declaration {
 	/** `initial`, admitted at declaration. Rollback restores it. */
 	readonly initial: unknown;
 	/** The value every reader goes through: the server's authoritative value, or the client's last applied one. */
-	readonly node: StateNode;
-	readonly status: StateNode;
+	readonly node: Atom<unknown>;
+	readonly status: Atom<Status>;
+	/** Moves on every write that changes `node`, so a sync view knows what it last sent. */
+	version: number;
 	publication?: Publication;
 }
 
@@ -39,6 +42,7 @@ const handles = setmetatable(new Map<unknown, Declaration>(), { __mode: "k" });
 let ordered = new Array<Declaration>();
 let sealed = false;
 let onRetired: (declaration: Declaration) => void = () => {};
+let onChanged: () => void = () => {};
 
 function onServer(): boolean {
 	return game.GetService("RunService").IsServer();
@@ -83,16 +87,17 @@ function register(audience: Audience, name: string, initial: unknown, descriptor
 		audience,
 		plan,
 		initial: admitted,
-		node: createStateNode(admitted),
-		status: createStateNode("pending"),
+		node: atom(admitted),
+		status: atom<Status>("pending"),
+		version: 0,
 	};
 	byName.set(name, declaration);
 	ordered.push(declaration);
 	ordered.sort((a, b) => a.name < b.name);
 	const handle =
 		audience === "all"
-			? () => readState(declaration.node)
-			: () => (onServer() ? perPlayer(declaration) : readState(declaration.node));
+			? () => declaration.node()
+			: () => (onServer() ? perPlayer(declaration) : declaration.node());
 	handles.set(handle, declaration);
 	return handle;
 }
@@ -133,11 +138,11 @@ export function declarations(): readonly Declaration[] {
 	return ordered;
 }
 
-/** @internal `syncStatus` (rule 45): a tracked read of the status node. */
+/** @internal `syncStatus` (rule 45): a tracked read of the status atom. */
 export function statusOf(handle: unknown): Status {
 	const declaration = declarationOf(handle) ?? error("syncStatus takes a replicated declaration", 0);
 	if (declaration.audience === "player" && onServer()) perPlayer(declaration);
-	return readState(declaration.status) as Status;
+	return declaration.status();
 }
 
 /** @internal ServerSync registers how a retirement reaches every peer (rule 52). */
@@ -145,10 +150,29 @@ export function useRetired(listener: (declaration: Declaration) => void) {
 	onRetired = listener;
 }
 
+/** @internal ServerSync registers how a changed public value reaches its Heartbeat. */
+export function useChanged(listener: () => void) {
+	onChanged = listener;
+}
+
+/** Stores a value in `node`, moving the version when it changes. Writes `store` makes are batched by the caller. */
+function assign(declaration: Declaration, value: unknown) {
+	if (rawequal(peek(declaration.node), value)) return;
+	declaration.version += 1;
+	onChanged();
+	declaration.node(value);
+}
+
+/** @internal A write the client applies or a rollback makes, as a pair for `store`. */
+export function assignment(declaration: Declaration, value: unknown): Write {
+	if (!rawequal(peek(declaration.node), value)) declaration.version += 1;
+	return [declaration.node, value];
+}
+
 function retire(declaration: Declaration, publication: Publication) {
 	if (!publication.live) return;
 	publication.live = false;
-	if (declaration.audience === "all") write(declaration.status, "failed");
+	if (declaration.audience === "all") store([[declaration.status, "failed"]], `${declaration.name} was retired`);
 	onRetired(declaration);
 }
 
@@ -156,32 +180,25 @@ function ended(declaration: Declaration, publication: Publication): never {
 	error(`${declaration.name}'s publisher ${publication.label} has ended`, 0);
 }
 
-interface PublishedState {
-	readonly declaration: Declaration;
-	readonly publication: Publication;
+/**
+ * The write side `publish` returns, shaped as a Charm atom: no argument reads, a function is called untracked with the
+ * current value, and anything else is the value. A rest parameter cannot tell `h()` from `h(undefined)`, so writing
+ * `undefined` takes the function form.
+ */
+function published(declaration: Declaration, publication: Publication) {
+	return (...args: unknown[]): unknown => {
+		if (args.size() === 0) return declaration.node();
+		if (!publication.live) ended(declaration, publication);
+		let value = args[0];
+		if (typeIs(value, "function")) {
+			value = untracked(value as (current: unknown) => unknown, peek(declaration.node));
+			if (!publication.live) ended(declaration, publication);
+		}
+		const admitted = admit(declaration.plan, declaration.name, value);
+		assign(declaration, admitted);
+		return admitted;
+	};
 }
-
-const publishedMethods = {
-	set(this: PublishedState, value: unknown) {
-		guardPure("write state");
-		const { declaration, publication } = this;
-		if (!publication.live) ended(declaration, publication);
-		write(declaration.node, admit(declaration.plan, declaration.name, value));
-	},
-	update(this: PublishedState, change: (current: unknown) => unknown) {
-		guardPure("write state");
-		const { declaration, publication } = this;
-		if (!publication.live) ended(declaration, publication);
-		const changed = readUntracked(() => change(declaration.node.value), "update's callback");
-		if (!publication.live) ended(declaration, publication);
-		write(declaration.node, admit(declaration.plan, declaration.name, changed));
-	},
-};
-
-const publishedMeta: LuaMetatable<PublishedState> = {
-	__index: publishedMethods as never,
-	__call: (handle) => readState(handle.declaration.node),
-};
 
 /** @internal `publish`'s runtime half (rules 47 to 50). */
 export function claimPublication(target: unknown, project?: (player: Player) => unknown): unknown {
@@ -210,8 +227,8 @@ export function claimPublication(target: unknown, project?: (player: Player) => 
 	if (owner.subscriptions === undefined) owner.subscriptions = [];
 	owner.subscriptions.push(() => retire(declaration, publication));
 	if (declaration.audience === "player") return table.freeze({});
-	write(declaration.status, "ready");
-	return setmetatable({ declaration, publication }, publishedMeta);
+	store([[declaration.status, "ready"]], `${declaration.name} was published`);
+	return published(declaration, publication);
 }
 
 /** @internal The server's registry seals with the catalog; the client's at its network commit (rule 41). */
@@ -225,12 +242,14 @@ export function sealDeclarations() {
  * "pending", and unseal. Declarations stay registered, because their modules stay cached.
  */
 export function rollbackDeclarations() {
+	const writes = new Array<Write>();
 	for (const declaration of ordered) {
 		const publication = declaration.publication;
 		if (publication !== undefined) publication.live = false;
 		declaration.publication = undefined;
-		write(declaration.node, declaration.initial);
-		write(declaration.status, "pending");
+		writes.push(assignment(declaration, declaration.initial));
+		writes.push([declaration.status, "pending"]);
 	}
+	store(writes, "replicated state rolled back");
 	sealed = false;
 }

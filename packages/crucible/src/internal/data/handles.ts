@@ -1,5 +1,5 @@
+import { computed } from "@rbxts/charm";
 import type { Node } from "../network/schema";
-import { createComputedNode, readComputed, type ComputedNode } from "../reactive/graph";
 import { childNode, describePath, getPath, luaKey, setPath, tableBranch, type Segment } from "./paths";
 
 /**
@@ -30,7 +30,8 @@ interface HandleNode {
 	readonly fields: Map<Segment, object>;
 	/** Map-entry and array-element children, weak-valued: their keys are unbounded. */
 	readonly entries: Map<Segment, object>;
-	read?: ComputedNode;
+	/** A Charm computed of the value at the path, made at the first read. */
+	read?: () => unknown;
 }
 
 /** The node lives in each handle's own metatable: Luau's weak keys are not ephemerons, so no shared table maps them. */
@@ -171,11 +172,13 @@ const handleCall = (handle: object, ...args: unknown[]) => {
 			2,
 		);
 	source.beforeRead();
-	if (node.read === undefined) {
+	let read = node.read;
+	if (read === undefined) {
 		const path = node.path;
-		node.read = createComputedNode(() => source.read(path));
+		read = computed(() => source.read(path));
+		node.read = read;
 	}
-	return readComputed(node.read);
+	return read();
 };
 
 const handleIndex = (handle: object, key: unknown) => {

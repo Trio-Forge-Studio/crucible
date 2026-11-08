@@ -71,12 +71,17 @@ return function(client: boolean?)
 	local realm = {}
 	local loaded = {}
 	local load
-	-- A package such as Vide requires its siblings by `./name`.
+	-- A package such as Vide requires its siblings by `./name`, and Charm its children by `@self/name`.
 	local function requireFrom(script)
 		return function(target)
 			if type(target) == "string" then
-				local name = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
-				target = assert(script.Parent:FindFirstChild(name), `{script:GetFullName()} has no sibling {name}`)
+				local child = string.match(target, "^@self/(.+)$")
+				if child then
+					target = assert(script:FindFirstChild(child), `{script:GetFullName()} has no child {child}`)
+				else
+					local name = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
+					target = assert(script.Parent:FindFirstChild(name), `{script:GetFullName()} has no sibling {name}`)
+				end
 			end
 			return load(target)
 		end

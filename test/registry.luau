@@ -396,7 +396,7 @@ tests["emitted t calls use dot properties for literal optional and mixed union"]
 	spec.eq(t.boolean(false), true, "boolean")
 end
 
-tests["start yields then observes with its owner while task.spawn remains ownerless"] = function()
+tests["start yields then observes with its owner, and a thread spawned in a hook is owned until it yields"] = function()
 	local task = require("@lune/task")
 	local w = world()
 	local set = w.emit.resolveAll("I")
@@ -429,7 +429,7 @@ tests["start yields then observes with its owner while task.spawn remains ownerl
 	w.life.request(owner, 2)
 	set:join({})
 	spec.eq(owned, 2, "owned observer disconnected")
-	spec.eq(spawned, 3, "spawned observer retained")
+	spec.eq(spawned, 2, "the spawned observer was the hook's, so it ended with the object")
 end
 
 tests["observe from a start that already destroyed its own object leaves no live subscription"] = function()

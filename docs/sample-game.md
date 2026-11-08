@@ -73,7 +73,8 @@ export const GlobalEvent = config<EventConfig>("GlobalEvent", NO_EVENT);
 `src/server/systems/wallet.ts`
 
 ```ts
-import { effect, Logging, receive, state, Subsystem } from "@trioforge/crucible";
+import { computed } from "@rbxts/charm";
+import { effect, Logging, receive, Subsystem } from "@trioforge/crucible";
 import { Network, publish } from "@trioforge/crucible/server";
 import { Collect, Collected } from "../../shared/messages";
 import { PlayerData } from "../../shared/profile";
@@ -85,7 +86,11 @@ const log = Logging.getLogger("Sample.Wallet");
 
 export class Wallet extends Subsystem {
 	private readonly total = publish(TotalCoins);
-	private readonly multiplier = state(1);
+	private readonly multiplier = computed(() => {
+		const event = GlobalEvent();
+		const live = event.endsAt === 0 || event.endsAt > os.time();
+		return live ? event.multiplier : 1;
+	});
 
 	private readonly collect = receive(Collect, (player, { size }) => {
 		if (size < 1 || size > MAX_PICKUP) return;
@@ -99,16 +104,13 @@ export class Wallet extends Subsystem {
 
 	protected override awake() {
 		effect(() => {
-			const event = GlobalEvent();
-			const live = event.endsAt === 0 || event.endsAt > os.time();
-			const multiplier = live ? event.multiplier : 1;
-			this.multiplier.set(multiplier);
+			const multiplier = this.multiplier();
 			log.info("coin multiplier {multiplier}", { multiplier });
 		});
 		effect(() => {
 			let sum = 0;
 			for (const player of PlayerData.players()) sum += PlayerData(player).coins();
-			this.total.set(sum);
+			this.total(sum);
 		});
 	}
 }
@@ -116,7 +118,7 @@ export class Wallet extends Subsystem {
 
 - The `u8` payload type bounds a pickup to 0 to 255 on the wire. The guard narrows it to 1 to 5, because the client chose the number.
 - A write returns `false` while the profile is not writable, so a press that arrives before the profile loads pays nothing and is not counted.
-- The config effect reruns when `refreshConfigs` applies a new value. A press after the refresh pays the new multiplier.
+- The multiplier is a Charm `computed` of the config, read by calling it. It is derived, so no effect writes it. The first effect only logs it, and reruns when `refreshConfigs` applies a value that changes it. A press after the refresh pays the new multiplier.
 - The total effect reads every online profile, so it reruns when any of them changes. `PlayerData.players()` lists only players whose profile is writable.
 
 ## Show it on the client
@@ -124,7 +126,8 @@ export class Wallet extends Subsystem {
 `src/client/systems/hud.ts`
 
 ```ts
-import { effect, Logging, receive, state, Subsystem } from "@trioforge/crucible";
+import { atom } from "@rbxts/charm";
+import { effect, Logging, receive, Subsystem } from "@trioforge/crucible";
 import { Network } from "@trioforge/crucible/client";
 import { Collect, Collected } from "../../shared/messages";
 import { PlayerData } from "../../shared/profile";
@@ -135,10 +138,10 @@ const Players = game.GetService("Players");
 const UserInputService = game.GetService("UserInputService");
 
 export class Hud extends Subsystem {
-	private readonly lastGain = state(0);
+	private readonly lastGain = atom(0);
 
 	private readonly collected = receive(Collected, ({ gained }) => {
-		this.lastGain.set(gained);
+		this.lastGain(gained);
 	});
 
 	protected override start() {
@@ -163,7 +166,9 @@ export class Hud extends Subsystem {
 }
 ```
 
-`PlayerData()` on the client is read-only and holds only the public fields. The screen builds in `start`, which may yield, because `awake` must not.
+- `PlayerData()` on the client is read-only and holds only the public fields.
+- The last gain is a Charm atom, read by calling it and written by calling it with the new value.
+- The screen builds in `start`, which may yield, because `awake` must not.
 
 ## Run it
 

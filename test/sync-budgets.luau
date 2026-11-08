@@ -55,7 +55,7 @@ local function projected(descriptor)
 			}
 		end,
 		serve = function(s, d, w)
-			w.wanted = s.api.state(function()
+			w.wanted = s.charm.atom(function()
 				return nil
 			end)
 			w.pulls = {}
@@ -71,7 +71,9 @@ local function projected(descriptor)
 end
 
 local function want(w, project)
-	w.wanted:set(project)
+	w.wanted(function()
+		return project
+	end)
 end
 
 -- A record of three 49,152-byte strings and a counter: about 147,500 bytes per frame.
@@ -110,7 +112,7 @@ local function byteLimitWorld(extra: number)
 			return { View = r.emit.replicatedPerPlayer("Data.View", nil, n.union({ n["nil"], record })) }
 		end,
 		serve = function(s, d, world)
-			world.count = s.api.state(0)
+			world.count = s.charm.atom(0)
 			s.service("ViewService", function()
 				s.entry.publish(d.View, function(player)
 					local tail = FRAME_TAIL + (if player.Name == "P8" then extra else 0)
@@ -159,7 +161,7 @@ local function admitRows(rows: number, absent: number)
 		end,
 	})
 	local ok, err = pcall(function()
-		w.rows:set(junkRows(rows))
+		w.rows(junkRows(rows))
 	end)
 	return w, ok, err
 end
@@ -182,7 +184,7 @@ local function peerWorld(rows: number, absent: number, publics: number)
 			return d
 		end,
 		serve = function(s, d, world)
-			world.bump = s.api.state(0)
+			world.bump = s.charm.atom(0)
 			s.service("ViewsService", function()
 				for i = 1, 3 do
 					s.entry.publish(d[i], function()
@@ -237,7 +239,7 @@ return {
 	end,
 	["70 58 K6 with frames over SYNC_HEARTBEAT_BYTES later peers get their frame next Heartbeat carrying every change since"] = function()
 		local w = World.new(projected(blobs))
-		local count = w.server.api.state(0)
+		local count = w.server.charm.atom(0)
 		want(w, function()
 			return { a = BIG, b = BIG, c = BIG, count = count() }
 		end)
@@ -248,8 +250,8 @@ return {
 		local last = clients[8]
 		local declaration = w.server.declarations.declarationOf(w.server.d.View)
 		local before = w:sync().peers[last.player].accepted[declaration].version
-		w.score:set(1)
-		count:set(1)
+		w.score(1)
+		count(1)
 		w:heartbeat()
 		for i = 1, 7 do
 			spec.eq(#w:frames(clients[i]), 2, `P{i} got its update`)
@@ -260,7 +262,7 @@ return {
 			before,
 			"a deferred peer keeps its baseline exactly"
 		)
-		count:set(2)
+		count(2)
 		w:heartbeat()
 		local frames = w:frames(last)
 		spec.eq(#frames, 2, "the deferred peer goes first next Heartbeat")
@@ -273,7 +275,7 @@ return {
 		local w = World.new(projected(function(n)
 			return n.array(n.f64)
 		end))
-		local bump = w.server.api.state(0)
+		local bump = w.server.charm.atom(0)
 		want(w, function()
 			bump()
 			return { 1, 2, 3 }
@@ -285,7 +287,7 @@ return {
 		local declaration = w.server.declarations.declarationOf(w.server.d.View)
 		local base = w:sync().peers[clients[65].player].accepted[declaration].version
 		local pulls = table.clone(w.pulls)
-		bump:set(1)
+		bump(1)
 		w:heartbeat()
 		local examined = 0
 		for i = 1, 65 do
@@ -308,7 +310,7 @@ return {
 		local w = World.new(projected(function(n)
 			return n.array(n.f64)
 		end))
-		local bump = w.server.api.state(0)
+		local bump = w.server.charm.atom(0)
 		want(w, function()
 			bump()
 			return numbers(9999)
@@ -318,7 +320,7 @@ return {
 			clients[i] = w:join(`P{i}`)
 		end
 		local pulls = table.clone(w.pulls)
-		bump:set(1)
+		bump(1)
 		w:heartbeat()
 		-- Rule 70's count per peer: two declarations considered; admission of the union node, the array node, 9,999
 		-- keys scanned and 9,999 element nodes; comparison of one node pair, then an index and a node pair per element.
@@ -326,7 +328,7 @@ return {
 		spec.eq(w:sync().spent, 2 * peer, "the Heartbeat spent both peers' examinations")
 		spec.eq(w.pulls.P3, pulls.P3, "80,002 is not below 65,536, so the third did not start")
 		pulls = table.clone(w.pulls)
-		bump:set(2)
+		bump(2)
 		w:heartbeat()
 		spec.eq(w.pulls.P3, pulls.P3 + 1, "the third goes first next Heartbeat")
 		w:finish()
@@ -359,7 +361,7 @@ return {
 			end)
 		end
 		local w = World.new(options)
-		local bump = w.server.api.state(0)
+		local bump = w.server.charm.atom(0)
 		want(w, function(player)
 			bump()
 			return if player.Name == "P1" then table.clone(map) else nil
@@ -368,7 +370,7 @@ return {
 		w:join("P2")
 		spec.eq(first.api.syncStatus(first.d.View), "failed", "P1's oversized values are failed, not its peer")
 		local pulls = table.clone(w.pulls)
-		bump:set(1)
+		bump(1)
 		w:heartbeat()
 		local spent = w:sync().spent
 		assert(spent > 65536, `the first peer spent {spent}, past the start threshold`)
@@ -392,7 +394,7 @@ return {
 				return d
 			end,
 			serve = function(s, d, world)
-				world.big = s.api.state({})
+				world.big = s.charm.atom({})
 				s.service("MapService", function()
 					for i = 1, 11 do
 						s.entry.publish(d[i], function(player)
@@ -402,14 +404,14 @@ return {
 				end)
 			end,
 		})
-		w.big:set({ Ann = true })
+		w.big({ Ann = true })
 		local ann = w:join("Ann")
 		spec.list(kinds(w, ann), { "failed" }, "the snapshot's examination failed: only the failed frame")
 		spec.eq(kicked(w, "Ann"), 1, "Ann was kicked")
 		spec.eq(w:logged("examination over SYNC_PEER_VISITS"), 1, "one diagnostic")
 		local bea = w:join("Bea")
 		spec.list(kinds(w, bea), { "snapshot" }, "Bea's small snapshot")
-		w.big:set({ Bea = true })
+		w.big({ Bea = true })
 		w:heartbeat()
 		spec.list(kinds(w, bea), { "snapshot", "failed" }, "the Heartbeat examination failed: no partial update")
 		spec.eq(kicked(w, "Bea"), 1, "Bea was kicked")
@@ -443,7 +445,7 @@ return {
 		end
 		watch(record)
 		local ok, err = pcall(function()
-			w.tally:set(record)
+			w.tally(record)
 		end)
 		spec.eq(ok, false, "a 20,000-entry record is rejected")
 		spec.has(err, "Job.Tally: over SYNC_FRAME_COLLECTION_ENTRIES", "at the entry budget")
@@ -456,7 +458,7 @@ return {
 			wide[`extra{i}`] = i
 		end
 		watch(wide)
-		w.board:set(wide)
+		w.board(wide)
 		local undeclared = 0
 		for _, key in counted[wide] do
 			if key ~= "title" then
@@ -468,7 +470,7 @@ return {
 		spec.eq(w.server.d.Board().extra1, nil, "without its undeclared keys")
 		local long = watch(numbers(12001))
 		ok, err = pcall(function()
-			w.list:set(long)
+			w.list(long)
 		end)
 		spec.eq(ok, false, "an array past the entry budget is rejected")
 		spec.has(err, "Job.List: over SYNC_FRAME_COLLECTION_ENTRIES", "by its length")
@@ -480,7 +482,7 @@ return {
 			rows[i] = { junk = true }
 		end
 		ok, err = pcall(function()
-			w.rows:set(rows)
+			w.rows(rows)
 		end)
 		spec.eq(ok, false, "a value within the codec budgets can still pass the admission budget")
 		spec.has(err, "Job.Rows", "naming the declaration")
@@ -496,7 +498,7 @@ return {
 		end)
 		local ann = w:join("Ann")
 		local view = w:sync().peers[ann.player]
-		w.score:set(5)
+		w.score(5)
 		w.link:leave(ann)
 		local deferred = #w.link.deferred
 		assert(deferred > 0, "networking deferred the ClientReady cleanup")
@@ -519,7 +521,7 @@ return {
 		local view = w:sync().peers[ann.player]
 		local declaration = w.server.declarations.declarationOf(w.server.d.Score)
 		local version = view.accepted[declaration].version
-		w.score:set(5)
+		w.score(5)
 		w.refuse = 1
 		w:heartbeat()
 		spec.eq(w:logged("encode refused a preflighted frame"), 1, "reported")
@@ -537,7 +539,7 @@ return {
 		end)
 		local ann = w:join("Ann")
 		w:sync().peers[ann.player].revision = 4294967295
-		w.score:set(5)
+		w.score(5)
 		w:heartbeat()
 		spec.eq(w:logged("revision passes SYNC_MAX_REVISION"), 1, "reported")
 		spec.list(kinds(w, ann), { "snapshot", "failed" }, "no update")
@@ -553,14 +555,57 @@ return {
 		end)
 		w:join("Ann")
 		w:join("Bea")
-		w.score:set(2)
+		w.score(2)
 		w:heartbeat()
-		assert(w:sync().spent > 0, "a Heartbeat after a write examines its peers")
+		assert(w:sync().examined > 0, "a Heartbeat after a write examines its peers")
 		w:heartbeat()
-		spec.eq(w:sync().spent, 0, "the next, with nothing written, examines none")
-		w.score:set(3)
+		spec.eq(w:sync().examined, 0, "the next, with nothing written, examines none")
+		w.score(3)
 		w:heartbeat()
-		assert(w:sync().spent > 0, "a later write is examined again")
+		assert(w:sync().examined > 0, "a later write is examined again")
+		w:finish()
+	end,
+	["58 60 a write of the value a published value already holds examines no peer"] = function()
+		local w = World.new(projected(function(n)
+			return n.f64
+		end))
+		want(w, function()
+			return 1
+		end)
+		local ann = w:join("Ann")
+		w.score(2)
+		w:heartbeat()
+		w:heartbeat()
+		spec.eq(w:sync().examined, 0, "the world is settled")
+		local before = #w:frames(ann)
+		w.score(2)
+		w:heartbeat()
+		spec.eq(w:sync().examined, 0, "a write of the value it holds examines no peer")
+		spec.eq(#w:frames(ann), before, "and sends nothing")
+		w:finish()
+	end,
+	["58 60 a peer examined with nothing to send keeps its revision and applies the next update"] = function()
+		local w = World.new(projected(function(n)
+			return n.f64
+		end))
+		want(w, function(player)
+			return if player.Name == "Ann" then 1 else 2
+		end)
+		local ann = w:join("Ann")
+		local bea = w:join("Bea")
+		w:heartbeat()
+		local seen, revision = #w:frames(bea), w:sync().peers[bea.player].revision
+		want(w, function(player)
+			return if player.Name == "Ann" then 3 else 2
+		end)
+		w:heartbeat()
+		spec.eq(w:sync().examined, 2, "the Heartbeat examined both peers")
+		spec.eq(ann.d.View(), 3, "Ann got her new value")
+		spec.eq(#w:frames(bea), seen, "Bea, whose value did not change, got no frame")
+		spec.eq(w:sync().peers[bea.player].revision, revision, "and kept her revision")
+		w.score(5)
+		w:heartbeat()
+		spec.eq(bea.d.Score(), 5, "Bea applied the next update")
 		w:finish()
 	end,
 	["69 frameCost counts 130 values with a two-byte list length, as networking's encoder does"] = function()
@@ -583,7 +628,7 @@ return {
 		})
 		local ann = w:join("Ann")
 		for i, publication in w.pubs do
-			publication:set(i)
+			publication(i)
 		end
 		w:heartbeat()
 		local frames = w:frames(ann)
@@ -612,11 +657,11 @@ return {
 		})
 		local ann = w:join("Ann")
 		for i = 2, 128 do
-			w.pubs[i]:set(i)
+			w.pubs[i](i)
 		end
 		w:heartbeat()
 		for i = 1, 128 do
-			w.pubs[i]:set(i + 1000)
+			w.pubs[i](i + 1000)
 		end
 		w:heartbeat()
 		local frames = w:frames(ann)
@@ -631,19 +676,19 @@ return {
 	end,
 	["58 70 a Heartbeat that stopped for the byte budget completes the next one, and the one after examines no peer"] = function()
 		local w, clients = byteLimitWorld(1)
-		w.count:set(1)
+		w.count(1)
 		w:heartbeat()
 		spec.eq(#w:frames(clients[8]), 1, "the eighth peer's frame waited for the byte budget")
 		w:heartbeat()
 		spec.eq(#w:frames(clients[8]), 2, "the next Heartbeat sent it")
-		assert(w:sync().spent > 0, "and examined the peers")
+		assert(w:sync().examined > 0, "and examined the peers")
 		w:heartbeat()
-		spec.eq(w:sync().spent, 0, "a Heartbeat that completed every peer settles, so the next examines none")
+		spec.eq(w:sync().examined, 0, "a Heartbeat that completed every peer settles, so the next examines none")
 		w:finish()
 	end,
 	["70 a Heartbeat whose frames total exactly SYNC_HEARTBEAT_BYTES sends every one, and one byte more defers the last"] = function()
 		local w, clients = byteLimitWorld(0)
-		w.count:set(1)
+		w.count(1)
 		w:heartbeat()
 		for i = 1, 8 do
 			local frames = w:frames(clients[i])
@@ -652,7 +697,7 @@ return {
 		end
 		w:finish()
 		local over, others = byteLimitWorld(1)
-		over.count:set(1)
+		over.count(1)
 		over:heartbeat()
 		for i = 1, 7 do
 			spec.eq(#over:frames(others[i]), 2, `P{i} got its update`)
@@ -684,7 +729,7 @@ return {
 		-- which is 87,381; three views and one public declaration considered make 262,144.
 		local w = peerWorld(3799, 18, 1)
 		local ann = w:join("Ann")
-		w.bump:set(1)
+		w.bump(1)
 		w:heartbeat()
 		spec.eq(w:sync().spent, 262144, "the Heartbeat spent exactly SYNC_PEER_VISITS")
 		spec.eq(w:logged("examination over SYNC_PEER_VISITS"), 0, "and the peer was not failed")
@@ -693,7 +738,7 @@ return {
 		w:finish()
 		local over = peerWorld(3799, 18, 2)
 		local bea = over:join("Bea")
-		over.bump:set(1)
+		over.bump(1)
 		over:heartbeat()
 		spec.eq(over:logged("examination over SYNC_PEER_VISITS after 262144 visits"), 1, "262,145 visits fail the peer")
 		spec.list(kinds(over, bea), { "snapshot", "failed" }, "with only the failed frame after the snapshot")

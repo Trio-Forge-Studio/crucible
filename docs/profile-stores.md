@@ -125,13 +125,13 @@ export function reward(player: Player, amount: number, upgrade: string) {
 - A map entry's `set(undefined)` removes it, and an optional field's `set(undefined)` clears it.
 - A write below an absent map entry, array element or optional object throws; set the parent whole first. An index out of range throws.
 - A write returns true when it was stored, or when its value equals the stored one. It returns false, and calls nothing, while the profile is not writable: before it loads, after it was released or handed off, or for a player who is not present.
-- Handle callbacks are pure: they must not yield, write data or write reactive state. Schedule work after the write returns.
+- Handle callbacks must not yield or write data. Schedule that work after the write returns. A callback may write a Charm atom or a published value, and the effects the write reaches run after the callback returns.
 
 While a profile is not writable, every read returns the template's value at that path. `PlayerData.loaded(player)` is the tracked test for whether the values are live. Read inside the write with `update` instead of reading first and writing later.
 
 A key a newer build saved is kept in place. Spread a table to change it (`{ ...d, currency: 1 }`); a table rebuilt from scratch drops what it leaves out.
 
-A handle is a callable table, not a function. Pass `() => h()` to code that tests `typeof(x) == "function"`.
+A handle is a callable table, not a function. Pass `() => h()` to code that tests `typeof(x) == "function"`, such as Charm's `computed`, `listen` and `subscribe` and `useAtom` from `vide-charm`. The types do not catch it.
 
 ## Store members
 
@@ -169,7 +169,7 @@ export function report(userId: number) {
 
 ## Claims
 
-`onLoad`, `onRelease`, `receive` and `grant` are claims: field initializers of a server Subsystem. They run in construction order, get and return plain data, and must not yield, write data or write reactive state. Reading the player's own handles inside an `onLoad` or `onRelease` claim throws; read the claim's data argument.
+`onLoad`, `onRelease`, `receive` and `grant` are claims: field initializers of a server Subsystem. They run in construction order, get and return plain data, and must not yield or write data. A claim may write a Charm atom or a published value, and the effects the write reaches run after the claim returns. Reading the player's own handles inside an `onLoad` or `onRelease` claim throws; read the claim's data argument.
 
 ```ts
 import { profileStore, Subsystem } from "@trioforge/crucible";
@@ -200,6 +200,7 @@ export class RewardService extends Subsystem {
 - A throwing `onLoad` claim fails the load and kicks the player. A throwing `onRelease` claim is skipped, keeping its input, and the other claims still run.
 - `profileMessage<P>(name)` declares a durable message in a server module. `send(userId, message, payload, id?)` queues it for a player who is online, elsewhere or offline. Each message has one receiver per server.
 - `grant(productId, apply)` owns Roblox's `ProcessReceipt` for that product. A purchase is acknowledged only after its change is durably saved, and `afterGrant` effects run once, after that.
+- A Charm atom or published value that a claim or a handle callback writes is not rolled back when its data change fails: when the callback throws, or returns a value the store rejects. A `grant` callback also runs again each time Roblox retries an unsaved purchase. Players can then see a reward their profile does not hold. Write what players see in `afterGrant`, or after a handle write returns true.
 - `quarantined(userId)` and `clearQuarantined(userId, ids, action)` recover messages a receiver kept failing on.
 
 ## The owner's client
