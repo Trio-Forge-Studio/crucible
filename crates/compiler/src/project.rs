@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::facts::ModulePath;
 
 /// An instance path from the place root: a service, then the names of its descendants.
-pub(crate) type RbxPath = Vec<String>;
+pub type RbxPath = Vec<String>;
 
 const PROJECT_FILE: &str = "default.project.json";
 
@@ -17,7 +17,7 @@ struct Partition {
 }
 
 /// The folder and file mappings of a Rojo project, as `@roblox-ts/rojo-resolver` reads them.
-pub(crate) struct Rojo {
+pub struct Rojo {
     /// Later mappings first, so a nested folder wins over the folder around it.
     partitions: Vec<Partition>,
     files: HashMap<PathBuf, RbxPath>,
@@ -141,7 +141,7 @@ impl Rojo {
     }
 }
 
-pub(crate) struct Game {
+pub struct Game {
     pub rojo: Rojo,
     /// The package root `boot` globs are relative to: the nearest folder at or above `dir` with a `package.json`, or
     /// `dir`.
@@ -361,7 +361,7 @@ fn strip_rojo_extensions(path: &Path) -> PathBuf {
     }
 }
 
-pub(crate) fn normalize(path: &Path) -> PathBuf {
+pub fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {

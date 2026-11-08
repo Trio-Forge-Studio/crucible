@@ -8,10 +8,11 @@ mod stmt;
 mod style;
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 
-use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
+use crate::ext::{Extension, FileId, LowerCx};
+use crate::facts::{Fact, FileFacts, ModulePath, Place, Span, Unanswered};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 use crucible_luau::{Block, Expr, Name, Stmt};
 
@@ -39,13 +40,19 @@ pub(crate) enum ImportBase {
 
 pub(crate) fn lower(
     file: File,
+    file_id: FileId,
     facts: &FileFacts,
     unanswered: &[&Unanswered],
     import_base: ImportBase,
     place: &Place,
+    extensions: &[&dyn Extension],
 ) -> Result<Block, Vec<Error>> {
     let mut l = Lower {
         file,
+        file_id,
+        extensions,
+        substitutions: HashMap::new(),
+        helpers_used: Vec::new(),
         facts,
         place,
         path: file.path(),
@@ -55,7 +62,6 @@ pub(crate) fn lower(
         temp_prefix: temp_prefix(file.text()),
         temps: 0,
         uses_ts: false,
-        uses_crucible: false,
         uses_ui: false,
         refs: references(file.root()),
         closure_assigned: closure_assigned(file.root()),
@@ -115,6 +121,12 @@ enum Usage {
 
 pub(crate) struct Lower<'a> {
     file: File,
+    pub(crate) file_id: FileId,
+    extensions: &'a [&'a dyn Extension],
+    /// Expressions an extension lowered ahead for nodes the compiler has not reached yet.
+    pub(crate) substitutions: HashMap<Span, Expr>,
+    /// The helper modules this file uses, by local, in first use order.
+    helpers_used: Vec<&'static str>,
     facts: &'a FileFacts,
     place: &'a Place,
     path: String,
@@ -124,7 +136,6 @@ pub(crate) struct Lower<'a> {
     temp_prefix: String,
     temps: u32,
     uses_ts: bool,
-    uses_crucible: bool,
     uses_ui: bool,
     refs: Vec<Reference>,
     closure_assigned: HashSet<&'static str>,
@@ -277,12 +288,33 @@ fn closure_assigned(root: Node) -> HashSet<&'static str> {
 }
 
 impl<'a> Lower<'a> {
+    pub(crate) fn helper(&mut self, local: &'static str, name: &'static str) -> Expr {
+        if !self.helpers_used.contains(&local) {
+            self.helpers_used.push(local);
+        }
+        Expr::global(local).field(name)
+    }
+
+    /// The first extension's lowering of a call it owns.
+    fn extension_call(&mut self, call: Node) -> Option<Expr> {
+        let extensions = self.extensions;
+        extensions.iter().find_map(|e| e.lower_call(&mut LowerCx { l: self }, call))
+    }
+
+    fn extension_class_tail(&mut self, class: Node, name: &Name) {
+        let extensions = self.extensions;
+        for extension in extensions {
+            let tail = extension.lower_class_tail(&mut LowerCx { l: self }, class, name);
+            self.current_block.extend(tail);
+        }
+    }
+
     fn error(&mut self, n: Node, message: impl Into<String>) {
         let Position { line, column } = self.file.position(n.span().start);
         self.errors.push(Error { path: self.path.clone(), line, column, message: message.into() });
     }
 
-    fn unsupported(&mut self, n: Node, what: &str) -> Expr {
+    pub(crate) fn unsupported(&mut self, n: Node, what: &str) -> Expr {
         self.error(n, format!("{what} is not supported"));
         Expr::Nil
     }
@@ -646,7 +678,7 @@ fn is_hole(e: Node) -> bool {
     e.kind() == Kind::OmittedExpression || (e.kind() == Kind::BindingElement && e.name().is_none())
 }
 
-fn skip_parens_and_assertions(mut n: Node) -> Node {
+pub fn skip_parens_and_assertions(mut n: Node) -> Node {
     while matches!(
         n.kind(),
         Kind::ParenthesizedExpression

@@ -248,7 +248,7 @@ fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
 
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
     child::exit_with_parent();
-    match crucible_compiler::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
+    match crucible_transform::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
         Ok(compiled) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
             let child = ChildModules { out_dir: compiled.out_dir, modules };

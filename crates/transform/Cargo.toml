@@ -1,0 +1,20 @@
+[package]
+name = "crucible-transform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# tsrs comes through `crucible_compiler::tsrs`, so the compiler's manifest pins it once.
+[dependencies]
+crucible-compiler = { path = "../compiler" }
+crucible-luau = { path = "../luau" }
+
+[features]
+# Exports `analyze`, which only this crate's tests and examples read.
+test-support = ["crucible-compiler/test-support"]
+
+[dev-dependencies]
+crucible-transform = { path = ".", features = ["test-support"] }
+crucible-compiler = { path = "../compiler", features = ["test-support"] }
+serde_json.workspace = true

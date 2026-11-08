@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use super::{Lower, Usage, is_stable, skip_parens_and_assertions};
-use crate::facts::{Callee, Constant, Crucible, Falsy, Receiver};
+use crate::facts::{Callee, Constant, Falsy, Receiver};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Op, UnaryOp};
 use crucible_luau::{BinOp, Block, Expr, Field, Name, Part, Stmt, UnOp};
@@ -44,14 +44,16 @@ fn offset_number(e: Expr, delta: f64) -> Expr {
 }
 
 impl Lower<'_> {
-    pub(super) fn expr(&mut self, n: Node) -> Expr {
+    pub(crate) fn expr(&mut self, n: Node) -> Expr {
+        if !self.substitutions.is_empty()
+            && let Some(value) = self.substitutions.remove(&n.span())
+        {
+            return value;
+        }
         match n.kind() {
             Kind::Identifier => self.identifier(n),
             Kind::NumericLiteral => Expr::Number(n.number()),
-            Kind::StringLiteral => match self.fact(n).and_then(|f| f.crucible.as_deref()) {
-                Some(Crucible::Load(glob)) => Expr::String(Cow::Owned(glob.to_string())),
-                _ => Expr::String(Cow::Borrowed(n.text())),
-            },
+            Kind::StringLiteral => Expr::String(Cow::Borrowed(n.text())),
             Kind::NoSubstitutionTemplateLiteral => Expr::String(Cow::Borrowed(n.text())),
             Kind::TemplateExpression => self.template(n),
             Kind::TrueKeyword => Expr::Bool(true),

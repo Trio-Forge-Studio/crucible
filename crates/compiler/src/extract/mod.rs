@@ -4,7 +4,7 @@
 //! not sites yet.
 
 mod classes;
-mod crucible;
+pub(crate) mod crucible;
 mod data;
 mod network;
 mod typed_lint;
@@ -20,6 +20,7 @@ use tsrs_compiler::CheckerHandle;
 use tsrs_core::{CompilerOptions, JsxEmit, P, jsnum};
 
 use crate::Diagnostic;
+use crate::ext::{Extension, ExtractCx, FileId, ProgramCx};
 use crate::facts::{
     Callee, Fact, Facts, Falsy, FileFacts, Import, Jsx, Prop, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
 };
@@ -30,7 +31,7 @@ use crucible::Code;
 
 const UI_ENTRY: &str = "@trioforge/crucible/ui";
 
-pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
+pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Facts {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -71,8 +72,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
                 message: "roblox-ts's runtime library has no instance path".to_owned(),
             }),
         }
-        facts.place.crucible_emit =
-            crucible.emit.as_deref().and_then(|emit| game.module(emit)).and_then(|r| absolute(&r));
     }
     facts.place.crucible_ui = crucible.ui.as_deref().and_then(|ui| match &game {
         Some(game) => game.module(ui).and_then(|r| absolute(&r)),
@@ -103,7 +102,14 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
         if file.is_declaration_file() || file.is_js() {
             continue;
         }
+        let id = FileId(x.facts.files.len() as u32);
         x.source_file(file);
+        for extension in extensions.iter_mut() {
+            extension.extract_file(&mut ExtractCx { x: &mut x, file: id }, file);
+        }
+    }
+    for extension in extensions.iter_mut() {
+        extension.finish_program(&mut ProgramCx { x: &mut x });
     }
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     x.facts
@@ -188,16 +194,16 @@ fn computed_key(n: P<Node>) -> bool {
     }
 }
 
-struct Extractor {
+pub(crate) struct Extractor {
     catalog: Option<crate::classes::Catalog>,
-    checker: CheckerHandle,
+    pub(crate) checker: CheckerHandle,
     resolver: P<EmitResolver>,
     globals: types::Globals,
-    crucible: crucible::Api,
-    game: Option<Game>,
+    pub(crate) crucible: crucible::Api,
+    pub(crate) game: Option<Game>,
     config_dir: PathBuf,
     network: network::Program,
-    facts: Facts,
+    pub(crate) facts: Facts,
     text: &'static str,
     path: String,
     table: Table,
@@ -396,12 +402,6 @@ impl Extractor {
         let span = self.span(callee);
         if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
             self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
-            if m == Macro::Inject {
-                self.site();
-                let inject = Box::new(self.crucible_inject(n));
-                let call = self.span(n);
-                self.table.store(call, Site::Crucible, |f| &mut f.crucible, inject);
-            }
         } else {
             let t = self.type_of(callee);
             let t = self.checker.get_non_optional_type(t);
