@@ -17,7 +17,8 @@ pub use crate::lower::extension::LowerCx;
 pub use crate::tree::{File, Kind, Node, Nodes, Position};
 
 pub trait Extension: Send {
-    /// Tells a host's extensions apart, such as in its logs. The compiler never reads it.
+    /// Tells a host's extensions apart, such as in its logs. The compiler reads it only to name an extension that
+    /// breaks a rule of the seam.
     fn name(&self) -> &'static str;
 
     /// Runs once with the whole program checked, before any file is extracted.

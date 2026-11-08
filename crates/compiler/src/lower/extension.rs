@@ -63,7 +63,8 @@ impl LowerCx<'_, '_> {
         arguments
     }
 
-    /// `name` in a helper module the extension declared, which the file then imports.
+    /// `name` in a helper module the extension declared, which the file then imports, even if `lower_call` goes on to
+    /// return `None`.
     pub fn helper(&mut self, module: &HelperModule, name: &'static str) -> Expr {
         self.l.helper(module, name)
     }
