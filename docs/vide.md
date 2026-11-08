@@ -1,18 +1,19 @@
 # Vide
 
-Read Crucible reactive values from Vide components with `useReadable`.
+Render UI with Vide, and read Charm values in components with `@rbxts/vide-charm`.
 
-Crucible's reactive graph and Vide's graph are separate. A Vide effect or JSX binding does not track a Crucible read, so a component that calls `coins()` directly renders once and never updates. `useReadable` turns a Crucible value into a Vide source that follows it.
-
-Import it from `@trioforge/crucible/vide`. The subpath needs `@rbxts/vide` 0.6.1 or a later 0.6 release installed in the game. It is an optional peer dependency. The root, server and client entries never load Vide, so a game without Vide does not need it.
+Crucible has no UI entry of its own. A game renders UI with `@rbxts/vide` and reads Charm values in components with `useAtom` from `@rbxts/vide-charm`. The game lists Charm, Vide and `vide-charm` in its own `dependencies`, as a game made with `crucible create` does. Crucible imports neither Vide nor `vide-charm`.
 
 ```ts
-import { useReadable } from "@trioforge/crucible/vide";
+import Vide from "@rbxts/vide";
+import { useAtom } from "@rbxts/vide-charm";
 ```
+
+`vide-charm` loads the Charm and Vide folders next to it in the place, which are the game's own. Keep one copy of each, as "Install Charm" in `crucible docs reactive` describes.
 
 ## Compile JSX
 
-Use Vide to render UI. Set these options in the game's tsconfig:
+Set these options in the game's tsconfig:
 
 ```json
 {
@@ -28,19 +29,19 @@ Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail 
 
 ## Bind a value
 
-`useReadable(readable)` returns a Vide source, a function of no arguments that Vide tracks. `readable` is any Crucible `Readable`. That covers a `state`, a `computed`, a replicated declaration, and a getter function that reads them.
+`useAtom(getter)` returns a Vide source that follows a Charm value. `getter` is any function of no arguments that reads Charm values: an atom, a computed, a replicated declaration, a profile handle, or a getter that reads them.
 
 ```tsx
+import { atom, computed } from "@rbxts/charm";
 import Vide from "@rbxts/vide";
-import { computed, state } from "@trioforge/crucible";
-import { useReadable } from "@trioforge/crucible/vide";
+import { useAtom } from "@rbxts/vide-charm";
 
-export const coins = state(0);
+export const coins = atom(0);
 const label = computed(() => `${coins()} coins`);
 
 export function CoinCounter() {
-	const text = useReadable(label);
-	const rich = useReadable(() => coins() >= 100);
+	const text = useAtom(label);
+	const rich = useAtom(() => coins() >= 100);
 	return <textlabel Text={text} TextColor3={() => (rich() ? Color3.fromRGB(255, 200, 0) : new Color3(1, 1, 1))} />;
 }
 ```
@@ -49,43 +50,41 @@ A replicated declaration binds the same way on the client.
 
 ```tsx
 import Vide from "@rbxts/vide";
+import { useAtom } from "@rbxts/vide-charm";
 import { replicated } from "@trioforge/crucible";
-import { useReadable } from "@trioforge/crucible/vide";
 
 export const Round = replicated<number>("Match.Round", 0);
 
 export function RoundLabel() {
-	const round = useReadable(Round);
+	const round = useAtom(Round);
 	return <textlabel Text={() => `Round ${round()}`} />;
 }
 ```
 
 ## When it updates
 
-- `useReadable` reads `readable` once when you call it, without tracking the read in Crucible. The first render has the current value.
-- A getter is read again on the first flush, and on each flush after something it read changed. A `state` is read on each flush after a write changed it. A getter that builds a new table on each call returns a new value every time, so the first flush updates the Vide source even when nothing changed.
-- Later changes reach the Vide source on Crucible's reactive flush, which runs once per VM through `task.defer` after the first change. Several writes before the flush make one update with the last value. A value that changes and changes back before the flush makes no update. A change is a value that is not `rawequal` to the last one, as for `watch`.
-- On a client that has not finished `boot`, updates wait until boot commits. The value read at the call is still the current one.
+`useAtom` reads `getter` when you call it, so the first render has the current value. It then updates the Vide source inside the Charm write that changes the value, or when the outermost batch ends.
 
-`@rbxts/vide-charm`'s `useAtom` behaves differently. Charm updates the Vide source at every atom write, inside the call that writes. With `useReadable`, code that writes a state and then reads the Vide source in the same call sees the old value. Read the Crucible value itself in that code, such as `coins()` in a click handler.
+- A write from a `receive` handler or a `start` hook updates the source at once.
+- A write from a hook Crucible batches, such as `onEnable`, updates it after the hook returns.
+- A replicated declaration updates when the client applies the server's frame.
 
 ## Lifetime
 
-Call `useReadable` inside a Vide owner: a component that Vide is rendering, or the callback of Vide's `root`. Outside one it throws `useReadable() needs a Vide owner: call it inside a component or root()` and creates nothing.
+Call `useAtom` inside a Vide owner: a component that Vide is rendering, or the callback of Vide's `root`. Outside one, Vide throws `cannot cleanup outside a stable or reactive scope` after the Charm listener exists, and nothing ever ends that listener.
 
-Each call makes one Crucible binding that no Crucible owner holds. Vide's `cleanup` ends it when the owner is destroyed: when you call the cleanup that `mount` or `root` returned, or when a `show` or `switch` branch unmounts the component. The binding does not belong to the Crucible owner around the call. A component mounted from a behaviour's `onEnable`, or from inside an effect run, keeps its bindings until Vide unmounts it. Pass the cleanup `mount` returns to `own` to unmount at disable.
-
-A Vide effect that runs on an update runs on Crucible's reactive flush, where no Crucible owner is current. `effect`, `watch`, `onCleanup` and `own` throw there, and `scope` makes a root scope.
+Vide's `cleanup` ends the binding when its owner is destroyed: when you call the cleanup that `mount` or `root` returned, or when a `show` or `switch` branch unmounts the component. The binding does not belong to the Crucible owner around the call. A component mounted from a behaviour's `onEnable` keeps its bindings until Vide unmounts it. Pass the cleanup `mount` returns to `own` to unmount at disable.
 
 ```tsx
+import { atom } from "@rbxts/charm";
 import Vide, { mount } from "@rbxts/vide";
-import { CrucibleBehaviour, own, state } from "@trioforge/crucible";
-import { useReadable } from "@trioforge/crucible/vide";
+import { useAtom } from "@rbxts/vide-charm";
+import { CrucibleBehaviour, own } from "@trioforge/crucible";
 
-const score = state(0);
+const score = atom(0);
 
 function Score() {
-	const value = useReadable(score);
+	const value = useAtom(score);
 	return <textlabel Text={() => tostring(value())} />;
 }
 
@@ -96,48 +95,22 @@ export class Scoreboard extends CrucibleBehaviour<"Scoreboard", ScreenGui> {
 }
 ```
 
+A binding is a raw Charm callback, so it gets no Crucible ownership. A Vide effect that an update runs runs inside the write, where Crucible's owner is the writer's. Do not call `effect`, `watch`, `scope`, `onCleanup` or `own` from a Vide effect.
+
 ## Errors
 
-A binding fails as a `watch` does. Its only handling of its own turns a yield in a Vide effect into an error.
+A Vide effect that throws while it handles an update fails the Charm write that caused it, as a failing effect does. A hook Crucible batches reports it after the hook returns. A `receive` handler or a `start` hook sees the write throw.
 
-- If `readable` throws at the call, `useReadable` rethrows and creates nothing. The Vide component or `root` fails as it would for any error in it.
-- If `readable` throws on a later flush, the binding stops for good. Crucible reports the failure once through its diagnostics. The Vide source keeps its last value and gets no more updates, even after `readable` stops throwing. Remount the component to bind again.
-- A getter runs as a `computed` does. A yield in it fails like a throw, and writing state or creating an effect, watch, scope or cleanup inside it throws.
-- The same happens when a Vide effect throws while it handles an update, because Vide runs those effects inside the write to the source.
-- A Vide effect that yields while it handles an update stops that binding the same way. With Vide's strict mode off, as at optimization level 2 in a live game, the yield fails where it is called with `attempt to yield across metamethod/C-call boundary`, and the rest of the effect does not run. In strict mode, which is on below optimization level 2, Vide reports the yield itself. Either way Vide unwinds its own state as it does for an error, so other components keep working. Start yielding work with `task.spawn` instead.
+Vide effects must not yield. In Studio, Charm's strict mode fails a yield in the update. Start yielding work with `task.spawn`.
 
-## Cost
+## Migrate from `@trioforge/crucible/vide`
 
-Each binding is one Crucible binding plus one Vide source, and nothing is shared between bindings of the same readable. In Lune at optimization level 2, with 1,000 bindings, a binding costs 9 to 12 µs to create, flush once and destroy, and about 5 µs per update. The Crucible binding alone costs 2 to 3 µs and about 2 µs of that. Turning a yield into an error adds about 0.4 µs to each update. A Vide source written directly costs 4 to 5 µs and about 2 µs. Measure again with `lune run bench-vide` after `pnpm build`.
+The `@trioforge/crucible/vide` entry and its `useReadable` are gone. Bind Charm values with `useAtom` instead.
 
-## Migrate from vide-charm
-
-| Charm and vide-charm | Crucible |
+| Before | Now |
 | --- | --- |
-| `atom(0)` | `state(0)` |
-| `coins(5)` | `coins.set(5)` |
-| `coins((current) => current + 1)` | `coins.update((current) => current + 1)` |
-| `computed(() => coins() * 2)` | `computed(() => coins() * 2)` |
-| `peek(coins)` | `untracked(coins)` |
-| `useAtom(coins)` | `useReadable(coins)` |
-| `useAtom(() => coins() * 2)` | `useReadable(() => coins() * 2)` |
+| `import { useReadable } from "@trioforge/crucible/vide"` | `import { useAtom } from "@rbxts/vide-charm"` |
+| `useReadable(coins)` | `useAtom(coins)` |
+| `useReadable(() => coins() * 2)` | `useAtom(() => coins() * 2)` |
 
-Only the imports and the writes change in a component. Reads stay calls.
-
-```tsx
-import Vide from "@rbxts/vide";
-import { state } from "@trioforge/crucible";
-import { useReadable } from "@trioforge/crucible/vide";
-
-export const coins = state(0);
-
-export function Wallet() {
-	const amount = useReadable(coins);
-	return (
-		<textbutton
-			Text={() => `${amount()} coins`}
-			Activated={() => coins.update((current) => current + 1)}
-		/>
-	);
-}
-```
+`crucible docs reactive` lists how Crucible's own values became Charm's.

@@ -8,7 +8,7 @@ Import the declarations and `syncStatus` from the root of `@trioforge/crucible`.
 import { replicated, replicatedPerPlayer, syncStatus } from "@trioforge/crucible";
 import type { Replicated, ReplicatedPerPlayer, SyncStatus } from "@trioforge/crucible";
 import { publish } from "@trioforge/crucible/server";
-import type { Publication } from "@trioforge/crucible/server";
+import type { Publication, Published } from "@trioforge/crucible/server";
 ```
 
 ## Declare a value
@@ -30,11 +30,11 @@ Both are compiler macros. Write each one as the initializer of an exported top-l
 - The type must describe plain data: booleans, numbers, strings, `Vector3`, `Color3`, `CFrame`, objects, arrays, tuples, string-keyed maps and unions the networking lowering accepts. Instances, `unknown`, functions and numeric map keys are build errors. Replicate a stable id instead of an Instance.
 - An optional field, or a map value that admits `undefined`, is an absent key.
 
-A declaration is a plain function. Call it to read the value. Inside an effect or a computed, the read tracks.
+A declaration is a plain function. Call it to read the value. Inside an effect or a Charm computed, the read tracks.
 
 ## Publish a value
 
-`publish(declaration)` takes the write side of a value every client receives. Call it while a server Subsystem is constructed, as a field initializer. It returns a `State`.
+`publish(declaration)` takes the write side of a value every client receives. Call it while a server Subsystem is constructed, as a field initializer. It returns a `Published<T>`, which reads and writes like a Charm atom: `h()` reads, `h(value)` writes a value, and `h(update)` writes what `update` returns for the current value.
 
 ```ts
 import { replicated, Subsystem } from "@trioforge/crucible";
@@ -46,33 +46,36 @@ export class JobService extends Subsystem {
 	private readonly score = publish(Score);
 
 	addPoints(points: number) {
-		this.score.update((current) => current + points);
+		this.score((current) => current + points);
 	}
 }
 ```
 
 - One Subsystem publishes each declaration. A second `publish` of the same declaration fails boot and names both Subsystems.
 - `publish` anywhere other than a server Subsystem's construction throws.
-- `set` and `update` check the value against the declared type before they store it. Fields the type does not declare are dropped and never sent. A value that cannot replicate throws at the write and names the declaration and the path, never the value: `Data.Profile.settings.music: expected boolean, got number`.
+- A write checks the value against the declared type before it stores it. Fields the type does not declare are dropped and never sent. A value that cannot replicate throws at the write and names the declaration and the path, never the value: `Data.Profile.settings.music: expected boolean, got number`.
 - Every table in a published value is frozen. Code that later mutates one of those tables in place throws at that line.
 - Every server reader sees the new value at once. Clients see it in the next Heartbeat's frame. Several writes between two Heartbeats send only the last value.
+- A call with no argument reads, so `h(undefined)` cannot write. The type refuses it. Write `undefined` with `h(() => undefined)`.
+- An update function runs untracked and is called with the current value. A write after the publisher ended throws `<name>'s publisher <Subsystem> has ended`.
 
 `publish(declaration, project)` supplies a per-player value as a projection. It returns an opaque `Publication`.
 
 ```ts
-import { replicatedPerPlayer, state, Subsystem } from "@trioforge/crucible";
+import { atom } from "@rbxts/charm";
+import { replicatedPerPlayer, Subsystem } from "@trioforge/crucible";
 import { publish } from "@trioforge/crucible/server";
 
 export const Coins = replicatedPerPlayer<number | undefined>("Data.Coins", undefined);
 
-const balances = state<ReadonlyMap<number, number>>(new Map());
+const balances = atom<ReadonlyMap<number, number>>(new Map());
 
 export class WalletService extends Subsystem {
 	private readonly coins = publish(Coins, (player) => balances().get(player.UserId));
 }
 ```
 
-For each player whose client is ready, the projection runs like a `computed`: it reruns when a value it read changes. Each player receives only their own value. The projection must not write state, create effects or yield. It returns `undefined` until its data exists. A projection that throws, or returns a value that cannot replicate, marks that player's value failed until its next accepted value.
+For each player whose client is ready, the Heartbeat that examines the player runs the projection again once a value it last read has changed. A write marks the projection stale and runs nothing, so many writes between two Heartbeats cost one run. Each player receives only their own value. The projection must not write atoms or yield. It has no Crucible owner, so `effect` and `watch` throw in it. It returns `undefined` until its data exists. A projection that throws, or returns a value that cannot replicate, marks that player's value failed until its next accepted value.
 
 ## Read a value
 
@@ -89,7 +92,8 @@ On the server, a public declaration reads the authoritative value. Calling a per
 | `"failed"` | Its publisher ended, its projection failed for this player, or this client's sync stopped. The last value is kept. | Its publisher ended. |
 
 ```ts
-import { computed, replicated, syncStatus } from "@trioforge/crucible";
+import { computed } from "@rbxts/charm";
+import { replicated, syncStatus } from "@trioforge/crucible";
 
 export const Phase = replicated<string | undefined>("Job.Phase", undefined);
 
