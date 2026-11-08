@@ -604,7 +604,7 @@ const mutants = [
 		RT,
 		'const target = player(name, "handoff", who);\nbinding.guard(binding.runtime?.sessions.get(target));',
 		'const target = player(name, "handoff", who);',
-		CL + "13 send, clearQuarantined, save and handoff",
+		CL + "13 a handoff of another player",
 	),
 	m(
 		"126",

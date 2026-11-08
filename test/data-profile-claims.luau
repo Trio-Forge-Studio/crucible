@@ -457,6 +457,28 @@ return {
 		w:finish()
 	end,
 
+	["13 a handoff of another player from a thread a data callback spawned throws"] = function()
+		local w = newWorld()
+		local ann = w:player("Ann", 4120)
+		local bea = w:player("Bea", 4121)
+		w:settle()
+		local data = w.server.d.PlayerData
+		local spawned
+		data(ann.player):update(function(d)
+			World.spawn(function()
+				spawned = { pcall(function()
+					return data:handoff(bea.player)
+				end) }
+			end)
+			return d
+		end)
+		spec.eq(type(spawned), "table", "the spawned thread's handoff ended at once instead of waiting on a release")
+		spec.eq(spawned[1], false, "the spawned thread's handoff throws")
+		spec.has(spawned[2], "a write inside a data callback", "with the callback message")
+		spec.eq(data:loaded(bea.player), true, "Bea's session is still open")
+		w:finish()
+	end,
+
 	["9 10 11 loaded, players and await follow the session"] = function()
 		local w = newWorld()
 		local data = w.server.d.PlayerData
