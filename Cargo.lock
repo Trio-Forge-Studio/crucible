@@ -678,6 +678,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-abi"
+version = "0.4.0"
+
+[[package]]
 name = "crucible-compiler"
 version = "0.4.0"
 dependencies = [
@@ -4776,6 +4780,7 @@ dependencies = [
 name = "xtask"
 version = "0.4.0"
 dependencies = [
+ "crucible-abi",
  "oc-registry",
  "proc-macro2 1.0.107",
  "quote 1.0.47",

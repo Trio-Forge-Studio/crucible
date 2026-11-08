@@ -59,10 +59,6 @@ const FRAMEWORK_MACROS: &[&str] = &[
 ];
 /// Rule 3's terminal and argument crates.
 const CLI_ONLY_DEPENDENCIES: &[&str] = &["clap", "ratatui", "syntect"];
-/// The UI calls compiled JSX makes. The runtime's UI entry also exports functions games call, which are not ABI.
-/// Rule 4 skips the one-letter ABI names, the `n` and `t` namespaces, because a one-letter string is too common to
-/// scan for. The ABI crate's own check covers them once it exists.
-const UI_ABI: &[&str] = &["bind", "append"];
 
 /// The Cargo target kinds a crate ships. Tests, examples and benches are left out.
 const SHIPPED: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro", "bin", "custom-build"];
@@ -247,11 +243,11 @@ fn shown(literal: &str, needle: &str) -> String {
     if literal.len() <= 80 && !literal.contains('\n') { format!("{literal:?}") } else { format!("…{needle:?}…") }
 }
 
-/// The names the transform emits calls to: the value exports of the runtime's emit entry and the UI calls.
+/// The names the transform emits calls to: the value exports of the runtime's emit entry. Rule 4 skips the one-letter
+/// ones, the `n` and `t` namespaces, because a one-letter string is too common to scan for. `cargo xtask abi check`
+/// covers them.
 fn abi_names(root: &Path) -> Result<BTreeSet<String>, String> {
-    let mut names = ts::value_exports(root, &root.join("packages/crucible/src/emit/index.ts"))?;
-    names.extend(UI_ABI.iter().map(|name| (*name).to_owned()));
-    Ok(names)
+    ts::value_exports(root, &root.join("packages/crucible/src/emit/index.ts"))
 }
 
 fn dependency_rules(workspace: &Workspace, package: &Package, found: &mut Vec<String>) {

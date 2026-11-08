@@ -4,8 +4,8 @@
 //! else it finds:
 //!
 //! - A rename that keeps at least 95% similarity.
-//! - A change to a file that a CI check regenerates and compares: the golden baseline, the arch list and the Open
-//!   Cloud registry.
+//! - A change to a file that a CI check regenerates and compares: the golden baseline, the arch list, the Open Cloud
+//!   registry and the runtime's ABI declaration.
 //! - A line whose only changes are path edits. Each hunk must replace as many lines as it removes, and each new line
 //!   must equal the old one byte for byte, whitespace included, outside the words a path edit swaps. Those words may
 //!   sit only in string literals of the same quote on both lines, without `${`, and, in YAML and TOML files, whose
@@ -24,14 +24,14 @@ use std::path::Path;
 
 use std::collections::BTreeSet;
 
-use crate::arch;
 use crate::golden::{self, BASELINE};
 use crate::run::{git, git_maybe, repo};
+use crate::{abi, arch};
 
 const USAGE: &str = "usage: cargo xtask proof [<base>]";
 const SIMILARITY: u32 = 95;
 /// Generated files whose CI check proves they match what their command writes.
-const GENERATED: &[&str] = &[BASELINE, arch::LIST, "crates/oc-registry/spec/registry.json"];
+const GENERATED: &[&str] = &[BASELINE, arch::LIST, "crates/oc-registry/spec/registry.json", abi::DECLARATION];
 /// The extensions that make a word read as a file name.
 const EXTENSIONS: &[&str] = &[
     "rs", "ts", "tsx", "js", "mjs", "cjs", "json", "jsonc", "toml", "yml", "yaml", "md", "txt", "lua", "luau", "rbxl",
@@ -54,6 +54,10 @@ pub fn main(args: &[String]) -> Result<(), String> {
     out.push_str("| Check | Result |\n| --- | --- |\n");
     out.push_str(&format!("| Golden | {} |\n", golden.0));
     out.push_str(&format!("| Arch violations | {} |\n", arch.0));
+    out.push_str(&format!(
+        "| ABI | {} |\n",
+        abi::check(&root).unwrap_or_else(|problems| cell(&problems.replace('\n', " ")))
+    ));
     out.push_str("\n| Commit | Review | Evidence |\n| --- | --- | --- |\n");
     let mut path_edits = String::new();
     for commit in commits.lines() {

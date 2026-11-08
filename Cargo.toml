@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
 	"crates/luau",
+	"crates/abi",
 	"crates/oc",
 	"crates/project",
 	"crates/docs",
