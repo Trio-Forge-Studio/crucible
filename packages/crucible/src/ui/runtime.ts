@@ -27,8 +27,12 @@ const modalAtom = atom(false);
 // Gameplay computeds track this atom. Anvil tracks the Vide derive, because a Charm batch delays the atom's subscribers.
 export const modalOpen: Getter<boolean> = () => modalAtom();
 function setState(value: ModalState<number>): void {
-	state(value);
-	modalAtom(hasModal(untrack(state)));
+	// A throwing Vide observer still leaves the new value in `state`, so the mirror must follow it.
+	try {
+		state(value);
+	} finally {
+		modalAtom(hasModal(untrack(state)));
+	}
 }
 const topId = derived.topId;
 export const selectedObject = source<GuiObject | undefined>(undefined);

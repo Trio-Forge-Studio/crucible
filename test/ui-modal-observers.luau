@@ -109,6 +109,53 @@ return {
 		stop()
 		h.stop()
 	end,
+	["a Vide effect that throws on open still leaves modalOpen() true"] = function()
+		local _, h = setup()
+		local runtime = h.runtime
+		local armed = false
+		h.mount("Base", function()
+			h.vide.effect(function()
+				runtime.active("Base")
+				if armed then
+					error("vide observer failed")
+				end
+			end)
+		end)
+		armed = true
+		local ok, err = pcall(function()
+			runtime.openScope(runtime.nextScopeId(), "Native")
+		end)
+		armed = false
+		assert(
+			not ok and string.find(tostring(err), "vide observer failed", 1, true),
+			"the Vide error reaches the opener"
+		)
+		assert(runtime.modalOpen() and not runtime.active("Base"), "modalOpen() agrees with the open Vide state")
+		h.stop()
+	end,
+	["a Vide effect that throws on close still leaves modalOpen() false"] = function()
+		local _, h = setup()
+		local runtime = h.runtime
+		local id = h.root(10)
+		local armed = false
+		h.mount("Base", function()
+			h.vide.effect(function()
+				runtime.active("Base")
+				if armed then
+					error("vide observer failed")
+				end
+			end)
+		end)
+		armed = true
+		local ok, err = pcall(runtime.closeScope, id)
+		armed = false
+		assert(
+			not ok and string.find(tostring(err), "vide observer failed", 1, true),
+			"the Vide error reaches the closer"
+		)
+		assert(not runtime.modalOpen() and runtime.active("Base"), "modalOpen() agrees with the closed Vide state")
+		h.stop()
+	end,
 	["modalOpen ignores an argument, so its export cannot write the modal atom"] = function()
 		local _, h = setup()
 		local modalOpen = h.require().modalOpen
