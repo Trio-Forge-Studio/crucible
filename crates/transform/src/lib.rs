@@ -139,6 +139,18 @@ impl Crucible {
         classes
     }
 
+    /// The macro calls of the program in source order, by macro name, for tests.
+    #[cfg(feature = "test-support")]
+    pub fn calls(&self) -> Vec<(String, u32, &'static str)> {
+        let mut calls: Vec<(String, u32, &'static str)> = self
+            .calls
+            .iter()
+            .map(|(node, m)| (node.source_file().map(|f| f.path()).unwrap_or_default(), node.start(), m.name()))
+            .collect();
+        calls.sort();
+        calls
+    }
+
     /// The `inject` targets of the program in source order, for tests.
     #[cfg(feature = "test-support")]
     pub fn injects(&self) -> Vec<(String, u32, Dependency)> {

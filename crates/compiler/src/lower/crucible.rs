@@ -2,19 +2,10 @@ use std::borrow::Cow;
 
 use super::Lower;
 use crate::declarations::DeclarationKind;
-use crate::extension::HelperModule;
 use crate::facts::{Crucible, Declaration, KeyLiteral, Literal, MapKey, Schema, Tail};
 use crate::macros::Macro;
 use crate::tree::Node;
 use crucible_luau::{Expr, Field};
-
-/// `@trioforge/crucible/emit`, which the declaration macros call.
-pub(crate) const EMIT: HelperModule = HelperModule {
-    package: "@trioforge/crucible",
-    entry: "./emit",
-    local: "__crucible",
-    missing: "Crucible's macros and registration need a game that maps @trioforge/crucible/emit",
-};
 
 fn string(text: &str) -> Expr {
     Expr::String(Cow::Owned(text.to_owned()))
@@ -29,8 +20,9 @@ fn literal(value: &Literal) -> Expr {
 }
 
 impl Lower<'_> {
+    /// The declaration macros' runtime, which the transform declares as a helper module.
     fn runtime(&mut self, name: &'static str) -> Expr {
-        self.helper(&EMIT, name)
+        self.declared_helper("__crucible", name)
     }
 
     pub(super) fn crucible_macro(&mut self, m: Macro, n: Node) -> Expr {

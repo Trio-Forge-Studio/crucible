@@ -6,7 +6,8 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Facts, Failure, Literal, Target};
+use crucible_compiler::{Failure, Target};
+use crucible_transform::{Check, Class, ClassKind, Dependency, Literal};
 use serde_json::{Value, json};
 use support::{Game, copy_declarations, has, lines, project, repo, slashes};
 
@@ -17,16 +18,8 @@ fn line_count(text: &str) -> usize {
     text.trim_end().split('\n').count()
 }
 
-fn classes(facts: &Facts, file: &str) -> Vec<Class> {
-    let table = facts.files.iter().find(|f| f.path.ends_with(file)).unwrap_or_else(|| panic!("{file} has facts"));
-    table
-        .facts
-        .iter()
-        .filter_map(|(_, fact)| match fact.crucible.as_deref() {
-            Some(Crucible::Class(class)) => Some(class.clone()),
-            _ => None,
-        })
-        .collect()
+fn classes(game: &Game, file: &str) -> Vec<Class> {
+    game.registered(file)
 }
 
 fn class<'a>(classes: &'a [Class], name: &str) -> &'a Class {
@@ -91,7 +84,7 @@ fn registration_payloads_inherited_deps_tags_attributes_provides_and_symbol_iden
     game.main(POSITIVE);
     let facts = game.facts();
     assert_eq!(facts.diagnostics, [], "the positive fixture reports nothing");
-    let registered = classes(&facts, "src/server/main.ts");
+    let registered = classes(&game, "src/server/main.ts");
     let store = class(&registered, "Store");
     assert_eq!(store.kind, ClassKind::Subsystem);
     assert_eq!(store.id, Some(id("Store")));
@@ -496,7 +489,7 @@ fn root_dirs_globs_map_and_a_missing_rojo_project_reports_cru006() {
     roots.write("src/shared/foo.ts", "export interface Foo { shared: true; }");
     roots.write("src/server/foo.ts", "export interface Foo { server: true; }");
     roots.main("import { Subsystem } from \"@trioforge/crucible\"; import { boot } from \"@trioforge/crucible/server\";\nimport type { Foo as Shared } from \"../shared/foo\"; import type { Foo } from \"./foo\";\nexport class S extends Subsystem implements Shared, Foo { shared = true as const; server = true as const; }\nboot({load: [\"src/server/**/*.ts\"]});");
-    let registered = classes(&roots.facts(), "src/server/main.ts");
+    let registered = classes(&roots, "src/server/main.ts");
     let s = class(&registered, "S");
     assert_eq!(s.id, Some(id("S")));
     assert_eq!(s.provides, ["fixture-game/shared/foo:Foo".into(), "fixture-game/server/foo:Foo".into()]);
@@ -633,13 +626,12 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     let (project, include) = (game.dir.join("gen/place/default.project.json"), game.include());
     let target = Target::Game { project: &project, include: &include };
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});");
-    let modules =
-        crucible_compiler::compile(&place, target, Vec::new()).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
+    let modules = crucible_transform::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
     let main = modules.modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
     has(&main.source, "crucible-path:ServerScriptService/TS/**");
 
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"../../src/server/**\"]});");
-    let facts = crucible_compiler::analyze(&place, target, &mut []).expect("the place type-checks");
+    let facts = crucible_transform::analyze(&place, target).map(|(facts, _)| facts).expect("the place type-checks");
     assert!(
         facts
             .diagnostics
@@ -683,7 +675,7 @@ fn package_declaration_ids_ignore_the_consumer_root_and_respect_exports_types_co
         );
         game.config(|c| c["compilerOptions"]["rootDir"] = json!(root));
         game.main("import { Subsystem } from \"@trioforge/crucible\";\nimport type { Handler } from \"@trioforge/fixture\";\nexport class Uses extends Subsystem implements Handler {\n\thandle() {}\n}\n");
-        let registered = classes(&game.facts(), "src/server/main.ts");
+        let registered = classes(&game, "src/server/main.ts");
         assert_eq!(registered[0].provides, std::slice::from_ref(&expected), "rootDir {root}");
         game.json(
             &format!("{installed}/package.json"),
@@ -693,7 +685,7 @@ fn package_declaration_ids_ignore_the_consumer_root_and_respect_exports_types_co
                 "exports": { ".": { "import": { "types": "./out/index.d.ts", "default": "./out/index.js" } } },
             }),
         );
-        let registered = classes(&game.facts(), "src/server/main.ts");
+        let registered = classes(&game, "src/server/main.ts");
         assert_eq!(registered[0].provides, std::slice::from_ref(&expected), "exports types condition, rootDir {root}");
     }
     let source = Game::new();
@@ -702,7 +694,7 @@ fn package_declaration_ids_ignore_the_consumer_root_and_respect_exports_types_co
         .json("src/server/fixture/tsconfig.json", &json!({ "compilerOptions": { "rootDir": "src", "outDir": "out" } }));
     source.write("src/server/fixture/src/events/handler.ts", "export interface Handler {\n\thandle(): void;\n}\n");
     source.main("import { Subsystem } from \"@trioforge/crucible\";\nimport type { Handler } from \"./fixture/src/events/handler\";\nexport class Uses extends Subsystem implements Handler {\n\thandle() {}\n}\n");
-    let registered = classes(&source.facts(), "src/server/main.ts");
+    let registered = classes(&source, "src/server/main.ts");
     assert_eq!(registered[0].provides, [expected], "the package's own source has the same id");
 }
 
@@ -1228,7 +1220,8 @@ fn package_sides_without_a_package_search_the_whole_path() {
         "include": ["server"],
     });
     std::fs::write(dir.join("tsconfig.json"), serde_json::to_string(&config).unwrap()).unwrap();
-    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json"), Target::Package, &mut [])
+    let facts = crucible_transform::analyze(&dir.join("tsconfig.json"), Target::Package)
+        .map(|(facts, _)| facts)
         .unwrap_or_else(|d| panic!("{}", lines(&d)));
     let found: Vec<(i32, u32)> = facts.diagnostics.iter().map(|d| (d.code, d.line)).collect();
     assert_eq!(found, [(90011, 2)]);
@@ -1445,7 +1438,7 @@ fn instance_classes_list_in_the_order_typescript_5_first_makes_their_types() {
     game.main("import { CrucibleBehaviour } from \"@trioforge/crucible\";\nimport type { Seated } from \"../shared/parts\";\ninterface Gear extends Tool {}\nexport type S = Seated;\nexport class Mixed extends CrucibleBehaviour<\"Mixed\", Part | Model | Folder> {}\nexport class Later extends CrucibleBehaviour<\"Later\", BasePart | Model> {}\nexport class Shared extends CrucibleBehaviour<\"Shared\", Accessory | Seat> {}\nexport class Heard extends CrucibleBehaviour<\"Heard\", Sound | Tool> {}\nexport class Aliased extends CrucibleBehaviour<\"Aliased\", Pair> {}\nexport const fire: Fire | undefined = undefined;\ntype Pair = Sparkles | Fire;\n");
     let facts = game.facts();
     assert_eq!(facts.diagnostics, []);
-    let registered = classes(&facts, "src/server/main.ts");
+    let registered = classes(&game, "src/server/main.ts");
     let instance =
         |name: &str| -> Vec<String> { class(&registered, name).instance.iter().map(|n| n.to_string()).collect() };
     assert_eq!(instance("Mixed"), ["Part", "Model", "Folder"], "each member in the order the union names it");

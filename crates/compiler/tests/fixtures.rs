@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use crucible_compiler::{
-    Callee, Constant, Crucible, Dependency, Fact, Facts, Falsy, Import, Macro, Reason, Receiver, Site, Span, Target,
-};
+use crucible_compiler::{Callee, Constant, Fact, Facts, Falsy, Import, Macro, Reason, Receiver, Site, Span, Target};
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -239,27 +237,11 @@ fn re_exported_const_enums_keep_their_import() {
 }
 
 #[test]
-fn inject_carries_its_target_type_id() {
-    let store = Box::new(Crucible::Inject(Dependency::One("crucible-workspace/crucible:Store".into())));
-    let call = fact("crucible.ts", "inject<Store>()", "inject<Store>()");
-    assert_eq!(call.crucible, Some(store.clone()), "the id is relative to the common source directory");
-    let macro_call = fact("crucible.ts", "inject<Store>()", "inject");
-    assert_eq!(macro_call, callee(Callee::Macro(Macro::Inject)), "inject is Crucible's macro");
-    let aliased = fact("crucible.ts", "alias<Store>()", "alias<Store>()");
-    assert_eq!(aliased.crucible, Some(store), "an alias of inject resolves through its signature");
-    let alias = fact("crucible.ts", "alias<Store>()", "alias");
-    assert_eq!(alias, callee(Callee::Macro(Macro::Inject)), "the alias is the inject macro");
-    let untyped = fact("crucible.ts", "inject()", "inject()");
-    let invalid = Box::new(Crucible::Inject(Dependency::Invalid));
-    assert_eq!(untyped.crucible, Some(invalid), "inject without a type argument is rejected");
-}
-
-#[test]
-fn crucible_macros_come_from_their_entries() {
+fn the_compiler_calls_crucible_exports_as_functions() {
     let emit = fact("crucible.ts", "emitAttribute({}", "emitAttribute");
     assert_eq!(emit, callee(Callee::Function), "the emit module's attribute is not the macro");
     let boot = fact("crucible.ts", "boot({ load: [] })", "boot");
-    assert_eq!(boot, callee(Callee::Macro(Macro::Boot)), "the server entry's boot is the macro");
+    assert_eq!(boot, callee(Callee::Function), "boot is the transform's macro, which the compiler does not know");
 }
 
 #[test]

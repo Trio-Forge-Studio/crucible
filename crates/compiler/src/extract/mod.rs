@@ -102,7 +102,6 @@ pub(crate) fn extract(
         instance_classes: None,
         catalog,
     };
-    x.declare_helper(&crate::lower::EMIT);
     for e in extensions.iter_mut() {
         e.begin_program(&mut extension::ExtractCx::new(&mut x));
     }

@@ -16,15 +16,20 @@ impl Lower<'_> {
 
     /// A reference to `name` in a helper module, which imports the module into this file.
     pub(super) fn helper(&mut self, module: &'static HelperModule, name: &'static str) -> Expr {
-        match self.place.helpers.iter().position(|h| h.local == module.local) {
+        self.declared_helper(module.local, name)
+    }
+
+    /// A reference to `name` in the helper module an extension declared under `local`.
+    pub(super) fn declared_helper(&mut self, local: &'static str, name: &'static str) -> Expr {
+        match self.place.helpers.iter().position(|h| h.local == local) {
             Some(index) if !self.helpers.contains(&index) => self.helpers.push(index),
             Some(_) => {}
             None => {
                 let root = self.file.root();
-                self.error(root, module.missing);
+                self.error(root, format!("no extension declares the `{local}` helper module"));
             }
         }
-        Expr::global(module.local).field(name)
+        Expr::global(local).field(name)
     }
 
     /// The expression an extension lowers in place of `n`, if any.

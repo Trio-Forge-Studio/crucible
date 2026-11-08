@@ -12,8 +12,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 
-pub(crate) use crucible::EMIT;
-
 use crate::extension::Extension;
 use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
