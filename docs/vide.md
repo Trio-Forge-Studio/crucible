@@ -2,7 +2,7 @@
 
 Render UI with Vide, and read Charm values in components with `@rbxts/vide-charm`.
 
-Crucible has no UI entry of its own. A game renders UI with `@rbxts/vide` and reads Charm values in components with `useAtom` from `@rbxts/vide-charm`. The game lists Charm, Vide and `vide-charm` in its own `dependencies`, as a game made with `crucible create` does. Crucible imports neither Vide nor `vide-charm`.
+A game renders UI with `@rbxts/vide` and reads Charm values in components with `useAtom` from `@rbxts/vide-charm`. The game lists Charm, Vide and `vide-charm` in its own `dependencies`, as a game made with `crucible create` does. Crucible's `ui` entry, which `crucible docs ui` describes, is the only Crucible entry that imports Vide, and no entry imports `vide-charm`.
 
 ```ts
 import Vide from "@rbxts/vide";
@@ -27,7 +27,7 @@ import { useAtom } from "@rbxts/vide-charm";
 
 The linter does not see that JSX uses `Vide`, so a new game's `vite.config.ts` also lets `no-unused-vars` skip a name `Vide` in `.tsx` files. Every other unused import or variable still fails `vp check`, and so does an unused `Vide` in a `.ts` file. Inside a pnpm workspace whose root holds a `vite.config.ts`, `vp check` lints with the root's config instead of the game's, so copy that override there.
 
-Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail compilation at the tsconfig with this fix. Crucible no longer exports `@trioforge/crucible/ui` or compiles `className` and `theme.toml` into instance styles.
+Automatic JSX modes (`react-jsx` and `react-jsxdev`) and `jsxImportSource` fail compilation at the tsconfig with this fix. Crucible no longer compiles `className` and `theme.toml` into instance styles.
 
 ## Bind a value
 
