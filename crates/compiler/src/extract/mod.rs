@@ -4,6 +4,7 @@
 //! not sites yet.
 
 mod classes;
+mod collisions;
 mod crucible;
 mod data;
 mod network;
