@@ -70,14 +70,18 @@ export class Menu extends Subsystem {
 			feedback: () => {},
 		});
 		own(startMenuRuntime());
-		UserInputService.LastInputTypeChanged.Connect((input) => {
-			if (input === Enum.UserInputType.Gamepad1) device("Gamepad");
-			else if (input === Enum.UserInputType.Touch) device("Touch");
-			else device("Keyboard");
-		});
-		UserInputService.InputBegan.Connect((input, processed) => {
-			if (!processed && input.KeyCode === Enum.KeyCode.M) this.shown((shown) => !shown);
-		});
+		own(
+			UserInputService.LastInputTypeChanged.Connect((input) => {
+				if (input === Enum.UserInputType.Gamepad1) device("Gamepad");
+				else if (input === Enum.UserInputType.Touch) device("Touch");
+				else device("Keyboard");
+			}),
+		);
+		own(
+			UserInputService.InputBegan.Connect((input, processed) => {
+				if (!processed && input.KeyCode === Enum.KeyCode.M) this.shown((shown) => !shown);
+			}),
+		);
 		effect(() => print(`Sample menu modal ${modalOpen()}`));
 		watch(this.shown, (shown) => {
 			if (!shown) return;

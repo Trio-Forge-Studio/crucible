@@ -8,6 +8,7 @@ local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
 local ConfigBackend = require("./config-backend")
+local Ownable = require("./ownable")
 local ProfileWorld = require("./profile-world")
 local UiLoad = require("./ui-load")
 
@@ -57,17 +58,19 @@ local function resolve(base, names: { string })
 	return node
 end
 
+-- Lune has no RBXScriptConnection, so a fake service hands out connections that the runtime's `own` disconnects.
 local function signal()
 	local listeners = {}
 	return {
 		listeners = listeners,
 		Connect = function(_, listener)
 			table.insert(listeners, listener)
-			return {
-				Disconnect = function()
-					table.remove(listeners, table.find(listeners, listener))
-				end,
-			}
+			return Ownable.connection(function()
+				local index = table.find(listeners, listener)
+				if index then
+					table.remove(listeners, index)
+				end
+			end)
 		end,
 	}
 end
@@ -242,7 +245,7 @@ local function attach(self, realm, runtimeLib)
 	env = {
 		game = game,
 		task = self.link.task,
-		typeof = roblox.typeof,
+		typeof = Ownable.typeof,
 		Vector3 = roblox.Vector3,
 		Color3 = roblox.Color3,
 		CFrame = roblox.CFrame,

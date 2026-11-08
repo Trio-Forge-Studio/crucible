@@ -383,4 +383,36 @@ return {
 		w.link:assertClean()
 		w.place:Destroy()
 	end,
+
+	["compiled sample ending the Menu releases its input connections"] = function()
+		local w = newWorld()
+		local ann = connect(w, "Ann", ANN)
+		local menu
+		for _, record in ann.graph.module("internal/registry").records() do
+			if record.id == "@trioforge/crucible-sample-game/client/systems/menu:Menu" then
+				menu = record.state
+			end
+		end
+		assert(menu, "the client runs the Menu")
+		local function listeners()
+			return {
+				#ann.userInput.LastInputTypeChanged.listeners,
+				#ann.inputs.listeners,
+				#ann.userInput.InputEnded.listeners,
+			}
+		end
+		spec.list(listeners(), { 1, 5, 2 }, "the Menu, its close input and the menu runtime listen")
+		w:press(ann, M)
+		assert(menu.object.shown(), "M opens the menu")
+		w:press(ann, M)
+
+		ann.graph.module("internal/lifecycle").fault(menu, 8, "retired")
+		w.link:flush()
+		-- The Hud's coin key is the one InputBegan listener that is not the Menu's.
+		spec.list(listeners(), { 0, 1, 0 }, "ending the Menu disconnects every listener it made")
+		w:press(ann, M)
+		assert(not menu.object.shown(), "M no longer reaches the ended Menu")
+		assert(ann.player.PlayerGui:FindFirstChild("SettingsMenu") == nil, "and mounts nothing")
+		w.place:Destroy()
+	end,
 }
