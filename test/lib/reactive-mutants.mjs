@@ -11,6 +11,7 @@ const OWNERSHIP = "packages/crucible/src/internal/reactive/ownership.ts";
 const LIFECYCLE = "packages/crucible/src/internal/lifecycle.ts";
 const RUNNER = "packages/crucible/src/internal/runner.ts";
 const BOOT = "packages/crucible/src/internal/boot.ts";
+const SERVER_SYNC = "packages/crucible/src/internal/sync/server-sync.ts";
 
 // [name, kind, rules, file, [[before, after], ...]]. Kinds: guard (a reset or guard deleted), swap (two operands of
 // the same type exchanged), pair (one half of a paired operation short-circuited). Charm owns values, so the targets
@@ -28,7 +29,19 @@ const mutants = [
 		"guard",
 		[23],
 		OWNERSHIP,
-		[["		dispose(child);\n		child = after;", "		child = after;"]],
+		[["		unlist(child);\n		dispose(child);", "		unlist(child);"]],
+	],
+	[
+		"a child's end loses the next sibling",
+		"swap",
+		[23],
+		OWNERSHIP,
+		[
+			[
+				"		unlist(child);\n		dispose(child);\n		child = owner.first;",
+				"		const after = child.next;\n		unlist(child);\n		dispose(child);\n		child = after;",
+			],
+		],
 	],
 	[
 		"unlisting keeps the head",
@@ -54,7 +67,12 @@ const mutants = [
 		"guard",
 		[36],
 		OWNERSHIP,
-		[["	owner.body = undefined;\n	unlist(owner);", "	unlist(owner);"]],
+		[
+			[
+				"		if (owner.body === undefined) return;\n		owner.body = undefined;\n",
+				"		if (owner.body === undefined) return;\n",
+			],
+		],
 	],
 	["effects outside a run are not listed", "guard", [20], OWNERSHIP, [["		adopt(owner, run);\n", ""]]],
 	[
@@ -71,19 +89,45 @@ const mutants = [
 		OWNERSHIP,
 		[
 			["	openScope();\n	const [result, value] = call(body,", "	const [result, value] = call(body,"],
-			[
-				"	if (closeScope()) drain();\n	if (failed) error(failure, 0);",
-				"	if (failed) error(failure, 0);",
-			],
+			["	if (closeScope()) drain();\n	if (!failed) return;", "	if (!failed) return;"],
 		],
 	],
-	["a failed run not rethrown", "pair", [17, 18], OWNERSHIP, [["	if (failed) error(failure, 0);\n", ""]]],
+	["a failed run not rethrown", "pair", [17, 18], OWNERSHIP, [["	if (!run.creating) error(failure, 0);\n", ""]]],
+	[
+		"a failed first run thrown inside Charm",
+		"swap",
+		[17],
+		OWNERSHIP,
+		[["	if (!run.creating) error(failure, 0);\n	run.failure = failure;", "	error(failure, 0);"]],
+	],
+	[
+		"a failed first run not rethrown",
+		"pair",
+		[17, 36],
+		OWNERSHIP,
+		[["	dispose(run);\n	error(failure, 0);", "	dispose(run);"]],
+	],
 	[
 		"a nested effect created as a root",
 		"swap",
 		[26],
 		OWNERSHIP,
 		[["setActiveSub(nested ? lifetime.node : undefined)", "setActiveSub(undefined)"]],
+	],
+	[
+		"a disposed nested effect keeps its children",
+		"guard",
+		[26],
+		OWNERSHIP,
+		[["		for (const child of children) dispose(child);\n", ""]],
+	],
+	["a disposed nested effect is never closed", "pair", [17, 26], OWNERSHIP, [["	run.close?.(true);\n", ""]]],
+	[
+		"a nested effect reads no close signal",
+		"pair",
+		[26],
+		OWNERSHIP,
+		[["	(run.closed as Getter<boolean>)();\n", ""]],
 	],
 	[
 		"a self-disposed entry is never stopped",
@@ -97,7 +141,7 @@ const mutants = [
 		"guard",
 		[36],
 		OWNERSHIP,
-		[["	dispose(run);\n	error(stop, 0);", "	error(stop, 0);"]],
+		[["	dispose(run);\n	error(failure, 0);", "	error(failure, 0);"]],
 	],
 	[
 		"boot holds nothing",
@@ -131,6 +175,19 @@ const mutants = [
 		[15],
 		OWNERSHIP,
 		[["call(peek, source, undefined, owner.state, owner)", "call(peek, source, undefined)"]],
+	],
+	[
+		"a failed watch baseline leaves tracking off",
+		"pair",
+		[15],
+		OWNERSHIP,
+		[
+			["	const active = getActiveSub();\n	const [result, baseline]", "	const [result, baseline]"],
+			[
+				"	setActiveSub(active);\n	if (result !== CallResult.Ok) error(baseline, 0);",
+				"	if (result !== CallResult.Ok) error(baseline, 0);",
+			],
+		],
 	],
 	[
 		"a scope setup outside its lifecycle scope",
@@ -259,6 +316,20 @@ const mutants = [
 		],
 	],
 	["boot never ends intervals", "pair", [21, 75], BOOT, [["		disabled: endInterval,\n", ""]]],
+	[
+		"a projection a failed flush skipped is never examined",
+		"guard",
+		[13],
+		SERVER_SYNC,
+		[["		if (!this.changed) this.changed = this.anySkipped();\n", ""]],
+	],
+	[
+		"a projection a failed flush skipped is never pulled",
+		"guard",
+		[13],
+		SERVER_SYNC,
+		[["	if (!projection.dirty && !skipped(projection)) return;", "	if (!projection.dirty) return;"]],
+	],
 	[
 		"a committed boot keeps its effects held",
 		"guard",
