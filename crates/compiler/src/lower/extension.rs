@@ -27,8 +27,10 @@ impl Lower<'_> {
     }
 
     pub(super) fn replacement(&mut self, n: Node) -> Option<Expr> {
-        let at = self.replacements.iter().position(|(node, _)| *node == n)?;
-        Some(self.replacements.swap_remove(at).1)
+        self.replacements.iter_mut().rev().find_map(|scope| {
+            let at = scope.iter().position(|(node, _)| *node == n)?;
+            Some(scope.swap_remove(at).1)
+        })
     }
 }
 
@@ -39,11 +41,13 @@ impl LowerCx<'_, '_> {
     }
 
     /// A call's arguments in evaluation order, with a last argument that may return several values cut to one. Each
-    /// replacement lowers in place of its node, wherever that node sits in the arguments.
+    /// replacement lowers in place of its node, wherever that node sits in the arguments, until this returns. A call
+    /// lowered inside the arguments keeps the replacements of the calls around it, and its own replacement of the same
+    /// node wins.
     pub fn arguments(&mut self, call: Node, replacements: Vec<(Node, Expr)>) -> Vec<Expr> {
-        let outer = std::mem::replace(&mut self.l.replacements, replacements);
+        self.l.replacements.push(replacements);
         let arguments = self.l.macro_arguments(call);
-        self.l.replacements = outer;
+        self.l.replacements.pop();
         arguments
     }
 

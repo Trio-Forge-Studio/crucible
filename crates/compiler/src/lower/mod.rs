@@ -126,8 +126,9 @@ pub(crate) struct Lower<'a> {
     facts: &'a FileFacts,
     place: &'a Place,
     extensions: &'a [&'a dyn Extension],
-    /// The nodes an extension lowers in place of the compiler while the compiler lowers a call's arguments for it.
-    replacements: Vec<(Node, Expr)>,
+    /// The nodes extensions lower in place of the compiler, one scope for each call whose arguments the compiler is
+    /// lowering for an extension, innermost last.
+    replacements: Vec<Vec<(Node, Expr)>>,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,

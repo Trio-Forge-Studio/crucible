@@ -1,7 +1,8 @@
 //! A test extension that uses every hook of the seam. It finds calls to `probe` from the `@rbxts/probe` package,
 //! records each one's types from the checker, and lowers it to a call into the package's runtime entry with those
 //! types and the program's probe count. It replaces each `HERE` in a probe's arguments with where the probe is, and
-//! registers every class with the runtime after its declaration.
+//! registers every class with the runtime after its declaration. A second one, `Scopes`, nests the calls it lowers to
+//! test how long a replacement lasts.
 
 mod support;
 
@@ -164,9 +165,8 @@ fn probe_game() -> Game {
     game
 }
 
-fn compile(game: &Game, probe: &mut Probe, target: Target<'_>) -> Result<Vec<(String, String)>, Failure> {
-    let compiled =
-        crucible_compiler::compile_with(&game.dir.join("tsconfig.json"), target, &mut [probe as &mut dyn Extension])?;
+fn compile(game: &Game, extension: &mut dyn Extension, target: Target<'_>) -> Result<Vec<(String, String)>, Failure> {
+    let compiled = crucible_compiler::compile_with(&game.dir.join("tsconfig.json"), target, &mut [extension])?;
     Ok(compiled.modules.into_iter().map(|m| (m.path, m.source)).collect())
 }
 
@@ -268,4 +268,95 @@ fn a_helper_the_place_cannot_reach_fails_with_its_message() {
     let messages: Vec<&str> = errors.iter().map(|e| &*e.message).collect();
     assert_eq!(messages, [RUNTIME.missing]);
     assert!(Path::new(&errors[0].path).ends_with("src/server/main.ts"), "{}", errors[0]);
+}
+
+/// Each function `Scopes` lowers, the global its calls lower to, and what replaces a `HERE` while its arguments lower.
+/// `outer` and `claim` replace each `HERE` in their own arguments. `reach` replaces every `HERE` of its file, even one
+/// outside its call, and `inner` replaces none.
+const SCOPED: &[(&str, &str, &str)] = &[
+    ("outer", "out", "REPLACED"),
+    ("claim", "claimed", "CLAIMED"),
+    ("reach", "reached", "REACHED"),
+    ("inner", "inside", ""),
+];
+
+#[derive(Default)]
+struct Scopes {
+    /// Each call to a scoped function, as the global it lowers to, the replacement and the `HERE`s it replaces.
+    calls: HashMap<SiteId, (&'static str, &'static str, Vec<Node>)>,
+}
+
+impl Scopes {
+    fn named(cx: &mut ExtractCx<'_>, n: Node) -> Option<&'static str> {
+        if n.kind() != Kind::Identifier {
+            return None;
+        }
+        cx.symbol_at(n).map(|symbol| symbol.name())
+    }
+}
+
+impl Extension for Scopes {
+    fn name(&self) -> &'static str {
+        "scopes"
+    }
+
+    fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
+        let heres: Vec<Node> =
+            descendants(file.root()).into_iter().filter(|&n| Scopes::named(cx, n) == Some("HERE")).collect();
+        for n in descendants(file.root()) {
+            if n.kind() != Kind::CallExpression {
+                continue;
+            }
+            let Some(callee) = Scopes::named(cx, n.expression()) else { continue };
+            let Some(&(function, global, replacement)) = SCOPED.iter().find(|(name, ..)| *name == callee) else {
+                continue;
+            };
+            let replaced = match function {
+                "inner" => Vec::new(),
+                "reach" => heres.clone(),
+                _ => {
+                    let inside = n.arguments().iter().flat_map(descendants).collect::<Vec<_>>();
+                    heres.iter().copied().filter(|h| inside.contains(h)).collect()
+                }
+            };
+            self.calls.insert(cx.site(n), (global, replacement, replaced));
+        }
+    }
+
+    fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {
+        let (global, replacement, replaced) = self.calls.get(&cx.site(call))?;
+        let replacements = replaced.iter().map(|&n| (n, Expr::string(*replacement))).collect();
+        let arguments = cx.arguments(call, replacements);
+        Some(Expr::global(global).call(arguments))
+    }
+}
+
+fn compile_scopes(main: &str) -> String {
+    let game = Game::new();
+    game.main(&format!(
+        "{}declare const HERE: string;\nexport {{}};\n{main}",
+        SCOPED
+            .iter()
+            .map(|(name, ..)| format!("declare function {name}(...values: unknown[]): unknown;\n"))
+            .collect::<String>()
+    ));
+    let (project, include) = in_place(&game);
+    let mut scopes = Scopes::default();
+    let modules = compile(&game, &mut scopes, Target::Game { project: &project, include: &include })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    module(&modules, "server/main.luau").to_owned()
+}
+
+#[test]
+fn a_call_in_the_arguments_of_another_keeps_its_replacements_and_its_own_win() {
+    let main = compile_scopes("outer(inner(HERE));\nouter(claim(HERE), HERE);\n");
+    has(&main, "out((inside(\"REPLACED\")))");
+    has(&main, "out(claimed(\"CLAIMED\"), \"REPLACED\")");
+}
+
+#[test]
+fn replacements_end_with_the_call_that_supplies_them() {
+    let main = compile_scopes("outer(reach(), inner(HERE));\nreach();\ninner(HERE);\n");
+    has(&main, "out(reached(), (inside(\"REPLACED\")))");
+    has(&main, "\nreached()\ninside(HERE)\n");
 }
