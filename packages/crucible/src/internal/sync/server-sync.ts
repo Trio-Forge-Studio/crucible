@@ -1,3 +1,4 @@
+import { effect, setActiveSub } from "@rbxts/charm";
 import { ClientReady } from "../../network";
 import { Subsystem } from "../../subsystem";
 import { enginePort } from "../binding";
@@ -7,7 +8,8 @@ import { claim } from "../network/claims";
 import { KICK_MESSAGE } from "../network/limits";
 import { networkPort } from "../network/port";
 import { FrameEvent } from "../port";
-import { createComputedNode, currentEpoch, readComputed, type ComputedNode } from "../reactive/graph";
+import { peek } from "../reactive/store";
+import { call, CallResult } from "../runner";
 import {
 	SYNC_HEARTBEAT_BYTES,
 	SYNC_HEARTBEAT_PEERS,
@@ -16,7 +18,7 @@ import {
 	SYNC_PEER_VISITS,
 } from "../reactive/limits";
 import { define, type TypeId } from "../registry";
-import { declarations, useRetired, type Declaration } from "./declarations";
+import { declarations, useChanged, useRetired, type Declaration } from "./declarations";
 import { frameCost, overBudget, SyncFaultMessage, SyncFrameMessage, type SyncFrame, type SyncValue } from "./frame";
 import { admit, equal, isOverBudget, spend, type Work } from "./values";
 
@@ -32,12 +34,53 @@ interface Accepted {
 /** A retired publication fails for good, at no version a projection can reach. */
 const RETIRED = -1;
 
+/**
+ * One player's projection of a per-player declaration, pulled when a Heartbeat or a snapshot examines it. A pull runs
+ * the projector on a worker inside a Charm effect and moves `version` when the outcome changes: a value that is not
+ * `rawequal` to the last one, or a different failure. A throw or a yield is the failure. A write that reaches what the
+ * pull read only marks it dirty, so projectors run within the Heartbeat's budgets and never in the code that wrote.
+ */
+interface Projection {
+	readonly project: (player: Player) => unknown;
+	version: number;
+	ok: boolean;
+	/** The value, or the failure with its traceback. */
+	value: unknown;
+	dirty: boolean;
+	/** Stops the effect that watches what the last pull read. */
+	stop?: () => void;
+}
+
+function pull(projection: Projection, player: Player, changed: () => void) {
+	if (!projection.dirty) return;
+	projection.dirty = false;
+	projection.stop?.();
+	let pulling = true;
+	const active = setActiveSub(undefined);
+	projection.stop = effect(() => {
+		if (!pulling) {
+			// Reads nothing, so Charm drops what the pull read until the next pull.
+			projection.dirty = true;
+			changed();
+			return;
+		}
+		pulling = false;
+		const [result, value] = call(projection.project, player, undefined);
+		const ok = result === CallResult.Ok;
+		if (projection.version > 0 && ok === projection.ok && rawequal(value, projection.value)) return;
+		projection.ok = ok;
+		projection.value = value;
+		projection.version += 1;
+	});
+	setActiveSub(active);
+}
+
 interface View {
 	readonly player: Player;
 	revision: number;
 	live: boolean;
 	readonly accepted: Map<Declaration, Accepted>;
-	readonly projections: Map<Declaration, ComputedNode>;
+	readonly projections: Map<Declaration, Projection>;
 	/** Declarations the client was told failed, with the version that failed or RETIRED. */
 	readonly failing: Map<Declaration, number>;
 	readonly reported: Set<Declaration>;
@@ -59,7 +102,8 @@ class ServerSync extends Subsystem {
 	private readonly peers = new Map<Player, View>();
 	private readonly order = new Array<View>();
 	private cursor = 0;
-	private settledEpoch = -1;
+	/** A published value or a projection changed since the last Heartbeat began a round. */
+	private changed = true;
 	private incomplete = false;
 	private retiredSince = false;
 	private examining = "";
@@ -73,7 +117,12 @@ class ServerSync extends Subsystem {
 	constructor() {
 		super();
 		useRetired((declaration) => this.retired(declaration));
+		useChanged(this.marker);
 	}
+
+	private readonly marker = () => {
+		this.changed = true;
+	};
 
 	protected awake() {
 		this.disconnect = enginePort().onFrame(FrameEvent.Heartbeat, () => this.heartbeat());
@@ -98,11 +147,13 @@ class ServerSync extends Subsystem {
 		for (const declaration of declarations()) {
 			const publication = declaration.publication;
 			if (declaration.audience !== "player" || publication === undefined || !publication.live) continue;
-			const project = publication.project!;
-			view.projections.set(
-				declaration,
-				createComputedNode(() => project(player)),
-			);
+			view.projections.set(declaration, {
+				project: publication.project!,
+				version: 0,
+				ok: true,
+				value: undefined,
+				dirty: true,
+			});
 		}
 		const work: Work = { visits: 0, limit: SYNC_PEER_VISITS };
 		const staged = this.examine(view, work);
@@ -120,8 +171,8 @@ class ServerSync extends Subsystem {
 		this.spent = 0;
 		const ring = [...this.order];
 		if (ring.size() === 0) return;
-		if (!this.incomplete && !this.retiredSince && currentEpoch() === this.settledEpoch) return;
-		const startEpoch = currentEpoch();
+		if (!this.incomplete && !this.retiredSince && !this.changed) return;
+		this.changed = false;
 		this.retiredSince = false;
 		let bytes = 0;
 		let visits = 0;
@@ -158,7 +209,6 @@ class ServerSync extends Subsystem {
 		} else {
 			this.incomplete = false;
 			this.cursor = 0;
-			this.settledEpoch = startEpoch;
 		}
 	}
 
@@ -201,13 +251,15 @@ class ServerSync extends Subsystem {
 			let version: number;
 			let value: unknown;
 			if (declaration.audience === "all") {
-				version = declaration.node.version;
-				value = declaration.node.value;
+				version = declaration.version;
+				value = peek(declaration.node);
 				if (accepted !== undefined && accepted.version === version) continue;
 			} else {
-				const node = view.projections.get(declaration)!;
-				const [pulled, raw] = pcall(readComputed, node);
-				version = node.version;
+				const projection = view.projections.get(declaration)!;
+				pull(projection, view.player, this.marker);
+				const pulled = projection.ok;
+				const raw = projection.value;
+				version = projection.version;
 				if (failedAt === version) continue;
 				if (failedAt === undefined && accepted !== undefined && accepted.version === version) continue;
 				let reason: string | undefined;
@@ -324,6 +376,7 @@ class ServerSync extends Subsystem {
 	private end(view: View) {
 		if (!view.live) return;
 		view.live = false;
+		for (const [, projection] of view.projections) projection.stop?.();
 		view.projections.clear();
 		if (this.peers.get(view.player) === view) this.peers.delete(view.player);
 		const index = this.order.indexOf(view);
@@ -332,7 +385,10 @@ class ServerSync extends Subsystem {
 
 	private retired(declaration: Declaration) {
 		this.retiredSince = true;
-		for (const view of this.order) view.projections.delete(declaration);
+		for (const view of this.order) {
+			view.projections.get(declaration)?.stop?.();
+			view.projections.delete(declaration);
+		}
 	}
 
 	/** Rule 73: ServerSync's own generation ended. */

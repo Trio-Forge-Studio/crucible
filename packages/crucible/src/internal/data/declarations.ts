@@ -1,5 +1,4 @@
 import { assertDescriptor, n, type Node, type ObjectNode } from "../network/schema";
-import { readState } from "../reactive/graph";
 import { MAX_REPLICATED_DECLARATIONS } from "../reactive/limits";
 import { declarationOf, declareFrameworkReplicated, replicatedCapacity, type Declaration } from "../sync/declarations";
 import { admit as admitReplicated, compilePlan } from "../sync/values";
@@ -151,15 +150,15 @@ function clientSource(declaration: ProfileDeclaration): HandleSource {
 			error(`${declaration.name}() is read-only on the client`, 3);
 		},
 		read(path: readonly Segment[]) {
-			const live = readState(declaration.liveDeclaration.node) === true;
+			const live = declaration.liveDeclaration.node() === true;
 			if (path.size() === 0) {
 				if (!live) return declaration.clientTemplate;
 				const root: Record<string, unknown> = {};
-				for (const field of declaration.fields) root[field.name] = readState(field.declaration.node);
+				for (const field of declaration.fields) root[field.name] = field.declaration.node();
 				return table.freeze(root);
 			}
 			const field = byName.get(path[0] as string);
-			if (live && field !== undefined) return getPath(readState(field.declaration.node), path, 1);
+			if (live && field !== undefined) return getPath(field.declaration.node(), path, 1);
 			return getPath(declaration.clientTemplate, path);
 		},
 	};
@@ -178,8 +177,8 @@ export function clientRoot(declaration: ProfileDeclaration): object {
 /** @internal Rule 126: tracked; the lifecycle is ready and true, and every field view is ready. */
 export function clientLoaded(declaration: ProfileDeclaration): boolean {
 	const live = declaration.liveDeclaration;
-	if (readState(live.status) !== "ready" || readState(live.node) !== true) return false;
-	for (const field of declaration.fields) if (readState(field.declaration.status) !== "ready") return false;
+	if (live.status() !== "ready" || live.node() !== true) return false;
+	for (const field of declaration.fields) if (field.declaration.status() !== "ready") return false;
 	return true;
 }
 

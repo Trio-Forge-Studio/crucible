@@ -3,16 +3,16 @@ import { runtimeDiagnostic } from "../diagnostics";
 import { isLive, stateOf } from "../lifecycle";
 import { admitsNil, assertDescriptor, runtimeKind, type Branch, type Node } from "../network/schema";
 import type { Disconnect } from "../port";
-import { createStateNode, readState, write, type StateNode } from "../reactive/graph";
+import { atom, startBatch, type Atom } from "@rbxts/charm";
+import { peek, settle, store } from "../reactive/store";
 import { define, type TypeId } from "../registry";
 import * as L from "./limits";
 import { configPort, type ConfigSnapshotPort } from "./port";
 
 export type ConfigKind = "global" | "player";
 
-/** One value a reader sees. Commit is its only writer. */
-/** A config value as reactive state, so a read is tracked (rule 93) and a commit wakes its readers once. */
-type Cell = StateNode;
+/** A config value as a Charm atom, so a read is tracked (rule 93) and a commit wakes its readers once. */
+type Cell = Atom<unknown>;
 
 export interface Declaration {
 	readonly name: string;
@@ -69,7 +69,7 @@ function newScope(player?: Player): Scope {
 		player,
 		phase: Phase.Fetching,
 		diagnosed: new Set(),
-		ready: createStateNode(false),
+		ready: atom<unknown>(false),
 		values: new Map(),
 	};
 }
@@ -77,7 +77,7 @@ function newScope(player?: Player): Scope {
 const global = newScope();
 const slots = new Map<Player, Scope>();
 /** Bumped at every join, so a read for a player with no scope yet reruns once their scope exists (rule 93). */
-const roster = createStateNode(0);
+const roster = atom(0);
 let owner: ConfigRuntime | undefined;
 let retired = false;
 let listeners = new Array<Disconnect>();
@@ -318,34 +318,34 @@ export function declare(name: string, kind: ConfigKind, fallback: unknown, node:
 		const f = failure(admitted);
 		error(`Config ${name} has an invalid fallback at ${f.path}: ${f.reason}`, 3);
 	}
-	const declaration: Declaration = { name, kind, node, fallback: admitted, global: createStateNode(admitted) };
+	const declaration: Declaration = { name, kind, node, fallback: admitted, global: atom(admitted) };
 	names.add(name);
 	declarations.push(declaration);
 	return declaration;
 }
 
 export function readGlobal(declaration: Declaration): unknown {
-	return readState(declaration.global);
+	return declaration.global();
 }
 
 export function readPlayer(declaration: Declaration, player: Player): unknown {
 	const scope = slots.get(player);
 	if (scope === undefined) {
-		readState(roster);
+		roster();
 		return declaration.fallback;
 	}
-	if (readState(scope.ready) !== true) return readState(declaration.global);
-	return readState(scope.values.get(declaration)!);
+	if (scope.ready() !== true) return declaration.global();
+	return scope.values.get(declaration)!();
 }
 
 export function ready(player?: Player): boolean {
-	if (player === undefined) return readState(global.ready) as boolean;
+	if (player === undefined) return global.ready() as boolean;
 	const scope = slots.get(player);
 	if (scope === undefined) {
-		readState(roster);
+		roster();
 		return false;
 	}
-	return readState(scope.ready) === true;
+	return scope.ready() === true;
 }
 
 function seal(runtime: ConfigRuntime) {
@@ -492,6 +492,7 @@ function refreshScope(scope: Scope): Staged | undefined {
 /** Writes every changed value of every result in one pass that never yields. */
 function commit(results: readonly Staged[]) {
 	const apply = live();
+	startBatch();
 	for (const result of results) {
 		const scope = result.scope;
 		if (!apply || scope.phase === Phase.Gone || (result.first && scope.phase === Phase.Loaded)) {
@@ -508,13 +509,14 @@ function commit(results: readonly Staged[]) {
 			let cell: Cell;
 			if (scope.player === undefined) cell = declaration.global;
 			else {
-				cell = scope.values.get(declaration) ?? createStateNode(declaration.global.value);
+				cell = scope.values.get(declaration) ?? atom(peek(declaration.global));
 				scope.values.set(declaration, cell);
 			}
-			if (value !== KEEP && !deepEqual(cell.value, value)) write(cell, value);
+			if (value !== KEEP && !deepEqual(peek(cell), value)) cell(value);
 		}
-		write(scope.ready, true);
+		scope.ready(true);
 	}
+	settle("configs updated");
 }
 
 function fetchLoop(scope: Scope) {
@@ -588,7 +590,7 @@ function join(player: Player) {
 	if (!live() || slots.has(player)) return;
 	const scope = newScope(player);
 	slots.set(player, scope);
-	write(roster, (roster.value as number) + 1);
+	store([[roster, peek(roster) + 1]], `${player.Name} joined the configs`);
 	task.spawn(fetchLoop, scope);
 }
 
@@ -598,7 +600,7 @@ function leave(player: Player) {
 	if (scope === undefined) return;
 	slots.delete(player);
 	scope.phase = Phase.Gone;
-	write(scope.ready, false);
+	store([[scope.ready, false]], `${player.Name} left the configs`);
 	scope.snapshot?.disconnect();
 }
 
