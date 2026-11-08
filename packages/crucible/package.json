@@ -44,7 +44,7 @@
 		"@trioforge/compiler-types": "workspace:*"
 	},
 	"peerDependencies": {
-		"@rbxts/charm": "^0.11.1"
+		"@rbxts/charm": "0.11.1"
 	},
 	"files": [
 		"out",

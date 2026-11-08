@@ -17,6 +17,9 @@ local nodes: { [string]: Node } = {}
 -- The bytecode optimization level for modules loaded after `spec.optimize` sets it. Unset, Lune's default applies.
 local optimization: number? = nil
 
+-- Changes each module's source as it loads, after `spec.rewrite` sets it, such as a changed copy of Charm.
+local rewrite: ((path: string, source: string) -> string)? = nil
+
 local function node(path: string): Node
 	local existing = nodes[path]
 	if existing then
@@ -144,6 +147,9 @@ local function graph(defaults, loggingPort, configPort, network, dataPort, root:
 				end
 			end
 			local source = fs.readFile(fileOf(path))
+			if rewrite then
+				source = rewrite(path, source)
+			end
 			if optimization then
 				source = luau.compile(source, { optimizationLevel = optimization })
 			end
@@ -183,6 +189,10 @@ local shared = graph()
 
 function spec.optimize(level: number)
 	optimization = level
+end
+
+function spec.rewrite(transform: ((path: string, source: string) -> string)?)
+	rewrite = transform
 end
 
 -- Loads `packages/crucible/out/<relative>` once per process.

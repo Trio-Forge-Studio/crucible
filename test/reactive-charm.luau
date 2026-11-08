@@ -27,6 +27,29 @@ local function countingRealm()
 	return r, calls
 end
 
+-- Loads a strict realm on a copy of Charm whose init.luau has each `{from, to}` change applied once. Returns pcall's
+-- result.
+local function changedCharm(changes: { { string } })
+	local applied = 0
+	spec.rewrite(function(path, source)
+		if string.sub(path, -#"@rbxts/charm/src") ~= "@rbxts/charm/src" then
+			return source
+		end
+		for _, change in changes do
+			local start, finish = string.find(source, change[1], 1, true)
+			if start then
+				applied += 1
+				source = string.sub(source, 1, start - 1) .. change[2] .. string.sub(source, finish + 1)
+			end
+		end
+		return source
+	end)
+	local ok, result = pcall(realm, nil, nil, true)
+	spec.rewrite(nil)
+	spec.eq(applied, #changes, "every change applied to Charm")
+	return ok, result
+end
+
 -- An effect whose first run reads a source, holds a cleanup and writes an atom that an earlier effect throws on, then
 -- runs `after`. Checks that it keeps nothing, and returns what effect() threw and the realm.
 local function reachingFirstRun(after: () -> ())
@@ -556,6 +579,8 @@ return {
 				end)
 			end
 		end, nil, true)
+		-- The runtime ran effects of its own as it loaded, to check Charm.
+		calls = 0
 		local s = r.charm.atom(0)
 		local dispose
 		r.ownership.holdEffects()
@@ -871,5 +896,50 @@ return {
 		spec.list(order, { "child", "nested" }, "the child ended first, then the nested effect's cleanup ran")
 		stopRoot()
 		spec.list(order, { "child", "nested" }, "ending the root released nothing twice")
+	end,
+	["J1 rule 13 strict: the runtime refuses to load on a Charm whose failed flush clears a skipped effect's flags"] = function()
+		local ok, err = changedCharm({
+			{
+				"effect.flags = bit32.bor(effect.flags, bit32.bor(WATCHING, RECURSED))",
+				"effect.flags = bit32.bor(WATCHING, RECURSED)",
+			},
+		})
+		spec.eq(ok, false, "the runtime did not load")
+		spec.has(err, "Crucible needs @rbxts/charm 0.11.1", "the failure names the version")
+		spec.has(err, "forgets a write", "and what differs")
+	end,
+	["J2 rule 26 strict: the runtime refuses to load on a Charm whose stop keeps a nested effect's dependencies"] = function()
+		local ok, err = changedCharm({
+			{ "\tpurgeDeps(effect)\n\n\t-- Unlink from the parent effect", "\t-- Unlink from the parent effect" },
+		})
+		spec.eq(ok, false, "the runtime did not load")
+		spec.has(err, "stops a nested effect differently", "the failure says what differs")
+	end,
+	["J3 rule 13 strict: the runtime loads on a Charm whose failed flush still runs every queued effect"] = function()
+		local ok, r = changedCharm({
+			{
+				"\tlocal success, err = pcall(function()\n",
+				"\tlocal firstFailure\n\tlocal success, err = pcall(function()\n",
+			},
+			{
+				"\t\t\trun(effect)\n\t\tend\n",
+				"\t\t\tlocal ran, failure = pcall(run, effect)\n\t\t\tif not ran and firstFailure == nil then\n\t\t\t\tfirstFailure = failure\n\t\t\tend\n\t\tend\n\t\tif firstFailure ~= nil then\n\t\t\terror(firstFailure, 0)\n\t\tend\n",
+			},
+		})
+		spec.eq(ok, true, `the runtime loaded: {r}`)
+		local x = r.charm.atom(0)
+		local seen = 0
+		r.root(function()
+			r.api.effect(function()
+				if x() ~= 0 then
+					error("an earlier effect broke")
+				end
+			end)
+			r.api.effect(function()
+				seen = x()
+			end)
+		end)
+		spec.eq(pcall(x, 1), false, "the earlier effect threw to the writer")
+		spec.eq(seen, 1, "and the later one still ran")
 	end,
 }

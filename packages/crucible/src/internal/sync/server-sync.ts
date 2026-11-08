@@ -8,6 +8,7 @@ import { claim } from "../network/claims";
 import { KICK_MESSAGE } from "../network/limits";
 import { networkPort } from "../network/port";
 import { FrameEvent } from "../port";
+import { checkCharm } from "../reactive/charm";
 import { peek } from "../reactive/store";
 import { call, CallResult } from "../runner";
 import {
@@ -21,6 +22,8 @@ import { define, type TypeId } from "../registry";
 import { declarations, useChanged, useRetired, type Declaration } from "./declarations";
 import { frameCost, overBudget, SyncFaultMessage, SyncFrameMessage, type SyncFrame, type SyncValue } from "./frame";
 import { admit, equal, isOverBudget, spend, type Work } from "./values";
+
+checkCharm();
 
 /** @internal How ServerSync sends: exactly `Network.send` on the frame message. */
 export type FrameSender = (player: Player, frame: SyncFrame) => boolean;

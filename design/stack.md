@@ -28,7 +28,7 @@ Charm source lines refer to `@rbxts/charm` 0.11.1, file `src/init.luau`. Crucibl
 
 | Package | Role | How the game gets it |
 | --- | --- | --- |
-| `@rbxts/charm` | Values: atoms, computeds, batches | A required peer of `@trioforge/crucible` at `^0.11.1`. Never a hard dependency, never re-exported. |
+| `@rbxts/charm` | Values: atoms, computeds, batches | A required peer of `@trioforge/crucible` at exactly `0.11.1`. Never a hard dependency, never re-exported. |
 | `@rbxts/vide` | UI rendering | A peer of the `@trioforge/crucible/ui` entry only. The root, server and client entries never import it. |
 | `@rbxts/vide-charm` | Reads Charm values from Vide | The game installs it. Crucible does not import it. |
 | `@trioforge/crucible` | Lifetimes, compiler ABI, data, network, the `ui` entry | The game installs it. |
@@ -247,6 +247,8 @@ unrelated atom write, its effect saw 5
 The skip lasts for the failing write only. The next write that A survives reaches B again, and effects on unrelated atoms are unaffected. `batch` does not change it. The atom keeps its new value either way (`atom=1`).
 
 A fix is proposed upstream as U1: run every queued effect, rethrow a single error unchanged, and combine two or more errors into one, as Charm already does for cleanups (`init.luau:197`). Crucible does not depend on that fix.
+
+The peer is pinned to exactly `0.11.1`, because the runtime reads and edits Charm's nodes, which no Charm API covers. A per-player projection reads its effect's `Dirty` and `Pending` flags after a skipped flush, and ending a nested effect clears its node's link to its parent so that `stopEffect` (`init.luau:343` to `:356`) never reaches the wrong-parent unlink at `:352`. When the runtime loads, `internal/reactive/charm.ts` checks both behaviours and fails with the pinned version's name when Charm differs. Adopting any other Charm release, including one with U1 (`littensy/charm#71`), means running Crucible's specs against it, `test/reactive-charm.luau` above all, and moving the pin, the check's `CHARM_VERSION` and this section together.
 
 ## One copy per place
 

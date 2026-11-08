@@ -15,7 +15,10 @@ import { closeScope, drain, enabling, hasEnded, openScope } from "../lifecycle";
 import type { ClassRecord } from "../registry";
 import { call, CallResult, running } from "../runner";
 import type { ObjectState } from "../state";
+import { checkCharm } from "./charm";
 import { peek, settle } from "./store";
+
+checkCharm();
 
 /** @internal */
 export const enum Role {

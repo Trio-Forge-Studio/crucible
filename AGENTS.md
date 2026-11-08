@@ -4,7 +4,7 @@ Crucible is Trio Forge's TypeScript game framework for Roblox. It replaced Flame
 
 ## Layout
 
-- `packages/crucible` is the single runtime package, `@trioforge/crucible`.
+- `packages/crucible` is the single runtime package, `@trioforge/crucible`. Its `@rbxts/charm` peer is pinned to exactly the version the specs run against, because ownership and ServerSync read and edit Charm's nodes, and `src/internal/reactive/charm.ts` checks those behaviours when the runtime loads. Adopting another Charm release, including one with `littensy/charm#71`, means running the specs against it and moving the peer, the devDependency, the sample's and template's version, `CHARM_VERSION` and `design/stack.md` together.
 - `packages/crucible/src/index.ts` is the shared-safe root. It must never import or re-export server or client code, including through transitive imports.
 - `packages/crucible/src/server/index.ts` and `src/client/index.ts` are the side entries. The package exports map resolves side entries under TypeScript 7 bundler resolution.
 - `@rbxts/charm` is a required peer dependency of the runtime at `^0.11.1`, and a devDependency for its own build. It is never a hard dependency and never re-exported. Charm owns values, and the runtime owns lifetimes in `src/internal/reactive/ownership.ts`. No entry imports `@rbxts/vide` or `@rbxts/vide-charm`. Games install both next to Charm. The runtime lists `@rbxts/vide` as a devDependency only because the compiler's JSX fixture in `crates/compiler/tests/jsx/vide` resolves it from the runtime's `node_modules`.

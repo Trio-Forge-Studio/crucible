@@ -12,7 +12,9 @@ import type { Ownable } from "@trioforge/crucible";
 
 ## Install Charm
 
-`@rbxts/charm` is a required peer dependency of `@trioforge/crucible`, at `^0.11.1`. Crucible does not re-export it, so the game lists it in its own `dependencies`, as a game made with `crucible create` does.
+`@rbxts/charm` is a required peer dependency of `@trioforge/crucible`, at exactly `0.11.1`. Crucible does not re-export it, so the game lists it in its own `dependencies`, as a game made with `crucible create` does.
+
+The peer is exact because Crucible reads and edits Charm's internal nodes, which no Charm API covers. When the runtime loads, it checks that Charm behaves as it assumes, and it fails with `Crucible needs @rbxts/charm 0.11.1, and the installed Charm <what differs>` when it does not. A Crucible release that supports a newer Charm moves the pin.
 
 A place must hold one copy of Charm. Charm keeps its graph in module variables, so an atom from a second copy is invisible to Crucible's effects. The Rojo project `crucible create` writes maps the game's `node_modules/@rbxts` folder once, and the runtime finds Charm there.
 
