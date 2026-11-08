@@ -124,7 +124,7 @@ class ServerSync extends Subsystem {
 	private incomplete = false;
 	private retiredSince = false;
 	private examining = "";
-	/** Visits the last Heartbeat spent, its scan's reads included, for specs of rule 70's bound. */
+	/** Visits the last Heartbeat spent, its scan's included, for specs of rule 70's bound. */
 	spent = 0;
 	/** Peers the last Heartbeat examined, for specs of rule 58. */
 	examined = 0;
@@ -187,7 +187,7 @@ class ServerSync extends Subsystem {
 
 	/**
 	 * Rules 58 and 70: round robin from the first peer the last Heartbeat did not complete. A Heartbeat with nothing to
-	 * send scans instead, and its reads count against the round that a skipped projection starts.
+	 * send scans instead, and its visits count against the round that a skipped projection starts.
 	 */
 	private pace() {
 		this.spent = 0;
@@ -244,25 +244,27 @@ class ServerSync extends Subsystem {
 
 	/**
 	 * Looks for a projection whose effect a failed flush skipped, which only its flags show. It reads whole peers'
-	 * projections, round robin from where the last scan stopped, until it has read SYNC_HEARTBEAT_SCAN or every peer,
-	 * and each read is a visit. A sweep over every peer takes ceil(peers / k) quiet Heartbeats, where k is how many
-	 * peers' projections fit in SYNC_HEARTBEAT_SCAN reads, at least one. The round it starts pulls the projection when
-	 * it reaches that peer, within rule 58's limits.
+	 * projections, round robin from where the last scan stopped, and counts a visit for each peer and each projection.
+	 * SYNC_HEARTBEAT_SCAN is a threshold checked before each peer, so a scan stops after the peer that reaches it, or
+	 * after every peer. A sweep over every peer takes ceil(peers / k) quiet Heartbeats, where k is
+	 * ceil(SYNC_HEARTBEAT_SCAN / (projections per peer + 1)). The round it starts pulls the projection when it reaches
+	 * that peer, within rule 58's limits.
 	 */
 	private scan(): number {
 		const size = this.order.size();
-		let reads = 0;
-		for (let peers = 0; peers < size && reads < SYNC_HEARTBEAT_SCAN; peers++) {
+		let visits = 0;
+		for (let peers = 0; peers < size && visits < SYNC_HEARTBEAT_SCAN; peers++) {
 			if (this.scanned >= size) this.scanned = 0;
 			const view = this.order[this.scanned];
 			this.scanned += 1;
+			visits += 1;
 			for (const [, projection] of view.projections) {
-				reads += 1;
+				visits += 1;
 				if (!projection.dirty && skipped(projection)) this.changed = true;
 			}
 			if (this.changed) break;
 		}
-		return reads;
+		return visits;
 	}
 
 	/** One peer's staged examination, or undefined after failing the peer for passing its visit budget. */

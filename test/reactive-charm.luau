@@ -1115,11 +1115,13 @@ return {
 			assert(reads > 0 and reads < PEERS * DECLARATIONS, `a quiet Heartbeat read {reads} projection flags`)
 			local limit = w.server.reactiveLimits.SYNC_HEARTBEAT_SCAN
 			assert(reads <= limit + DECLARATIONS - 1, `{reads} reads stay within SYNC_HEARTBEAT_SCAN's whole peers`)
-			spec.eq(sync.spent, reads, "each read is a visit")
+			spec.eq(sync.spent, reads + reads // DECLARATIONS, "each read and each peer read is a visit")
 			spec.eq(sync.examined, 0, "and no peer is examined")
 		end
 		local function sweep()
-			return math.ceil(#sync.order / math.max(1, w.server.reactiveLimits.SYNC_HEARTBEAT_SCAN // DECLARATIONS))
+			return math.ceil(
+				#sync.order / math.max(1, w.server.reactiveLimits.SYNC_HEARTBEAT_SCAN // (DECLARATIONS + 1))
+			)
 		end
 		local function stall(name)
 			local before = #frames
@@ -1147,6 +1149,46 @@ return {
 		local behind = sync.order[sync.scanned].player.Name
 		waited = stall(behind)
 		assert(waited <= sweep(), `the peer the scan just read waited {waited} Heartbeats, within a sweep of {sweep()}`)
+		w:finish()
+	end,
+	["K2 rule 70 strict: a quiet Heartbeat without per-player projections visits SYNC_HEARTBEAT_SCAN peers, not all"] = function()
+		local w = SyncWorld.new({
+			declare = function(r)
+				return { r.emit.replicated("Scan.Public", 0, r.n.f64) }
+			end,
+			serve = function(s, d)
+				s.charm.flags.strict = true
+				s.service("Publisher", function()
+					s.entry.publish(d[1])
+				end)
+			end,
+		})
+		w.server.graph.module("internal/sync/server-sync").installServerSync(function()
+			return true
+		end)
+		local sync = w:sync()
+		local limit = w.server.reactiveLimits.SYNC_HEARTBEAT_SCAN
+		local peers = limit + limit // 2
+		-- The first Heartbeat with a peer runs a round, and a round over more than SYNC_HEARTBEAT_PEERS peers never ends,
+		-- so one peer settles first and the rest join a quiet server.
+		sync:snapshot({ Name = "Peer1", UserId = 1 })
+		w:heartbeat()
+		w:heartbeat()
+		spec.eq(sync.examined, 0, "the first peer's round ended")
+		for i = 2, peers do
+			sync:snapshot({ Name = `Peer{i}`, UserId = i })
+		end
+		for beat = 1, 3 do
+			local before = sync.scanned
+			w:heartbeat()
+			spec.eq(
+				sync.spent,
+				limit,
+				`Heartbeat {beat}: each peer the scan read is a visit, up to SYNC_HEARTBEAT_SCAN`
+			)
+			spec.eq(sync.examined, 0, `Heartbeat {beat}: no peer is examined`)
+			spec.eq((sync.scanned - before) % peers, limit, `Heartbeat {beat}: the scan read {limit} of {peers} peers`)
+		end
 		w:finish()
 	end,
 }
