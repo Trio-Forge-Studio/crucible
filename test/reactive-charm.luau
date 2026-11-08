@@ -626,6 +626,8 @@ return {
 			end,
 		})
 		local ann = w:join("Ann")
+		w:heartbeat()
+		spec.eq(ann.d.Value(), 0, "the join's round sent the first value")
 		local pulls = w.pulls
 		local ok = pcall(w.x, 1)
 		spec.eq(ok, false, "the earlier effect threw to the writer")
