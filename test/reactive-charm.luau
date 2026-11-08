@@ -687,4 +687,68 @@ return {
 		stopRoot()
 		stopNested()
 	end,
+	["G1 rule 21 rule 36 strict: an enable interval that ends before boot commits cancels its queued effect and watch"] = function()
+		local w = strictLife()
+		local x = w.charm.atom(0)
+		local runs, changes = 0, 0
+		w.ownership.holdEffects()
+		local object = w.make("Brief", {
+			onEnable = function()
+				w.api.effect(function()
+					x()
+					runs += 1
+				end)
+				w.api.watch(x, function()
+					changes += 1
+				end)
+			end,
+		})
+		w.boot(object)
+		w.life.request(object, w.Want.Disabled)
+		w.ownership.releaseEffects(true)
+		x(1)
+		spec.eq(runs, 0, "the queued effect never ran")
+		spec.eq(changes, 0, "the queued watch never changed")
+		spec.eq(w.engine.logged("failed at boot's commit"), 0, "and both were skipped without a report")
+	end,
+	["G2 rule 20 strict: raw Charm subscribe and listen callbacks get no Crucible owner from the object that made them"] = function()
+		local w = strictLife()
+		local x = w.charm.atom(0)
+		local runner = w.graph.module("internal/runner")
+		local seen = {}
+		local function who(): string
+			local owner = w.life.current()
+			return if owner then owner.record.id else "none"
+		end
+		local a = w.make("A", {
+			awake = function()
+				w.charm.subscribe(function()
+					seen.source = who()
+					return x()
+				end, function()
+					seen.subscribe = who()
+				end)
+				w.charm.listen(x, function()
+					seen.listen = who()
+				end)
+			end,
+		})
+		local b = w.make("B")
+		w.boot(a, b)
+		spec.eq(seen.listen, "A", "listen ran its callback at once, inside A's hook")
+		runner.call(function()
+			x(1)
+		end, nil, nil, b)
+		spec.list(
+			{ seen.source, seen.subscribe, seen.listen },
+			{ "B", "B", "B" },
+			"a write from B's code runs each callback as B"
+		)
+		x(2)
+		spec.list(
+			{ seen.source, seen.subscribe, seen.listen },
+			{ "none", "none", "none" },
+			"a write from no Crucible code runs each with no owner"
+		)
+	end,
 }
