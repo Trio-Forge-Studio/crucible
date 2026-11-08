@@ -23,6 +23,9 @@ import { boot } from "@trioforge/crucible/server";
 boot({ load: ["src/server/systems/**"] });
 ```
 
+Keep game state in Charm atoms and computeds from `@rbxts/charm`. Tie effects to objects with Crucible's `effect`, `watch`, `scope`, `onCleanup` and `own`, never Charm's `effect`, as `npx crucible docs reactive` describes.
+Render UI with Vide and read Charm values in components with `useAtom` from `@rbxts/vide-charm`, as `npx crucible docs vide` describes. The tsconfig already compiles JSX for Vide.
+
 Use `Logging.getLogger` with an explicit dotted name once per module. Logging works before boot and stays local to each Luau VM.
 
 `crucible.toml` holds place and environment IDs, never credentials.
