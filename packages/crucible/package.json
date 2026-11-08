@@ -25,14 +25,6 @@
 			"types": "./out/vide/index.d.ts",
 			"default": "./out/vide/init.luau"
 		},
-		"./ui": {
-			"types": "./out/ui/index.d.ts",
-			"default": "./out/ui/init.luau"
-		},
-		"./ui/jsx-runtime": {
-			"types": "./out/ui/jsx-runtime.d.ts",
-			"default": "./out/ui/jsx-runtime.luau"
-		},
 		"./util/random": {
 			"types": "./out/util/random/index.d.ts",
 			"default": "./out/util/random/init.luau"

@@ -39,11 +39,6 @@ pub struct Fact {
     pub crucible: Option<Box<Crucible>>,
     /// Where an imported module's instance is, set at an import's module specifier in a game.
     pub module: Option<Box<ModulePath>>,
-    /// The Roblox class an intrinsic element of the Crucible lowering creates, such as `TextLabel` for `textlabel`,
-    /// set at its tag.
-    pub instance_class: Option<Box<str>>,
-    /// How an attribute of an intrinsic element of the Crucible lowering lowers.
-    pub prop: Option<Prop>,
 }
 
 impl Fact {
@@ -154,45 +149,8 @@ pub enum Jsx {
     /// `jsx: "react"`. Each element calls `factory`, such as `Vide.jsx`, with its tag, its attributes and its
     /// children, as roblox-ts emits it, and a fragment passes `fragment` as its tag. Both are dotted names.
     Factory { factory: Box<str>, fragment: Option<Box<str>> },
-    /// `jsx: "react-jsx"` with `jsxImportSource` `@trioforge/crucible/ui`. An intrinsic element creates its
-    /// instance and lowers each attribute by its `Prop` fact, and a component element calls the component with a
-    /// props table.
-    Crucible,
     /// Any other `jsx` setting, which the lowering refuses.
     Unsupported,
-}
-
-/// How an attribute of an intrinsic element lowers, from the instance's declared property and the value's type.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Prop {
-    /// Assigned once, when the element creates its instance.
-    Fixed {
-        optional: bool,
-    },
-    /// A `Readable`, which `bind` assigns now and again on each change.
-    Reactive {
-        optional: bool,
-    },
-    /// An event, whose handler the element connects.
-    Event {
-        optional: bool,
-    },
-    /// `children`, which the element appends as it appends a child.
-    Children,
-    Class(ClassStyle),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClassStyle {
-    style: Box<crate::classes::Style>,
-}
-impl ClassStyle {
-    pub(crate) fn new(style: crate::classes::Style) -> Self {
-        Self { style: Box::new(style) }
-    }
-    pub(crate) fn style(&self) -> &crate::classes::Style {
-        &self.style
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -315,8 +273,6 @@ pub struct Place {
     /// `@trioforge/crucible/emit`, which registration and Crucible's macros call. `None` outside a game that has
     /// the package.
     pub crucible_emit: Option<ModulePath>,
-    /// `@trioforge/crucible/ui`, which the Crucible JSX lowering calls. `None` where the program cannot reach it.
-    pub crucible_ui: Option<ModulePath>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -425,8 +381,6 @@ pub enum Site {
     Destructure,
     /// A call receiver, a call result or a returned value.
     CallOrReturn,
-    /// An attribute of an intrinsic element of the Crucible lowering.
-    Jsx,
     Function,
     Constant,
     Import,

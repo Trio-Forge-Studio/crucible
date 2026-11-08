@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 
 use super::Lower;
-use crate::facts::{Jsx, Prop};
+use crate::facts::Jsx;
 use crate::tree::{Kind, Node};
-use crucible_luau::{BinOp, Block, Expr, Field, Stmt};
+use crucible_luau::{Block, Expr, Field, Stmt};
 
 /// A JSX element or fragment, as each lowering reads it.
 struct Element {
@@ -23,7 +23,6 @@ enum Tag {
 enum Attribute {
     /// `name="text"`, `name={value}`, or a bare `name`, which is `true`.
     Named {
-        node: Node,
         name: String,
         value: Option<Node>,
     },
@@ -54,7 +53,7 @@ impl Element {
                         Kind::JsxExpression => v.jsx_expression().unwrap_or(v),
                         _ => v,
                     });
-                    Attribute::Named { node: a, name: a.jsx_attribute_name().jsx_name(), value }
+                    Attribute::Named { name: a.jsx_attribute_name().jsx_name(), value }
                 }
             })
             .collect();
@@ -87,149 +86,8 @@ impl Lower<'_> {
             Some(Jsx::Factory { factory, fragment }) => {
                 self.factory_element(n, Element::read(n), factory, fragment.as_deref())
             }
-            Some(Jsx::Crucible) => self.crucible_element(n, Element::read(n)),
-            _ => self.unsupported(
-                n,
-                "JSX without `jsx: \"react\"` and a `jsxFactory`, or `jsx: \"react-jsx\"` and `jsxImportSource: \"@trioforge/crucible/ui\"`",
-            ),
+            _ => self.unsupported(n, "JSX without `jsx: \"react\"` and a `jsxFactory`"),
         }
-    }
-
-    pub(super) fn ui(&mut self, name: &'static str) -> Expr {
-        self.uses_ui = true;
-        Expr::global("__ui").field(name)
-    }
-
-    fn crucible_element(&mut self, n: Node, element: Element) -> Expr {
-        match element.tag {
-            Tag::Intrinsic(_) => self.instance_element(n, element),
-            Tag::Component(tag) => self.component_element(n, tag, element),
-            Tag::Fragment => {
-                let values = self.child_values(n, element.children, false);
-                Expr::Table(values.into_iter().map(Field::Item).collect())
-            }
-        }
-    }
-
-    /// Creates the instance and applies its classes, then sets, binds or connects each attribute by its `Prop` fact, so
-    /// a prop that turns out nil leaves the class value in place. Then parents each child.
-    fn instance_element(&mut self, n: Node, element: Element) -> Expr {
-        let tag = n.jsx_tag().expect("an intrinsic element has a tag");
-        let Some(class) = self.fact(tag).and_then(|f| f.instance_class.as_deref()) else {
-            return self.unsupported(tag, "an intrinsic element that is not a creatable instance class");
-        };
-        let new = Expr::global("Instance.new").call(vec![Expr::String(Cow::Owned(class.to_owned()))]);
-        let instance = self.push_temp(new);
-        let mut group = None;
-        for attribute in &element.attributes {
-            if let Attribute::Named { node, .. } = attribute
-                && let Some(Prop::Class(style)) = self.fact(*node).and_then(|f| f.prop.as_ref())
-                && let Some(interaction) = self.class_style(*node, &instance, style.style())
-                && !style.style().groups().is_empty()
-            {
-                group = Some((style.style().groups().clone(), interaction));
-            }
-        }
-        for attribute in element.attributes {
-            let (node, name, value) = match attribute {
-                Attribute::Named { node, name, value } => (node, name, value),
-                Attribute::Spread(source) => {
-                    self.unsupported(source, "a spread attribute on an intrinsic element");
-                    continue;
-                }
-            };
-            let Some(prop) = self.fact(node).and_then(|f| f.prop.as_ref()) else {
-                self.error(node, "the type facts do not say how this attribute lowers");
-                continue;
-            };
-            if let Prop::Class(_) = prop {
-                continue;
-            }
-            let value = self.attribute_value(value);
-            let optional = matches!(
-                prop,
-                Prop::Fixed { optional: true } | Prop::Reactive { optional: true } | Prop::Event { optional: true }
-            );
-            let value = if optional { self.push_temp(value) } else { value };
-            let statement = match prop {
-                Prop::Fixed { .. } => Stmt::Assign(vec![instance.clone().field(name)], vec![value.clone()]),
-                Prop::Reactive { .. } => {
-                    let property = Expr::String(Cow::Owned(name));
-                    Stmt::Call(self.ui("bind").call(vec![instance.clone(), property, value.clone()]))
-                }
-                Prop::Event { .. } => Stmt::Call(instance.clone().field(name).method("Connect", vec![value.clone()])),
-                Prop::Children => Stmt::Call(self.ui("append").call(vec![instance.clone(), value.clone()])),
-                Prop::Class(_) => unreachable!(),
-            };
-            if optional {
-                self.current_block.push(Stmt::If(value.binary(BinOp::Ne, Expr::Nil), vec![statement], None));
-            } else {
-                self.current_block.push(statement);
-            }
-        }
-        let grouped = group.is_some();
-        self.groups.extend(group);
-        for child in element.children {
-            match child {
-                Child::Text(_) => self.error(n, "text in an intrinsic element is not supported; set its Text"),
-                Child::Value(c) if c.jsx_tag().is_some_and(|t| t.is_intrinsic_tag()) => {
-                    let value = self.expr(c);
-                    self.current_block.push(Stmt::Assign(vec![value.field("Parent")], vec![instance.clone()]));
-                }
-                Child::Value(c) | Child::Spread(c) => {
-                    let value = self.expr(c);
-                    let append = self.ui("append").call(vec![instance.clone(), value]);
-                    self.current_block.push(Stmt::Call(append));
-                }
-            }
-        }
-        if grouped {
-            self.groups.pop();
-        }
-        instance
-    }
-
-    /// `Component(props)`, where `props.children` is the only child, or an array of several.
-    fn component_element(&mut self, n: Node, tag: Node, element: Element) -> Expr {
-        let mut lowered = vec![self.capture(|l| l.expr(tag)), self.capture(|l| l.attribute_table(&element.attributes))];
-        if !element.children.is_empty() {
-            lowered.push(self.capture(|l| {
-                let mut values = l.child_values(n, element.children, true);
-                match values.len() {
-                    1 => values.pop().unwrap_or(Expr::Nil),
-                    _ => Expr::Table(values.into_iter().map(Field::Item).collect()),
-                }
-            }));
-        }
-        let mut values = self.order_values(lowered).into_iter();
-        let (callee, props, children) = (values.next().unwrap_or(Expr::Nil), values.next(), values.next());
-        let props = match (props.unwrap_or(Expr::Nil), children) {
-            (Expr::Table(mut fields), Some(children)) => {
-                fields.push(Field::Keyed(Expr::string("children"), children));
-                Expr::Table(fields)
-            }
-            (props, Some(children)) => {
-                self.current_block.push(Stmt::Assign(vec![props.clone().field("children")], vec![children]));
-                props
-            }
-            (props, None) => props,
-        };
-        callee.call(vec![props])
-    }
-
-    fn child_values(&mut self, n: Node, children: Vec<Child>, text: bool) -> Vec<Expr> {
-        let lowered = children
-            .into_iter()
-            .map(|child| {
-                self.capture(|l| match child {
-                    Child::Text(t) if text => Expr::String(Cow::Owned(t)),
-                    Child::Text(_) => l.unsupported(n, "text in a fragment"),
-                    Child::Value(c) => l.expr(c),
-                    Child::Spread(c) => l.unsupported(c, "a spread child here"),
-                })
-            })
-            .collect();
-        self.order_values(lowered)
     }
 
     /// `factory(tag, attributes, ...children)`, with `nil` for the attributes when there are none but there are

@@ -1,7 +1,7 @@
 use super::{Extractor, crucible::Code, types};
 use crate::facts::ClassKind;
 use tsrs_ast::{Kind, Node, SymbolFlags};
-use tsrs_checker::{ContextFlags, SignatureKind, Type, TypeFlags};
+use tsrs_checker::{Type, TypeFlags};
 use tsrs_core::P;
 
 #[derive(Clone, Copy)]
@@ -11,7 +11,6 @@ enum Rule {
     ArrayPairs = 34,
     FrameHooks = 35,
     SessionLifetime = 36,
-    StateAsFunction = 37,
 }
 impl Rule {
     fn legacy(self) -> &'static str {
@@ -21,7 +20,6 @@ impl Rule {
             Self::ArrayPairs => "roblox-ts/no-array-pairs",
             Self::FrameHooks => "fragile-delivery/frame-hooks",
             Self::SessionLifetime => "fragile-delivery/session-lifetime",
-            Self::StateAsFunction => "fragile-delivery/state-as-function",
         }
     }
 }
@@ -233,9 +231,6 @@ impl Extractor {
             Kind::ClassDeclaration => self.lint_session(n),
             _ => {}
         }
-        if matches!(n.kind(), Kind::Identifier | Kind::PropertyAccessExpression) {
-            self.lint_state(n);
-        }
     }
     fn lint_identifier_used(&mut self, root: P<Node>, name: P<Node>) -> bool {
         let symbol = self.checker.get_symbol_at_location_exported(name);
@@ -377,37 +372,6 @@ impl Extractor {
                     "A subsystem lives for the whole session. Put the Janitor on the lifetime that ends.",
                 );
             }
-        }
-    }
-    fn lint_crucible_type(t: P<Type>) -> Option<&'static str> {
-        let s = t.alias().and_then(|a| a.symbol()).or_else(|| t.symbol())?;
-        let d = *s.declarations().first()?;
-        let f = tsrs_ast::get_source_file_of_node(d)?.file_name().replace('\\', "/");
-        f.contains("/node_modules/@trioforge/crucible/").then(|| s.name())
-    }
-    fn lint_state(&mut self, n: P<Node>) {
-        let Some(p) = n.parent() else {
-            return;
-        };
-        if (matches!(p.kind(), Kind::CallExpression | Kind::PropertyAccessExpression) && p.expression() == Some(n))
-            || (matches!(p.kind(), Kind::PropertyAssignment | Kind::JsxAttribute) && p.name() == Some(n))
-            || (p.kind() == Kind::PropertyAccessExpression && p.expression() != Some(n))
-        {
-            return;
-        }
-        let t = self.type_of(n);
-        if Self::lint_crucible_type(t) != Some("State") {
-            return;
-        }
-        let Some(t) = self.checker.get_contextual_type_exported(n, ContextFlags::None) else {
-            return;
-        };
-        let members = if t.flags().intersects(TypeFlags::Union) { t.types().to_vec() } else { vec![t] };
-        if members.iter().any(|&t| Self::lint_crucible_type(t).is_some()) {
-            return;
-        }
-        if members.iter().any(|&t| !self.checker.get_signatures_of_type_exported(t, SignatureKind::Call).is_empty()) {
-            self.lint_report(n, Rule::StateAsFunction, "A Crucible State is a callable table, not a function, so code that tests type(x) == \"function\", such as Vide, treats it as a constant. Pass () => state(), or type the receiver as Readable.");
         }
     }
 }
