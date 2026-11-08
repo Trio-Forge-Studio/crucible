@@ -1,81 +1,18 @@
--- Run after pnpm build: lune run test/bench/sync.luau [trunk|charm|charm-native]. No argument runs 15 interleaved pairs,
--- trunk first in every pair, each in a fresh process. Downloads the pinned trial package into ignored build/bench.
--- FD 5514468: core/{Replication,Analytics,Party,Leaderboard,Mood}, job/{Intro,Job}, warehouse/Departure.
--- Shapes are copied; values and the ten-second workload are synthetic, not a recorded gameplay trace.
--- trunk/ holds the cdbcf09 compiler output for the two changed modules and its extracted equality routine.
--- Both runs use that scheduler. The trial replaces equality, framing and patch application through benchmark hooks.
--- charm-native is a single informational sample through server/client APIs, without Crucible's sync preflight or limits.
+-- Run after pnpm build: lune run test/bench/sync.luau [trunk|charm].
+-- No argument runs 15 fresh-process pairs, trunk first. The Charm arm loads shipped modules.
+-- Workload: FD 5514468's 20 declarations, one four-player job, with synthetic accelerated cadence.
+-- Includes task rebuilds, board re-sorts, resampled mood, private anchor load/unload, party changes and reset.
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
-local net = require("@lune/net")
 local process = require("@lune/process")
 local roblox = require("@lune/roblox")
 local serde = require("@lune/serde")
 local World = require("../lib/sync-world")
-local Trial = require("./sync-trial")
 local spec = require("../lib/load")
 local referenceEquality = fs.readFile("test/bench/trunk/equal.txt")
 
-local PEERS, FRAMES, HZ = 30, 600, 60
+local PEERS, FRAMES, HZ = 4, 600, 60
 local VERSION = "0.4.1"
-local ARCHIVE_HASH = "fd4b8532605e4a8a238af2d6ba1b2544690200669a9824da6990c94f14f0b62d"
-local CACHE = "build/bench/charm-sync-0.4.1"
-
-local function prepare()
-	if not fs.isDir(CACHE) then
-		fs.writeDir(CACHE)
-	end
-	local archive = `{CACHE}/package.tgz`
-	if not fs.isFile(archive) then
-		local response = net.request(`https://registry.npmjs.org/@rbxts/charm-sync/-/charm-sync-{VERSION}.tgz`)
-		assert(response.ok, `npm download failed: {response.statusCode}`)
-		fs.writeFile(archive, response.body)
-	end
-	assert(serde.hash("sha256", fs.readFile(archive)) == ARCHIVE_HASH, "trial archive hash changed")
-	-- Always extract the verified archive, including when reusing the cache.
-	local result = process.exec("tar", { "-xzf", archive, "-C", CACHE })
-	assert(result.ok, result.stderr)
-	local package = serde.decode("json", fs.readFile(`{CACHE}/package/package.json`))
-	assert(
-		package.version == VERSION and package.dependencies["@rbxts/charm"] == "^0.11.1",
-		"trial dependency range changed"
-	)
-	local charm = serde.decode("json", fs.readFile("packages/crucible/node_modules/@rbxts/charm/package.json"))
-	assert(charm.version == "0.11.1", "benchmark must use the exact runtime pin")
-end
-
-local function loadSync(charm)
-	local loaded = {}
-	local load
-	load = function(name)
-		if loaded[name] == nil then
-			local source = fs.readFile(`{CACHE}/package/src/{name}.luau`)
-			loaded[name] = luau.load(source, {
-				debugName = `charm-sync/{name}`,
-				environment = {
-					-- Force manual flush; spawn's coroutine cost remains inside the measured Heartbeat.
-					game = false,
-					task = {
-						spawn = function(callback, ...)
-							local thread = coroutine.create(callback)
-							local ok, err = coroutine.resume(thread, ...)
-							assert(ok, tostring(err))
-							assert(coroutine.status(thread) == "dead", "sync sender yielded")
-						end,
-					},
-					require = function(path)
-						if path == "../Charm" then
-							return charm
-						end
-						return load(assert(string.match(path, "^%./(.+)$")))
-					end,
-				},
-			})()
-		end
-		return loaded[name]
-	end
-	return { server = load("server"), client = load("client"), patch = load("patch"), config = load("config") }
-end
 
 local function object(n, fields)
 	local keys, entries = {}, {}
@@ -94,10 +31,25 @@ local function shapes(n)
 		return object(n, fields)
 	end
 	local function optional(node)
+		if node.kind == "union" then
+			local branches = { n["nil"] }
+			for _, branch in node.branches do
+				table.insert(branches, branch)
+			end
+			return n.union(branches)
+		end
 		return n.union({ n["nil"], node })
 	end
 	local function map(node)
 		return n.map(n.string, node)
+	end
+	local function literals(names)
+		table.sort(names)
+		local branches = {}
+		for _, name in names do
+			table.insert(branches, n.literal(name))
+		end
+		return n.union(branches)
 	end
 	local f, s, b, c = n.f64, n.string, n.bool, n.color3
 	local member = o({ UserId = f, JoinedAt = f })
@@ -106,7 +58,7 @@ local function shapes(n)
 		Members = n.array(member),
 		Coming = n.array(o({ UserId = f, JoinedAt = optional(f), Until = f })),
 		Invited = map(f),
-		Trip = optional(s),
+		Trip = optional(literals({ "Leaving", "Left" })),
 		Contract = optional(o({ Id = s, Truck = f, Until = f, Payer = f, RushPay = f, BuyIn = f })),
 	})
 	local environment = o({
@@ -166,9 +118,33 @@ local function shapes(n)
 		["Job.Score"] = o({ deliveredValue = f, damageFees = f, damaged = b, missed = f }),
 		["Job.ItemCounts"] = optional(o({ delivered = f, broken = f, cracked = f, left = f })),
 		["Job.Highlights"] = optional(o({
-			awards = n.array(o({ id = s, userId = f, name = s, value = f, item = optional(s), fees = optional(f) })),
+			awards = n.array(o({
+				id = literals({
+					"GoldenMover",
+					"Clutch",
+					"HeavyLifter",
+					"GentleTouch",
+					"Butterfingers",
+					"BigTicket",
+					"PatchJob",
+					"LongHaul",
+					"Workhorse",
+					"FirstIn",
+				}),
+				userId = f,
+				name = s,
+				value = f,
+				item = optional(s),
+				fees = optional(f),
+			})),
 		})),
-		["Job.Tasks"] = n.array(o({ Id = s, Text = s, Have = f, Need = f, Status = s })),
+		["Job.Tasks"] = n.array(o({
+			Id = literals({ "Quota", "Careful", "Gentle", "Fragile", "Heavy", "Haul", "Prized" }),
+			Text = s,
+			Have = f,
+			Need = f,
+			Status = literals({ "Open", "Done", "Failed" }),
+		})),
 		["Job.ReturnsToWarehouse"] = b,
 		["Job.PlayerPayouts"] = map(o({
 			base = f,
@@ -194,10 +170,29 @@ local function shapes(n)
 				mastered = b,
 			})),
 		})),
-		["Leaderboard.Boards"] = map(n.array(o({ UserId = f, Name = s, Value = f }))),
-		["Mood.Current"] = optional(
-			o({ Mood = s, Weather = s, Seed = f, StartedAt = f, From = environment, FadeSeconds = f })
-		),
+		["Leaderboard.Boards"] = o({
+			Money = optional(n.array(o({ UserId = f, Name = s, Value = f }))),
+			PlayTime = optional(n.array(o({ UserId = f, Name = s, Value = f }))),
+			Jobs = optional(n.array(o({ UserId = f, Name = s, Value = f }))),
+		}),
+		["Mood.Current"] = optional(o({
+			Mood = literals({
+				"Morning",
+				"Midday",
+				"Warehouse",
+				"GoldenHour",
+				"Dusk",
+				"ManorNight",
+				"ChaletDay",
+				"ChaletNight",
+				"Night",
+			}),
+			Weather = literals({ "Clear", "Snowfall" }),
+			Seed = f,
+			StartedAt = f,
+			From = environment,
+			FadeSeconds = f,
+		})),
 		["Party.Parties"] = map(party),
 	}
 end
@@ -226,8 +221,8 @@ local function initial()
 		boards[id] = entries
 	end
 	local parties, departures = {}, {}
-	-- PARTY_MAX is four: seven parties of four and one of two account for the 30 simulated players.
-	for i = 1, 8 do
+	-- One job server has at most four party members.
+	for i = 1, math.ceil(PEERS / 4) do
 		local members = {}
 		for p = (i - 1) * 4 + 1, math.min(i * 4, PEERS) do
 			table.insert(members, { UserId = 100000000 + p, JoinedAt = 1700000000 })
@@ -330,13 +325,14 @@ local function writes(frame, write, values)
 		values[key] = value
 		write(key, value)
 	end
-	-- A delivery every six frames updates the score, counts and task progress together; immutable shared subtrees.
+	-- FD evaluates every task afresh on each delivery; item counts wait for settlement.
 	if frame % 6 == 0 and frame <= 480 then
 		local count = frame / 6
 		put("Job.Score", { deliveredValue = count * 20, damageFees = 0, damaged = false, missed = 0 })
-		put("Job.ItemCounts", { delivered = count, broken = 0, cracked = 0, left = 100 - count })
-		local tasks = table.clone(values["Job.Tasks"])
-		tasks[1] = table.clone(tasks[1])
+		local tasks = {}
+		for i, task in values["Job.Tasks"] do
+			tasks[i] = table.clone(task)
+		end
 		tasks[1].Have = count
 		tasks[1].Status = if count >= 70 then "Done" else "Open"
 		put("Job.Tasks", tasks)
@@ -346,8 +342,37 @@ local function writes(frame, write, values)
 		put("Intro.SkippedAt", 1700000001)
 		put("Departure.Countdowns", {})
 	end
+	if frame == 300 then
+		local boards = {}
+		for id, entries in values["Leaderboard.Boards"] do
+			local fresh = {}
+			local last = entries[#entries]
+			fresh[1] = { UserId = last.UserId, Name = last.Name, Value = 200000 }
+			for i = 1, #entries - 1 do
+				local entry = entries[i]
+				fresh[i + 1] = { UserId = entry.UserId, Name = entry.Name, Value = entry.Value }
+			end
+			boards[id] = fresh
+		end
+		put("Leaderboard.Boards", boards)
+	end
+	if frame == 360 then
+		local mood = table.clone(values["Mood.Current"])
+		mood.Mood, mood.Seed, mood.StartedAt = "Dusk", 43, 1700000360
+		local from = {}
+		for group, fields in mood.From do
+			local fresh = {}
+			for key, value in fields do
+				fresh[key] = if type(value) == "number" then value * 0.9 + 0.01 else value
+			end
+			from[group] = fresh
+		end
+		mood.From = from
+		put("Mood.Current", mood)
+	end
 	if frame == 480 then
-		put("Job.Phase", "Done")
+		put("Job.Phase", "Settling")
+		put("Job.ItemCounts", { delivered = 80, broken = 0, cracked = 0, left = 20 })
 		put("Job.Highlights", {
 			awards = {
 				{ id = "GoldenMover", userId = 100000001, name = "Player00000000000001", value = 500 },
@@ -392,63 +417,49 @@ local function writes(frame, write, values)
 		put("Job.ReturnsToWarehouse", true)
 		put("Job.Highlights", nil)
 	end
+	if frame == 120 then
+		local parties = {}
+		for id, party in values["Party.Parties"] do
+			local fresh = table.clone(party)
+			fresh.Invited = { ["100000099"] = 1700000120 }
+			fresh.Trip = "Leaving"
+			parties[id] = fresh
+		end
+		put("Party.Parties", parties)
+	end
+	if frame == 570 then
+		put("Job.Phase", "Resetting")
+		put("Job.EndsAt", nil)
+		put("Job.StartedAt", nil)
+		put("Job.ItemCounts", nil)
+		put("Job.Highlights", nil)
+		put("Job.Tasks", {})
+		put("Job.PlayerPayouts", {})
+		put("Job.Score", { deliveredValue = 0, damageFees = 0, damaged = false, missed = 0 })
+		put("Job.Phase", "Waiting")
+	end
 end
 
 local function run(protocol)
-	local native = protocol == "charm-native"
 	local values, handles, schemas, keys = initial(), {}, nil, {}
-	local trial, adapter
-	spec.rewrite(function(path, source)
-		local name = string.match(path, "^packages/crucible/out/internal/sync/(.+)$")
-		if name == "server-sync" or name == "frame" then
-			local fixture = fs.readFile(`test/bench/trunk/{name}.txt`)
-			if name == "frame" and protocol == "charm" then
-				local count
-				fixture, count = string.gsub(
-					fixture,
-					'%{ "key", n%.string %}, %{ "value", n%.dynamic %}',
-					'{ "key", n.string }, { "mode", n.union({ n.literal("full"), n.literal("patch"), n.literal("same") }) }, { "value", n.dynamic }'
-				)
-				assert(count == 1, "expected the trunk value-entry schema")
+	if protocol == "trunk" then
+		spec.rewrite(function(path, source)
+			local name = string.match(path, "^packages/crucible/out/internal/sync/(.+)$")
+			if name == "server-sync" or name == "frame" then
+				return fs.readFile(`test/bench/trunk/{name}.txt`)
 			end
-			return fixture
-		end
-		if name == "values" and not string.find(source, "\nlocal function equal(", 1, true) then
-			local rewritten, count = string.gsub(source, "\nreturn {", function()
-				return "\n" .. referenceEquality .. "\nreturn {\n equal = equal,"
-			end)
-			assert(count == 1, "expected the compiled values module's export table")
-			return rewritten
-		end
-		return source
-	end)
+			if name == "values" then
+				local rewritten, count = string.gsub(source, "\nreturn {", function()
+					return "\n" .. referenceEquality .. "\nreturn {\n equal = equal,"
+				end)
+				assert(count == 1, "expected one compiled export table")
+				return rewritten
+			end
+			return source
+		end)
+	end
 
 	local w = World.new({
-		patch = function(world)
-			if protocol == "charm" then
-				local server = world.server
-				trial = loadSync(server.charm)
-				adapter = Trial(trial.patch, server.values)
-				server.values.equal = function(a, b, work)
-					return adapter.difference(a, b, work) == nil
-				end
-				local message = world.wire.frame.SyncFrameMessage
-				local encodeBody, packet = world.wire.envelope.encodeBody, world.wire.envelope.frame
-				local frameBytes = server.reactiveLimits.SYNC_FRAME_BYTES
-				world.wire.frame.frameCost = function(frame, index)
-					local ok, cost = pcall(function()
-						local body = encodeBody(message.name, message.input, "payload", frame)
-						local encoded = packet(body, 0, { index })
-						return {
-							bytes = buffer.len(encoded.bytes),
-							entries = body.writer.budget.entries,
-							visits = body.writer.budget.visits,
-						}
-					end)
-					return if ok then cost else { bytes = frameBytes + 1, entries = 0, visits = 0 }
-				end
-			end
-		end,
 		declare = function(r)
 			schemas = shapes(r.n)
 			local declarations = {}
@@ -459,14 +470,30 @@ local function run(protocol)
 			assert(#keys == 20, "all FD declarations are present")
 			for _, key in keys do
 				local emit = if key == "Analytics.Played" then r.emit.replicatedPerPlayer else r.emit.replicated
-				declarations[key] = emit(key, values[key], schemas[key])
+				local empty = if key == "Job.Score"
+					then { deliveredValue = 0, damageFees = 0, damaged = false, missed = 0 }
+					elseif key == "Job.ReturnsToWarehouse" then false
+					elseif key == "Intro.Voters" then 0
+					elseif
+						key == "Intro.Skips"
+						or key == "Job.Tasks"
+						or key == "Job.PlayerPayouts"
+						or key == "Leaderboard.Boards"
+						or key == "Party.Parties"
+						or key == "Departure.Countdowns"
+					then {}
+					else nil
+				declarations[key] = emit(key, empty, schemas[key])
 			end
 			return declarations
 		end,
 		serve = function(s, declarations, world)
-			world.played = s.charm.atom(0)
+			world.played = s.charm.atom(false)
 			world.project = function(player)
-				return { savedSeconds = player.UserId + world.played(), sessionStartedAt = 1700000000 }
+				if not world.played() then
+					return nil
+				end
+				return { savedSeconds = player.UserId, sessionStartedAt = 1700000000 }
 			end
 			s.service("Publisher", function()
 				for _, key in keys do
@@ -480,6 +507,12 @@ local function run(protocol)
 		end,
 	})
 	local s, sync = w.server, w:sync()
+	for key, handle in handles do
+		handle(function()
+			return values[key]
+		end)
+	end
+	local adapter = if protocol == "charm" then s.graph.module("internal/sync/patches") else nil
 	local referenceEqual = luau.load(referenceEquality .. "\nreturn equal", {
 		environment = {
 			spend = s.values.spend,
@@ -489,8 +522,6 @@ local function run(protocol)
 	local envelope = w.wire.envelope
 	local index = w.wire.frame.SyncFrameMessage.index
 	local pending, clients, players = {}, {}, {}
-	local nativeClients = {}
-	local nativeSync = if native then loadSync(s.charm) else nil
 	local totalBytes, largestFrame, packets = 0, 0, 0
 	local function send(player, payload, wireCodec)
 		local body = envelope.encodeBody("Bench.Sync", wireCodec, "payload", payload)
@@ -513,50 +544,7 @@ local function run(protocol)
 		send(player, frame, w.wire.frame.SyncFrameMessage.input)
 		return true
 	end)
-	if nativeSync then
-		local nativeCodec = w.wire.codec.compile(s.n.array(object(s.n, {
-			data = s.n.dynamic,
-			type = s.n.union({ s.n.literal("init"), s.n.literal("patch") }),
-		})))
-		nativeSync.server.connect(function(player, payloads)
-			local privateKey = `Analytics.Played/{player.UserId}`
-			for _, payload in payloads do
-				if payload.data[privateKey] then
-					payload.data["Analytics.Played"] = payload.data[privateKey]
-					payload.data[privateKey] = nil
-				end
-			end
-			send(player, payloads, nativeCodec)
-		end)
-	end
-	if adapter then
-		local stage = sync.stage
-		local declarationNamed = s.declarations.declarationNamed
-		sync.stage = function(self, view, work)
-			local staged = stage(self, view, work)
-			for _, entry in staged.values do
-				local declaration = declarationNamed(entry.key)
-				local accepted = view.accepted[declaration]
-				local before = if accepted then accepted.value else declaration.initial
-				if view.revision == 0 then
-					entry.mode, entry.value = "full", adapter.snapshot(entry.value)
-				else
-					local delta = adapter.difference(before, entry.value, work)
-					entry.mode = if delta == nil then "same" else "patch"
-					entry.value = delta
-				end
-			end
-			return staged
-		end
-	end
 	local function tick()
-		if nativeSync then
-			nativeSync.server.flush()
-			return
-		end
-		if adapter then
-			adapter.beginPatches()
-		end
 		s.engine.frame(5, 1 / HZ)
 	end
 	local function deliver()
@@ -566,31 +554,21 @@ local function run(protocol)
 			local decoded = envelope.decodeBody(sent.codec, "payload", reader)
 			local client = clients[sent.player]
 			local first = next(client) == nil
-			local cost = if native
-				then { bytes = buffer.len(sent.packet.bytes), entries = sent.entries, visits = sent.visits }
-				else w.wire.frame.frameCost(sent.payload, index)
+			local cost = w.wire.frame.frameCost(sent.payload, index)
 			assert(buffer.len(sent.packet.bytes) == cost.bytes, "preflight/encoder byte parity")
 			assert(
 				reader.budget.entries == cost.entries and reader.budget.visits == cost.visits,
 				"preflight/decoder budget parity"
 			)
 			assert(decoded.kind ~= "failed", "server sync failed")
-			if native then
-				nativeClients[sent.player].client.patch(decoded)
-			else
-				for _, entry in decoded.values do
-					if protocol == "trunk" then
-						client[entry.key] = { value = entry.value }
-					else
-						local current = client[entry.key]
-						local before = if current then current.value else nil
-						local raw = if entry.mode == "full"
-							then entry.value
-							elseif entry.mode == "same" then before
-							else trial.patch.apply(before, entry.value)
-						client[entry.key] = { value = raw }
-					end
-				end
+			for _, entry in decoded.values do
+				local current = client[entry.key]
+				local before = if current then current.value else nil
+				local raw = if protocol == "trunk"
+					then entry.value
+					elseif entry.mode == "same" then before
+					else adapter.apply(before, entry.value, entry.mode == "full")
+				client[entry.key] = { value = raw }
 			end
 			if first then
 				for _, key in keys do
@@ -600,42 +578,10 @@ local function run(protocol)
 		end
 		table.clear(pending)
 	end
-	local publicSignals = {}
-	if native then
-		for key, handle in handles do
-			publicSignals[key] = function()
-				return { value = handle() }
-			end
-		end
-	end
 	for i = 1, PEERS do
 		local player = { Name = `Peer{i}`, UserId = 100000000 + i }
 		players[i], clients[player] = player, {}
-		if adapter then
-			adapter.beginPatches()
-		end
-		if nativeSync then
-			local signals = table.clone(publicSignals)
-			local plan = s.values.compilePlan(schemas["Analytics.Played"])
-			signals[`Analytics.Played/{player.UserId}`] = function()
-				return { value = s.values.admit(plan, "Analytics.Played", w.project(player)) }
-			end
-			nativeSync.server.addSignalsToClient(player, signals)
-			local clientSync, setters = loadSync(s.charm), {}
-			nativeClients[player] = clientSync
-			for _, key in keys do
-				setters[key] = function(value)
-					clients[player][key] = if type(value) == "function" then value(clients[player][key]) else value
-					return clients[player][key]
-				end
-			end
-			clientSync.client.addSignals(setters)
-		else
-			sync:snapshot(player)
-		end
-	end
-	if nativeSync then
-		nativeSync.server.flush()
+		sync:snapshot(player)
 	end
 	-- Warm both implementations on 60 quiet Heartbeats before timing, without discarding snapshot byte counts.
 	for _ = 1, 60 do
@@ -648,6 +594,12 @@ local function run(protocol)
 				return value
 			end)
 		end, values)
+		if frame == 240 then
+			w.played(true)
+		end
+		if frame == 540 then
+			w.played(false)
+		end
 		local started = os.clock()
 		tick()
 		elapsed += os.clock() - started
@@ -665,9 +617,7 @@ local function run(protocol)
 		for _, key in keys do
 			local expected = if key == "Analytics.Played" then w.project(player) else values[key]
 			local plan = s.values.compilePlan(schemas[key])
-			local received = if trial
-				then adapter.apply(nil, clients[player][key].value, true)
-				else clients[player][key].value
+			local received = clients[player][key].value
 			local actual = s.values.admit(plan, key, received)
 			assert(referenceEqual(actual, s.values.admit(plan, key, expected)), `peer {player.Name} stale at {key}`)
 		end
@@ -676,7 +626,6 @@ local function run(protocol)
 	w.link:assertClean()
 	return {
 		protocol = protocol,
-		informationalOnly = native,
 		peers = PEERS,
 		declarations = #keys,
 		frames = FRAMES,
@@ -692,13 +641,9 @@ local function run(protocol)
 	}
 end
 
-prepare()
 local protocol = process.args[1]
 if protocol then
-	assert(
-		protocol == "trunk" or protocol == "charm" or protocol == "charm-native",
-		"expected trunk, charm or charm-native"
-	)
+	assert(protocol == "trunk" or protocol == "charm", "expected trunk or charm")
 	print(serde.encode("json", run(protocol)))
 else
 	for pair = 1, 15 do

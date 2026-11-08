@@ -1,4 +1,6 @@
 import { patch } from "@rbxts/charm-sync";
+import { encodeDynamic, Writer } from "../network/codec";
+import { SYNC_FRAME_BYTES, SYNC_FRAME_COLLECTION_ENTRIES, SYNC_FRAME_VALUE_VISITS } from "../reactive/limits";
 import { costOf, spend, type Work } from "./values";
 
 // 0.4.1's declarations call this applyImmutable; its pinned Luau exports it as apply.
@@ -9,6 +11,7 @@ const decoded = setmetatable(new Map<object, object>(), { __mode: "kv" });
 const SAME = {};
 const NIL = {};
 const ARRAY_MARKER = "__array";
+const patchSizes = setmetatable(new Map<object, number>(), { __mode: "k" });
 let differences = new Map<unknown, Map<unknown, { readonly delta: unknown }>>();
 
 // Charm's deletion marker is a plain table with __none = "__none". Escape that key, and the escape prefix,
@@ -80,8 +83,31 @@ export function difference(current: unknown, updated: unknown, work: Work): unkn
 	return found.delta;
 }
 
+/** @internal Compare the actual patch encoding with the admitted full value; oversized patches are disposable. */
+export function smaller(delta: unknown, value: unknown): boolean {
+	let bytes = typeIs(delta, "table") ? patchSizes.get(delta) : undefined;
+	if (bytes === undefined) {
+		const [ok, size] = pcall(() => {
+			const writer = new Writer();
+			encodeDynamic(writer, delta, "patch", new Set());
+			if (writer.budget.entries > SYNC_FRAME_COLLECTION_ENTRIES || writer.budget.visits > SYNC_FRAME_VALUE_VISITS)
+				return SYNC_FRAME_BYTES + 1;
+			const [packet] = writer.finish(buffer.create(0));
+			return buffer.len(packet);
+		});
+		bytes = ok ? size : SYNC_FRAME_BYTES + 1;
+		if (typeIs(delta, "table")) patchSizes.set(delta, bytes);
+	}
+	return bytes < costOf(value).bytes;
+}
+
 /** @internal Apply one declaration without writing its atom; the caller commits the whole frame atomically. */
 export function apply(current: unknown, delta: unknown, initial: boolean): unknown {
-	const value = initial ? delta : applyPatch(snapshot(current), delta);
+	if (initial) {
+		const diff = patch.diff(snapshot(current), snapshot(delta));
+		if (diff === undefined) return current;
+		return keys(applyPatch(snapshot(current), diff), decoded, false);
+	}
+	const value = applyPatch(snapshot(current), delta);
 	return keys(value, decoded, false);
 }

@@ -46,6 +46,7 @@ export const SyncFaultMessage: Definition = defineFramework({
 	input: n.u32,
 });
 
+/** @internal */
 export interface FrameCost {
 	readonly bytes: number;
 	readonly entries: number;
@@ -54,17 +55,13 @@ export interface FrameCost {
 
 /** @internal Preflight with the transport codec, including its envelope and decoder budgets. */
 export function frameCost(frame: SyncFrame, catalogIndex: number): FrameCost {
-	const [ok, cost] = pcall(() => {
-		const body = encodeBody(SyncFrameMessage.name, SyncFrameMessage.input!, "payload", frame);
-		const encoded = packet(body, 0, [catalogIndex]);
-		return {
-			bytes: buffer.len(encoded.bytes),
-			entries: body.writer.budget.entries,
-			visits: body.writer.budget.visits,
-		};
-	});
-	// A delta can exceed the transport limit before the smaller sync budget is checked. Fail the peer normally.
-	return ok ? cost : { bytes: SYNC_FRAME_BYTES + 1, entries: 0, visits: 0 };
+	const body = encodeBody(SyncFrameMessage.name, SyncFrameMessage.input!, "payload", frame);
+	const encoded = packet(body, 0, [catalogIndex]);
+	return {
+		bytes: buffer.len(encoded.bytes),
+		entries: body.writer.budget.entries,
+		visits: body.writer.budget.visits,
+	};
 }
 
 /** @internal The first frame budget `cost` passes, or undefined when it fits. */

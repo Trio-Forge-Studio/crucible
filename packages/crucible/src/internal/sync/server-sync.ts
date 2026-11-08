@@ -21,8 +21,16 @@ import {
 } from "../reactive/limits";
 import { define, type TypeId } from "../registry";
 import { declarationNamed, declarations, useChanged, useRetired, type Declaration } from "./declarations";
-import { frameCost, overBudget, SyncFaultMessage, SyncFrameMessage, type SyncFrame, type SyncValue } from "./frame";
-import { beginPatches, difference, snapshot } from "./patches";
+import {
+	frameCost,
+	overBudget,
+	SyncFaultMessage,
+	SyncFrameMessage,
+	type FrameCost,
+	type SyncFrame,
+	type SyncValue,
+} from "./frame";
+import { beginPatches, difference, smaller } from "./patches";
 import { admit, isOverBudget, spend, type Work } from "./values";
 
 checkCharm();
@@ -349,18 +357,23 @@ class ServerSync extends Subsystem {
 				staged.accept.set(declaration, { version, value });
 			}
 		}
-		this.examining = "";
 		for (const entry of staged.values) {
+			this.examining = entry.key;
 			const declaration = declarationNamed(entry.key)!;
 			const accepted = view.accepted.get(declaration);
 			const before = accepted !== undefined ? accepted.value : declaration.initial;
-			if (view.revision === 0) entry.value = snapshot(entry.value);
-			else {
+			if (view.revision !== 0) {
 				const delta = difference(before, entry.value, work);
-				entry.mode = delta === undefined ? "same" : "patch";
-				entry.value = delta;
+				if (delta === undefined) {
+					entry.mode = "same";
+					entry.value = undefined;
+				} else if (smaller(delta, entry.value)) {
+					entry.mode = "patch";
+					entry.value = delta;
+				}
 			}
 		}
+		this.examining = "";
 		return staged;
 	}
 
@@ -380,7 +393,22 @@ class ServerSync extends Subsystem {
 			revision: view.revision + 1,
 			values: staged.values,
 		};
-		const cost = frameCost(frame, SyncFrameMessage.index!);
+		let [encoded, result] = pcall(frameCost, frame, SyncFrameMessage.index!);
+		if (!encoded || overBudget(result as FrameCost) !== undefined) {
+			let replaced = false;
+			for (const entry of staged.values) {
+				if (entry.mode !== "patch") continue;
+				entry.mode = "full";
+				entry.value = staged.accept.get(declarationNamed(entry.key)!)!.value;
+				replaced = true;
+			}
+			if (replaced) [encoded, result] = pcall(frameCost, frame, SyncFrameMessage.index!);
+		}
+		if (!encoded) {
+			this.fail(view, `frame encode failed (${names.join(", ")}): ${tostring(result)}`);
+			return 0;
+		}
+		const cost = result as FrameCost;
 		const budget = overBudget(cost);
 		if (budget !== undefined) {
 			this.fail(

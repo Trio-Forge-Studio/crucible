@@ -108,7 +108,7 @@ A per-player declaration that failed becomes `"ready"` again when its next value
 
 - The server sends each ready player one frame per Heartbeat at most, holding every value that changed since the last frame that player accepted. A frame is atomic: an effect on the client never sees part of it.
 - A value equal to the one the player already holds is not resent.
-- Snapshots carry complete values; updates carry Charm Sync patches through Crucible's network. Root `undefined`, deleted keys, and arrays keep the same game-facing behavior. Crucible escapes Charm Sync's internal marker keys, so a map may use those names as ordinary data.
+- Snapshots carry complete values with plain arrays. Updates carry Charm Sync patches when they are smaller, otherwise complete values; a combined patch frame that exceeds a budget is retried with complete values. Root `undefined`, deleted keys, arrays, and equal initial values keep the same game-facing behavior. Crucible escapes Charm Sync's internal marker keys in patches, so a map may use those names as ordinary data.
 - A declaration nobody publishes is never sent. Its clients keep `initial` with status `"pending"`.
 - When a publishing Subsystem faults, its declarations become `"failed"` for every client, and writes through its handle throw.
 - A frame over the sync budgets, or a client that reports a broken frame, stops that player's sync and kicks the player with "Connection problem, please rejoin." No other player is affected.

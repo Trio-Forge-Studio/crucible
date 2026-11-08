@@ -121,7 +121,6 @@ end
 function world:frames(client)
 	local out = {}
 	local state = {}
-	local apply = self.server.graph.package("@rbxts/charm-sync/src").patch.apply
 	local unpackValue = self.server.graph.module("internal/sync/patches").apply
 	for _, entry in self.link.log do
 		if entry.to == client.name and type(entry.packet) == "buffer" then
@@ -131,12 +130,11 @@ function world:frames(client)
 				for _, value in decoded.frame.values do
 					local previous = state[value.key]
 					local before = if previous then previous.value else nil
-					local raw = if value.mode == "full"
-						then value.value
-						elseif value.mode == "same" then before
-						else apply(before, value.value)
+					local raw = if value.mode == "same"
+						then before
+						else unpackValue(before, value.value, value.mode == "full")
 					state[value.key] = { value = raw }
-					table.insert(values, { key = value.key, value = unpackValue(nil, raw, true) })
+					table.insert(values, { key = value.key, mode = value.mode, value = raw })
 				end
 				decoded.frame.values = values
 				decoded.injected = entry.injected

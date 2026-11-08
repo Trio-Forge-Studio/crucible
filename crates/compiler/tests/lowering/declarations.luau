@@ -72,12 +72,20 @@ local game = {
 local realm = {}
 local loaded = {}
 local load
--- Charm requires its children by `@self/name`.
+-- Packages use both child aliases and paths relative to the requiring module.
 local function requireFrom(script)
 	return function(target)
 		if type(target) == "string" then
-			local child = assert(string.match(target, "^@self/(.+)$"), `unsupported require {target}`)
-			target = assert(script:FindFirstChild(child), `{script:GetFullName()} has no child {child}`)
+			local child = string.match(target, "^@self/(.+)$")
+			if child then
+				target = assert(script:FindFirstChild(child), `{script:GetFullName()} has no child {child}`)
+			elseif string.match(target, "^%.%./") then
+				local name = string.sub(target, 4)
+				target = assert(script.Parent.Parent:FindFirstChild(name), `missing parent module {name}`)
+			else
+				local name = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
+				target = assert(script.Parent:FindFirstChild(name), `{script:GetFullName()} has no sibling {name}`)
+			end
 		end
 		return load(target)
 	end

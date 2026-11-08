@@ -226,8 +226,9 @@ return {
 			end)
 		end
 		local w = World.new(options)
+		local text = string.rep("x", 35000)
 		want(w, function(player)
-			return if player.Name == "Ann" then { a = BIG, b = BIG, c = BIG, count = 1 } else nil
+			return if player.Name == "Ann" then { a = text, b = text, c = text, count = 1 } else nil
 		end)
 		local ann = w:join("Ann")
 		local bea = w:join("Bea")
