@@ -134,6 +134,7 @@ flags! {
         Property,
         Type,
         TypeAlias,
+        ValueModule,
         Variable,
     }
 }

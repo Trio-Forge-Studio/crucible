@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crucible_abi::PACKAGE;
-use crucible_compiler::extension::{ExtractCx, File, Kind, Node, NodeFlags, Op, Symbol, SymbolFlags};
+use crucible_compiler::extension::{ExtractCx, File, Kind, Node, NodeFlags, Op, Symbol, SymbolFlags, Type, TypeFlags};
 
 use crate::Code;
 use crate::facts::ClassKind;
@@ -42,17 +42,6 @@ fn crucible_call(charm: &str) -> Option<&'static str> {
 /// Whether CRU038 reads the file, which then reports its own imports and exports.
 fn linted(file: File) -> bool {
     !file.is_declaration() && !file.path().contains("/node_modules/")
-}
-
-/// The name a binding element reads, when it is one the checker can look up.
-fn property_key(name: Node) -> Option<&'static str> {
-    match name.kind() {
-        Kind::Identifier | Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral => Some(name.text()),
-        Kind::ComputedPropertyName => Some(name.expression())
-            .filter(|key| matches!(key.kind(), Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral))
-            .map(|key| key.text()),
-        _ => None,
-    }
 }
 
 fn unwrap(mut n: Node) -> Node {
@@ -97,7 +86,14 @@ impl Lints<'_, '_> {
                 self.charm_bindings(n)
             }
             Kind::PropertyAccessExpression | Kind::ElementAccessExpression if charm => self.charm_read(n),
-            Kind::BindingElement if charm => self.charm_destructuring(n),
+            Kind::VariableDeclaration if charm => {
+                if let Some(pattern) = n.name() {
+                    self.charm_destructuring(pattern, n.initializer());
+                }
+            }
+            Kind::BinaryExpression if charm && n.operator() == Op::Assign => {
+                self.charm_destructuring(unwrap(n.left()), Some(n.right()));
+            }
             _ => {}
         }
         n.for_each_child(&mut |child| self.visit(child, charm));
@@ -313,26 +309,97 @@ impl Lints<'_, '_> {
     }
 
     fn charm_read(&mut self, n: Node) {
-        let key = match n.kind() {
-            Kind::PropertyAccessExpression => n.name(),
-            _ => Some(n.argument_expression())
-                .filter(|a| matches!(a.kind(), Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral)),
+        if !self.is_namespace(n.expression()) {
+            return;
+        }
+        let names = match n.kind() {
+            Kind::PropertyAccessExpression => n.name().map(|name| vec![name.text()]).unwrap_or_default(),
+            _ => self.literal_names(n.argument_expression()),
         };
-        let Some(symbol) = key.and_then(|key| self.cx.symbol_at(key)) else { return };
-        if let Some(name) = self.charm_lifetime(symbol) {
+        if let Some(name) = self.namespace_lifetime(n.expression(), names) {
             self.charm_report(n, name);
         }
     }
 
-    fn charm_destructuring(&mut self, element: Node) {
-        let Some(pattern) = element.parent().filter(|p| p.kind() == Kind::ObjectBindingPattern) else { return };
-        let Some(key) = element.property_name_or_name().and_then(property_key).filter(|_| !element.is_rest()) else {
-            return;
-        };
-        let source = self.cx.type_at(pattern);
-        let Some(symbol) = self.cx.property_of_type(source, key) else { return };
-        if let Some(name) = self.charm_lifetime(symbol) {
-            self.charm_report(element, name);
+    /// Reports each lifetime call that a destructuring of `source` takes from a module's namespace. An array pattern
+    /// of an array literal pairs each element with the element of the literal it takes.
+    fn charm_destructuring(&mut self, pattern: Node, source: Option<Node>) {
+        let Some(source) = source.map(unwrap) else { return };
+        match pattern.kind() {
+            Kind::ObjectBindingPattern | Kind::ObjectLiteralExpression => {
+                if !self.is_namespace(source) {
+                    return;
+                }
+                let members = if pattern.kind() == Kind::ObjectBindingPattern {
+                    pattern.elements()
+                } else {
+                    pattern.properties()
+                };
+                for member in members.iter() {
+                    let key = match member.kind() {
+                        Kind::BindingElement if !member.is_rest() => member.property_name_or_name(),
+                        Kind::ShorthandPropertyAssignment | Kind::PropertyAssignment => member.name(),
+                        _ => None,
+                    };
+                    let Some(key) = key else { continue };
+                    let names = self.key_names(key);
+                    if let Some(name) = self.namespace_lifetime(source, names) {
+                        self.charm_report(member, name);
+                    }
+                }
+            }
+            Kind::ArrayBindingPattern | Kind::ArrayLiteralExpression
+                if source.kind() == Kind::ArrayLiteralExpression =>
+            {
+                for (target, value) in pattern.elements().iter().zip(source.elements().iter()) {
+                    if target.is_rest() || target.kind() == Kind::SpreadElement || value.kind() == Kind::SpreadElement {
+                        break;
+                    }
+                    let target = if target.kind() == Kind::BindingElement { target.name() } else { Some(target) };
+                    if let Some(target) = target {
+                        self.charm_destructuring(unwrap(target), Some(value));
+                    }
+                }
+            }
+            _ => {}
         }
+    }
+
+    /// Whether `n` reads a module's namespace through the aliases that lead to it, as `import * as charm`,
+    /// `import charm = require(..)` and a default import of a module without a default export do.
+    fn is_namespace(&mut self, n: Node) -> bool {
+        let n = unwrap(n);
+        let name = match n.kind() {
+            Kind::Identifier => Some(n),
+            Kind::PropertyAccessExpression => n.name(),
+            _ => None,
+        };
+        let Some(symbol) = name.and_then(|name| self.cx.symbol_at(name)) else { return false };
+        self.cx.aliased(symbol).flags().intersects(SymbolFlags::ValueModule)
+    }
+
+    /// The Charm lifetime call that the namespace `namespace` exports under one of `names`.
+    fn namespace_lifetime(&mut self, namespace: Node, names: Vec<&'static str>) -> Option<&'static str> {
+        let namespace = self.cx.type_at(unwrap(namespace));
+        names.into_iter().find_map(|name| {
+            let symbol = self.cx.property_of_type(namespace, name)?;
+            self.charm_lifetime(symbol)
+        })
+    }
+
+    /// The names a property key reads: its own, or each string literal that a computed key's type allows.
+    fn key_names(&mut self, key: Node) -> Vec<&'static str> {
+        match key.kind() {
+            Kind::Identifier | Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral => vec![key.text()],
+            Kind::ComputedPropertyName => self.literal_names(key.expression()),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The string literals the checked type of `n` allows: its own, or each one of its union's.
+    fn literal_names(&mut self, n: Node) -> Vec<&'static str> {
+        let t = self.cx.type_at(n);
+        let members = if t.flags().intersects(TypeFlags::Union) { t.types() } else { vec![t] };
+        members.iter().filter_map(Type::literal_string).collect()
     }
 }

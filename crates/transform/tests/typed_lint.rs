@@ -209,3 +209,49 @@ fn cru038_applies_wherever_crucible_is_installed_even_in_a_program_that_never_im
     game.remove("default.project.json");
     assert_eq!(rules(&game), [], "a program without Crucible installed is exempt");
 }
+
+#[test]
+fn cru038_reads_the_keys_the_checker_knows_and_destructuring_assignments() {
+    let game = with_charm();
+    game.main(
+        "import * as charm from \"@rbxts/charm\";\n\
+         charm[(\"effect\")](() => {});\n\
+         const k: \"effect\" = \"effect\";\n\
+         charm[k](() => {});\n\
+         const u = math.random() > 0.5 ? \"effect\" : \"onCleanup\";\n\
+         charm[u](() => {});\n\
+         const key = \"effect\" as const;\n\
+         const { [key]: run } = charm;\n\
+         run(() => {});\n\
+         let effect: typeof charm.effect;\n\
+         ({ effect } = charm);\n\
+         effect(() => {});\n\
+         let later: typeof charm.onCleanup;\n\
+         [{ onCleanup: later }] = [charm];\n\
+         const [{ effectScope }] = [charm];\n\
+         let made: typeof charm.atom;\n\
+         ({ atom: made } = charm);\n\
+         const kept = charm[\"computed\"];\n\
+         export const values = [later, effectScope, made, kept];\n",
+    );
+    let found: Vec<_> =
+        game.facts().diagnostics.iter().filter(|d| d.code == 90038).map(|d| (d.line, d.column)).collect();
+    assert_eq!(found, [(2, 1), (4, 1), (6, 1), (8, 9), (11, 4), (14, 4), (15, 10)]);
+}
+
+#[test]
+fn cru038_reports_a_value_taken_from_charm_and_not_a_value_typed_like_charm() {
+    let game = with_charm();
+    game.main(
+        "import type * as charm from \"@rbxts/charm\";\n\
+         const safe: Pick<typeof charm, \"effect\" | \"onCleanup\"> = { effect: () => () => {}, onCleanup: () => {} };\n\
+         safe.effect(() => {});\n\
+         safe[\"onCleanup\"](() => {});\n\
+         const { effect } = safe;\n\
+         let later: typeof charm.onCleanup;\n\
+         ({ onCleanup: later } = safe);\n\
+         function run({ effectScope }: typeof charm) {\n\treturn effectScope;\n}\n\
+         export const values = [effect, later, run];\n",
+    );
+    assert_eq!(rules(&game), [], "no value here comes from Charm");
+}
