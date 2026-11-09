@@ -346,7 +346,6 @@ impl<'a> Lower<'a> {
         self.ordered_after(first, second)
     }
 
-    /// `first`, lowered with the statements it needs, and then `second`, as `ordered_pair` orders them.
     fn ordered_after(&mut self, (first, first_setup): (Expr, Block), second: Node) -> (Expr, Expr) {
         let (second, second_setup) = self.capture(|l| l.expr(second));
         self.current_block.extend(first_setup);

@@ -321,8 +321,6 @@ impl Lints<'_, '_> {
         }
     }
 
-    /// Reports each lifetime call that a destructuring of `source` takes from a module's namespace. An array pattern
-    /// of an array literal pairs each element with the element of the literal it takes.
     fn charm_destructuring(&mut self, pattern: Node, source: Option<Node>) {
         let Some(source) = source.map(unwrap) else { return };
         match pattern.kind() {
@@ -378,7 +376,6 @@ impl Lints<'_, '_> {
         self.cx.aliased(symbol).flags().intersects(SymbolFlags::ValueModule)
     }
 
-    /// The Charm lifetime call that the namespace `namespace` exports under one of `names`.
     fn namespace_lifetime(&mut self, namespace: Node, names: Vec<&'static str>) -> Option<&'static str> {
         let namespace = self.cx.type_at(unwrap(namespace));
         names.into_iter().find_map(|name| {
@@ -387,7 +384,6 @@ impl Lints<'_, '_> {
         })
     }
 
-    /// The names a property key reads: its own, or each string literal that a computed key's type allows.
     fn key_names(&mut self, key: Node) -> Vec<&'static str> {
         match key.kind() {
             Kind::Identifier | Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral => vec![key.text()],
@@ -396,7 +392,6 @@ impl Lints<'_, '_> {
         }
     }
 
-    /// The string literals the checked type of `n` allows: its own, or each one of its union's.
     fn literal_names(&mut self, n: Node) -> Vec<&'static str> {
         let t = self.cx.type_at(n);
         let members = if t.flags().intersects(TypeFlags::Union) { t.types() } else { vec![t] };

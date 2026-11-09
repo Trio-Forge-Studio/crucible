@@ -158,8 +158,6 @@ impl Lower<'_> {
         }
     }
 
-    /// A call of `function`, which an extension lowered from the callee `target`. A method call still passes the
-    /// object it reads the method from, lowered once.
     fn call_lowered_callee(&mut self, n: Node, target: Node, kind: Callee, function: Expr) -> Expr {
         let mut callee = vec![(function, Vec::new())];
         if kind == Callee::Method
@@ -319,8 +317,6 @@ impl Lower<'_> {
         map
     }
 
-    /// `new Map([[k, v], ..])` as one table. Each pair's key and value lower in place, or are read from the pair an
-    /// extension lowered.
     fn map_of_pairs(&mut self, pairs: Node) -> Expr {
         let mut lowered = Vec::new();
         for pair in pairs.elements().iter() {

@@ -22,9 +22,7 @@ impl Lower<'_> {
         self.first_extension(n, |e, cx, n| e.lower_expression(cx, n))
     }
 
-    /// The first extension's lowering of `n` or of an expression inside the parentheses and assertions around the
-    /// node they wrap, asked from the outside in as `expr` asks. A path that lowers a node by its parts, instead of
-    /// through `expr`, asks this first.
+    /// A path that lowers a node by its parts, instead of through `expr`, asks this first.
     pub(super) fn extension_value(&mut self, mut n: Node) -> Option<Expr> {
         loop {
             if let Some(value) = self.extension_expression(n) {

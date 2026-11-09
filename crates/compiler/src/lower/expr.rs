@@ -495,7 +495,7 @@ impl Lower<'_> {
         if is_logic(n)
             && let Some(value) = self.extension_expression(n)
         {
-            let falsy = self.logic_falsy(n);
+            let falsy = self.falsy(n);
             return self.truthy_check(value, falsy);
         }
         match n.kind() {
@@ -534,16 +534,6 @@ impl Lower<'_> {
         let falsy = self.falsy(n);
         let value = self.expr(n);
         self.truthy_check(value, falsy)
-    }
-
-    /// The falsy values of a `!`, `&&` or `||`, read from its operands as the fact pass reads them.
-    fn logic_falsy(&mut self, n: Node) -> Falsy {
-        match n.kind() {
-            Kind::ParenthesizedExpression => self.logic_falsy(n.expression()),
-            Kind::PrefixUnaryExpression => Falsy::FALSE,
-            _ if n.operator() == Op::And => self.falsy(n.left()) | self.falsy(n.right()),
-            _ => self.falsy(n.right()),
-        }
     }
 
     fn is_boolean_macro(&self, call: Node) -> bool {
@@ -718,7 +708,6 @@ impl Lower<'_> {
         self.append_spread(target, source, receiver, value);
     }
 
-    /// Appends the values of `source`, which lowered to `value`, to the array `target`.
     fn append_spread(&mut self, target: Expr, source: Node, receiver: Option<Receiver>, value: Expr) {
         let insert = |item: Expr| Stmt::Call(Expr::global("table.insert").call(vec![target.clone(), item]));
         match receiver {
