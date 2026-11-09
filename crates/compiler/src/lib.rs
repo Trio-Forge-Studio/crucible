@@ -1,4 +1,3 @@
-mod declarations;
 mod entities;
 pub mod extension;
 mod extract;
@@ -19,11 +18,9 @@ use extension::Extension;
 
 // The fact table is internal. Tests read it through `analyze`, which the `test-support` feature exports.
 #[cfg(feature = "test-support")]
-pub use declarations::DeclarationKind;
-#[cfg(feature = "test-support")]
 pub use facts::{
-    Callee, ClassKind, Constant, Crucible, Declaration, Fact, Facts, Falsy, Field, FileFacts, Import, Jsx, KeyLiteral,
-    Literal, MapKey, ModulePath, Place, Reason, Receiver, RuntimeLib, Schema, Site, Span, Tail, Unanswered,
+    Callee, ClassKind, Constant, Crucible, Fact, Facts, Falsy, FileFacts, Import, Jsx, ModulePath, Place, Reason,
+    Receiver, RuntimeLib, Site, Span, Unanswered,
 };
 #[cfg(not(feature = "test-support"))]
 use facts::{FileFacts, Unanswered};

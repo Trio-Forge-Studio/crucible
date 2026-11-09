@@ -1,25 +1,35 @@
 //! Crucible's transform, the compiler extension that knows the framework. It checks that the installed runtime
-//! implements the ABI this transform emits, and owns registration and dependency injection. The framework's other rules
-//! and lowerings still run inside the compiler and move here one feature at a time.
+//! implements the ABI this transform emits, and owns registration, dependency injection, and the network, data and
+//! config declarations. The framework's other rules and lowerings still run inside the compiler and move here one
+//! feature at a time.
 
 mod api;
+mod data;
+mod declarations;
 mod facts;
 mod lower;
+mod network;
 mod registration;
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use crucible_abi::{EMIT as EMIT_ENTRY, MANIFEST_FIELD, PACKAGE, UNDECLARED, VERSION};
+#[cfg(feature = "test-support")]
+use crucible_compiler::extension::Span;
 use crucible_compiler::extension::{
     Extension, ExtractCx, File, HelperModule, LowerCx, Manifest, Node, ProgramCx, SiteId,
 };
 use crucible_compiler::{Compiled, Failure, Target};
 use crucible_luau::{Expr, Name, Stmt};
 
+#[cfg(feature = "test-support")]
+pub use declarations::DeclarationKind;
 use facts::Fact;
 #[cfg(feature = "test-support")]
-pub use facts::{Attribute, Check, Class, ClassKind, Dependency, Literal};
+pub use facts::{
+    Attribute, Check, Class, ClassKind, Declaration, Dependency, Field, KeyLiteral, Literal, MapKey, Schema, Tail,
+};
 
 /// TypeScript's number for a Crucible error that is not a rule.
 const SETUP: i32 = 90000;
@@ -69,17 +79,37 @@ pub fn analyze(
 #[derive(Default)]
 pub struct Crucible {
     api: Option<api::Api>,
+    state: State,
+}
+
+/// What the transform keeps across the files of a program.
+#[derive(Default)]
+pub(crate) struct State {
     facts: HashMap<SiteId, Fact>,
-    /// Each registered class with the path of its file, in the order extraction found them.
+    network: network::Network,
+    /// Each fact with the path of its file and its node's span, in the order extraction found them.
     #[cfg(feature = "test-support")]
-    classes: Vec<(String, Class)>,
+    recorded: Vec<(String, Span, Fact)>,
 }
 
 #[cfg(feature = "test-support")]
 impl Crucible {
     /// The classes registered in the file whose path ends with `file`.
     pub fn classes(&self, file: &str) -> Vec<Class> {
-        self.classes.iter().filter(|(path, _)| path.ends_with(file)).map(|(_, class)| class.clone()).collect()
+        self.facts_in(file)
+            .filter_map(|(_, fact)| if let Fact::Class(c) = fact { Some(c.clone()) } else { None })
+            .collect()
+    }
+
+    /// The declaration macro calls in the file whose path ends with `file`, by the span of each call.
+    pub fn declarations(&self, file: &str) -> Vec<(Span, Declaration)> {
+        self.facts_in(file)
+            .filter_map(|(span, fact)| if let Fact::Declaration(d) = fact { Some((span, d.clone())) } else { None })
+            .collect()
+    }
+
+    fn facts_in(&self, file: &str) -> impl Iterator<Item = (Span, &Fact)> {
+        self.state.recorded.iter().filter(move |(path, ..)| path.ends_with(file)).map(|(_, span, fact)| (*span, fact))
     }
 }
 
@@ -99,25 +129,25 @@ impl Extension for Crucible {
 
     fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
         // The compiler reports metadata it cannot read, and the transform then leaves the program alone.
-        if self.api.is_none()
-            || cx.metadata_invalid()
-            || cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE)
-        {
+        let Some(api) = self.api.as_mut() else { return };
+        if cx.metadata_invalid() || cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE) {
             return;
         }
-        registration::Walk { cx, crucible: self }.file(file.root());
+        registration::Walk { cx, api, state: &mut self.state }.file(file);
     }
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {
-        match self.facts.get(&cx.site(call))? {
+        match self.state.facts.get(&cx.site(call))? {
             Fact::Inject(dependency) => Some(lower::inject(cx, call, dependency)),
             Fact::Attribute => Some(lower::attribute(cx, call)),
+            Fact::Declaration(declaration) => Some(lower::declaration(cx, call, declaration)),
+            Fact::Receive { field } => Some(lower::receive(cx, call, field)),
             Fact::Class(_) => None,
         }
     }
 
     fn lower_class_tail(&self, cx: &mut LowerCx<'_, '_>, class: Node, local: &Name) -> Vec<Stmt> {
-        match self.facts.get(&cx.site(class)) {
+        match self.state.facts.get(&cx.site(class)) {
             Some(Fact::Class(registered)) => vec![lower::register(cx, registered, local)],
             _ => Vec::new(),
         }

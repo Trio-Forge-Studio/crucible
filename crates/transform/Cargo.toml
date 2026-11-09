@@ -9,6 +9,7 @@ publish.workspace = true
 crucible-abi = { path = "../abi" }
 crucible-compiler = { path = "../compiler" }
 crucible-luau = { path = "../luau" }
+serde_json.workspace = true
 
 [features]
 # Exports `analyze` and the facts the transform keeps, which only this crate's tests read.
@@ -17,4 +18,3 @@ test-support = ["crucible-compiler/test-support"]
 # Tests build with dev-dependencies, so this turns test-support on for them and for nothing else.
 [dev-dependencies]
 crucible-transform = { path = ".", features = ["test-support"] }
-serde_json.workspace = true

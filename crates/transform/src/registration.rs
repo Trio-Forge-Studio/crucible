@@ -5,12 +5,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crucible_compiler::extension::{
-    ExtractCx, Kind, ModifierFlags, Node, NodeFlags, ObjectFlags, SignatureKind, Symbol, SymbolFlags, Type, TypeFlags,
+    ExtractCx, File, Kind, ModifierFlags, Node, NodeFlags, ObjectFlags, SignatureKind, Symbol, SymbolFlags, Type,
+    TypeFlags,
 };
 
-use crate::api::{Macro, Made, OWN_CLASSES};
+use crate::api::{Api, Macro, Made, OWN_CLASSES, is_declaration_macro};
+use crate::declarations::Side;
 use crate::facts::{Attribute, Check, Class, ClassKind, Dependency, Fact, Literal};
-use crate::{Code, Crucible};
+use crate::{Code, State};
 
 /// Lifecycle names from other frameworks that a Crucible class may mean as a hook.
 const HOOK_LOOKALIKES: [&str; 5] = ["onInit", "onStart", "onTick", "onPhysics", "onRender"];
@@ -24,24 +26,17 @@ enum Generic {
     Target,
 }
 
-/// The folder that names the side a class runs on.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Side {
-    Server,
-    Client,
-    Shared,
-}
-
 pub(crate) struct Walk<'w, 'x> {
     pub(crate) cx: &'w mut ExtractCx<'x>,
-    pub(crate) crucible: &'w mut Crucible,
+    pub(crate) api: &'w mut Api,
+    pub(crate) state: &'w mut State,
 }
 
 fn target(t: Type) -> Type {
     if is_reference(t) { t.target().unwrap_or(t) } else { t }
 }
 
-fn is_reference(t: Type) -> bool {
+pub(crate) fn is_reference(t: Type) -> bool {
     t.flags().intersects(TypeFlags::Object) && t.object_flags().intersects(ObjectFlags::Reference)
 }
 
@@ -54,7 +49,7 @@ fn is_concrete_class(d: Node) -> bool {
 }
 
 /// A global script, or a `declare global` block in a module.
-fn is_global(declaration: Node) -> bool {
+pub(crate) fn is_global(declaration: Node) -> bool {
     if !declaration.file().is_module() {
         return true;
     }
@@ -66,6 +61,30 @@ fn is_global(declaration: Node) -> bool {
         parent = p.parent();
     }
     false
+}
+
+/// Whether a call calls `n`, through any parentheses.
+fn is_callee(mut n: Node) -> bool {
+    while let Some(parent) = n.parent().filter(|p| p.kind() == Kind::ParenthesizedExpression) {
+        n = parent;
+    }
+    n.parent().is_some_and(|p| p.kind() == Kind::CallExpression && p.expression() == n)
+}
+
+/// The local names that a file's imports bind.
+fn import_names(statement: Node) -> Vec<Node> {
+    match statement.kind() {
+        Kind::ImportEqualsDeclaration => statement.name().into_iter().collect(),
+        Kind::ImportDeclaration => {
+            let Some(clause) = statement.import_clause() else { return Vec::new() };
+            let mut names: Vec<Node> = clause.name().into_iter().collect();
+            if let Some(named) = clause.named_bindings().filter(|n| n.kind() == Kind::NamedImports) {
+                names.extend(named.elements().iter().filter_map(|e| e.name()));
+            }
+            names
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn implemented(declaration: Node) -> Vec<Node> {
@@ -105,35 +124,76 @@ fn one_edit(a: &str, b: &str) -> bool {
 }
 
 impl Walk<'_, '_> {
-    pub(crate) fn file(&mut self, root: Node) {
-        self.walk(root);
+    pub(crate) fn file(&mut self, file: File) {
+        let names = self.macro_names(file);
+        self.walk(file.root(), file, &names);
     }
 
-    fn report(&mut self, at: Node, code: Code, message: &str) {
+    /// The names that can refer to a network or data macro in `file`: the macros' own, and the ones its imports give.
+    fn macro_names(&mut self, file: File) -> HashSet<&'static str> {
+        let mut names: HashSet<&'static str> = Macro::declarations().map(Macro::name).collect();
+        for statement in file.root().statements().iter() {
+            for name in import_names(statement) {
+                let symbol = self.cx.symbol_at(name);
+                if self.api(symbol).is_some_and(is_declaration_macro) {
+                    names.insert(name.text());
+                }
+            }
+        }
+        names
+    }
+
+    /// CRU023: a network or data macro anywhere but a call's callee, an import or an export.
+    fn macro_value(&mut self, at: Node, symbol: Option<Symbol>) {
+        if let Some(name) = self.api(symbol).filter(|name| is_declaration_macro(name)) {
+            let message = format!("{name} is a declaration macro and cannot be used as a value.");
+            self.report(at, Code::Rule(23), &message);
+        }
+    }
+
+    pub(crate) fn report(&mut self, at: Node, code: Code, message: &str) {
         let (number, message) = code.render(message);
         self.cx.report(at, number, &message);
     }
 
-    fn store(&mut self, at: Node, fact: Fact) {
+    pub(crate) fn store(&mut self, at: Node, fact: Fact) {
         #[cfg(feature = "test-support")]
-        if let Fact::Class(class) = &fact {
-            self.crucible.classes.push((at.file().path(), class.clone()));
-        }
+        self.state.recorded.push((at.file().path(), at.span(), fact.clone()));
         let site = self.cx.site(at);
-        self.crucible.facts.insert(site, fact);
+        self.state.facts.insert(site, fact);
     }
 
-    fn api(&mut self, symbol: Option<Symbol>) -> Option<&'static str> {
-        self.crucible.api.as_ref()?.name(self.cx, symbol)
+    pub(crate) fn api(&mut self, symbol: Option<Symbol>) -> Option<&'static str> {
+        self.api.name(self.cx, symbol)
     }
 
-    fn macro_at(&mut self, call: Node) -> Option<Macro> {
-        self.crucible.api.as_ref()?.macro_at(self.cx, call)
+    pub(crate) fn macro_at(&mut self, call: Node) -> Option<Macro> {
+        self.api.macro_at(self.cx, call)
     }
 
-    fn walk(&mut self, n: Node) {
+    fn walk(&mut self, n: Node, file: File, names: &HashSet<&'static str>) {
         match n.kind() {
-            Kind::CallExpression => self.call(n),
+            Kind::CallExpression => self.call(n, file),
+            Kind::StringLiteral => self.side_entry_specifier(n, file),
+            Kind::BinaryExpression => self.process_receipt(n),
+            Kind::ModuleDeclaration => self.augmentation(n),
+            Kind::Identifier => {
+                if names.contains(n.text()) {
+                    let parent = n.parent();
+                    let specifier =
+                        parent.is_some_and(|p| matches!(p.kind(), Kind::ImportSpecifier | Kind::ExportSpecifier));
+                    let access = parent.filter(|p| p.kind() == Kind::PropertyAccessExpression && p.name() == Some(n));
+                    if !specifier && !is_callee(access.unwrap_or(n)) {
+                        let symbol = self.cx.symbol_at(n);
+                        self.macro_value(n, symbol);
+                    }
+                }
+                self.side_entry_reference(n, file);
+            }
+            Kind::ElementAccessExpression if !is_callee(n) => {
+                let t = self.cx.type_at(n);
+                self.macro_value(n, t.symbol());
+            }
             Kind::ClassDeclaration | Kind::ClassExpression => self.class_rules(n),
             Kind::TypeReference => {
                 let t = self.cx.type_from_type_node(n);
@@ -149,7 +209,7 @@ impl Walk<'_, '_> {
             }
             _ => {}
         }
-        n.for_each_child(&mut |child| self.walk(child));
+        n.for_each_child(&mut |child| self.walk(child, file, names));
         if matches!(n.kind(), Kind::ClassDeclaration | Kind::ClassExpression)
             && let Some(class) = self.registration(n)
         {
@@ -157,7 +217,7 @@ impl Walk<'_, '_> {
         }
     }
 
-    fn call(&mut self, n: Node) {
+    fn call(&mut self, n: Node, file: File) {
         if n.expression().kind() == Kind::ImportKeyword {
             return;
         }
@@ -171,8 +231,11 @@ impl Walk<'_, '_> {
                 self.attribute_rules(n);
                 self.store(n, Fact::Attribute);
             }
+            Some(Macro::Receive) => self.receive(n, file),
+            Some(Macro::Declaration(kind)) => self.declaration(n, kind, file),
             None => {}
         }
+        self.profile_store_call(n, file);
     }
 
     fn is_own_class(&mut self, t: Type) -> bool {
@@ -209,22 +272,22 @@ impl Walk<'_, '_> {
         None
     }
 
-    fn kind_of(&mut self, t: Type) -> Option<ClassKind> {
-        if let Some(&kind) = self.crucible.api.as_ref()?.kinds.get(&t) {
+    pub(crate) fn kind_of(&mut self, t: Type) -> Option<ClassKind> {
+        if let Some(&kind) = self.api.kinds.get(&t) {
             return kind;
         }
         let kind = self.class_kind(t, &mut HashSet::new());
-        self.crucible.api.as_mut()?.kinds.insert(t, kind);
+        self.api.kinds.insert(t, kind);
         kind
     }
 
-    fn instance_type(&mut self, class: Node) -> Option<Type> {
+    pub(crate) fn instance_type(&mut self, class: Node) -> Option<Type> {
         let symbol = self.cx.symbol_of_declaration(class)?;
         Some(self.cx.declared_type_of_symbol(symbol))
     }
 
     /// Declarations of the language and the Roblox API, which every program shares.
-    fn is_library_declaration(&mut self, declaration: Node) -> bool {
+    pub(crate) fn is_library_declaration(&mut self, declaration: Node) -> bool {
         let file = declaration.file();
         let name = file.path();
         if name.contains("/node_modules/@rbxts/") || self.cx.is_default_library(file) {
@@ -395,7 +458,7 @@ impl Walk<'_, '_> {
         Check::Invalid
     }
 
-    fn is_macro_call(&mut self, n: Node, m: Macro) -> bool {
+    pub(crate) fn is_macro_call(&mut self, n: Node, m: Macro) -> bool {
         n.kind() == Kind::CallExpression && self.macro_at(n) == Some(m)
     }
 
@@ -535,7 +598,7 @@ impl Walk<'_, '_> {
     /// instance classes in that order. The checker makes a type at the first reference in the transformer's walk of
     /// the program, and makes an interface's bases as it makes the interface. TypeScript 7 orders a union by name.
     fn made(&mut self) -> Option<&HashMap<Symbol, Made>> {
-        if self.crucible.api.as_ref()?.made.is_none() {
+        if self.api.made.is_none() {
             let mut made = HashMap::new();
             let mut aliases = HashSet::new();
             for file in self.cx.files() {
@@ -543,9 +606,9 @@ impl Walk<'_, '_> {
                     self.make_referenced(file.root(), &mut made, &mut aliases);
                 }
             }
-            self.crucible.api.as_mut()?.made = Some(made);
+            self.api.made = Some(made);
         }
-        self.crucible.api.as_ref()?.made.as_ref()
+        self.api.made.as_ref()
     }
 
     fn make_referenced(&mut self, n: Node, made: &mut HashMap<Symbol, Made>, aliases: &mut HashSet<Symbol>) {
@@ -684,7 +747,7 @@ impl Walk<'_, '_> {
     }
 
     /// The nearest folder named for a side in the path from the package of `source` to `file`'s folder.
-    fn side(&mut self, source: &Path, file: &Path) -> Option<Side> {
+    pub(crate) fn side(&mut self, source: &Path, file: &Path) -> Option<Side> {
         let root = self.cx.package_dir(source).unwrap_or_default();
         let folder = file.parent()?;
         let relative = folder.strip_prefix(&root).unwrap_or(folder);
@@ -717,7 +780,7 @@ impl Walk<'_, '_> {
         let class_file = PathBuf::from(n.file().path());
         let side = self.side(&class_file, &class_file);
         self.side_members(t, n, side, &mut HashSet::new());
-        let hooks = self.crucible.api.as_ref().map(|a| a.hooks.clone()).unwrap_or_default();
+        let hooks = self.api.hooks.clone();
         for member in n.members().iter() {
             if member.kind() != Kind::MethodDeclaration {
                 continue;

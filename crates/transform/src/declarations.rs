@@ -1,4 +1,6 @@
-use crate::macros::Macro;
+//! The declaration macros: what each declares, where, and the runtime limits its names and schemas keep.
+
+use crucible_abi::Function;
 
 pub const MESSAGE_NAME_MAX_BYTES: usize = 64;
 pub const MAX_ASK_TIMEOUT_SECONDS: f64 = 120.0;
@@ -157,27 +159,24 @@ impl DeclarationKind {
         }
     }
 
-    pub const fn macro_(self) -> Macro {
+    /// The emit function the macro lowers to, which has the macro's name.
+    pub const fn function(self) -> Function {
         match self {
-            DeclarationKind::ToServer => Macro::ToServer,
-            DeclarationKind::ToClient => Macro::ToClient,
-            DeclarationKind::AskServer => Macro::AskServer,
-            DeclarationKind::Replicated => Macro::Replicated,
-            DeclarationKind::ReplicatedPerPlayer => Macro::ReplicatedPerPlayer,
-            DeclarationKind::ProfileStore => Macro::ProfileStore,
-            DeclarationKind::DataStore => Macro::DataStore,
-            DeclarationKind::ProfileMessage => Macro::ProfileMessage,
-            DeclarationKind::Config => Macro::Config,
-            DeclarationKind::PlayerConfig => Macro::PlayerConfig,
+            DeclarationKind::ToServer => crucible_abi::TO_SERVER,
+            DeclarationKind::ToClient => crucible_abi::TO_CLIENT,
+            DeclarationKind::AskServer => crucible_abi::ASK_SERVER,
+            DeclarationKind::Replicated => crucible_abi::REPLICATED,
+            DeclarationKind::ReplicatedPerPlayer => crucible_abi::REPLICATED_PER_PLAYER,
+            DeclarationKind::ProfileStore => crucible_abi::PROFILE_STORE,
+            DeclarationKind::DataStore => crucible_abi::DATA_STORE,
+            DeclarationKind::ProfileMessage => crucible_abi::PROFILE_MESSAGE,
+            DeclarationKind::Config => crucible_abi::CONFIG,
+            DeclarationKind::PlayerConfig => crucible_abi::PLAYER_CONFIG,
         }
     }
 
     pub const fn name(self) -> &'static str {
-        self.macro_().name()
-    }
-
-    pub fn of(m: Macro) -> Option<DeclarationKind> {
-        DeclarationKind::ALL.into_iter().find(|kind| kind.macro_() == m)
+        self.function().name
     }
 }
 
@@ -233,10 +232,11 @@ mod tests {
     }
 
     #[test]
-    fn every_macro_maps_to_one_kind_and_back() {
+    fn every_kind_has_its_own_emit_function() {
+        let names: std::collections::HashSet<&str> = DeclarationKind::ALL.iter().map(|k| k.name()).collect();
+        assert_eq!(names.len(), DeclarationKind::ALL.len());
         for kind in DeclarationKind::ALL {
-            assert_eq!(DeclarationKind::of(kind.macro_()), Some(kind));
+            assert!(crucible_abi::FUNCTIONS.iter().any(|f| f.name == kind.name()), "{kind:?}");
         }
-        assert_eq!(DeclarationKind::of(Macro::Receive), None);
     }
 }

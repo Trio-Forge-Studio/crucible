@@ -5,7 +5,6 @@ use std::fmt;
 use std::ops::BitOr;
 
 use crate::Diagnostic;
-use crate::declarations::DeclarationKind;
 use crate::macros::Macro;
 
 /// A node's source range in UTF-8 bytes, from the start of its first token to its end. Leading trivia is excluded.
@@ -158,86 +157,6 @@ pub enum Crucible {
     /// A `boot` load glob, as the instance path pattern the runtime matches, such as
     /// `crucible-path:ServerScriptService/TS/systems/**`.
     Load(Box<str>),
-    /// A declaration macro call, which lowers to the `@trioforge/crucible/emit` function of the same name.
-    Declaration(Declaration),
-    /// A `receive` call, which lowers to `receive(self, field, target, callback)`.
-    Receive { field: Box<str> },
-}
-
-/// `__crucible.<kind>(name, ...kept arguments, ...schemas, ...tail)`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Declaration {
-    pub kind: DeclarationKind,
-    /// A message's payload, an ask's request and response, or a state's value. A profile store has the saved value
-    /// and then the replica its owner's client receives.
-    pub schemas: Vec<Schema>,
-    pub tail: Tail,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Tail {
-    None,
-    /// An ask's timeout in seconds, or `None` for the runtime's default.
-    Timeout(Option<f64>),
-    /// The paths of a profile store's `serverOnly` fields, each from the value's root.
-    ServerOnly(Vec<Vec<Box<str>>>),
-}
-
-/// A value's wire schema, which the runtime's `n` builders describe.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Schema {
-    Nil,
-    Bool,
-    F64,
-    F32,
-    U8,
-    U16,
-    U32,
-    String,
-    /// `unknown` in a payload, which the codec checks at run time.
-    Dynamic,
-    Vector3,
-    Color3,
-    CFrame,
-    Literal(Literal),
-    /// `Instances` class names, sorted by their bytes.
-    Instance(Vec<Box<str>>),
-    /// Sorted by the bytes of their names.
-    Object(Vec<Field>),
-    Array(Box<Schema>),
-    Tuple(Vec<Schema>),
-    Map(MapKey, Box<Schema>),
-    Union(Vec<Schema>),
-    /// One member of a union of objects: its discriminant property, one literal value of it, and the object without it.
-    Variant {
-        key: Box<str>,
-        value: Literal,
-        body: Box<Schema>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Field {
-    pub name: Box<str>,
-    pub value: Schema,
-    /// A `serverOnly` profile store field, which the replica leaves out.
-    pub server_only: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum MapKey {
-    String,
-    U8,
-    U16,
-    U32,
-    /// A union of literals, numbers before strings, each group sorted.
-    Literals(Vec<KeyLiteral>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum KeyLiteral {
-    Number(f64),
-    String(Box<str>),
 }
 
 /// An instance path a module reaches another module by.
@@ -296,13 +215,6 @@ pub struct Helper {
 pub enum ClassKind {
     Subsystem,
     Behaviour,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Literal {
-    Boolean(bool),
-    Number(f64),
-    String(Box<str>),
 }
 
 /// The facts of one source file, sorted by span.

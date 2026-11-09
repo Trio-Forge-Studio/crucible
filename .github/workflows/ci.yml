@@ -94,5 +94,5 @@ jobs:
         uses: Trio-Forge-Studio/tooling/.github/actions/setup@main
       - name: Run the compiler's emitted Luau, JSX and network declarations in Lune
         if: runner.os == 'Linux'
-        run: cargo test --locked -p crucible-compiler -- --ignored
+        run: cargo test --locked -p crucible-compiler -p crucible-transform -- --ignored
       - run: node --test crates/cli/npm/package.test.mjs

@@ -157,15 +157,4 @@ macros! {
     PromiseThen = Method("Promise") "then",
 
     Boot = Crucible "boot",
-    ToServer = Crucible "toServer",
-    ToClient = Crucible "toClient",
-    AskServer = Crucible "askServer",
-    Receive = Crucible "receive",
-    Replicated = Crucible "replicated",
-    ReplicatedPerPlayer = Crucible "replicatedPerPlayer",
-    ProfileStore = Crucible "profileStore",
-    DataStore = Crucible "dataStore",
-    ProfileMessage = Crucible "profileMessage",
-    Config = Crucible "config",
-    PlayerConfig = Crucible "playerConfig",
 }

@@ -63,6 +63,13 @@ impl LowerCx<'_, '_> {
         arguments
     }
 
+    /// Some of a call's argument nodes in evaluation order, each lowered to one value, for a lowering that drops the
+    /// others. Like `arguments`, a `lower_call` that calls this must lower the call itself.
+    pub fn some_arguments(&mut self, nodes: &[Node]) -> Vec<Expr> {
+        self.lowered_arguments = true;
+        self.l.ordered(nodes.iter().copied(), |l, n| l.expr(n))
+    }
+
     /// `name` in a helper module the extension declared, which the file then imports, even if `lower_call` goes on to
     /// return `None`.
     pub fn helper(&mut self, module: &HelperModule, name: &'static str) -> Expr {

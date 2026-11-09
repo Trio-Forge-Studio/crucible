@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use super::Extractor;
 use super::crucible::Code;
 use crate::Diagnostic;
-use crate::extension::{HelperModule, Manifest, Signature, SignatureKind, SiteId, Symbol, SymbolFlags, Type};
+use crate::extension::{
+    HelperModule, IndexInfo, Manifest, Signature, SignatureKind, SiteId, Symbol, SymbolFlags, Type,
+};
 use crate::tree::{File, Node};
 
 /// What an extension reads and reports about the whole program.
@@ -118,6 +120,34 @@ impl ProgramCx<'_> {
     /// The type as TypeScript prints it in a message.
     pub fn type_text(&mut self, t: Type) -> String {
         self.x.checker.type_to_string_exported(t.0)
+    }
+
+    /// A property's type without the `undefined` its optionality adds.
+    pub fn non_missing_type_of_symbol(&mut self, symbol: Symbol) -> Type {
+        Type(self.x.checker.get_non_missing_type_of_symbol_exported(symbol.0))
+    }
+
+    pub fn non_nullable_type(&mut self, t: Type) -> Type {
+        Type(self.x.checker.get_non_nullable_type(t.0))
+    }
+
+    pub fn index_infos_of_type(&mut self, t: Type) -> Vec<IndexInfo> {
+        let infos = self.x.checker.get_index_infos_of_type_exported(t.0);
+        infos.iter().map(|i| IndexInfo { key: Type(i.key_type()), value: Type(i.value_type()) }).collect()
+    }
+
+    pub fn is_array_type(&mut self, t: Type) -> bool {
+        self.x.checker.is_array_type_exported(t.0)
+    }
+
+    /// The module a module specifier names.
+    pub fn resolve_external_module(&mut self, specifier: Node) -> Option<Symbol> {
+        self.x.checker.resolve_external_module_name_exported(specifier.raw(), None).map(Symbol)
+    }
+
+    /// The folder of the tsconfig the program was built from.
+    pub fn config_dir(&self) -> PathBuf {
+        self.x.config_dir.clone()
     }
 
     pub fn base_types(&mut self, t: Type) -> Vec<Type> {

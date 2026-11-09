@@ -1,17 +1,17 @@
-//! Lowers what registration and dependency injection extracted: `inject` and `attribute` calls, and each registered
-//! class's `defineClass` call.
+//! Lowers what the transform extracted: `inject` and `attribute` calls, each registered class's `defineClass` call,
+//! and the network and data macros with their wire schemas.
 
 use std::borrow::Cow;
 
 use crucible_abi::record::{
     ALL, ATTRIBUTES, BEHAVIOUR, CHECK, DEPS, ID, INSTANCE, KIND, NAME, PROVIDES, REQUIRED, SUBSYSTEM, TAG,
 };
-use crucible_abi::{ATTRIBUTE, DEFINE_CLASS, RESOLVE, RESOLVE_ALL, T};
+use crucible_abi::{ATTRIBUTE, DEFINE_CLASS, N, RECEIVE, RESOLVE, RESOLVE_ALL, T};
 use crucible_compiler::extension::{Kind, LowerCx, Node};
 use crucible_luau::{Expr, Field, Name, Stmt};
 
 use crate::EMIT;
-use crate::facts::{Check, Class, ClassKind, Dependency, Literal};
+use crate::facts::{Check, Class, ClassKind, Declaration, Dependency, KeyLiteral, Literal, MapKey, Schema, Tail};
 
 fn string(text: &str) -> Expr {
     Expr::String(Cow::Owned(text.to_owned()))
@@ -132,6 +132,116 @@ fn check(cx: &mut LowerCx<'_, '_>, check: &Check) -> Expr {
         Check::Union(parts) => {
             let parts = parts.iter().map(|p| self::check(cx, p)).collect();
             t(cx, "union").call(parts)
+        }
+    }
+}
+
+/// `receive(self, field, ...arguments)` for a receiver field's initializer.
+pub(crate) fn receive(cx: &mut LowerCx<'_, '_>, call: Node, field: &str) -> Expr {
+    let mut args = vec![Expr::global("self"), string(field)];
+    args.extend(cx.arguments(call, Vec::new()));
+    cx.helper(&EMIT, RECEIVE.name).call(args)
+}
+
+/// `<kind>(name, ...kept arguments, ...schemas, ...tail)`.
+pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &Declaration) -> Expr {
+    let arguments = call.arguments();
+    let kept: Vec<Node> = arguments
+        .get(0)
+        .into_iter()
+        .chain(declaration.kind.spec().passed.iter().filter_map(|&i| arguments.get(i)))
+        .collect();
+    let mut args = cx.some_arguments(&kept);
+    for schema in &declaration.schemas {
+        args.push(self::schema(cx, schema));
+    }
+    match &declaration.tail {
+        Tail::None => {}
+        Tail::Timeout(seconds) => args.push(seconds.map_or(Expr::Nil, Expr::Number)),
+        Tail::ServerOnly(paths) => args.push(Expr::Table(
+            paths
+                .iter()
+                .map(|path| Field::Item(Expr::Table(path.iter().map(|s| Field::Item(string(s))).collect())))
+                .collect(),
+        )),
+    }
+    cx.helper(&EMIT, declaration.kind.name()).call(args)
+}
+
+/// `n.<name>` of the runtime's schema builders.
+fn n(cx: &mut LowerCx<'_, '_>, name: &'static str) -> Expr {
+    cx.helper(&EMIT, N.name).field(name)
+}
+
+fn schema(cx: &mut LowerCx<'_, '_>, schema: &Schema) -> Expr {
+    match schema {
+        Schema::Nil => n(cx, "nil"),
+        Schema::Bool => n(cx, "bool"),
+        Schema::F64 => n(cx, "f64"),
+        Schema::F32 => n(cx, "f32"),
+        Schema::U8 => n(cx, "u8"),
+        Schema::U16 => n(cx, "u16"),
+        Schema::U32 => n(cx, "u32"),
+        Schema::String => n(cx, "string"),
+        Schema::Dynamic => n(cx, "dynamic"),
+        Schema::Vector3 => n(cx, "vector3"),
+        Schema::Color3 => n(cx, "color3"),
+        Schema::CFrame => n(cx, "cframe"),
+        Schema::Literal(value) => n(cx, "literal").call(vec![literal(value)]),
+        Schema::Instance(classes) => {
+            let classes = classes.iter().map(|c| Field::Item(string(c))).collect();
+            n(cx, "instance").call(vec![Expr::Table(classes)])
+        }
+        Schema::Object(fields) => {
+            let fields = fields
+                .iter()
+                .map(|f| {
+                    Field::Item(Expr::Table(vec![
+                        Field::Item(string(&f.name)),
+                        Field::Item(self::schema(cx, &f.value)),
+                    ]))
+                })
+                .collect();
+            n(cx, "object").call(vec![Expr::Table(fields)])
+        }
+        Schema::Array(element) => {
+            let element = self::schema(cx, element);
+            n(cx, "array").call(vec![element])
+        }
+        Schema::Tuple(elements) => {
+            let elements = elements.iter().map(|e| Field::Item(self::schema(cx, e))).collect();
+            n(cx, "tuple").call(vec![Expr::Table(elements)])
+        }
+        Schema::Map(key, value) => {
+            let key = match key {
+                MapKey::String => n(cx, "string"),
+                MapKey::U8 => n(cx, "u8"),
+                MapKey::U16 => n(cx, "u16"),
+                MapKey::U32 => n(cx, "u32"),
+                MapKey::Literals(keys) => {
+                    let branches = keys
+                        .iter()
+                        .map(|k| {
+                            let value = match k {
+                                KeyLiteral::Number(v) => Expr::Number(*v),
+                                KeyLiteral::String(s) => string(s),
+                            };
+                            Field::Item(n(cx, "literal").call(vec![value]))
+                        })
+                        .collect();
+                    n(cx, "union").call(vec![Expr::Table(branches)])
+                }
+            };
+            let value = self::schema(cx, value);
+            n(cx, "map").call(vec![key, value])
+        }
+        Schema::Union(branches) => {
+            let branches = branches.iter().map(|b| Field::Item(self::schema(cx, b))).collect();
+            n(cx, "union").call(vec![Expr::Table(branches)])
+        }
+        Schema::Variant { key, value, body } => {
+            let body = self::schema(cx, body);
+            n(cx, "variant").call(vec![string(key), literal(value), body])
         }
     }
 }

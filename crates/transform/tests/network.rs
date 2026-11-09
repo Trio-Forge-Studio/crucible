@@ -2,9 +2,10 @@ mod support;
 
 use std::collections::{BTreeSet, HashMap};
 
-use crucible_compiler::{Crucible, Declaration, Facts, Field, KeyLiteral, Literal, MapKey, Schema, Tail, Target};
+use crucible_compiler::Target;
+use crucible_transform::{Declaration, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
 use serde_json::json;
-use support::{Game, has, lines, project, repo};
+use support::{Analysis, Game, has, lines, project, repo};
 
 const IMPORTS: &str = "import { toServer, toClient, askServer, receive, ClientReady, Subsystem, CrucibleBehaviour, u8, u16, u32, f32, f64, ToServer, ToClient, AskServer, ReceiveTarget } from \"@trioforge/crucible\";\n";
 
@@ -25,7 +26,7 @@ fn fresh() -> Game {
 }
 
 fn fixture(path: &str) -> String {
-    let file = repo().join("crates/compiler/tests/transform-fixtures").join(path);
+    let file = repo().join("crates/transform/tests/transform-fixtures").join(path);
     std::fs::read_to_string(&file).unwrap_or_else(|_| panic!("{} exists", file.display())).replace('\r', "")
 }
 
@@ -303,15 +304,12 @@ fn same(luau: &str, js: &str, label: &str) {
     assert_eq!(canon(luau), canon(js), "{label}");
 }
 
-fn declarations(facts: &Facts, game: &Game, file: &str) -> HashMap<String, Declaration> {
+fn declarations(analysis: &Analysis, game: &Game, file: &str) -> HashMap<String, Declaration> {
     let source = std::fs::read_to_string(game.dir.join(file)).unwrap();
-    let table = facts.files.iter().find(|f| f.path.ends_with(file)).unwrap_or_else(|| panic!("{file} has facts"));
     let mut found = HashMap::new();
-    for (span, fact) in &table.facts {
-        if let Some(Crucible::Declaration(d)) = fact.crucible.as_deref() {
-            let call = &source[span.start as usize..span.end as usize];
-            found.insert(call_name(call), d.clone());
-        }
+    for (span, d) in analysis.crucible.declarations(file) {
+        let call = &source[span.start as usize..span.end as usize];
+        found.insert(call_name(call), d);
     }
     found
 }

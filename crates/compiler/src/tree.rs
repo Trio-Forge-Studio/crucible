@@ -140,6 +140,9 @@ kinds! {
     ExtendsKeyword,
     ImplementsKeyword,
     TypeReference,
+    TypeQuery,
+    LiteralType,
+    ImportType,
 }
 
 macro_rules! operators {
@@ -340,7 +343,7 @@ pub struct Nodes {
 }
 
 impl Nodes {
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
@@ -352,7 +355,7 @@ impl Nodes {
         self.nodes.get(i).map(|&n| Node { n, text: self.text })
     }
 
-    pub(crate) fn last(&self) -> Option<Node> {
+    pub fn last(&self) -> Option<Node> {
         self.nodes.last().map(|&n| Node { n, text: self.text })
     }
 
@@ -464,7 +467,7 @@ impl Node {
         }
     }
 
-    pub(crate) fn body(&self) -> Option<Node> {
+    pub fn body(&self) -> Option<Node> {
         match self.n.kind() {
             TsKind::ModuleDeclaration => self.wrap_opt(self.n.as_module_declaration().body()),
             TsKind::ClassStaticBlockDeclaration => Some(self.wrap(self.n.as_class_static_block_declaration().body)),
@@ -472,7 +475,7 @@ impl Node {
         }
     }
 
-    pub(crate) fn statements(&self) -> Nodes {
+    pub fn statements(&self) -> Nodes {
         match self.n.kind() {
             TsKind::CaseClause | TsKind::DefaultClause => {
                 self.list(self.n.as_case_or_default_clause().statements.nodes())
@@ -489,7 +492,7 @@ impl Node {
         self.list(self.n.arguments())
     }
 
-    pub(crate) fn elements(&self) -> Nodes {
+    pub fn elements(&self) -> Nodes {
         match self.n.kind() {
             TsKind::NamedImports => self.list(self.n.as_named_imports().elements.nodes()),
             TsKind::NamedExports => self.list(self.n.as_named_exports().elements.nodes()),
@@ -497,7 +500,7 @@ impl Node {
         }
     }
 
-    pub(crate) fn properties(&self) -> Nodes {
+    pub fn properties(&self) -> Nodes {
         self.list(self.n.properties())
     }
 
@@ -505,7 +508,7 @@ impl Node {
         self.list(self.n.members())
     }
 
-    pub(crate) fn declarations(&self) -> Nodes {
+    pub fn declarations(&self) -> Nodes {
         let list = match self.n.kind() {
             TsKind::VariableStatement => self.n.as_variable_statement().declaration_list,
             _ => self.n,
@@ -528,15 +531,15 @@ impl Node {
         }
     }
 
-    pub(crate) fn left(&self) -> Node {
+    pub fn left(&self) -> Node {
         self.wrap(self.n.as_binary_expression().left)
     }
 
-    pub(crate) fn right(&self) -> Node {
+    pub fn right(&self) -> Node {
         self.wrap(self.n.as_binary_expression().right())
     }
 
-    pub(crate) fn operator(&self) -> Op {
+    pub fn operator(&self) -> Op {
         op_of(self.n.as_binary_expression().operator_token.kind())
     }
 
@@ -632,7 +635,7 @@ impl Node {
         self.wrap(self.n.as_template_span().literal)
     }
 
-    pub(crate) fn argument_expression(&self) -> Node {
+    pub fn argument_expression(&self) -> Node {
         self.wrap(self.n.as_element_access_expression().argument_expression)
     }
 
@@ -711,15 +714,15 @@ impl Node {
             .map(|e| self.wrap(e))
     }
 
-    pub(crate) fn module_specifier(&self) -> Option<Node> {
+    pub fn module_specifier(&self) -> Option<Node> {
         self.wrap_opt(self.n.module_specifier())
     }
 
-    pub(crate) fn import_clause(&self) -> Option<Node> {
+    pub fn import_clause(&self) -> Option<Node> {
         self.wrap_opt(self.n.import_clause())
     }
 
-    pub(crate) fn named_bindings(&self) -> Option<Node> {
+    pub fn named_bindings(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_import_clause().named_bindings)
     }
 
@@ -878,6 +881,23 @@ impl Node {
     /// The name a heritage clause type refers to.
     pub fn heritage_element_name(&self) -> Node {
         self.wrap(tsrs_ast::get_heritage_clause_element_name(self.n))
+    }
+
+    /// The flags of the declaration the node belongs to, with its declaration list's, as tsrs's
+    /// `get_combined_node_flags` gives them.
+    pub fn combined_node_flags(&self) -> crate::extension::NodeFlags {
+        crate::extension::NodeFlags(tsrs_ast::get_combined_node_flags(self.n))
+    }
+
+    /// The name a `typeof` type query reads.
+    pub fn expr_name(&self) -> Node {
+        self.wrap(self.n.as_type_query_node().expr_name)
+    }
+
+    /// The node's source text, as written.
+    pub fn source_text(&self) -> &'static str {
+        let span = self.span();
+        &self.text[span.start as usize..span.end as usize]
     }
 
     /// Whether the node is a `declare global` block.

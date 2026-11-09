@@ -7,8 +7,6 @@ mod jsx;
 mod pattern;
 mod stmt;
 
-pub(crate) use stmt::CRUCIBLE_EMIT;
-
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;

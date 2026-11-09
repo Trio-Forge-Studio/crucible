@@ -1,18 +1,10 @@
 use std::borrow::Cow;
 
 use super::{Breakable, Exit, ImportBase, Lower, is_hole, skip_parens_and_assertions};
-use crate::facts::{Callee, Constant, HelperModule, Import, Receiver, RuntimeLib};
+use crate::facts::{Callee, Constant, Import, Receiver, RuntimeLib};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Nodes, Op, UnaryOp};
 use crucible_luau::{BinOp, Block, Expr, Field, Function, Name, Stmt, UnOp};
-
-/// `@trioforge/crucible/emit`, which registration and Crucible's macros call.
-pub(crate) const CRUCIBLE_EMIT: HelperModule = HelperModule {
-    package: crate::extract::PACKAGE,
-    entry: "./emit",
-    local: "__crucible",
-    missing: "Crucible's macros and registration need a game that maps @trioforge/crucible/emit",
-};
 
 impl Lower<'_> {
     pub(super) fn module(&mut self, statements: Nodes) -> Block {

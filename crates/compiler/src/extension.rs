@@ -15,7 +15,7 @@ use tsrs_core::P;
 pub use crate::extract::extension::{ExtractCx, ProgramCx};
 pub use crate::facts::{HelperModule, Span};
 pub use crate::lower::extension::LowerCx;
-pub use crate::tree::{File, Kind, Node, Nodes, Position};
+pub use crate::tree::{File, Kind, Node, Nodes, Op, Position};
 
 pub trait Extension: Send {
     /// Tells a host's extensions apart, such as in its logs. The compiler reads it only to name an extension that
@@ -84,15 +84,24 @@ macro_rules! flags {
 
 flags! {
     TypeFlags(tsrs_checker::TypeFlags) {
+        Any,
+        BigIntLike,
         Boolean,
         BooleanLiteral,
+        ESSymbolLike,
         Intersection,
+        Never,
         Number,
+        NumberLike,
         Object,
         String,
+        TemplateLiteral,
+        TypeParameter,
         Undefined,
         Union,
         UnionOrIntersection,
+        Unknown,
+        Void,
     }
 }
 
@@ -108,8 +117,11 @@ flags! {
         Alias,
         Class,
         Interface,
+        Optional,
+        Property,
         Type,
         TypeAlias,
+        Variable,
     }
 }
 
@@ -118,8 +130,10 @@ flags! {
         Abstract,
         Ambient,
         Async,
+        Export,
         Private,
         Protected,
+        Readonly,
         Static,
     }
 }
@@ -127,7 +141,16 @@ flags! {
 flags! {
     NodeFlags(tsrs_ast::NodeFlags) {
         Ambient,
+        Const,
         ContainsThis,
+    }
+}
+
+flags! {
+    ElementFlags(tsrs_checker::ElementFlags) {
+        Optional,
+        Rest,
+        Variadic,
     }
 }
 
@@ -197,6 +220,15 @@ impl Type {
         self.0.try_as_interface_type().map_or(&[][..], |i| i.type_parameters()).iter().map(|&t| Type(t)).collect()
     }
 
+    pub fn is_tuple_type(&self) -> bool {
+        self.0.is_tuple_type()
+    }
+
+    /// The flags of each element of a tuple target, such as the `target` of a tuple reference.
+    pub fn element_flags(&self) -> Vec<ElementFlags> {
+        self.0.as_tuple_type().element_flags().iter().map(|&f| ElementFlags(f)).collect()
+    }
+
     pub fn literal_string(&self) -> Option<&'static str> {
         match self.literal(tsrs_checker::TypeFlags::StringLiteral)? {
             LiteralValue::String(s) => Some(s),
@@ -235,6 +267,23 @@ impl Signature {
     pub fn parameters(&self) -> Vec<Symbol> {
         self.0.parameters().iter().map(|&p| Symbol(p)).collect()
     }
+}
+
+/// An index signature of a type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexInfo {
+    pub key: Type,
+    pub value: Type,
+}
+
+/// The number JavaScript's `Number(text)` gives.
+pub fn js_number(text: &str) -> f64 {
+    tsrs_core::jsnum::from_string(text).0
+}
+
+/// Whether TypeScript reads a property name as a number, because it is the text of the number it parses as.
+pub fn is_numeric_name(name: &str) -> bool {
+    tsrs_core::jsnum::from_string(name).to_string() == name
 }
 
 /// A package's `package.json`.

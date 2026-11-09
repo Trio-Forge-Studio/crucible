@@ -5,14 +5,10 @@
 
 mod collisions;
 mod crucible;
-mod data;
 pub(crate) mod extension;
-mod network;
 mod packages;
 mod typed_lint;
 mod types;
-
-pub(crate) use crucible::PACKAGE;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -78,7 +74,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         packages,
         game,
         config_dir: PathBuf::from(&dir),
-        network: network::Program::default(),
         facts,
         text: "",
         path: String::new(),
@@ -89,7 +84,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         options,
         jsx: None,
     };
-    x.declare_helper(&crate::lower::CRUCIBLE_EMIT);
     for extension in extensions.iter_mut() {
         extension.begin_program(&mut ProgramCx { x: &mut x });
     }
@@ -197,7 +191,6 @@ struct Extractor {
     packages: packages::Packages,
     game: Option<Game>,
     config_dir: PathBuf,
-    network: network::Program,
     facts: Facts,
     text: &'static str,
     path: String,
