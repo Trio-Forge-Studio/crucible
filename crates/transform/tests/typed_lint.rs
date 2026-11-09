@@ -80,7 +80,18 @@ fn charm_imports_inside_installed_packages_raise_nothing() {
         &format!("{vide_charm}/index.d.ts"),
         "import { effect, onCleanup } from \"@rbxts/charm\";\nexport declare function useAtom<T>(value: () => T): () => T;\nexport { effect, onCleanup };\n",
     );
-    game.main("import { boot } from \"@trioforge/crucible/server\";\nimport { useAtom } from \"@rbxts/vide-charm\";\nimport { atom } from \"@rbxts/charm\";\nexport const value = useAtom(atom(0));\nprint(boot);\n");
+    let watch = "node_modules/@rbxts/watch";
+    game.json(&format!("{watch}/package.json"), &serde_json::json!({ "name": "@rbxts/watch", "types": "index.ts" }));
+    game.write(
+        &format!("{watch}/index.ts"),
+        "import { effect } from \"@rbxts/charm\";\nexport function watch(read: () => unknown) {\n\treturn effect(() => {\n\t\tread();\n\t});\n}\n",
+    );
+    game.main("import { boot } from \"@trioforge/crucible/server\";\nimport { useAtom } from \"@rbxts/vide-charm\";\nimport { watch } from \"@rbxts/watch\";\nimport { atom } from \"@rbxts/charm\";\nexport const value = useAtom(atom(0));\nexport const stop = watch(value);\nprint(boot);\n");
+    let facts = game.facts();
+    assert!(
+        facts.files.iter().any(|f| f.path.ends_with("/node_modules/@rbxts/watch/index.ts")),
+        "the dependency's TypeScript source is extracted, so the exemption is what keeps it clean"
+    );
     assert_eq!(rules(&game), []);
 }
 
@@ -123,4 +134,67 @@ fn another_extension_s_report_where_a_crucible_rule_reports_with_the_same_number
     let found: Vec<(u32, u32, i32, &str)> =
         facts.diagnostics.iter().map(|d| (d.line, d.column, d.code, d.message.split(':').next().unwrap())).collect();
     assert_eq!(found, [(4, 51, 90035, "CRU035"), (4, 51, 90035, "echo")]);
+}
+
+#[test]
+fn charm_lifetime_calls_through_brackets_destructuring_and_barrels_report_cru038_where_game_code_takes_them() {
+    let game = with_charm();
+    let lifecycle = "node_modules/@rbxts/lifecycle";
+    game.json(
+        &format!("{lifecycle}/package.json"),
+        &serde_json::json!({ "name": "@rbxts/lifecycle", "types": "index.d.ts" }),
+    );
+    game.write(&format!("{lifecycle}/index.d.ts"), "import { effect } from \"@rbxts/charm\";\nexport { effect };\n");
+    game.write(
+        "src/server/uses.ts",
+        "import { Subsystem } from \"@trioforge/crucible\";\nexport const base = Subsystem;\n",
+    );
+    game.write("src/shared/bridge.ts", "export * from \"@rbxts/charm\";\n");
+    game.write("src/shared/named.ts", "export { effect } from \"@rbxts/charm\";\n");
+    game.write("src/server/reads.ts", "import charm from \"@rbxts/charm\";\ncharm.effect(() => {});\n");
+    game.write("src/server/required.ts", "import charm = require(\"@rbxts/charm\");\ncharm.effect(() => {});\n");
+    game.main(
+        "import * as charm from \"@rbxts/charm\";\n\
+         import { effect } from \"../shared/bridge\";\n\
+         import * as bridge from \"../shared/bridge\";\n\
+         import { effect as viaNamed } from \"../shared/named\";\n\
+         import { effect as viaPackage } from \"@rbxts/lifecycle\";\n\
+         import { atom, computed } from \"../shared/bridge\";\n\
+         charm[\"effect\"](() => {});\n\
+         const { effectScope } = charm;\n\
+         const { onCleanup: later } = bridge;\n\
+         effect(() => {});\n\
+         bridge.effect(() => {});\n\
+         bridge[\"onCleanup\"](() => {});\n\
+         viaNamed(() => {});\n\
+         viaPackage(() => {});\n\
+         const { atom: makeAtom, computed: derive } = charm;\n\
+         export type Read = typeof charm.effect;\n\
+         export const values = [effectScope, later, makeAtom(0), derive, atom, computed];\n",
+    );
+    let found = game.facts();
+    let reports: Vec<_> = found
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == 90038)
+        .map(|d| (game.relative(d), d.line, d.column, d.message.split(' ').nth(1).unwrap_or("")))
+        .collect();
+    let at = |file: &str, line: u32, column: u32, name| (file.to_owned(), line, column, name);
+    assert_eq!(
+        reports,
+        [
+            at("src/server/main.ts", 2, 10, "effect"),
+            at("src/server/main.ts", 5, 10, "effect"),
+            at("src/server/main.ts", 7, 1, "effect"),
+            at("src/server/main.ts", 8, 9, "effectScope"),
+            at("src/server/main.ts", 9, 9, "onCleanup"),
+            at("src/server/main.ts", 11, 1, "effect"),
+            at("src/server/main.ts", 12, 1, "onCleanup"),
+            at("src/server/reads.ts", 2, 1, "effect"),
+            at("src/server/required.ts", 2, 1, "effect"),
+            at("src/shared/named.ts", 1, 10, "effect"),
+        ],
+        "the barrel's export * and the import of named.ts's re-export are not reported, because the import from the \
+         barrel and the re-export are"
+    );
 }

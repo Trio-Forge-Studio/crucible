@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use crucible_abi::PACKAGE;
-use crucible_compiler::extension::{ExtractCx, File, Kind, Node, NodeFlags, Op, Symbol};
+use crucible_compiler::extension::{ExtractCx, File, Kind, Node, NodeFlags, Op, Symbol, SymbolFlags};
 
 use crate::Code;
 use crate::facts::ClassKind;
@@ -37,6 +39,22 @@ fn crucible_call(charm: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether CRU038 reads the file, which then reports its own imports and exports.
+fn linted(file: File) -> bool {
+    !file.is_declaration() && !file.path().contains("/node_modules/")
+}
+
+/// The name a binding element reads, when it is one the checker can look up.
+fn property_key(name: Node) -> Option<&'static str> {
+    match name.kind() {
+        Kind::Identifier | Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral => Some(name.text()),
+        Kind::ComputedPropertyName => Some(name.expression())
+            .filter(|key| matches!(key.kind(), Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral))
+            .map(|key| key.text()),
+        _ => None,
+    }
+}
+
 fn unwrap(mut n: Node) -> Node {
     while n.kind() == Kind::ParenthesizedExpression {
         n = n.expression();
@@ -59,7 +77,7 @@ pub(crate) struct Lints<'w, 'x> {
 
 impl Lints<'_, '_> {
     pub(crate) fn file(&mut self, file: File) {
-        let charm = self.uses_crucible && !file.path().contains("/node_modules/");
+        let charm = self.uses_crucible && linted(file);
         for statement in file.root().statements().iter() {
             self.visit(statement, charm);
         }
@@ -75,8 +93,11 @@ impl Lints<'_, '_> {
         match n.kind() {
             Kind::CallExpression => self.frame(n),
             Kind::ClassDeclaration => self.session(n),
-            Kind::ImportDeclaration | Kind::ExportDeclaration if charm => self.charm_specifiers(n),
-            Kind::PropertyAccessExpression if charm => self.charm_access(n),
+            Kind::ImportDeclaration | Kind::ImportEqualsDeclaration | Kind::ExportDeclaration if charm => {
+                self.charm_bindings(n)
+            }
+            Kind::PropertyAccessExpression | Kind::ElementAccessExpression if charm => self.charm_read(n),
+            Kind::BindingElement if charm => self.charm_destructuring(n),
             _ => {}
         }
         n.for_each_child(&mut |child| self.visit(child, charm));
@@ -231,7 +252,7 @@ impl Lints<'_, '_> {
         }
     }
 
-    fn charm_lifetime(&mut self, at: Node, name: &str) {
+    fn charm_report(&mut self, at: Node, name: &str) {
         let Some(crucible) = crucible_call(name) else { return };
         let message = format!(
             "{name} from {CHARM} belongs to whatever scope is running when it is called, not to the object whose code \
@@ -241,45 +262,77 @@ impl Lints<'_, '_> {
         self.cx.report(at, code, &message);
     }
 
-    fn is_charm(&mut self, module: Option<Symbol>) -> bool {
-        let Some(module) = module else { return false };
-        module.declarations().into_iter().any(|d| self.cx.package_of(d).as_deref() == Some(CHARM))
+    /// The Charm lifetime call that `symbol` names, through the aliases that lead to it. The search stops at an alias
+    /// a linted file declares, because that file reports its own import or export.
+    fn charm_lifetime(&mut self, mut symbol: Symbol) -> Option<&'static str> {
+        let mut seen = HashSet::new();
+        while symbol.flags().intersects(SymbolFlags::Alias) {
+            if !seen.insert(symbol) || symbol.declarations().into_iter().any(|d| linted(d.file())) {
+                return None;
+            }
+            symbol = self.cx.immediate_aliased(symbol)?;
+        }
+        let name = symbol.name();
+        crucible_call(name)?;
+        let declarations = symbol.declarations();
+        declarations
+            .into_iter()
+            .any(|d| d.kind() == Kind::FunctionDeclaration && self.cx.package_of(d).as_deref() == Some(CHARM))
+            .then_some(name)
     }
 
-    fn charm_specifiers(&mut self, n: Node) {
-        let Some(specifier) = n.module_specifier().filter(|s| s.kind() == Kind::StringLiteral) else { return };
-        let module = self.cx.resolve_external_module(specifier);
-        if !self.is_charm(module) {
-            return;
-        }
-        let named = if n.kind() == Kind::ImportDeclaration {
-            n.import_clause().filter(|c| !c.is_type_only()).and_then(|c| c.named_bindings())
-        } else {
-            n.export_clause().filter(|_| !n.is_type_only())
-        };
-        let Some(named) = named.filter(|b| matches!(b.kind(), Kind::NamedImports | Kind::NamedExports)) else {
-            return;
-        };
-        for element in named.elements().iter() {
-            if element.is_type_only() {
-                continue;
+    fn charm_bindings(&mut self, n: Node) {
+        let mut bindings = Vec::new();
+        match n.kind() {
+            Kind::ImportDeclaration => {
+                let Some(clause) = n.import_clause().filter(|c| !c.is_type_only()) else { return };
+                if clause.name().is_some() {
+                    bindings.push(clause);
+                }
+                if let Some(named) = clause.named_bindings().filter(|b| b.kind() == Kind::NamedImports) {
+                    bindings.extend(named.elements().iter());
+                }
             }
-            if let Some(name) = element.property_name_or_name() {
-                self.charm_lifetime(element, name.text());
+            Kind::ExportDeclaration => {
+                let Some(named) = n.export_clause().filter(|c| c.kind() == Kind::NamedExports && !n.is_type_only())
+                else {
+                    return;
+                };
+                bindings.extend(named.elements().iter());
+            }
+            Kind::ImportEqualsDeclaration if !n.is_type_only() => bindings.push(n),
+            _ => {}
+        }
+        for binding in bindings.into_iter().filter(|b| !b.is_type_only()) {
+            let Some(alias) = self.cx.symbol_of_declaration(binding) else { continue };
+            let Some(target) = self.cx.immediate_aliased(alias) else { continue };
+            if let Some(name) = self.charm_lifetime(target) {
+                self.charm_report(binding, name);
             }
         }
     }
 
-    fn charm_access(&mut self, n: Node) {
-        let Some(name) = n.name() else { return };
-        if crucible_call(name.text()).is_none() {
-            return;
+    fn charm_read(&mut self, n: Node) {
+        let key = match n.kind() {
+            Kind::PropertyAccessExpression => n.name(),
+            _ => Some(n.argument_expression())
+                .filter(|a| matches!(a.kind(), Kind::StringLiteral | Kind::NoSubstitutionTemplateLiteral)),
+        };
+        let Some(symbol) = key.and_then(|key| self.cx.symbol_at(key)) else { return };
+        if let Some(name) = self.charm_lifetime(symbol) {
+            self.charm_report(n, name);
         }
-        let Some(symbol) = self.cx.symbol_at(n.expression()) else { return };
-        let module = self.cx.aliased(symbol);
-        let is_module = module.declarations().iter().any(|d| d.kind() == Kind::SourceFile);
-        if is_module && self.is_charm(Some(module)) {
-            self.charm_lifetime(n, name.text());
+    }
+
+    fn charm_destructuring(&mut self, element: Node) {
+        let Some(pattern) = element.parent().filter(|p| p.kind() == Kind::ObjectBindingPattern) else { return };
+        let Some(key) = element.property_name_or_name().and_then(property_key).filter(|_| !element.is_rest()) else {
+            return;
+        };
+        let source = self.cx.type_at(pattern);
+        let Some(symbol) = self.cx.property_of_type(source, key) else { return };
+        if let Some(name) = self.charm_lifetime(symbol) {
+            self.charm_report(element, name);
         }
     }
 }

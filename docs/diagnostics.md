@@ -475,10 +475,10 @@ CRU038: effectScope from @rbxts/charm belongs to whatever scope is running when 
 CRU038: onCleanup from @rbxts/charm belongs to whatever scope is running when it is called, not to the object whose code called it. Use onCleanup from @trioforge/crucible, which ends with its owner.
 ```
 
-A game file imports, re-exports or reads `effect`, `effectScope` or `onCleanup` from `@rbxts/charm`. Charm attaches what they create to the scope that is running when the call runs, so an effect one object's code creates can belong to another object and outlive the first. Crucible's calls of the same names, and `scope` for `effectScope`, belong to the object whose code made the call and end with it. To fix it, import the call from `@trioforge/crucible` instead:
+A game file imports, re-exports, reads or destructures `effect`, `effectScope` or `onCleanup` from `@rbxts/charm`. Charm attaches what they create to the scope that is running when the call runs, so an effect one object's code creates can belong to another object and outlive the first. Crucible's calls of the same names, and `scope` for `effectScope`, belong to the object whose code made the call and end with it. To fix it, import the call from `@trioforge/crucible` instead:
 
 ```ts
 import { effect, onCleanup } from "@trioforge/crucible";
 ```
 
-The rule reports a named import or re-export at its specifier, and a read through a namespace import, such as `charm.effect(...)`, at the read. Type-only imports, `atom`, `computed`, `batch` and Charm's other calls are fine. Packages under `node_modules`, such as `@rbxts/vide-charm`, may import Charm's lifetime calls.
+The rule follows each name through the type checker to Charm's declaration, so a barrel such as `export * from "@rbxts/charm"` does not hide the call. It reports an import or re-export at its specifier, a read such as `charm.effect(...)` or `charm["effect"](...)` at the read, and a destructuring such as `const { effect } = charm` at the destructured name. It does not report a barrel's `export *`, which also passes on Charm's other calls. It reports the game file that takes a lifetime call from the barrel instead. When one game file re-exports a lifetime call by name, the rule reports that re-export, and not each file that imports it. Type-only imports, `atom`, `computed`, `batch` and Charm's other calls are fine. Packages under `node_modules`, such as `@rbxts/vide-charm`, may import Charm's lifetime calls, but a game file that takes one from such a package is reported.

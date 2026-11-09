@@ -91,6 +91,15 @@ impl ProgramCx<'_> {
         Symbol(super::report::unalias(&mut self.x.checker, symbol.0))
     }
 
+    /// The symbol an alias names one step along its chain, such as the export an import names, or `None` when
+    /// `symbol` is not an alias.
+    pub fn immediate_aliased(&mut self, symbol: Symbol) -> Option<Symbol> {
+        if !symbol.flags().intersects(SymbolFlags::Alias) {
+            return None;
+        }
+        self.x.checker.get_immediate_aliased_symbol_exported(symbol.0).map(Symbol)
+    }
+
     pub fn symbol_of_declaration(&mut self, declaration: Node) -> Option<Symbol> {
         self.x.checker.get_symbol_of_declaration_exported(declaration.raw()).map(Symbol)
     }
