@@ -2,17 +2,30 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crucible_compiler::Target;
+use crucible_compiler::{InstanceMap, Target};
 
 fn main() -> ExitCode {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    let (tsconfig, out, target) = match &args[..] {
-        [tsconfig, out] => (tsconfig, out, Target::Package),
-        [tsconfig, out, project, include] => (tsconfig, out, Target::Game { project, include }),
+    let (tsconfig, out, place) = match &args[..] {
+        [tsconfig, out] => (tsconfig, out, None),
+        [tsconfig, out, project, include] => match crucible_project::rojo::place(project) {
+            Ok(mappings) => {
+                let instances = InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files);
+                (tsconfig, out, Some((instances, include)))
+            }
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::FAILURE;
+            }
+        },
         _ => {
             eprintln!("usage: compile <tsconfig> <out> [<project> <include>]");
             return ExitCode::from(2);
         }
+    };
+    let target = match &place {
+        Some((instances, include)) => Target::Game { instances, include },
+        None => Target::Package,
     };
     let start = Instant::now();
     let compiled = match crucible_transform::compile(tsconfig, target) {

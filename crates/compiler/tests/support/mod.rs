@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, Module, Target};
+use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, InstanceMap, Module, Target};
 use serde_json::{Value, json};
 
 pub fn repo() -> PathBuf {
@@ -52,7 +52,6 @@ impl Game {
         std::fs::create_dir_all(dir.join("src/server")).unwrap();
         let game = Game { dir };
         game.json("package.json", &json!({ "name": "fixture-game", "private": true }));
-        game.json("default.project.json", &project());
         game.config(|_| {});
         game
     }
@@ -97,8 +96,21 @@ impl Game {
         self.analyze_at("tsconfig.json")
     }
 
-    pub fn project(&self) -> PathBuf {
-        self.dir.join("default.project.json")
+    pub fn instances(&self) -> InstanceMap {
+        let folder = |path: &str, rbx: &[&str]| (self.dir.join(path), rbx.iter().map(|&n| n.to_owned()).collect());
+        let include = ["ReplicatedStorage", "rbxts_include"];
+        let folders = [
+            folder("include", &include),
+            folder("node_modules/@rbxts", &[&include[..], &["node_modules", "@rbxts"]].concat()),
+            folder(
+                "node_modules/@trioforge/crucible",
+                &[&include[..], &["node_modules", "@trioforge", "crucible"]].concat(),
+            ),
+            folder("out/shared", &["ReplicatedStorage", "TS"]),
+            folder("out/server", &["ServerScriptService", "TS"]),
+            folder("out/client", &["StarterPlayer", "StarterPlayerScripts", "TS"]),
+        ];
+        InstanceMap::new("default.project.json", folders, [])
     }
 
     pub fn include(&self) -> PathBuf {
@@ -106,13 +118,16 @@ impl Game {
     }
 
     pub fn analyze_at(&self, tsconfig: &str) -> Result<Facts, Vec<Diagnostic>> {
-        let (project, include) = (self.project(), self.include());
-        crucible_compiler::analyze(&self.dir.join(tsconfig), game_or_package(&project, &include))
+        let (instances, include) = (self.instances(), self.include());
+        crucible_compiler::analyze(&self.dir.join(tsconfig), Target::Game { instances: &instances, include: &include })
     }
 
     pub fn try_compile(&self) -> Result<Compiled, Failure> {
-        let (project, include) = (self.project(), self.include());
-        crucible_compiler::compile(&self.dir.join("tsconfig.json"), game_or_package(&project, &include))
+        let (instances, include) = (self.instances(), self.include());
+        crucible_compiler::compile(
+            &self.dir.join("tsconfig.json"),
+            Target::Game { instances: &instances, include: &include },
+        )
     }
 
     pub fn facts(&self) -> Facts {
@@ -166,36 +181,6 @@ impl Game {
         let modules = self.compile();
         modules.into_iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} is emitted")).source
     }
-}
-
-pub fn game_or_package<'a>(project: &'a Path, include: &'a Path) -> Target<'a> {
-    if project.is_file() { Target::Game { project, include } } else { Target::Package }
-}
-
-pub fn project() -> Value {
-    json!({
-        "name": "fixture",
-        "tree": {
-            "$className": "DataModel",
-            "ReplicatedStorage": {
-                "$className": "ReplicatedStorage",
-                "rbxts_include": {
-                    "$path": "include",
-                    "node_modules": {
-                        "$className": "Folder",
-                        "@rbxts": { "$path": "node_modules/@rbxts" },
-                        "@trioforge": { "$className": "Folder", "crucible": { "$path": "node_modules/@trioforge/crucible" } },
-                    },
-                },
-                "TS": { "$path": "out/shared" },
-            },
-            "ServerScriptService": { "$className": "ServerScriptService", "TS": { "$path": "out/server" } },
-            "StarterPlayer": {
-                "$className": "StarterPlayer",
-                "StarterPlayerScripts": { "$className": "StarterPlayerScripts", "TS": { "$path": "out/client" } },
-            },
-        },
-    })
 }
 
 pub fn code(d: &Diagnostic) -> String {

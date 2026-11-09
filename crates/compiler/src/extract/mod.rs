@@ -43,8 +43,8 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
     let mut facts = Facts::default();
     let game = match target {
         crate::Target::Package => None,
-        crate::Target::Game { project, include } => {
-            match Game::load(project, include, Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
+        crate::Target::Game { instances, include } => {
+            match Game::load(instances, include, Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
                 Ok(game) => Some(game),
                 Err(message) => {
                     facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code: 0, message });
@@ -958,7 +958,7 @@ impl Extractor {
         let Some(module) = game.module(Path::new(&target)) else {
             return self.report(specifier, Code::Place, "the Rojo project maps no instance for this module");
         };
-        match game.rojo.import(&script, &module) {
+        match game.instances.import(&script, &module) {
             Ok(path) => {
                 let span = self.span(specifier);
                 self.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));

@@ -4,13 +4,13 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::Target;
+use crucible_compiler::{InstanceMap, Target};
 use crucible_transform::{Attribute, Check, Class, ClassKind, Dependency};
 use support::{Analysis, repo};
 
-fn sample_place() -> (PathBuf, PathBuf) {
+fn sample_place() -> (InstanceMap, PathBuf) {
     let dir = repo().join("examples/sample-game");
-    (dir.join("default.project.json"), dir.join("include"))
+    (support::instances(&dir.join("default.project.json")), dir.join("include"))
 }
 
 fn analyze(tsconfig: &str, target: Target<'_>) -> Analysis {
@@ -73,8 +73,9 @@ fn sample_game_checks_and_every_site_is_answered() {
         repo().join("packages/crucible/out/index.d.ts").is_file(),
         "packages/crucible/out exists; run pnpm build first"
     );
-    let (project, include) = sample_place();
-    let facts = analyze("examples/sample-game/tsconfig.json", Target::Game { project: &project, include: &include });
+    let (instances, include) = sample_place();
+    let facts =
+        analyze("examples/sample-game/tsconfig.json", Target::Game { instances: &instances, include: &include });
     assert_complete(&facts, "examples/sample-game/src");
 
     let id = |module: &str| format!("@trioforge/crucible-sample-game/{module}").into_boxed_str();
@@ -99,8 +100,8 @@ fn sample_game_checks_and_every_site_is_answered() {
 
 #[test]
 fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
-    let (project, include) = sample_place();
-    let target = Target::Game { project: &project, include: &include };
+    let (instances, include) = sample_place();
+    let target = Target::Game { instances: &instances, include: &include };
     let modules = crucible_transform::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
         .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))
         .modules;

@@ -1,5 +1,5 @@
 use crate::child;
-use crucible_compiler::{Compiled, Module, Target};
+use crucible_compiler::{Compiled, InstanceMap, Module, Target};
 use crucible_project::{Manifest, ManifestError, Place};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -248,7 +248,14 @@ fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
 
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
     child::exit_with_parent();
-    match crucible_transform::compile(&tsconfig, Target::Game { project: &project, include: &include }) {
+    let instances = match crucible_project::rojo::place(&project) {
+        Ok(mappings) => InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files),
+        Err(message) => {
+            eprint!("{}", relative_to_cwd(&format!("error: {message}\n")));
+            return ExitCode::FAILURE;
+        }
+    };
+    match crucible_transform::compile(&tsconfig, Target::Game { instances: &instances, include: &include }) {
         Ok(compiled) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
             let child = ChildModules { out_dir: compiled.out_dir, modules };

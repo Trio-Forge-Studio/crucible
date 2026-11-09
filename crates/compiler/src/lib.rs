@@ -29,6 +29,7 @@ pub use lower::Error;
 use lower::ImportBase;
 #[cfg(feature = "test-support")]
 pub use macros::{Macro, MacroKind};
+pub use project::InstanceMap;
 use write::HEADER;
 pub use write::{Written, write};
 
@@ -63,9 +64,9 @@ impl fmt::Display for Diagnostic {
 pub enum Target<'a> {
     /// A library. Its modules reach each other relatively and take the runtime library from `_G[script]`.
     Package,
-    /// A place. `project` is a Rojo project with a `DataModel` root that maps the output, and `include` is the folder
-    /// it maps for the runtime library, which `write_include` fills.
-    Game { project: &'a Path, include: &'a Path },
+    /// A place. `instances` maps the output and `include`, the folder for the runtime library, which `write_include`
+    /// fills.
+    Game { instances: &'a InstanceMap, include: &'a Path },
 }
 
 /// Builds the program for `tsconfig`, checks every file with one checker, and returns the fact table of every source

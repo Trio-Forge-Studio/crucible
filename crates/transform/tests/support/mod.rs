@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use std::ops::Deref;
 
-use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, Module, Target};
+use crucible_compiler::{Compiled, Diagnostic, Facts, Failure, InstanceMap, Module, Target};
 use crucible_transform::Crucible;
 use serde_json::{Value, json};
 
@@ -132,14 +132,20 @@ impl Game {
         self.dir.join("include")
     }
 
+    /// The game's place, or `None` when it has no project and compiles as a package.
+    pub fn instances(&self) -> Option<InstanceMap> {
+        let project = self.project();
+        project.is_file().then(|| instances(&project))
+    }
+
     pub fn analyze_at(&self, tsconfig: &str) -> Result<Analysis, Vec<Diagnostic>> {
-        let (project, include) = (self.project(), self.include());
-        analyze(&self.dir.join(tsconfig), game_or_package(&project, &include))
+        let (instances, include) = (self.instances(), self.include());
+        analyze(&self.dir.join(tsconfig), game_or_package(instances.as_ref(), &include))
     }
 
     pub fn try_compile(&self) -> Result<Compiled, Failure> {
-        let (project, include) = (self.project(), self.include());
-        crucible_transform::compile(&self.dir.join("tsconfig.json"), game_or_package(&project, &include))
+        let (instances, include) = (self.instances(), self.include());
+        crucible_transform::compile(&self.dir.join("tsconfig.json"), game_or_package(instances.as_ref(), &include))
     }
 
     pub fn facts(&self) -> Analysis {
@@ -195,8 +201,16 @@ impl Game {
     }
 }
 
-pub fn game_or_package<'a>(project: &'a Path, include: &'a Path) -> Target<'a> {
-    if project.is_file() { Target::Game { project, include } } else { Target::Package }
+pub fn instances(project: &Path) -> InstanceMap {
+    let mappings = crucible_project::rojo::place(project).unwrap_or_else(|message| panic!("{message}"));
+    InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files)
+}
+
+pub fn game_or_package<'a>(instances: Option<&'a InstanceMap>, include: &'a Path) -> Target<'a> {
+    match instances {
+        Some(instances) => Target::Game { instances, include },
+        None => Target::Package,
+    }
 }
 
 pub fn project() -> Value {

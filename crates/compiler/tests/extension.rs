@@ -170,8 +170,8 @@ fn compile(game: &Game, extension: &mut dyn Extension, target: Target<'_>) -> Re
     Ok(compiled.modules.into_iter().map(|m| (m.path, m.source)).collect())
 }
 
-fn in_place(game: &Game) -> (std::path::PathBuf, std::path::PathBuf) {
-    (game.project(), game.include())
+fn in_place(game: &Game) -> (crucible_compiler::InstanceMap, std::path::PathBuf) {
+    (game.instances(), game.include())
 }
 
 fn module<'a>(modules: &'a [(String, String)], path: &str) -> &'a str {
@@ -190,9 +190,9 @@ fn every_hook_runs_and_its_lowering_lands_in_the_module() {
          export const crate = probe(new Crate());\n",
     );
     game.write("src/server/other.ts", "import { probe } from \"@rbxts/probe\";\nprobe(\"label\");\n");
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut probe = Probe::default();
-    let modules = compile(&game, &mut probe, Target::Game { project: &project, include: &include })
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     assert_eq!(probe.name(), "probe");
     assert_eq!(probe.version.as_deref(), Some("1.2.3"));
@@ -218,9 +218,9 @@ fn every_hook_runs_and_its_lowering_lands_in_the_module() {
 fn a_module_without_a_probe_imports_no_helper() {
     let game = probe_game();
     game.main("export const value = 1;\n");
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut probe = Probe::default();
-    let modules = compile(&game, &mut probe, Target::Game { project: &project, include: &include })
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     assert_eq!(probe.version, None, "the program has no file from the package");
     let main = module(&modules, "server/main.luau");
@@ -237,10 +237,10 @@ fn extension_reports_fail_the_compile_where_they_point() {
          probe(1);\n\
          probe(2);\n",
     );
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut probe = Probe { limit: Some(1), ..Probe::default() };
     let Err(Failure::Crucible(diagnostics)) =
-        compile(&game, &mut probe, Target::Game { project: &project, include: &include })
+        compile(&game, &mut probe, Target::Game { instances: &instances, include: &include })
     else {
         panic!("the extension's reports fail the compile");
     };
@@ -345,9 +345,9 @@ fn compile_scopes(main: &str) -> String {
             .map(|(name, ..)| format!("declare function {name}(...values: unknown[]): unknown;\n"))
             .collect::<String>()
     ));
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut scopes = Scopes::default();
-    let modules = compile(&game, &mut scopes, Target::Game { project: &project, include: &include })
+    let modules = compile(&game, &mut scopes, Target::Game { instances: &instances, include: &include })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     module(&modules, "server/main.luau").to_owned()
 }

@@ -15,13 +15,13 @@ fn a_deeply_nested_source_compiles_through_the_library() {
         ),
     );
     let config = game.dir.join("tsconfig.json");
-    let project = game.project();
+    let instances = game.instances();
     let include = game.include();
     let compiled = std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(1 << 20)
             .spawn_scoped(scope, || {
-                crucible_compiler::compile(&config, Target::Game { project: &project, include: &include })
+                crucible_compiler::compile(&config, Target::Game { instances: &instances, include: &include })
             })
             .unwrap()
             .join()

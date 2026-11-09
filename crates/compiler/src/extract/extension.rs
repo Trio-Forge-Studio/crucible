@@ -150,7 +150,7 @@ impl ProgramCx<'_> {
         self.x.config_dir.clone()
     }
 
-    /// Whether the program compiles as a game, whose Rojo project maps its output into a place.
+    /// Whether the program compiles as a game, whose instance map places its output.
     pub fn is_game(&self) -> bool {
         self.x.game.is_some()
     }
@@ -168,7 +168,7 @@ impl ProgramCx<'_> {
     /// The instance a game's output file or folder becomes, from the place's root. A `.server` or `.client` suffix
     /// and an `init` module name the script's instance, as Rojo does.
     pub fn instance_path(&self, out: &Path) -> Option<Vec<String>> {
-        self.x.game.as_ref()?.rojo.rbx_path(out)
+        self.x.game.as_ref()?.instances.rbx_path(out)
     }
 
     pub fn base_types(&mut self, t: Type) -> Vec<Type> {

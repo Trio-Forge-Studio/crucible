@@ -5,6 +5,8 @@ use std::io;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
+pub mod rojo;
+
 pub const FILE: &str = "crucible.toml";
 pub const DEFAULT_PLACE: &str = "start";
 pub const DEFAULT_PROJECT: &str = "default.project.json";

@@ -1,5 +1,5 @@
-//! The Roblox place a game compiles into. A Rojo project maps the output folders and packages to instances, and the
-//! emitted code reaches roblox-ts's runtime library and other modules by those instance paths.
+//! The Roblox place a game compiles into. An instance map places the output folders and packages, and the emitted
+//! code reaches roblox-ts's runtime library and other modules by those instance paths.
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -9,89 +9,28 @@ use crate::facts::ModulePath;
 /// An instance path from the place root: a service, then the names of its descendants.
 pub(crate) type RbxPath = Vec<String>;
 
-const PROJECT_FILE: &str = "default.project.json";
-
-struct Partition {
-    fs: PathBuf,
-    rbx: RbxPath,
-}
-
-/// The folder and file mappings of a Rojo project, as `@roblox-ts/rojo-resolver` reads them.
-pub(crate) struct Rojo {
-    /// Later mappings first, so a nested folder wins over the folder around it.
-    partitions: Vec<Partition>,
+/// The instances a place's folders and files become, such as a Rojo project maps them. A file in a mapped folder
+/// becomes the instance that Rojo would sync it to.
+#[derive(Clone, Debug)]
+pub struct InstanceMap {
+    source: String,
+    folders: Vec<(PathBuf, RbxPath)>,
     files: HashMap<PathBuf, RbxPath>,
-    is_game: bool,
 }
 
-impl Rojo {
-    pub fn load(project: &Path) -> Result<Rojo, String> {
-        let mut rojo = Rojo { partitions: Vec::new(), files: HashMap::new(), is_game: false };
-        let mut rbx = Vec::new();
-        rojo.config(project, false, &mut rbx)?;
-        rojo.partitions.reverse();
-        Ok(rojo)
-    }
-
-    pub fn is_game(&self) -> bool {
-        self.is_game
-    }
-
-    fn config(&mut self, file: &Path, push: bool, rbx: &mut RbxPath) -> Result<(), String> {
-        let text = std::fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-        let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| format!("{} is not valid JSON: {e}", file.display()))?;
-        let (Some(name), Some(tree)) = (json["name"].as_str(), json.get("tree").filter(|t| t.is_object())) else {
-            return Err(format!("{} needs a name and a tree", file.display()));
-        };
-        let base = file.parent().unwrap_or(Path::new("")).to_path_buf();
-        self.tree(&base, push.then_some(name), tree, rbx)
-    }
-
-    fn tree(
-        &mut self,
-        base: &Path,
-        name: Option<&str>,
-        tree: &serde_json::Value,
-        rbx: &mut RbxPath,
-    ) -> Result<(), String> {
-        if let Some(name) = name {
-            rbx.push(name.to_owned());
+impl InstanceMap {
+    /// `source` names the map in messages, such as the project file it was read from. Each instance path starts at
+    /// the place root, and each path is absolute. A later folder wins over an earlier one that holds it.
+    pub fn new(
+        source: impl Into<String>,
+        folders: impl IntoIterator<Item = (PathBuf, Vec<String>)>,
+        files: impl IntoIterator<Item = (PathBuf, Vec<String>)>,
+    ) -> InstanceMap {
+        InstanceMap {
+            source: source.into(),
+            folders: folders.into_iter().map(|(folder, rbx)| (normalize(&folder), rbx)).collect(),
+            files: files.into_iter().map(|(file, rbx)| (to_luau(normalize(&file)), rbx)).collect(),
         }
-        let path = match &tree["$path"] {
-            serde_json::Value::String(path) => Some(path.as_str()),
-            serde_json::Value::Object(optional) => optional.get("optional").and_then(|p| p.as_str()),
-            _ => None,
-        };
-        if let Some(path) = path {
-            self.path(normalize(&base.join(path)), rbx)?;
-        }
-        if tree["$className"] == "DataModel" {
-            self.is_game = true;
-        }
-        if let Some(children) = tree.as_object() {
-            for (child, subtree) in children {
-                if !child.starts_with('$') && subtree.is_object() {
-                    self.tree(base, Some(child), subtree, rbx)?;
-                }
-            }
-        }
-        if name.is_some() {
-            rbx.pop();
-        }
-        Ok(())
-    }
-
-    fn path(&mut self, item: PathBuf, rbx: &mut RbxPath) -> Result<(), String> {
-        let item = to_luau(item);
-        if matches!(extension(&item), Some("luau" | "json" | "toml")) {
-            self.files.insert(item, rbx.clone());
-        } else if item.join(PROJECT_FILE).is_file() {
-            self.config(&item.join(PROJECT_FILE), false, rbx)?;
-        } else {
-            self.partitions.push(Partition { fs: item, rbx: rbx.clone() });
-        }
-        Ok(())
     }
 
     /// The instance a file or folder becomes. A `.server` or `.client` suffix and an `init` module name the
@@ -102,10 +41,10 @@ impl Rojo {
             return Some(rbx.clone());
         }
         let script = extension(&file) == Some("luau");
-        let partition = self.partitions.iter().find(|p| file.starts_with(&p.fs))?;
+        let (folder, folder_rbx) = self.folders.iter().rev().find(|(folder, _)| file.starts_with(folder))?;
         let stripped = strip_rojo_extensions(&file);
         let mut parts: Vec<String> = stripped
-            .strip_prefix(&partition.fs)
+            .strip_prefix(folder)
             .ok()?
             .components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -113,25 +52,23 @@ impl Rojo {
         if script && parts.last().is_some_and(|p| p == "init") {
             parts.pop();
         }
-        let mut rbx = partition.rbx.clone();
+        let mut rbx = folder_rbx.clone();
         rbx.extend(parts);
         Some(rbx)
     }
 
-    fn container(&self, containers: &[&[&str]], rbx: &[String]) -> Option<usize> {
-        if !self.is_game {
-            return None;
-        }
+    fn container(containers: &[&[&str]], rbx: &[String]) -> Option<usize> {
         containers.iter().position(|c| c.iter().zip(rbx).all(|(a, b)| a == b))
     }
 
     /// How the module at `module` is reached from the script at `source`. A module in the same isolated container
     /// is reached relatively, because the container's contents are copied, and any other from its service.
     pub fn import(&self, source: &[String], module: &[String]) -> Result<ModulePath, &'static str> {
-        if self.container(SERVER_CONTAINERS, module).is_some() && self.container(SERVER_CONTAINERS, source).is_none() {
+        if Self::container(SERVER_CONTAINERS, module).is_some() && Self::container(SERVER_CONTAINERS, source).is_none()
+        {
             return Err("a module in a server container cannot be imported from outside one");
         }
-        match (self.container(ISOLATED_CONTAINERS, source), self.container(ISOLATED_CONTAINERS, module)) {
+        match (Self::container(ISOLATED_CONTAINERS, source), Self::container(ISOLATED_CONTAINERS, module)) {
             (Some(a), Some(b)) if a == b => Ok(relative(source, module)),
             (_, Some(_)) => Err(
                 "a module in an isolated container, such as StarterPlayerScripts, can only be imported from inside it",
@@ -142,7 +79,7 @@ impl Rojo {
 }
 
 pub(crate) struct Game {
-    pub rojo: Rojo,
+    pub instances: InstanceMap,
     root: PathBuf,
     out_dir: PathBuf,
     packages: Vec<Installed>,
@@ -151,30 +88,27 @@ pub(crate) struct Game {
 
 impl Game {
     pub fn load(
-        project: &Path,
+        instances: &InstanceMap,
         include: &Path,
         tsconfig_dir: &Path,
         root: &Path,
         out_dir: Option<&Path>,
     ) -> Result<Game, String> {
-        let absolute = |path: &Path| std::path::absolute(path).map(|p| normalize(&p)).map_err(|e| e.to_string());
-        let rojo = Rojo::load(&absolute(project)?)?;
-        if !rojo.is_game() {
-            return Err(format!("{} has no DataModel root, so it is not a place", project.display()));
-        }
         let Some(out_dir) = out_dir else {
             return Err("a game needs an outDir in its tsconfig, which its Rojo project maps".to_owned());
         };
-        let Some(runtime_lib) = rojo.rbx_path(&absolute(include)?.join(crate::include::RUNTIME_LIB)) else {
+        let include_dir = std::path::absolute(include).map(|p| normalize(&p)).map_err(|e| e.to_string())?;
+        let Some(runtime_lib) = instances.rbx_path(&include_dir.join(crate::include::RUNTIME_LIB)) else {
             return Err(format!(
                 "{} maps no folder for {}, where roblox-ts's runtime library goes",
-                project.display(),
+                instances.source,
                 include.display()
             ));
         };
         let package = package_dir(tsconfig_dir).unwrap_or(tsconfig_dir);
         let packages = packages(&package.join("node_modules"));
-        Ok(Game { rojo, root: root.to_path_buf(), out_dir: normalize(out_dir), packages, runtime_lib })
+        let instances = instances.clone();
+        Ok(Game { instances, root: root.to_path_buf(), out_dir: normalize(out_dir), packages, runtime_lib })
     }
 
     /// Where the output of a source file under the source root goes.
@@ -194,7 +128,7 @@ impl Game {
             Some(path) => luau_path(&runtime_path(&path), true)?,
             None => self.out_path(file)?,
         };
-        self.rojo.rbx_path(&out)
+        self.instances.rbx_path(&out)
     }
 
     fn through_node_modules(&self, file: &Path) -> Option<PathBuf> {
