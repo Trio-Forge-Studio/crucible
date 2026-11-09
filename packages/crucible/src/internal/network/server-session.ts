@@ -82,6 +82,12 @@ export class ServerSession extends Session {
 		return peer !== undefined && this.deliver(peer, frame(body, Opcode.Event, [definition.index!]));
 	}
 
+	sendEncoded(player: Player, packet: Packet): boolean {
+		if (!this.sendable()) return false;
+		const peer = this.peers.get(player);
+		return peer !== undefined && this.deliver(peer, packet);
+	}
+
 	broadcast(token: unknown, value: unknown) {
 		const sendable = this.sendable();
 		const definition = toClient(token, "Network.broadcast");

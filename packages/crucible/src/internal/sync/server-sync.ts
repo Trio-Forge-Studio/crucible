@@ -5,6 +5,7 @@ import { enginePort } from "../binding";
 import { runtimeDiagnostic } from "../diagnostics";
 import { stateOf } from "../lifecycle";
 import { claim } from "../network/claims";
+import type { Packet } from "../network/envelope";
 import { KICK_MESSAGE } from "../network/limits";
 import { networkPort } from "../network/port";
 import { FrameEvent } from "../port";
@@ -20,14 +21,23 @@ import {
 	SYNC_PEER_VISITS,
 } from "../reactive/limits";
 import { define, type TypeId } from "../registry";
-import { declarations, useChanged, useRetired, type Declaration } from "./declarations";
-import { frameCost, overBudget, SyncFaultMessage, SyncFrameMessage, type SyncFrame, type SyncValue } from "./frame";
-import { admit, equal, isOverBudget, spend, type Work } from "./values";
+import { declarationNamed, declarations, useChanged, useRetired, type Declaration } from "./declarations";
+import {
+	frameCost,
+	overBudget,
+	SyncFaultMessage,
+	SyncFrameMessage,
+	type FrameCost,
+	type SyncFrame,
+	type SyncValue,
+} from "./frame";
+import { beginPatches, difference, smaller } from "./patches";
+import { admit, isOverBudget, spend, type Work } from "./values";
 
 checkCharm();
 
-/** @internal How ServerSync sends: exactly `Network.send` on the frame message. */
-export type FrameSender = (player: Player, frame: SyncFrame) => boolean;
+/** @internal Delivers the frame's preflighted transport packet. */
+export type FrameSender = (player: Player, frame: SyncFrame, packet: Packet) => boolean;
 
 /** What a peer accepted for one declaration: the version and frozen value of the last frame `send` took. */
 interface Accepted {
@@ -113,6 +123,11 @@ interface Staged {
 
 let sender: FrameSender = () => false;
 
+function sendFailed(player: Player, revision: number) {
+	const frame: SyncFrame = { failed: [], kind: "failed", revision, values: [] };
+	return sender(player, frame, frameCost(frame, SyncFrameMessage.index!).packet);
+}
+
 class ServerSync extends Subsystem {
 	private readonly peers = new Map<Player, View>();
 	private readonly order = new Array<View>();
@@ -151,6 +166,7 @@ class ServerSync extends Subsystem {
 	}
 
 	private snapshot(player: Player): (() => void) | undefined {
+		beginPatches();
 		if (!declarations().some((declaration) => declaration.publication !== undefined)) return undefined;
 		const view: View = {
 			player,
@@ -190,6 +206,7 @@ class ServerSync extends Subsystem {
 	 * send scans instead, and its visits count against the round that a skipped projection starts.
 	 */
 	private pace() {
+		beginPatches();
 		this.spent = 0;
 		this.examined = 0;
 		if (this.order.size() === 0) return;
@@ -333,17 +350,33 @@ class ServerSync extends Subsystem {
 					continue;
 				}
 				if (failedAt !== undefined) {
-					staged.values.push({ key: declaration.name, value });
+					staged.values.push({ key: declaration.name, mode: "full", value });
 					staged.accept.set(declaration, { version, value });
 					staged.recovered.push(declaration);
 					continue;
 				}
 			}
-			if (accepted !== undefined && equal(accepted.value, value, work))
+			if (accepted !== undefined && difference(accepted.value, value, work) === undefined)
 				staged.accept.set(declaration, { version, value: accepted.value });
 			else {
-				staged.values.push({ key: declaration.name, value });
+				staged.values.push({ key: declaration.name, mode: "full", value });
 				staged.accept.set(declaration, { version, value });
+			}
+		}
+		for (const entry of staged.values) {
+			this.examining = entry.key;
+			const declaration = declarationNamed(entry.key)!;
+			const accepted = view.accepted.get(declaration);
+			const before = accepted !== undefined ? accepted.value : declaration.initial;
+			if (view.revision !== 0) {
+				const delta = difference(before, entry.value, work);
+				if (delta === undefined) {
+					entry.mode = "same";
+					entry.value = undefined;
+				} else if (smaller(delta, entry.value)) {
+					entry.mode = "patch";
+					entry.value = delta;
+				}
 			}
 		}
 		this.examining = "";
@@ -366,7 +399,22 @@ class ServerSync extends Subsystem {
 			revision: view.revision + 1,
 			values: staged.values,
 		};
-		const cost = frameCost(frame, SyncFrameMessage.index!);
+		let [encoded, result] = pcall(frameCost, frame, SyncFrameMessage.index!);
+		if (!encoded || overBudget(result as FrameCost) !== undefined) {
+			let replaced = false;
+			for (const entry of staged.values) {
+				if (entry.mode !== "patch") continue;
+				entry.mode = "full";
+				entry.value = staged.accept.get(declarationNamed(entry.key)!)!.value;
+				replaced = true;
+			}
+			if (replaced) [encoded, result] = pcall(frameCost, frame, SyncFrameMessage.index!);
+		}
+		if (!encoded) {
+			this.fail(view, `frame encode failed (${names.join(", ")}): ${tostring(result)}`);
+			return 0;
+		}
+		const cost = result as FrameCost;
 		const budget = overBudget(cost);
 		if (budget !== undefined) {
 			this.fail(
@@ -376,9 +424,12 @@ class ServerSync extends Subsystem {
 			return 0;
 		}
 		if (spent > 0 && spent + cost.bytes > SYNC_HEARTBEAT_BYTES) return undefined;
-		const [ok, accepted] = pcall(sender, view.player, frame);
+		const [ok, accepted] = pcall(sender, view.player, frame, cost.packet);
 		if (!ok) {
-			this.fail(view, `encode refused a preflighted frame (${cost.bytes} bytes; ${names.join(", ")})`);
+			this.fail(
+				view,
+				`send failed for a preflighted frame (${cost.bytes} bytes; ${names.join(", ")}): ${accepted}`,
+			);
 			return 0;
 		}
 		if (!accepted) {
@@ -405,7 +456,7 @@ class ServerSync extends Subsystem {
 	private fail(view: View, reason: string) {
 		if (!view.live) return;
 		const player = view.player;
-		pcall(sender, player, { failed: [], kind: "failed", revision: view.revision, values: [] });
+		pcall(sendFailed, player, view.revision);
 		this.end(view);
 		runtimeDiagnostic(
 			"error",
@@ -453,7 +504,7 @@ class ServerSync extends Subsystem {
 		this.disconnect?.();
 		this.disconnect = undefined;
 		for (const view of [...this.order]) {
-			pcall(sender, view.player, { failed: [], kind: "failed", revision: view.revision, values: [] });
+			pcall(sendFailed, view.player, view.revision);
 			this.end(view);
 		}
 	}

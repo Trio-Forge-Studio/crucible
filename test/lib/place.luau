@@ -78,6 +78,9 @@ return function(client: boolean?)
 				local child = string.match(target, "^@self/(.+)$")
 				if child then
 					target = assert(script:FindFirstChild(child), `{script:GetFullName()} has no child {child}`)
+				elseif string.match(target, "^%.%./") then
+					local name = string.sub(target, 4)
+					target = assert(script.Parent.Parent:FindFirstChild(name), `missing parent module {name}`)
 				else
 					local name = assert(string.match(target, "^%./(.+)$"), `unsupported require {target}`)
 					target = assert(script.Parent:FindFirstChild(name), `{script:GetFullName()} has no sibling {name}`)

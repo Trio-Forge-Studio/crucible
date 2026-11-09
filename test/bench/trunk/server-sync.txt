@@ -1,0 +1,594 @@
+-- Compiled with crucible-compiler
+local TS = _G[script]
+local _0 = TS.import(script, TS.getModule(script, "@rbxts", "charm").src)
+local effect = _0.effect
+local getActiveSub = _0.getActiveSub
+local ReactiveFlags = _0.ReactiveFlags
+local setActiveSub = _0.setActiveSub
+local ClientReady = TS.import(script, script.Parent.Parent.Parent, "network").ClientReady
+local Subsystem = TS.import(script, script.Parent.Parent.Parent, "subsystem").Subsystem
+local enginePort = TS.import(script, script.Parent.Parent, "binding").enginePort
+local runtimeDiagnostic = TS.import(script, script.Parent.Parent, "diagnostics").runtimeDiagnostic
+local stateOf = TS.import(script, script.Parent.Parent, "lifecycle").stateOf
+local claim = TS.import(script, script.Parent.Parent, "network", "claims").claim
+local KICK_MESSAGE = TS.import(script, script.Parent.Parent, "network", "limits").KICK_MESSAGE
+local networkPort = TS.import(script, script.Parent.Parent, "network", "port").networkPort
+local FrameEvent = TS.import(script, script.Parent.Parent, "port").FrameEvent
+local checkCharm = TS.import(script, script.Parent.Parent, "reactive", "charm").checkCharm
+local peek = TS.import(script, script.Parent.Parent, "reactive", "store").peek
+local _1 = TS.import(script, script.Parent.Parent, "runner")
+local call = _1.call
+local CallResult = _1.CallResult
+local _2 = TS.import(script, script.Parent.Parent, "reactive", "limits")
+local SYNC_HEARTBEAT_BYTES = _2.SYNC_HEARTBEAT_BYTES
+local SYNC_HEARTBEAT_PEERS = _2.SYNC_HEARTBEAT_PEERS
+local SYNC_HEARTBEAT_SCAN = _2.SYNC_HEARTBEAT_SCAN
+local SYNC_HEARTBEAT_VISITS = _2.SYNC_HEARTBEAT_VISITS
+local SYNC_MAX_REVISION = _2.SYNC_MAX_REVISION
+local SYNC_PEER_VISITS = _2.SYNC_PEER_VISITS
+local define = TS.import(script, script.Parent.Parent, "registry").define
+local _3 = TS.import(script, script.Parent, "declarations")
+local declarations = _3.declarations
+local useChanged = _3.useChanged
+local useRetired = _3.useRetired
+local _4 = TS.import(script, script.Parent, "frame")
+local frameCost = _4.frameCost
+local overBudget = _4.overBudget
+local SyncFaultMessage = _4.SyncFaultMessage
+local SyncFrameMessage = _4.SyncFrameMessage
+local _5 = TS.import(script, script.Parent, "values")
+local admit = _5.admit
+local equal = _5.equal
+local isOverBudget = _5.isOverBudget
+local spend = _5.spend
+checkCharm()
+local RETIRED = -1
+local function skipped(projection)
+	local node = projection.node
+	return node ~= nil and bit32.btest(node.flags, bit32.bor(ReactiveFlags.Dirty, ReactiveFlags.Pending))
+end
+local function pull(projection, player, changed)
+	if not projection.dirty and not skipped(projection) then
+		return
+	end
+	projection.dirty = false
+	local _6 = projection.stop
+	if _6 ~= nil then
+		_6()
+	end
+	local pulling = true
+	local active = setActiveSub(nil)
+	projection.stop = effect(function()
+		if not pulling then
+			projection.dirty = true
+			changed()
+			return
+		end
+		pulling = false
+		projection.node = getActiveSub()
+		local result, value = call(projection.project, player, nil)
+		local ok = result == 0
+		if projection.version > 0 and ok == projection.ok and rawequal(value, projection.value) then
+			return
+		end
+		projection.ok = ok
+		projection.value = value
+		projection.version += 1
+	end)
+	setActiveSub(active)
+end
+local sender = function()
+	return false
+end
+local ServerSync
+do
+	local super = Subsystem
+	ServerSync = setmetatable({}, {
+		__tostring = function()
+			return "ServerSync"
+		end,
+		__index = super,
+	})
+	ServerSync.__index = ServerSync
+	function ServerSync.new(...)
+		local self = setmetatable({}, ServerSync)
+		return self:constructor(...) or self
+	end
+	function ServerSync:constructor()
+		super.constructor(self)
+		self.peers = {}
+		self.order = {}
+		self.cursor = 0
+		self.scanned = 0
+		self.changed = true
+		self.incomplete = false
+		self.retiredSince = false
+		self.examining = ""
+		self.spent = 0
+		self.examined = 0
+		self.ready = claim(self, "ready", ClientReady, function(player)
+			return self:snapshot(player)
+		end)
+		self.fault = claim(self, "fault", SyncFaultMessage, function(player)
+			return self:faulted(player)
+		end)
+		self.marker = function()
+			self.changed = true
+		end
+		useRetired(function(declaration)
+			return self:retired(declaration)
+		end)
+		useChanged(self.marker)
+	end
+	function ServerSync:awake()
+		self.disconnect = enginePort().onFrame(5, function()
+			return self:heartbeat()
+		end)
+		local state = stateOf(self)
+		if state.subscriptions == nil then
+			state.subscriptions = {}
+		end
+		table.insert(state.subscriptions, function()
+			return self:stop()
+		end)
+	end
+	function ServerSync:snapshot(player)
+		local _7 = declarations()
+		local _8 = false
+		local _9 = function(declaration)
+			return declaration.publication ~= nil
+		end
+		for _10, _11 in _7 do
+			if _9(_11, _10 - 1, _7) then
+				_8 = true
+				break
+			end
+		end
+		if not _8 then
+			return nil
+		end
+		local view = {
+			player = player,
+			revision = 0,
+			live = true,
+			accepted = {},
+			projections = {},
+			failing = {},
+			reported = {},
+		}
+		self.peers[player] = view
+		table.insert(self.order, view)
+		for _12, declaration in declarations() do
+			local publication = declaration.publication
+			if declaration.audience ~= "player" or publication == nil or not publication.live then
+				continue
+			end
+			view.projections[declaration] = {
+				project = publication.project,
+				version = 0,
+				ok = true,
+				value = nil,
+				dirty = true,
+			}
+		end
+		local work = {
+			visits = 0,
+			limit = SYNC_PEER_VISITS,
+		}
+		local staged = self:examine(view, work)
+		if staged ~= nil then
+			self:send(view, staged, "snapshot")
+		end
+		return function()
+			return self["end"](self, view)
+		end
+	end
+	function ServerSync:heartbeat()
+		local ok, err = pcall(function()
+			return self:pace()
+		end)
+		if not ok then
+			runtimeDiagnostic("error", `Crucible sync: internal error in the Heartbeat: {tostring(err)}`)
+		end
+	end
+	function ServerSync:pace()
+		self.spent = 0
+		self.examined = 0
+		if #self.order == 0 then
+			return
+		end
+		local visits = 0
+		if not self.incomplete and not self.retiredSince and not self.changed then
+			visits = self:scan()
+			if not self.changed then
+				self.spent = visits
+				return
+			end
+		end
+		self.changed = false
+		self.retiredSince = false
+		local _13 = self.order
+		local ring = table.move(_13, 1, #_13, 1, {})
+		local bytes = 0
+		local examined = 0
+		local stopped
+		local first = self.cursor % #ring
+		do
+			local i = 0
+			local _14 = false
+			while true do
+				if _14 then
+					i += 1
+				else
+					_14 = true
+				end
+				if not (i < #ring) then
+					break
+				end
+				local view = ring[(first + i) % #ring + 1]
+				if not view.live then
+					continue
+				end
+				if examined > 0 and (examined >= SYNC_HEARTBEAT_PEERS or visits >= SYNC_HEARTBEAT_VISITS) then
+					stopped = view
+					break
+				end
+				local work = {
+					visits = 0,
+					limit = SYNC_PEER_VISITS,
+				}
+				local staged = self:examine(view, work)
+				visits += work.visits
+				examined += 1
+				if staged == nil then
+					continue
+				end
+				if #staged.values == 0 and #staged.failed == 0 then
+					self:commit(view, staged, false)
+					continue
+				end
+				local result = self:send(view, staged, "update", bytes)
+				if result == nil then
+					stopped = view
+					break
+				end
+				bytes += result
+			end
+		end
+		self.spent = visits
+		self.examined = examined
+		if stopped ~= nil then
+			self.incomplete = true
+			self.cursor = math.max((table.find(self.order, stopped) or 0) - 1, 0)
+		else
+			self.incomplete = false
+			self.cursor = 0
+		end
+	end
+	function ServerSync:scan()
+		local size = #self.order
+		local visits = 0
+		do
+			local peers = 0
+			while peers < size and visits < SYNC_HEARTBEAT_SCAN do
+				do
+					if self.scanned >= size then
+						self.scanned = 0
+					end
+					local view = self.order[self.scanned + 1]
+					self.scanned += 1
+					visits += 1
+					for _15, projection in view.projections do
+						visits += 1
+						if not projection.dirty and skipped(projection) then
+							self.changed = true
+						end
+					end
+					if self.changed then
+						break
+					end
+				end
+				peers += 1
+			end
+		end
+		return visits
+	end
+	function ServerSync:examine(view, work)
+		local ok, result = pcall(function()
+			return self:stage(view, work)
+		end)
+		if ok then
+			return result
+		end
+		self:fail(
+			view,
+			if isOverBudget(result)
+				then `examination over SYNC_PEER_VISITS after {work.visits} visits, at {self.examining}`
+				else `internal error at {self.examining}: {tostring(result)}`
+		)
+		return nil
+	end
+	function ServerSync:stage(view, work)
+		local staged = {
+			values = {},
+			failed = {},
+			accept = {},
+			failing = {},
+			recovered = {},
+			reasons = {},
+		}
+		for _16, declaration in declarations() do
+			local publication = declaration.publication
+			if publication == nil then
+				continue
+			end
+			self.examining = declaration.name
+			spend(work)
+			local failedAt = view.failing[declaration]
+			if not publication.live then
+				if failedAt == nil then
+					table.insert(staged.failed, declaration.name)
+					staged.failing[declaration] = RETIRED
+				end
+				continue
+			end
+			local accepted = view.accepted[declaration]
+			local version
+			local value
+			if declaration.audience == "all" then
+				version = declaration.version
+				value = peek(declaration.node)
+				if accepted ~= nil and accepted.version == version then
+					continue
+				end
+			else
+				local projection = view.projections[declaration]
+				pull(projection, view.player, self.marker)
+				local pulled = projection.ok
+				local raw = projection.value
+				version = projection.version
+				if failedAt == version then
+					continue
+				end
+				if failedAt == nil and accepted ~= nil and accepted.version == version then
+					continue
+				end
+				local reason
+				if pulled then
+					local admitted, result = pcall(admit, declaration.plan, declaration.name, raw, work)
+					if admitted then
+						value = result
+					elseif isOverBudget(result) then
+						error(result)
+					else
+						reason = tostring(result)
+					end
+				else
+					reason = tostring(raw)
+				end
+				if reason ~= nil then
+					if failedAt == nil then
+						table.insert(staged.failed, declaration.name)
+						staged.reasons[declaration] = reason
+					end
+					staged.failing[declaration] = version
+					continue
+				end
+				if failedAt ~= nil then
+					table.insert(staged.values, {
+						key = declaration.name,
+						value = value,
+					})
+					staged.accept[declaration] = {
+						version = version,
+						value = value,
+					}
+					table.insert(staged.recovered, declaration)
+					continue
+				end
+			end
+			if accepted ~= nil and equal(accepted.value, value, work) then
+				staged.accept[declaration] = {
+					version = version,
+					value = accepted.value,
+				}
+			else
+				table.insert(staged.values, {
+					key = declaration.name,
+					value = value,
+				})
+				staged.accept[declaration] = {
+					version = version,
+					value = value,
+				}
+			end
+		end
+		self.examining = ""
+		return staged
+	end
+	function ServerSync:send(view, staged, kind, spent)
+		if spent == nil then
+			spent = 0
+		end
+		local _17 = staged.values
+		local _18 = table.create(#_17)
+		local _19 = function(entry)
+			return entry.key
+		end
+		for _20, _21 in _17 do
+			_18[_20] = _19(_21, _20 - 1, _17)
+		end
+		local names = _18
+		if view.revision >= SYNC_MAX_REVISION then
+			local _22 = table.create(#names)
+			for _23, _24 in names do
+				_22[_23] = tostring(_24)
+			end
+			self:fail(view, `revision passes SYNC_MAX_REVISION ({table.concat(_22, ", ")})`)
+			return 0
+		end
+		local frame = {
+			failed = staged.failed,
+			kind = kind,
+			revision = view.revision + 1,
+			values = staged.values,
+		}
+		local cost = frameCost(frame, SyncFrameMessage.index)
+		local budget = overBudget(cost)
+		if budget ~= nil then
+			local _28 = cost.bytes
+			local _29 = cost.entries
+			local _30 = cost.visits
+			local _25 = table.create(#names)
+			for _26, _27 in names do
+				_25[_26] = tostring(_27)
+			end
+			self:fail(view, `frame over {budget} ({_28} bytes, {_29} entries, {_30} visits; {table.concat(_25, ", ")})`)
+			return 0
+		end
+		if spent > 0 and spent + cost.bytes > SYNC_HEARTBEAT_BYTES then
+			return nil
+		end
+		local ok, accepted = pcall(sender, view.player, frame)
+		if not ok then
+			local _34 = cost.bytes
+			local _31 = table.create(#names)
+			for _32, _33 in names do
+				_31[_32] = tostring(_33)
+			end
+			self:fail(view, `encode refused a preflighted frame ({_34} bytes; {table.concat(_31, ", ")})`)
+			return 0
+		end
+		if not accepted then
+			self["end"](self, view)
+			return 0
+		end
+		self:commit(view, staged, true)
+		return cost.bytes
+	end
+	function ServerSync:commit(view, staged, sent)
+		if sent then
+			view.revision += 1
+		end
+		for declaration, accepted in staged.accept do
+			view.accepted[declaration] = accepted
+		end
+		for declaration, version in staged.failing do
+			view.failing[declaration] = version
+		end
+		for _35, declaration in staged.recovered do
+			view.failing[declaration] = nil
+		end
+		for declaration, reason in staged.reasons do
+			if view.reported[declaration] ~= nil then
+				continue
+			end
+			view.reported[declaration] = true
+			runtimeDiagnostic("error", `Crucible sync: {declaration.name} for {view.player.Name} failed: {reason}`)
+		end
+	end
+	function ServerSync:fail(view, reason)
+		if not view.live then
+			return
+		end
+		local player = view.player
+		pcall(sender, player, {
+			failed = {},
+			kind = "failed",
+			revision = view.revision,
+			values = {},
+		})
+		self["end"](self, view)
+		runtimeDiagnostic(
+			"error",
+			`Crucible sync for {player.Name} failed at revision {view.revision}: {reason}; kicking`
+		)
+		pcall(function()
+			return networkPort().kick(player, KICK_MESSAGE)
+		end)
+	end
+	function ServerSync:faulted(player)
+		local view = self.peers[player]
+		if view ~= nil and view.live then
+			self["end"](self, view)
+			runtimeDiagnostic(
+				"error",
+				`Crucible sync for {player.Name} stopped on the client after revision {view.revision}; kicking`
+			)
+		end
+		pcall(function()
+			return networkPort().kick(player, KICK_MESSAGE)
+		end)
+	end
+	ServerSync["end"] = function(self, view)
+		if not view.live then
+			return
+		end
+		view.live = false
+		for _36, projection in view.projections do
+			local _37 = projection.stop
+			if _37 ~= nil then
+				_37()
+			end
+		end
+		table.clear(view.projections)
+		if self.peers[view.player] == view then
+			self.peers[view.player] = nil
+		end
+		local index = (table.find(self.order, view) or 0) - 1
+		if index == -1 then
+			return
+		end
+		table.remove(self.order, index + 1)
+		if index < self.scanned then
+			self.scanned -= 1
+		end
+	end
+	function ServerSync:retired(declaration)
+		self.retiredSince = true
+		for _38, view in self.order do
+			local _39 = view.projections[declaration]
+			if _39 ~= nil then
+				_39 = _39.stop
+			end
+			if _39 ~= nil then
+				_39()
+			end
+			view.projections[declaration] = nil
+		end
+	end
+	function ServerSync:stop()
+		local _40 = self.disconnect
+		if _40 ~= nil then
+			_40()
+		end
+		self.disconnect = nil
+		local _41 = self.order
+		for _42, view in table.move(_41, 1, #_41, 1, {}) do
+			pcall(sender, view.player, {
+				failed = {},
+				kind = "failed",
+				revision = view.revision,
+				values = {},
+			})
+			self["end"](self, view)
+		end
+	end
+end
+local installed = false
+local function installServerSync(send)
+	sender = send
+	if installed then
+		return
+	end
+	installed = true
+	define(ServerSync, {
+		kind = "subsystem",
+		id = "Crucible.ServerSync",
+		deps = {},
+		provides = {},
+	}, true)
+end
+return {
+	installServerSync = installServerSync,
+}

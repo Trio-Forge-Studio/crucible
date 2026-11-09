@@ -102,9 +102,8 @@ end
 -- Rule 70's byte bound: eight peers each get one 131,072-byte update frame, so the Heartbeat's frames total exactly
 -- SYNC_HEARTBEAT_BYTES (1,048,576). `extra` lengthens the last peer's frame by that many bytes.
 local PEER_FRAME = 131072
-local FRAME_TAIL = 32713
+local FRAME_TAIL = 32712
 local function byteLimitWorld(extra: number)
-	local long = string.rep("a", 49152)
 	local w = World.new({
 		declare = function(r)
 			local n = r.n
@@ -115,8 +114,15 @@ local function byteLimitWorld(extra: number)
 			world.count = s.charm.atom(0)
 			s.service("ViewService", function()
 				s.entry.publish(d.View, function(player)
+					local count = world.count()
+					local long = string.rep(if count % 2 == 0 then "a" else "b", 49152)
 					local tail = FRAME_TAIL + (if player.Name == "P8" then extra else 0)
-					return { a = long, b = long, c = string.rep("c", tail), count = world.count() }
+					return {
+						a = long,
+						b = long,
+						c = string.rep(if count % 2 == 0 then "c" else "d", tail),
+						count = count,
+					}
 				end)
 			end)
 		end,
@@ -220,8 +226,9 @@ return {
 			end)
 		end
 		local w = World.new(options)
+		local text = string.rep("x", 35000)
 		want(w, function(player)
-			return if player.Name == "Ann" then { a = BIG, b = BIG, c = BIG, count = 1 } else nil
+			return if player.Name == "Ann" then { a = text, b = text, c = text, count = 1 } else nil
 		end)
 		local ann = w:join("Ann")
 		local bea = w:join("Bea")
@@ -241,7 +248,8 @@ return {
 		local w = World.new(projected(blobs))
 		local count = w.server.charm.atom(0)
 		want(w, function()
-			return { a = BIG, b = BIG, c = BIG, count = count() }
+			local text = if count() % 2 == 0 then BIG else string.rep("y", 49152)
+			return { a = text, b = text, c = text, count = count() }
 		end)
 		local clients = {}
 		for i = 1, 8 do
@@ -306,7 +314,7 @@ return {
 		spec.eq(w.pulls.P65, pulls.P65 + 1, "the next Heartbeat starts at the 65th")
 		w:finish()
 	end,
-	["70 R2 two peers needing 40,001 visits each both run, the third waits, and goes first next Heartbeat"] = function()
+	["70 R2 two peers needing 40,002 visits each both run, the third waits, and goes first next Heartbeat"] = function()
 		local w = World.new(projected(function(n)
 			return n.array(n.f64)
 		end))
@@ -323,10 +331,10 @@ return {
 		bump(1)
 		w:heartbeat()
 		-- Rule 70's count per peer: two declarations considered; admission of the union node, the array node, 9,999
-		-- keys scanned and 9,999 element nodes; comparison of one node pair, then an index and a node pair per element.
-		local peer = 2 + (1 + 1 + 9999 + 9999) + (1 + 2 * 9999)
+		-- keys scanned and 9,999 element nodes; then both admitted input trees for Charm Sync's diff.
+		local peer = 2 + (1 + 1 + 9999 + 9999) + 2 * (1 + 9999)
 		spec.eq(w:sync().spent, 2 * peer, "the Heartbeat spent both peers' examinations")
-		spec.eq(w.pulls.P3, pulls.P3, "80,002 is not below 65,536, so the third did not start")
+		spec.eq(w.pulls.P3, pulls.P3, "80,004 is not below 65,536, so the third did not start")
 		pulls = table.clone(w.pulls)
 		bump(2)
 		w:heartbeat()
@@ -510,7 +518,7 @@ return {
 		w.link:flush()
 		w:finish()
 	end,
-	["66 69 encode refused on a preflighted frame fails the peer, keeps its baseline, and kicks"] = function()
+	["66 69 a refused send of a preflighted frame fails the peer, keeps its baseline, and kicks"] = function()
 		local w = World.new(projected(function(n)
 			return n.f64
 		end))
@@ -524,7 +532,8 @@ return {
 		w.score(5)
 		w.refuse = 1
 		w:heartbeat()
-		spec.eq(w:logged("encode refused a preflighted frame"), 1, "reported")
+		spec.eq(w:logged("send failed for a preflighted frame"), 1, "reported")
+		spec.eq(w:logged("injected send refusal"), 1, "with its cause")
 		spec.eq(view.accepted[declaration].version, version, "nothing staged was committed")
 		spec.list(kinds(w, ann), { "snapshot", "failed" }, "only the failed frame followed")
 		spec.eq(kicked(w, "Ann"), 1, "kicked")
@@ -669,9 +678,9 @@ return {
 		spec.eq(#frames[1].frame.values, 128, "the snapshot carries all 128 values")
 		spec.eq(#frames[2].frame.values, 127, "the first update changed 127 of them")
 		spec.eq(#frames[3].frame.values, 128, "the second changed all 128")
-		-- Every entry is a 10-byte key and a 9-byte number, so one more entry adds 19 bytes, and the list length 128
+		-- Every entry is a 10-byte key, a 1-byte mode and a 9-byte number, so one more entry adds 20 bytes; list length 128
 		-- needs a second varuint byte where 127 needs one.
-		spec.eq(frames[3].bytes - frames[2].bytes, 19 + 1, "the 128th entry and the second length byte")
+		spec.eq(frames[3].bytes - frames[2].bytes, 20 + 1, "the 128th entry and the second length byte")
 		spec.eq(w:finish(), 3, "frameCost matched the encoder on all three frames")
 	end,
 	["58 70 a Heartbeat that stopped for the byte budget completes the next one, and the one after examines no peer"] = function()
@@ -725,9 +734,9 @@ return {
 		over:finish()
 	end,
 	["70 a peer examination spending exactly SYNC_PEER_VISITS completes, and one more visit fails the peer"] = function()
-		-- Per view: 1 considered + (1 union + 1 array + 3799 keys + 3799 * (2 + 18)) admission + (1 + 2 * 3799) comparison,
-		-- which is 87,381; three views and one public declaration considered make 262,144.
-		local w = peerWorld(3799, 18, 1)
+		-- Per view: 1 considered + (1 union + 1 array + 3798 keys + 3798 * (2 + 18)) admission + 2 * (1 + 3798) diff,
+		-- which is 87,359; three views and 67 public declarations considered make 262,144.
+		local w = peerWorld(3798, 18, 67)
 		local ann = w:join("Ann")
 		w.bump(1)
 		w:heartbeat()
@@ -736,7 +745,7 @@ return {
 		spec.eq(ann.api.syncStatus(ann.d[1]), "ready", "its views stay ready")
 		spec.eq(#w:frames(ann), 1, "nothing changed, so no update")
 		w:finish()
-		local over = peerWorld(3799, 18, 2)
+		local over = peerWorld(3798, 18, 68)
 		local bea = over:join("Bea")
 		over.bump(1)
 		over:heartbeat()

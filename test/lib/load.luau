@@ -150,6 +150,10 @@ local function graph(defaults, loggingPort, configPort, network, dataPort, root:
 						if child then
 							return load(`{path}/{child}`)
 						end
+						local sibling = string.match(target, "^%.%./(.+)$")
+						if sibling then
+							return load(`{node(path).Parent.Parent.path}/{sibling}`)
+						end
 						local relative =
 							assert(string.match(target, "^%./(.+)$"), `unsupported require {target} from {path}`)
 						return load(`{node(path).Parent.path}/{relative}`)
@@ -228,6 +232,7 @@ function spec.readAhead(on: boolean)
 	local read = {}
 	readTree(ROOT, read)
 	readTree(`{PACKAGES}/@rbxts/charm/src`, read)
+	readTree(`{PACKAGES}/@rbxts/charm-sync`, read)
 	sources = read
 end
 

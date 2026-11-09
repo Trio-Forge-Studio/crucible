@@ -8,9 +8,11 @@ import { createRequire } from "node:module";
 const repo = process.cwd();
 const src = "packages/crucible/src/";
 const V = src + "internal/sync/values.ts";
+const P = src + "internal/sync/patches.ts";
 const D = src + "internal/sync/declarations.ts";
 const F = src + "internal/sync/frame.ts";
 const SS = src + "internal/sync/server-sync.ts";
+const SESSION = src + "internal/network/server-session.ts";
 const CS = src + "internal/sync/client-sync.ts";
 const CAT = src + "internal/network/catalog.ts";
 const B = src + "internal/boot.ts";
@@ -19,7 +21,15 @@ const EM = src + "emit/replicated.ts";
 const CI = src + "client/index.ts";
 const EMIT = src + "emit/index.ts";
 const REG = src + "internal/registry.ts";
-const specs = ["sync-frames", "sync-players", "sync-client", "sync-budgets", "sync-publish"];
+const specs = [
+	"sync-frames",
+	"sync-players",
+	"sync-client",
+	"sync-budgets",
+	"sync-publish",
+	"sync-charm",
+	"sync-bounds",
+];
 const types = ["sync-types"];
 
 // Ruling K3: each rule carries a guard (or reset), a swap and a pair mutant, or says why the code has no such site.
@@ -336,24 +346,40 @@ const rules = [
 		[
 			"guard",
 			SS,
-			"\t\t\tif (accepted !== undefined && equal(accepted.value, value, work))",
-			"\t\t\tif (accepted !== undefined && (false as boolean))",
+			"accepted !== undefined && difference(accepted.value, value, work) === undefined",
+			"accepted !== undefined && (false as boolean)",
 		],
-		["swap", "equality is symmetric: swapping its arguments changes only which side is iterated"],
-		["guard length", V, "\t\t\tif (xs.size() !== ys.size()) return false;\n", "\n"],
-		[
-			"pair",
-			V,
-			"\t\t\tfor (let i = 0; i < ys.size(); i++) {\n\t\t\t\tvisit();\n",
-			"\t\t\tfor (let i = 0; i < ys.size(); i++) {\n",
-		],
+		["swap", "equality is symmetric; diff direction is covered by 63 swap"],
+		["pair", P, "work.visits += visits;", "work.visits += 0;"],
+		["guard budget", P, "if (visits > work.limit - work.visits)", "if (false as boolean)"],
 	],
 	[
 		"63",
-		["guard", V, "\t\tif (seen === count) return old;\n", "\n"],
-		["guard count", V, "\t\tif (seen === count) return old;\n", "\t\treturn old;\n"],
-		["swap", V, "\t\tconst result = reuse(before, child);", "\t\tconst result = reuse(child, before);"],
-		["pair", V, "\treturn table.freeze(fresh);\n}", "\treturn fresh;\n}"],
+		["guard", P, "if (diff === undefined) return current;", "if (diff === undefined) return delta;"],
+		[
+			"swap",
+			P,
+			"patch.diff(snapshot(current), snapshot(updated))",
+			"patch.diff(snapshot(updated), snapshot(current))",
+		],
+		[
+			"pair",
+			P,
+			"if (!table.isfrozen(result)) table.freeze(result);",
+			"if (false as boolean) table.freeze(result);",
+		],
+		[
+			"guard escape",
+			P,
+			'key === "__none" || key === ARRAY_MARKER || key.sub(1, 1) === "\\0"',
+			"key === ARRAY_MARKER",
+		],
+		["guard array", P, "rawget(value, 1) !== undefined", "false as boolean"],
+		["swap cache", P, "byNext.get(after)", "byNext.get(before)"],
+		[
+			"guard cache",
+			"clearing or replacing the per-turn diff map is equivalent; cache lookup direction is mutated separately",
+		],
 	],
 	[
 		"64",
@@ -383,7 +409,7 @@ const rules = [
 		[
 			"guard",
 			SS,
-			'\t\tpcall(sender, player, { failed: [], kind: "failed", revision: view.revision, values: [] });\n\t\tthis.end(view);\n\t\truntimeDiagnostic(',
+			"\t\tpcall(sendFailed, player, view.revision);\n\t\tthis.end(view);\n\t\truntimeDiagnostic(",
 			"\t\tthis.end(view);\n\t\truntimeDiagnostic(",
 		],
 		["swap", "a failure sends one frame to one player with nothing of one type to swap"],
@@ -414,28 +440,44 @@ const rules = [
 	],
 	[
 		"69",
-		["guard", SS, "\t\tif (budget !== undefined) {", "\t\tif (false as boolean) {"],
+		["guard", SS, "if (budget !== undefined) {", "if (false as boolean) {"],
+		["swap", F, "entries: body.writer.budget.entries,", "entries: body.writer.budget.visits,"],
+		["pair", F, "visits: body.writer.budget.visits,", "visits: 0,"],
 		[
-			"swap",
-			F,
-			"\t\tentries += cost.entries;\n\t\tvisits += cost.visits;",
-			"\t\tentries += cost.visits;\n\t\tvisits += cost.entries;",
+			"varuint boundaries",
+			"frame lengths now come from the transport encoder; shared codec boundary specs own varuints",
 		],
-		["pair", F, "\tbytes += varuintSize(frame.failed.size());\n", "\n"],
+		["guard fallback", SS, "else if (smaller(delta, entry.value))", "else if (true as boolean)"],
+		["swap fallback", P, "return bytes < costOf(value).bytes;", "return bytes > costOf(value).bytes;"],
 		[
-			"swap failed length",
-			F,
-			"\tbytes += varuintSize(frame.failed.size());",
-			"\tbytes += varuintSize(frame.values.size());",
+			"pair fallback",
+			SS,
+			"entry.value = staged.accept.get(declarationNamed(entry.key)!)!.value;",
+			"entry.value = undefined;",
 		],
-		["guard varuint boundary above", F, "\twhile (value >= 128) {", "\twhile (value > 128) {"],
-		["guard varuint boundary below", F, "\twhile (value >= 128) {", "\twhile (value >= 127) {"],
+	],
+	[
+		"69",
+		["guard pre-encoded lifecycle", SESSION, "\t\tif (!this.sendable()) return false;\n", "\n"],
 		[
-			"swap values length",
-			F,
-			"\tbytes += varuintSize(frame.values.size());",
-			"\tbytes += varuintSize(frame.failed.size());",
+			"swap pre-encoded peer",
+			SESSION,
+			"const peer = this.peers.get(player);\n\t\treturn peer !== undefined && this.deliver(peer, packet);",
+			"const peer = this.order[0];\n\t\treturn peer !== undefined && this.deliver(peer, packet);",
 		],
+		[
+			"pair pre-encoded delivery",
+			SESSION,
+			"return peer !== undefined && this.deliver(peer, packet);",
+			"return peer !== undefined;",
+		],
+		[
+			"pair packet reuse",
+			SS,
+			"pcall(sender, view.player, frame, cost.packet)",
+			"pcall(sender, view.player, frame, frameCost(frame, SyncFrameMessage.index!).packet)",
+		],
+		["swap packet opcode", F, "packet(body, 0, [catalogIndex])", "packet(body, 2, [catalogIndex])"],
 	],
 	[
 		"70",
@@ -503,12 +545,7 @@ const rules = [
 	],
 	[
 		"73",
-		[
-			"guard",
-			SS,
-			'\t\t\tpcall(sender, view.player, { failed: [], kind: "failed", revision: view.revision, values: [] });\n',
-			"\n",
-		],
+		["guard", SS, "\t\t\tpcall(sendFailed, view.player, view.revision);\n", "\n"],
 		["swap", "the end sends one frame per peer with nothing to swap"],
 		["pair", SS, "\t\tstate.subscriptions.push(() => this.stop());\n", "\n"],
 		["pair disconnect", SS, "\t\tthis.disconnect?.();\n", "\n"],
@@ -580,12 +617,23 @@ function run(cwd, command, args) {
 }
 
 // A Lune run that printed no summary never ran its specs, so it decides nothing; run it again.
-function specRun(cwd, extra = []) {
+function specRun(cwd, extra = [], selected = specs) {
 	for (let attempt = 1; ; attempt++) {
-		const result = run(cwd, "lune", ["run", "test", ...specs, ...extra]);
+		const result = run(cwd, "lune", ["run", "test", ...selected, ...extra]);
 		if (/\d+ passed, \d+ failed/.test(result.stdout)) return result;
 		assert.ok(attempt < 3, `lune printed no summary three times\n${result.stdout}${result.stderr}`);
 	}
+}
+
+function focused(name) {
+	const rule = name.split(" ")[0];
+	if (name === "49 swap" || rule === "63") return ["sync-bounds", "sync-charm"];
+	if (Number(rule) <= 54 || ["72", "74", "78", "R-D1"].includes(rule)) return ["sync-publish"];
+	if (["60", "64", "65"].includes(rule)) return ["sync-client"];
+	if (rule === "61") return ["sync-bounds", "sync-frames"];
+	if (rule === "69") return ["sync-bounds", "sync-budgets"];
+	if (["66", "67", "70"].includes(rule)) return ["sync-budgets"];
+	return ["sync-frames", "sync-players"];
 }
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-sync-mutants-"));
@@ -639,11 +687,10 @@ try {
 		const failure =
 			built.status === 0
 				? (() => {
-						const tested = specRun(scratch, extra);
-						return (
+						const failed = (tested) =>
 							tested.status === 1 &&
-							(tested.stdout + tested.stderr).match(/FAIL ((?:sync|network)[^\n]*)/)
-						);
+							(tested.stdout + tested.stderr).match(/FAIL ((?:sync|network)[^\n]*)/);
+						return failed(specRun(scratch, extra, focused(name))) || failed(specRun(scratch, extra));
 					})()
 				: undefined;
 		fs.writeFileSync(path.join(scratch, file), original);

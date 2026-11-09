@@ -1,0 +1,69 @@
+local BOUND = table.freeze({
+	bounded = true,
+})
+local function equal(a, b, work)
+	local spent = 0
+	local function visit()
+		if work ~= nil then
+			spend(work)
+		end
+		spent += 1
+		if spent > SYNC_FRAME_VALUE_VISITS then
+			error(BOUND)
+		end
+	end
+	local function same(x, y)
+		visit()
+		if rawequal(x, y) then
+			return true
+		end
+		if type(x) ~= "table" or type(y) ~= "table" then
+			return typeof(x) == typeof(y) and x == y
+		end
+		local xs = x
+		local ys = y
+		if #xs > 0 or #ys > 0 then
+			if #xs ~= #ys then
+				return false
+			end
+			do
+				local i = 0
+				while i < #ys do
+					visit()
+					if not same(xs[i + 1], ys[i + 1]) then
+						return false
+					end
+					i += 1
+				end
+			end
+			return true
+		end
+		local xr = x
+		local count = 0
+		for key, child in pairs(y) do
+			visit()
+			count += 1
+			local other = xr[key]
+			if other == nil or not same(other, child) then
+				return false
+			end
+		end
+		local seen = 0
+		for _19 in pairs(xr) do
+			visit()
+			seen += 1
+			if seen > count then
+				return false
+			end
+		end
+		return seen == count
+	end
+	local ok, result = pcall(same, a, b)
+	if ok then
+		return result
+	end
+	if rawequal(result, BOUND) then
+		return false
+	end
+	error(result, 0)
+end

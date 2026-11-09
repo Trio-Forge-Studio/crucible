@@ -63,14 +63,14 @@ local tests = {
 		local prepared = 0
 		local ann = w:join("Ann", {
 			patch = function(c)
-				local values = c.graph.module("internal/sync/values")
-				local reuse = values.reuse
-				values.reuse = function(current, decoded)
+				local values = c.graph.module("internal/sync/patches")
+				local reuse = values.apply
+				values.apply = function(current, decoded, initial)
 					prepared += 1
 					if prepared == 4 then
 						error("injected preparation failure")
 					end
-					return reuse(current, decoded)
+					return reuse(current, decoded, initial)
 				end
 			end,
 		})

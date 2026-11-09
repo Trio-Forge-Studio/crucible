@@ -1,0 +1,83 @@
+-- Compiled with crucible-compiler
+local TS = _G[script]
+local defineFramework = TS.import(script, script.Parent.Parent, "network", "catalog").defineFramework
+local n = TS.import(script, script.Parent.Parent, "network", "schema").n
+local _0 = TS.import(script, script.Parent.Parent, "reactive", "limits")
+local SYNC_FRAME_BYTES = _0.SYNC_FRAME_BYTES
+local SYNC_FRAME_COLLECTION_ENTRIES = _0.SYNC_FRAME_COLLECTION_ENTRIES
+local SYNC_FRAME_VALUE_VISITS = _0.SYNC_FRAME_VALUE_VISITS
+local costOf = TS.import(script, script.Parent, "values").costOf
+local SyncFrameMessage = defineFramework({
+	kind = "to-client",
+	name = "Crucible.State.Frame",
+	input = n.object({
+		{ "failed", n.array(n.string) },
+		{ "kind", n.union({ n.literal("failed"), n.literal("snapshot"), n.literal("update") }) },
+		{ "revision", n.u32 },
+		{ "values", n.array(n.object({ { "key", n.string }, { "value", n.dynamic } })) },
+	}),
+})
+local SyncFaultMessage = defineFramework({
+	kind = "to-server",
+	name = "Crucible.State.Fault",
+	input = n.u32,
+})
+local function varuintSize(value)
+	local size = 1
+	while value >= 128 do
+		value = math.floor(value / 128)
+		size += 1
+	end
+	return size
+end
+local function stringBytes(text)
+	return varuintSize(#text) + #text
+end
+local function frameCost(frame, catalogIndex)
+	local bytes = 1 + varuintSize(catalogIndex) + 1
+	local entries = #frame.failed + #frame.values
+	local visits = 1
+	visits += 1
+	bytes += varuintSize(#frame.failed)
+	for _1, key in frame.failed do
+		visits += 1
+		bytes += stringBytes(key)
+	end
+	visits += 2
+	bytes += 1
+	visits += 1
+	bytes += 4
+	visits += 1
+	bytes += varuintSize(#frame.values)
+	for _2, entry in frame.values do
+		visits += 2
+		bytes += stringBytes(entry.key)
+		local cost = costOf(entry.value)
+		bytes += cost.bytes
+		entries += cost.entries
+		visits += cost.visits
+	end
+	return {
+		bytes = bytes,
+		entries = entries,
+		visits = visits,
+	}
+end
+local function overBudget(cost)
+	if cost.bytes > SYNC_FRAME_BYTES then
+		return "SYNC_FRAME_BYTES"
+	end
+	if cost.entries > SYNC_FRAME_COLLECTION_ENTRIES then
+		return "SYNC_FRAME_COLLECTION_ENTRIES"
+	end
+	if cost.visits > SYNC_FRAME_VALUE_VISITS then
+		return "SYNC_FRAME_VALUE_VISITS"
+	end
+	return nil
+end
+return {
+	SyncFrameMessage = SyncFrameMessage,
+	SyncFaultMessage = SyncFaultMessage,
+	frameCost = frameCost,
+	overBudget = overBudget,
+}
