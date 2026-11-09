@@ -79,7 +79,7 @@ const BUILDERS = {
 	compiler(out) {
 		const compile = path.join(root, "target/release/examples/compile.exe");
 		if (!fs.existsSync(compile))
-			throw Error("Build the compiler first: cargo build --release -p crucible-compiler --example compile");
+			throw Error("Build the compiler first: cargo build --release -p crucible-transform --example compile");
 		execFileSync(compile, [path.join(bench, "tsconfig.json"), out], { stdio: "inherit" });
 	},
 	"compiler-native"(out) {

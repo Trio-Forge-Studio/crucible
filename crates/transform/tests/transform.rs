@@ -6,9 +6,10 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{Check, Class, ClassKind, Crucible, Dependency, Facts, Failure, Literal, Target};
+use crucible_compiler::{Failure, Target};
+use crucible_transform::{Check, Class, ClassKind, Dependency, Literal};
 use serde_json::{Value, json};
-use support::{Game, copy_declarations, has, lines, project, repo, slashes};
+use support::{Analysis, Game, analyze, copy_declarations, has, lines, project, repo, slashes};
 
 const HEADER: &str = "import { Subsystem, CrucibleBehaviour, attribute, type All } from \"@trioforge/crucible\";\nimport { boot } from \"@trioforge/crucible/server\";\n";
 const POSITIVE: &str = include_str!("transform-fixtures/game.ts");
@@ -17,16 +18,9 @@ fn line_count(text: &str) -> usize {
     text.trim_end().split('\n').count()
 }
 
-fn classes(facts: &Facts, file: &str) -> Vec<Class> {
-    let table = facts.files.iter().find(|f| f.path.ends_with(file)).unwrap_or_else(|| panic!("{file} has facts"));
-    table
-        .facts
-        .iter()
-        .filter_map(|(_, fact)| match fact.crucible.as_deref() {
-            Some(Crucible::Class(class)) => Some(class.clone()),
-            _ => None,
-        })
-        .collect()
+fn classes(analysis: &Analysis, file: &str) -> Vec<Class> {
+    assert!(analysis.files.iter().any(|f| f.path.ends_with(file)), "{file} has facts");
+    analysis.crucible.classes(file)
 }
 
 fn class<'a>(classes: &'a [Class], name: &str) -> &'a Class {
@@ -381,6 +375,16 @@ fn attribute_calls_lower_without_their_type_arguments_and_unions_use_a_union_che
 }
 
 #[test]
+fn inject_resolves_its_target_through_an_alias_of_the_macro() {
+    let game = Game::new();
+    game.main("import { inject, Subsystem } from \"@trioforge/crucible\";\nexport class Store extends Subsystem {}\nexport const store = inject<Store>();\nconst alias = inject;\nexport const aliased = alias<Store>();\n");
+    let luau = game.luau("server/main.luau");
+    assert_eq!(luau.matches("__crucible.resolve(\"fixture-game/server/main:Store\")").count(), 2, "{luau}");
+    game.main("import { inject } from \"@trioforge/crucible\";\nexport const untyped = inject();\n");
+    assert_eq!(game.found(), ["CRU005@src/server/main.ts:2"], "inject without a type argument is rejected");
+}
+
+#[test]
 fn api_identity_ignores_local_lookalikes_and_follows_namespace_and_renamed_imports() {
     let game = Game::new();
     game.main("import * as C from \"@trioforge/crucible\";\nimport { Subsystem as RealSubsystem } from \"@trioforge/crucible\";\nclass Subsystem { value = 1; }\nclass Fake extends Subsystem {}\nclass CrucibleBehaviour<T> { value?: T; }\nclass FakeBehaviour extends CrucibleBehaviour<\"Fake\"> {}\nclass Real extends RealSubsystem {}\nclass RealBehaviour extends C.CrucibleBehaviour<\"Real\"> {}\nfunction inject<T>(): T { return undefined as T; }\nconst untouched = inject<Real>();");
@@ -633,12 +637,12 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     let (project, include) = (game.dir.join("gen/place/default.project.json"), game.include());
     let target = Target::Game { project: &project, include: &include };
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});");
-    let modules = crucible_compiler::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
+    let modules = crucible_transform::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
     let main = modules.modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");
     has(&main.source, "crucible-path:ServerScriptService/TS/**");
 
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"../../src/server/**\"]});");
-    let facts = crucible_compiler::analyze(&place, target).expect("the place type-checks");
+    let facts = analyze(&place, target).expect("the place type-checks");
     assert!(
         facts
             .diagnostics
@@ -1227,8 +1231,7 @@ fn package_sides_without_a_package_search_the_whole_path() {
         "include": ["server"],
     });
     std::fs::write(dir.join("tsconfig.json"), serde_json::to_string(&config).unwrap()).unwrap();
-    let facts = crucible_compiler::analyze(&dir.join("tsconfig.json"), Target::Package)
-        .unwrap_or_else(|d| panic!("{}", lines(&d)));
+    let facts = analyze(&dir.join("tsconfig.json"), Target::Package).unwrap_or_else(|d| panic!("{}", lines(&d)));
     let found: Vec<(i32, u32)> = facts.diagnostics.iter().map(|d| (d.code, d.line)).collect();
     assert_eq!(found, [(90011, 2)]);
     let _ = std::fs::remove_dir_all(&dir);
@@ -1299,7 +1302,7 @@ fn imports_the_place_cannot_hold_are_errors_at_their_specifier() {
     game.write("src/server/runner.server.ts", "export const runner = 1;");
     game.write("src/loose.ts", "export const loose = 1;");
     game.main("import { shared } from \"../shared/util\";\nimport { runner } from \"./runner.server\";\nimport { loose } from \"../loose\";\nprint(shared, runner, loose);");
-    let diagnostics = game.facts().diagnostics;
+    let diagnostics = game.facts().facts.diagnostics;
     let found: Vec<String> =
         diagnostics.iter().map(|d| format!("{}:{} {}", game.relative(d), d.line, d.message)).collect();
     assert_eq!(
@@ -1323,7 +1326,7 @@ fn package_metadata_that_cannot_be_read_is_the_only_report_on_every_file() {
     game.write("src/shared/package.json", "{ not json");
     game.write("src/shared/model.ts", "export interface Model { a: string }");
     game.main("import { Subsystem, inject } from \"@trioforge/crucible\";\nimport type { Model } from \"../shared/model\";\nexport class S extends Subsystem { onStart(): void {} }\nexport type M = Model;\nexport const model = inject<Model>();\nexport const again = inject<Model>();");
-    let diagnostics = game.facts().diagnostics;
+    let diagnostics = game.facts().facts.diagnostics;
     let found: Vec<String> =
         diagnostics.iter().map(|d| format!("{} {} {}", game.relative(d), d.code, d.message)).collect();
     let message = "90000 Crucible: Cannot read package metadata. Check the project's package.json files.";

@@ -2,13 +2,14 @@
 //! before extraction, after its own extraction of each source file, once after the last file, and while lowering, at
 //! each call and after each class declaration. An extension reads syntax through the compiler's tree view and the
 //! checker through the handles and queries below, and never names a tsrs type. It keeps its own facts, keyed by
-//! `SiteId`.
+//! `SiteId`. The handles, flags and queries take tsrs's names, without the `_exported` suffix.
 
+use std::ops::BitOr;
 use std::path::PathBuf;
 
 use crucible_luau::{Expr, Name, Stmt};
 use tsrs_ast::Symbol as TsSymbol;
-use tsrs_checker::{Signature as TsSignature, Type as TsType};
+use tsrs_checker::{LiteralValue, Signature as TsSignature, Type as TsType};
 use tsrs_core::P;
 
 pub use crate::extract::extension::{ExtractCx, ProgramCx};
@@ -51,6 +52,92 @@ pub struct SiteId {
     pub(crate) span: Span,
 }
 
+/// tsrs's flags of one kind, with the constants extensions read under tsrs's names.
+macro_rules! flags {
+    ($(#[$doc:meta])* $name:ident($ts:path) { $($flag:ident,)* }) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub struct $name(pub(crate) $ts);
+
+        #[allow(non_upper_case_globals)]
+        impl $name {
+            $(pub const $flag: $name = $name(<$ts>::$flag);)*
+
+            pub fn intersects(self, other: $name) -> bool {
+                self.0.intersects(other.0)
+            }
+
+            pub fn contains(self, other: $name) -> bool {
+                self.0.contains(other.0)
+            }
+        }
+
+        impl BitOr for $name {
+            type Output = $name;
+
+            fn bitor(self, other: $name) -> $name {
+                $name(self.0 | other.0)
+            }
+        }
+    };
+}
+
+flags! {
+    TypeFlags(tsrs_checker::TypeFlags) {
+        Boolean,
+        BooleanLiteral,
+        Intersection,
+        Number,
+        Object,
+        String,
+        Undefined,
+        Union,
+        UnionOrIntersection,
+    }
+}
+
+flags! {
+    ObjectFlags(tsrs_checker::ObjectFlags) {
+        ClassOrInterface,
+        Reference,
+    }
+}
+
+flags! {
+    SymbolFlags(tsrs_ast::SymbolFlags) {
+        Alias,
+        Class,
+        Interface,
+        Type,
+        TypeAlias,
+    }
+}
+
+flags! {
+    ModifierFlags(tsrs_ast::ModifierFlags) {
+        Abstract,
+        Ambient,
+        Async,
+        Private,
+        Protected,
+        Static,
+    }
+}
+
+flags! {
+    NodeFlags(tsrs_ast::NodeFlags) {
+        Ambient,
+        ContainsThis,
+    }
+}
+
+/// Which signatures of a type to read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureKind {
+    Call,
+    Construct,
+}
+
 /// A symbol the checker bound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Symbol(pub(crate) P<TsSymbol>);
@@ -60,8 +147,16 @@ impl Symbol {
         self.0.name()
     }
 
+    pub fn flags(&self) -> SymbolFlags {
+        SymbolFlags(self.0.flags())
+    }
+
     pub fn declarations(&self) -> Vec<Node> {
         self.0.declarations().iter().filter_map(|&d| Node::of(d)).collect()
+    }
+
+    pub fn value_declaration(&self) -> Option<Node> {
+        self.0.value_declaration().and_then(Node::of)
     }
 }
 
@@ -69,9 +164,78 @@ impl Symbol {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Type(pub(crate) P<TsType>);
 
+impl Type {
+    pub fn flags(&self) -> TypeFlags {
+        TypeFlags(self.0.flags())
+    }
+
+    pub fn object_flags(&self) -> ObjectFlags {
+        ObjectFlags(self.0.object_flags())
+    }
+
+    pub fn symbol(&self) -> Option<Symbol> {
+        self.0.symbol().map(Symbol)
+    }
+
+    /// The symbol of the type alias that names the type.
+    pub fn alias_symbol(&self) -> Option<Symbol> {
+        self.0.alias().and_then(|a| a.symbol()).map(Symbol)
+    }
+
+    /// A union's or an intersection's members.
+    pub fn types(&self) -> Vec<Type> {
+        self.0.types().iter().map(|&t| Type(t)).collect()
+    }
+
+    /// The generic type a reference instantiates.
+    pub fn target(&self) -> Option<Type> {
+        self.0.target().map(Type)
+    }
+
+    /// A class's or an interface's type parameters, and none for any other type.
+    pub fn type_parameters(&self) -> Vec<Type> {
+        self.0.try_as_interface_type().map_or(&[][..], |i| i.type_parameters()).iter().map(|&t| Type(t)).collect()
+    }
+
+    pub fn literal_string(&self) -> Option<&'static str> {
+        match self.literal(tsrs_checker::TypeFlags::StringLiteral)? {
+            LiteralValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn literal_number(&self) -> Option<f64> {
+        match self.literal(tsrs_checker::TypeFlags::NumberLiteral)? {
+            LiteralValue::Number(n) => Some(n.0),
+            _ => None,
+        }
+    }
+
+    pub fn literal_bool(&self) -> Option<bool> {
+        match self.literal(tsrs_checker::TypeFlags::BooleanLiteral)? {
+            LiteralValue::Boolean(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    fn literal(&self, kind: tsrs_checker::TypeFlags) -> Option<LiteralValue> {
+        if self.0.flags().intersects(kind) { self.0.as_literal_type().value() } else { None }
+    }
+}
+
 /// A call or declaration signature the checker resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Signature(pub(crate) P<TsSignature>);
+
+impl Signature {
+    pub fn declaration(&self) -> Option<Node> {
+        self.0.declaration().and_then(Node::of)
+    }
+
+    pub fn parameters(&self) -> Vec<Symbol> {
+        self.0.parameters().iter().map(|&p| Symbol(p)).collect()
+    }
+}
 
 /// A package's `package.json`.
 #[derive(Clone, Debug)]

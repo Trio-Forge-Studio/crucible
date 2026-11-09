@@ -2,7 +2,6 @@ use std::borrow::Cow;
 
 use super::Lower;
 use super::stmt::Parameters;
-use crate::facts::Crucible;
 use crate::tree::{Kind, Node};
 use crucible_luau::{BinOp, Expr, Field, Function, Name, Stmt};
 
@@ -138,9 +137,6 @@ impl Lower<'_> {
         });
         self.namespace = outer_namespace;
         self.current_block.push(Stmt::Do(block));
-        if let Some(Crucible::Class(registered)) = self.fact(s).and_then(|f| f.crucible.as_deref()) {
-            self.register(registered, local.clone());
-        }
         self.extension_class_tail(s, &local);
         if s.is_export() {
             self.export(local);

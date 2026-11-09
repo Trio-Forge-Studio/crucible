@@ -68,4 +68,9 @@ impl LowerCx<'_, '_> {
     pub fn helper(&mut self, module: &HelperModule, name: &'static str) -> Expr {
         self.l.helper(module, name)
     }
+
+    /// Fails the compile with `<what> is not supported` at `n`, and gives `nil` to lower in its place.
+    pub fn unsupported(&mut self, n: Node, what: &str) -> Expr {
+        self.l.unsupported(n, what)
+    }
 }

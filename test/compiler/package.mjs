@@ -14,7 +14,7 @@ for (const [command, args] of [
 			"--manifest-path",
 			path.join(repo, "Cargo.toml"),
 			"-p",
-			"crucible-compiler",
+			"crucible-transform",
 			"--example",
 			"compile",
 			"--",

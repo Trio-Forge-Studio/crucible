@@ -22,9 +22,8 @@ use extension::Extension;
 pub use declarations::DeclarationKind;
 #[cfg(feature = "test-support")]
 pub use facts::{
-    Attribute, Callee, Check, Class, ClassKind, Constant, Crucible, Declaration, Dependency, Fact, Facts, Falsy, Field,
-    FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Reason, Receiver, RuntimeLib, Schema, Site,
-    Span, Tail, Unanswered,
+    Callee, ClassKind, Constant, Crucible, Declaration, Fact, Facts, Falsy, Field, FileFacts, Import, Jsx, KeyLiteral,
+    Literal, MapKey, ModulePath, Place, Reason, Receiver, RuntimeLib, Schema, Site, Span, Tail, Unanswered,
 };
 #[cfg(not(feature = "test-support"))]
 use facts::{FileFacts, Unanswered};

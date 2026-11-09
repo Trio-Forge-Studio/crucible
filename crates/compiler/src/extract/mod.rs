@@ -8,6 +8,7 @@ mod crucible;
 mod data;
 pub(crate) mod extension;
 mod network;
+mod packages;
 mod typed_lint;
 mod types;
 
@@ -42,7 +43,8 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
     let options = program.options();
     let globals = types::Globals::new(&mut checker);
-    let crucible = crucible::Api::new(program, &mut checker, host);
+    let mut packages = packages::Packages::new(program, host);
+    let crucible = crucible::Api::new(&mut checker, &mut packages);
     let mut facts = Facts::default();
     let game = match target {
         crate::Target::Package => None,
@@ -73,6 +75,7 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         resolver,
         globals,
         crucible,
+        packages,
         game,
         config_dir: PathBuf::from(&dir),
         network: network::Program::default(),
@@ -97,7 +100,7 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         let id = x.facts.files.len() as u32;
         x.source_file(file);
         for extension in extensions.iter_mut() {
-            extension.extract_file(&mut ExtractCx { x: &mut x, file: id }, File::new(file));
+            extension.extract_file(&mut ExtractCx { program: ProgramCx { x: &mut x }, file: id }, File::new(file));
         }
     }
     for extension in extensions.iter_mut() {
@@ -191,6 +194,7 @@ struct Extractor {
     resolver: P<EmitResolver>,
     globals: types::Globals,
     crucible: crucible::Api,
+    packages: packages::Packages,
     game: Option<Game>,
     config_dir: PathBuf,
     network: network::Program,
@@ -200,7 +204,8 @@ struct Extractor {
     table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
-    reported: HashSet<(String, u32, Code)>,
+    /// The path, start and TypeScript error number of each diagnostic at a node.
+    reported: HashSet<(String, u32, i32)>,
     options: P<CompilerOptions>,
     jsx: Option<Jsx>,
 }
@@ -213,7 +218,7 @@ impl Extractor {
         }
         let path = match &self.game {
             Some(game) => self
-                .crucible
+                .packages
                 .entry_declaration(module.package, module.entry)
                 .and_then(|declaration| game.module(&declaration))
                 .and_then(|r| absolute(&r)),
@@ -403,12 +408,6 @@ impl Extractor {
         let span = self.span(callee);
         if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
             self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
-            if m == Macro::Inject {
-                self.site();
-                let inject = Box::new(self.crucible_inject(n));
-                let call = self.span(n);
-                self.table.store(call, Site::Crucible, |f| &mut f.crucible, inject);
-            }
         } else {
             let t = self.type_of(callee);
             let t = self.checker.get_non_optional_type(t);

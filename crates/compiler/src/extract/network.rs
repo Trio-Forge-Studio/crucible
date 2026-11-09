@@ -276,14 +276,14 @@ fn ask_timeout(options: P<Node>) -> Option<f64> {
 impl Extractor {
     pub(super) fn file_side(&mut self, file: P<SourceFile>) -> Option<Side> {
         let path = Path::new(file.file_name());
-        self.crucible.side(path, path)
+        self.side(path, path)
     }
 
     pub(super) fn standard(&mut self, symbol: P<Symbol>, which: Standard) -> bool {
         symbol.declarations().iter().any(|&d| {
             let Some(file) = tsrs_ast::get_source_file_of_node(d) else { return false };
             let name = file.file_name().replace('\\', "/");
-            let package = self.crucible.package_name(Path::new(&name));
+            let package = self.packages.package_name(Path::new(&name));
             match which {
                 Standard::Types => name.contains("/@rbxts/types/") || package.as_deref() == Some("@rbxts/types"),
                 Standard::CompilerTypes => {

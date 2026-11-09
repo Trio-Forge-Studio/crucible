@@ -55,24 +55,29 @@ const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 
 const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
 const sorted = (codes) => [...new Set(codes)].sort();
-test("the diagnostics guide lists every CRU code the compiler reports, in order", () => {
-	const compilerDir = path.join(repo, "crates/compiler/src");
-	const compiler = sorted(
-		fs
-			.readdirSync(compilerDir, { recursive: true })
-			.filter((name) => name.endsWith(".rs"))
-			.flatMap((name) => {
-				const code = read(path.join(compilerDir, name));
-				return [
-					...code.matchAll(/Code::Rule\((\d+)\)/g),
-					...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
-				].map((m) => cru(m[1]));
-			}),
+test("the diagnostics guide lists every CRU code the compiler and the transform report, in order", () => {
+	const reported = sorted(
+		["crates/compiler/src", "crates/transform/src"].flatMap((dir) =>
+			fs
+				.readdirSync(path.join(repo, dir), { recursive: true })
+				.filter((name) => name.endsWith(".rs"))
+				.flatMap((name) => {
+					const code = read(path.join(repo, dir, name));
+					return [
+						...code.matchAll(/Code::Rule\((\d+)\)/g),
+						...code.matchAll(/\bfail_with\((?:"(?:[^"\\]|\\.)*"|[^;"])*?,\s*(\d+),?\s*\)/g),
+					].map((m) => cru(m[1]));
+				}),
+		),
 	);
 	const headings = [...read(path.join(repo, "docs/diagnostics.md")).matchAll(/^## (CRU\d{3})$/gm)].map((m) => m[1]);
-	assert.ok(compiler.length > 0, "found CRU codes in the compiler");
+	assert.ok(reported.length > 0, "found CRU codes in the compiler and the transform");
 	assert.deepEqual(headings, sorted(headings), "docs/diagnostics.md lists its CRU headings out of order or twice");
-	assert.deepEqual(headings, compiler, "docs/diagnostics.md headings differ from the CRU codes the compiler reports");
+	assert.deepEqual(
+		headings,
+		reported,
+		"docs/diagnostics.md headings differ from the CRU codes the compiler and the transform report",
+	);
 });
 const declared = (code, call) =>
 	[...code.matchAll(new RegExp(String.raw`\b${call}(?:<[^(]*>)?\("([^"]+)"`, "g"))].map((match) => match[1]);

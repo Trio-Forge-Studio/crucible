@@ -156,8 +156,6 @@ macros! {
     MapSet = Method("Map") "set",
     PromiseThen = Method("Promise") "then",
 
-    Attribute = Crucible "attribute",
-    Inject = Crucible "inject",
     Boot = Crucible "boot",
     ToServer = Crucible "toServer",
     ToClient = Crucible "toClient",
