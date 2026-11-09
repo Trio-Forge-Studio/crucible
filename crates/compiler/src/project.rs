@@ -114,6 +114,13 @@ impl Game {
                     module.specifier, module.path
                 ));
             }
+            if let Some(segment) = module.path.split('/').find(|segment| !portable(segment)) {
+                return Err(format!(
+                    "the virtual module `{}` has `{segment}` in its path, which Windows cannot use as a file or folder \
+                     name",
+                    module.specifier
+                ));
+            }
             let name = module.path.rsplit('/').next().and_then(|name| name.strip_suffix(".luau")).unwrap_or_default();
             if name == "init" || name.ends_with(".server") || name.ends_with(".client") {
                 return Err(format!(
@@ -121,6 +128,9 @@ impl Game {
                      module",
                     module.specifier, module.path
                 ));
+            }
+            if modules[..i].iter().any(|other| other.specifier == module.specifier) {
+                return Err(format!("two virtual modules have the specifier `{}`", module.specifier));
             }
             if let Some(other) = modules[..i].iter().find(|other| same_file(other.path, module.path)) {
                 return Err(format!(
@@ -174,6 +184,20 @@ struct Installed {
     path: PathBuf,
     /// `None` when the link cannot be resolved.
     real: Option<PathBuf>,
+}
+
+/// Whether Windows can name a file or folder `segment`. A device name is reserved with any extension.
+fn portable(segment: &str) -> bool {
+    let device = segment.split('.').next().unwrap_or(segment).to_uppercase();
+    let numbered = |port: &str| {
+        let mut rest = device.strip_prefix(port).into_iter().flat_map(str::chars);
+        matches!((rest.next(), rest.next()), (Some('0'..='9' | '¹' | '²' | '³'), None))
+    };
+    !segment.chars().any(|c| c < ' ' || "<>:\"|?*".contains(c))
+        && !segment.ends_with(['.', ' '])
+        && !matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        && !numbered("COM")
+        && !numbered("LPT")
 }
 
 /// Whether two output paths name one file where file names ignore case, as on Windows and macOS.

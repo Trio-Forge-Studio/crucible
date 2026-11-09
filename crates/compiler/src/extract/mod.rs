@@ -940,9 +940,8 @@ impl Extractor {
             return;
         }
         self.site();
-        let target = self
-            .checker
-            .get_symbol_at_location_exported(specifier)
+        let symbol = self.checker.get_symbol_at_location_exported(specifier);
+        let target = symbol
             .and_then(|s| s.declarations().first().copied())
             .and_then(tsrs_ast::get_source_file_of_node)
             .map(|f| f.file_name().replace('\\', "/"));
@@ -954,6 +953,15 @@ impl Extractor {
             return;
         };
         let virtual_out = game.virtual_module(specifier.text());
+        if virtual_out.is_some()
+            && symbol.is_some_and(|s| s.declarations().iter().any(|d| d.kind() == Kind::SourceFile))
+        {
+            return self.report(
+                specifier,
+                Code::Place,
+                "a virtual module has this specifier, which also names a file of the program",
+            );
+        }
         if virtual_out.is_none() {
             match target.as_deref() {
                 None => return self.report(specifier, Code::Place, "the module this names has no source file"),

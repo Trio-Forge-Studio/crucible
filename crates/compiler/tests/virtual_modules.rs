@@ -127,6 +127,66 @@ fn a_path_rojo_builds_as_a_script_or_folds_into_its_folder_is_refused() {
 }
 
 #[test]
+fn a_path_windows_cannot_name_is_refused() {
+    let game = game();
+    for (path, segment) in [
+        ("shared/x?.luau", "x?.luau"),
+        ("shared/a<b.luau", "a<b.luau"),
+        ("shared/a>b.luau", "a>b.luau"),
+        ("shared/a\"b.luau", "a\"b.luau"),
+        ("shared/a|b.luau", "a|b.luau"),
+        ("shared/a*b.luau", "a*b.luau"),
+        ("shared/a\u{1}b.luau", "a\u{1}b.luau"),
+        ("shared/dots./experience.luau", "dots."),
+        ("shared/space /experience.luau", "space "),
+        ("shared/con.luau", "con.luau"),
+        ("shared/NUL/experience.luau", "NUL"),
+        ("shared/Aux.server.luau", "Aux.server.luau"),
+        ("shared/com1.luau", "com1.luau"),
+        ("shared/LPT9.d.luau", "LPT9.d.luau"),
+        ("prn.luau", "prn.luau"),
+    ] {
+        assert_eq!(
+            failure(&game, &[experience(path)]),
+            format!(
+                "error: the virtual module `virtual:experience` has `{segment}` in its path, which Windows cannot use \
+                 as a file or folder name\n"
+            ),
+        );
+    }
+    for path in ["shared/console.luau", "shared/com10.luau", "shared/lpt.luau"] {
+        compile(&game, &[experience(path)]).unwrap_or_else(|failure| panic!("{path} compiles:\n{failure}"));
+    }
+}
+
+#[test]
+fn two_virtual_modules_with_one_specifier_are_refused() {
+    let game = game();
+    assert_eq!(
+        failure(&game, &[experience("shared/a.luau"), experience("shared/b.luau")]),
+        "error: two virtual modules have the specifier `virtual:experience`\n",
+    );
+}
+
+#[test]
+fn a_virtual_specifier_that_names_a_file_or_a_package_of_the_program_is_refused() {
+    let game = game();
+    game.write("src/shared/real.ts", "export const real = 1;\n");
+    game.main("import { real } from \"../shared/real\";\nimport Vide from \"@rbxts/vide\";\nprint(real, Vide);\n");
+    compile(&game, &[]).unwrap_or_else(|failure| panic!("the game compiles without a virtual module:\n{failure}"));
+    for (specifier, at) in [("../shared/real", "(1,22)"), ("@rbxts/vide", "(2,18)")] {
+        let shadow = VirtualModule { specifier, path: "shared/shadow.luau", source: "return {}\n" };
+        assert!(
+            failure(&game, &[shadow]).ends_with(&format!(
+                "src/server/main.ts{at}: error: a virtual module has this specifier, which also names a file of the \
+                 program\n"
+            )),
+            "{specifier}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "builds a place with Rojo and runs it in Lune, which must both be on PATH"]
 fn a_place_built_with_a_virtual_module_imports_its_value_at_run_time() {
     let game = Game::new();
