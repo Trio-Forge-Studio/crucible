@@ -13,6 +13,9 @@ impl Lower<'_> {
             && self.fact(pattern).and_then(|f| f.receiver) == Some(Receiver::LuaTuple)
             && inner.kind() == Kind::CallExpression
         {
+            if let Some(value) = self.extension_value(init) {
+                return self.bind_value(pattern, value);
+            }
             let call = self.call(inner);
             let mut names = Vec::new();
             let mut later = Vec::new();
@@ -165,7 +168,9 @@ impl Lower<'_> {
     fn lower_assign_pattern(&mut self, target: Node, source: Node) -> Option<Expr> {
         if target.kind() == Kind::ArrayLiteralExpression {
             let receiver = self.fact(target).and_then(|f| f.receiver);
-            if self.is_lua_tuple_call(target, source) {
+            let tuple_call = self.is_lua_tuple_call(target, source);
+            let lowered = if tuple_call { self.extension_value(source) } else { None };
+            if tuple_call && lowered.is_none() {
                 let call = self.call(skip_parens_and_assertions(source));
                 let elements: Vec<Node> = target.elements().iter().collect();
                 let temps: Vec<Name> = elements.iter().map(|_| self.temp()).collect();
@@ -188,7 +193,7 @@ impl Lower<'_> {
                     return None;
                 }
             }
-            let value = self.expr(source);
+            let value = lowered.unwrap_or_else(|| self.expr(source));
             let value = self.push_temp_if_complex(value);
             for (i, e) in target.elements().iter().enumerate() {
                 match e.kind() {

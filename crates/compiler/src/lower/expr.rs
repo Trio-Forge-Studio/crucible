@@ -170,15 +170,20 @@ impl Lower<'_> {
         let object = n.expression();
         let receiver = self.receiver(object);
         let inner = skip_parens_and_assertions(object);
-        if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-            let call = self.call(inner);
-            let index = self.expr(n.argument_expression());
-            return match index {
-                Expr::Number(0.0) => Expr::Paren(Box::new(call)),
-                index => Expr::Paren(Box::new(Expr::global("select").call(vec![offset(index, 1.0), call]))),
+        let base = if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
+            let Some(base) = self.extension_value(object) else {
+                let call = self.call(inner);
+                let index = self.expr(n.argument_expression());
+                return match index {
+                    Expr::Number(0.0) => Expr::Paren(Box::new(call)),
+                    index => Expr::Paren(Box::new(Expr::global("select").call(vec![offset(index, 1.0), call]))),
+                };
             };
-        }
-        let (base, key) = self.ordered_pair(object, n.argument_expression());
+            (base, Vec::new())
+        } else {
+            self.capture(|l| l.expr(object))
+        };
+        let (base, key) = self.ordered_after(base, n.argument_expression());
         base.index(element_key(receiver, key))
     }
 
@@ -487,6 +492,12 @@ impl Lower<'_> {
     }
 
     pub(super) fn condition(&mut self, n: Node) -> Expr {
+        if is_logic(n)
+            && let Some(value) = self.extension_expression(n)
+        {
+            let falsy = self.logic_falsy(n);
+            return self.truthy_check(value, falsy);
+        }
         match n.kind() {
             Kind::ParenthesizedExpression => {
                 let inner = n.expression();
@@ -523,6 +534,16 @@ impl Lower<'_> {
         let falsy = self.falsy(n);
         let value = self.expr(n);
         self.truthy_check(value, falsy)
+    }
+
+    /// The falsy values of a `!`, `&&` or `||`, read from its operands as the fact pass reads them.
+    fn logic_falsy(&mut self, n: Node) -> Falsy {
+        match n.kind() {
+            Kind::ParenthesizedExpression => self.logic_falsy(n.expression()),
+            Kind::PrefixUnaryExpression => Falsy::FALSE,
+            _ if n.operator() == Op::And => self.falsy(n.left()) | self.falsy(n.right()),
+            _ => self.falsy(n.right()),
+        }
     }
 
     fn is_boolean_macro(&self, call: Node) -> bool {
@@ -566,12 +587,17 @@ impl Lower<'_> {
     fn coalesce(&mut self, n: Node) -> Expr {
         let mut operands = vec![n.right()];
         let mut left = n.left();
+        let mut first = None;
         while left.kind() == Kind::BinaryExpression && left.operator() == Op::Coalesce {
+            first = self.extension_expression(left);
+            if first.is_some() {
+                break;
+            }
             operands.push(left.right());
             left = left.left();
         }
         let can_be_false = self.falsy(n).contains(Falsy::FALSE);
-        let first = self.expr(left);
+        let first = first.unwrap_or_else(|| self.expr(left));
         let mut rest = Vec::new();
         for &o in operands.iter().rev() {
             rest.push(self.capture(|l| l.expr(o)));
@@ -653,8 +679,13 @@ impl Lower<'_> {
         let receiver = self.receiver(source);
         let inner = skip_parens_and_assertions(source);
         if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-            let call = self.call(inner);
-            return Expr::Table(vec![Field::Item(call)]);
+            let Some(value) = self.extension_value(source) else {
+                let call = self.call(inner);
+                return Expr::Table(vec![Field::Item(call)]);
+            };
+            let result = self.push_temp(Expr::Table(Vec::new()));
+            self.append_spread(result.clone(), source, receiver, value);
+            return result;
         }
         if receiver == Some(Receiver::Array) {
             let value = self.expr(source);
@@ -677,11 +708,18 @@ impl Lower<'_> {
         let receiver = self.receiver(source);
         let inner = skip_parens_and_assertions(source);
         let value = if receiver == Some(Receiver::LuaTuple) && inner.kind() == Kind::CallExpression {
-            let call = self.call(inner);
-            Expr::Table(vec![Field::Item(call)])
+            match self.extension_value(source) {
+                Some(value) => value,
+                None => Expr::Table(vec![Field::Item(self.call(inner))]),
+            }
         } else {
             self.expr(source)
         };
+        self.append_spread(target, source, receiver, value);
+    }
+
+    /// Appends the values of `source`, which lowered to `value`, to the array `target`.
+    fn append_spread(&mut self, target: Expr, source: Node, receiver: Option<Receiver>, value: Expr) {
         let insert = |item: Expr| Stmt::Call(Expr::global("table.insert").call(vec![target.clone(), item]));
         match receiver {
             Some(Receiver::Array | Receiver::LuaTuple) => {
@@ -780,7 +818,7 @@ impl Lower<'_> {
             }
             Kind::ShorthandPropertyAssignment => {
                 let Some(name) = p.name() else { return refused(self) };
-                let value = Lowered::of(self.identifier(name));
+                let value = Lowered::of(self.expr(name));
                 Property { key: Lowered::of(Expr::String(Cow::Borrowed(name.text()))), value }
             }
             Kind::MethodDeclaration => {
@@ -805,7 +843,14 @@ impl Lower<'_> {
         let statement = usage == Usage::Statement;
         let mut links = Vec::new();
         let mut cur = n;
+        let mut lowered = None;
         while cur.in_optional_chain() {
+            if cur != n {
+                lowered = self.extension_expression(cur);
+                if lowered.is_some() {
+                    break;
+                }
+            }
             match cur.kind() {
                 Kind::PropertyAccessExpression | Kind::ElementAccessExpression | Kind::CallExpression => {
                     links.push(cur)
@@ -825,19 +870,24 @@ impl Lower<'_> {
             && self.fact(first.expression()).and_then(|f| f.callee) == Some(Callee::Method)
             && matches!(cur.kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression)
         {
+            let lowered = lowered.or_else(|| self.extension_expression(cur));
             let object = self.expr(cur.expression());
             let object = self.push_temp(object);
-            let function = if cur.kind() == Kind::PropertyAccessExpression {
-                object.clone().field(Cow::Borrowed(cur.name().unwrap().text()))
-            } else {
-                let kind = self.receiver(cur.expression());
-                let key = self.expr(cur.argument_expression());
-                object.clone().index(element_key(kind, key))
+            let function = match lowered {
+                Some(function) => function,
+                None if cur.kind() == Kind::PropertyAccessExpression => {
+                    object.clone().field(Cow::Borrowed(cur.name().unwrap().text()))
+                }
+                None => {
+                    let kind = self.receiver(cur.expression());
+                    let key = self.expr(cur.argument_expression());
+                    object.clone().index(element_key(kind, key))
+                }
             };
             receiver = Some(object);
             function
         } else {
-            self.expr(cur)
+            lowered.unwrap_or_else(|| self.expr(cur))
         };
         let result = self.push_temp(base);
         let mut segment: Vec<Block> = Vec::new();
@@ -897,10 +947,19 @@ impl Lower<'_> {
             });
             let consumed = if call_of_link.is_some() { 2 } else { 1 };
             let last = i + consumed == links.len();
-            let target = open.get_or_insert_with(Vec::new);
+            let guarded = open.is_some();
+            // Links before the first `?.` follow an expression an extension lowered, which nothing guards.
+            let target = match open.as_mut() {
+                Some(block) => block,
+                None => &mut self.current_block,
+            };
             target.extend(block);
             if last && statement && value.is_multi() {
-                final_call = Some(value);
+                if guarded {
+                    final_call = Some(value);
+                } else {
+                    target.push(Stmt::Call(value));
+                }
             } else {
                 target.push(Stmt::Assign(vec![result.clone()], vec![value]));
             }

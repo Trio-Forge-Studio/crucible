@@ -2,7 +2,8 @@
 //! records each one's types from the checker, and lowers it to a call into the package's runtime entry with those
 //! types and the program's probe count. It replaces each `HERE` in a probe's arguments with where the probe is, and
 //! registers every class with the runtime after its declaration. A second one, `Heres`, replaces every `HERE` of a
-//! file to test that an expression an extension lowers lowers in place wherever it sits.
+//! file to test that an expression an extension lowers lowers in place wherever it sits. A third, `Hooks`, replaces
+//! the expressions the compiler lowers by their parts instead of whole.
 
 mod support;
 
@@ -349,4 +350,181 @@ fn an_expression_an_extension_lowers_lowers_in_place_on_every_path() {
 #[should_panic(expected = "extension `heres` lowered the parts of a node and then left the node to the compiler")]
 fn declining_a_call_after_lowering_its_arguments_panics() {
     compile_heres("outer(peek(HERE), HERE);\n");
+}
+
+/// Replaces each property access named `hook` with the global `hooked`, each call to `tupleHook` with the global
+/// `hookedTuple`, and each expression written as one of `texts` with the global `replaced`.
+#[derive(Default)]
+struct Hooks {
+    texts: &'static [&'static str],
+    sites: HashMap<SiteId, &'static str>,
+}
+
+impl Extension for Hooks {
+    fn name(&self) -> &'static str {
+        "hooks"
+    }
+
+    fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
+        for n in descendants(file.root()) {
+            let global = match n.kind() {
+                Kind::PropertyAccessExpression if n.name().is_some_and(|name| name.text() == "hook") => "hooked",
+                Kind::CallExpression if n.expression().source_text() == "tupleHook" => "hookedTuple",
+                _ if self.texts.contains(&n.source_text()) => "replaced",
+                _ => continue,
+            };
+            self.sites.insert(cx.site(n), global);
+        }
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        self.sites.get(&cx.site(n)).map(|&global| Expr::global(global))
+    }
+}
+
+const HOOKED: &str = "declare const obj: { hook: (n: number) => number; value: { hook: { value: number } } } | undefined;\n\
+                      declare const thing: { hook: (n: number) => number };\n\
+                      declare function make(): { hook(n: number): number };\n\
+                      declare function tupleHook(): LuaTuple<[number, string]>;\n\
+                      declare function take(...values: unknown[]): void;\n";
+
+fn compile_hooks(texts: &'static [&'static str], main: &str) -> String {
+    let game = Game::new();
+    game.main(&format!("{HOOKED}export {{}};\n{main}"));
+    let (instances, include) = in_place(&game);
+    let mut hooks = Hooks { texts, ..Hooks::default() };
+    let modules = compile(&game, &mut hooks, Target::Game { instances: &instances, include: &include, modules: &[] })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    module(&modules, "server/main.luau").to_owned()
+}
+
+#[test]
+fn an_optional_chain_link_an_extension_lowers_starts_the_rest_of_the_chain() {
+    let main = compile_hooks(
+        &[],
+        "export const deep = obj?.value.hook.value;\nexport const further = obj?.value.hook?.value;\n",
+    );
+    assert!(!main.contains(".hook"), "no link reads `hook`:\n{main}");
+    has(&main, "local _0 = hooked\n_0 = _0.value\nlocal deep = _0\n");
+    has(&main, "local _1 = hooked\nif _1 ~= nil then\n\t_1 = _1.value\nend\nlocal further = _1\n");
+}
+
+#[test]
+fn a_callee_an_extension_lowers_is_called_and_a_method_keeps_its_receiver_once() {
+    let main = compile_hooks(&[], "export const called = thing.hook(1);\nexport const method = make().hook(2);\n");
+    has(&main, "local called = hooked(1)\n");
+    has(&main, "local method = hooked(make(), 2)\n");
+}
+
+#[test]
+fn a_lua_tuple_call_an_extension_lowers_is_the_tuple_s_array_wherever_it_sits() {
+    let main = compile_hooks(
+        &[],
+        "export const spread = [...tupleHook()];\n\
+         take(...tupleHook());\n\
+         export const first = tupleHook()[0];\n\
+         export const [x, y] = tupleHook();\n\
+         let p: number, q: string;\n\
+         [p, q] = tupleHook();\n\
+         export function f(): LuaTuple<[number, string]> {\n\treturn tupleHook();\n}\n",
+    );
+    assert!(!main.contains("tupleHook("), "every call of tupleHook was replaced:\n{main}");
+    has(&main, "local _0 = {}\ntable.move(hookedTuple, 1, #hookedTuple, #_0 + 1, _0)\nlocal spread = _0\n");
+    has(&main, "take(table.unpack(hookedTuple))\n");
+    has(&main, "local first = hookedTuple[1]\n");
+    has(&main, "local x = hookedTuple[1]\nlocal y = hookedTuple[2]\n");
+    has(&main, "p = hookedTuple[1]\nq = hookedTuple[2]\n");
+    has(&main, "return table.unpack(hookedTuple)\n");
+}
+
+#[test]
+fn an_unreplaced_lua_tuple_call_keeps_its_several_values() {
+    let main = compile_hooks(
+        &[],
+        "declare function pair(): LuaTuple<[number, string]>;\n\
+         export const spread = [...pair()];\n\
+         take(...pair());\n\
+         export const [x, y] = pair();\n",
+    );
+    has(&main, "local spread = { pair() }\n");
+    has(&main, "take(pair())\n");
+    has(&main, "local x, y = pair()\n");
+}
+
+#[test]
+fn an_expression_the_compiler_takes_apart_is_asked_before_its_parts() {
+    let main = compile_hooks(
+        &[
+            "!ready",
+            "ready && open",
+            "(ready || open)",
+            "first ?? second",
+            "[1, 2]",
+            "[[\"a\", 1]]",
+            "[\"b\", 2]",
+            "shorthand",
+            "[3, 4]",
+            "$tuple(5, 6)",
+        ],
+        "declare const ready: boolean;\ndeclare const open: boolean;\n\
+         declare const first: number | undefined;\ndeclare const second: number | undefined;\n\
+         declare const third: number;\ndeclare const shorthand: number;\n\
+         if (!ready) print(1);\n\
+         if (ready && open) print(2);\n\
+         if ((ready || open) && ready) print(3);\n\
+         export const chosen = first ?? second ?? third;\n\
+         export const set = new Set([1, 2]);\n\
+         export const map = new Map([[\"a\", 1]]);\n\
+         export const entries = new Map([[\"b\", 2], [\"c\", 3]]);\n\
+         export const object = { shorthand };\n\
+         export function g(): LuaTuple<[number, number]> {\n\treturn [3, 4] as LuaTuple<[number, number]>;\n}\n\
+         export function h(): LuaTuple<[number, number]> {\n\treturn $tuple(5, 6);\n}\n",
+    );
+    has(&main, "if replaced then\n\tprint(1)\nend\n");
+    has(&main, "if replaced then\n\tprint(2)\nend\n");
+    has(&main, "if replaced and ready then\n\tprint(3)\nend\n");
+    has(&main, "local chosen = replaced or third\n");
+    has(&main, "for _1, _2 in replaced do\n\t_0[_2] = true\nend\nlocal set = _0\n");
+    has(&main, "for _4, _5 in replaced do\n\t_3[_5[1]] = _5[2]\nend\nlocal map = _3\n");
+    has(&main, "local _6 = replaced\nlocal entries = {\n\t[_6[1]] = _6[2],\n\tc = 3,\n}\n");
+    has(&main, "shorthand = replaced,\n");
+    assert_eq!(main.matches("return table.unpack(replaced)\n").count(), 2, "both tuples are replaced:\n{main}");
+}
+
+#[test]
+fn a_jsx_string_attribute_an_extension_lowers_lowers_in_place() {
+    let game = Game::new();
+    game.config(|config| config["compilerOptions"]["jsx"] = json!("react"));
+    game.write(
+        "src/server/main.tsx",
+        "/** @jsx h */\n\
+         declare function h(tag: unknown, props: unknown, ...children: unknown[]): unknown;\n\
+         declare namespace h {\n\tnamespace JSX {\n\t\ttype Element = unknown;\n\t\t\
+         interface IntrinsicElements {\n\t\t\tframe: { Name?: string };\n\t\t}\n\t}\n}\n\
+         export const frame = <frame Name=\"Hooked\" />;\n",
+    );
+    let (instances, include) = in_place(&game);
+    let mut hooks = Hooks { texts: &["\"Hooked\""], ..Hooks::default() };
+    let modules = compile(&game, &mut hooks, Target::Game { instances: &instances, include: &include, modules: &[] })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    has(module(&modules, "server/main.luau"), "Name = replaced,\n");
+}
+
+#[test]
+fn a_replacement_stays_inside_its_probe_and_the_innermost_probe_wins() {
+    let game = probe_game();
+    game.main(
+        "import { HERE, probe } from \"@rbxts/probe\";\n\
+         export const outer = probe({ at: HERE, inner:\n\
+         \tprobe({ at: HERE }) });\n\
+         print(HERE);\n",
+    );
+    let (instances, include) = in_place(&game);
+    let mut probe = Probe::default();
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    let main = module(&modules, "server/main.luau");
+    assert_eq!(main.matches("at = \"main.ts:2\"").count(), 1, "the outer HERE is the outer probe's:\n{main}");
+    assert_eq!(main.matches("at = \"main.ts:3\"").count(), 1, "the inner HERE is the inner probe's:\n{main}");
+    has(main, "\nprint(HERE)\n");
 }

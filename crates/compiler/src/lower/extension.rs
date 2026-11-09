@@ -1,6 +1,6 @@
 //! The lowering half of the extension seam.
 
-use super::Lower;
+use super::{Lower, is_paren_or_assertion};
 use crate::extension::{Extension, HelperModule, SiteId};
 use crate::tree::Node;
 use crucible_luau::{Expr, Name};
@@ -20,6 +20,21 @@ impl Lower<'_> {
     /// The first extension's lowering of an expression.
     pub(super) fn extension_expression(&mut self, n: Node) -> Option<Expr> {
         self.first_extension(n, |e, cx, n| e.lower_expression(cx, n))
+    }
+
+    /// The first extension's lowering of `n` or of an expression inside the parentheses and assertions around the
+    /// node they wrap, asked from the outside in as `expr` asks. A path that lowers a node by its parts, instead of
+    /// through `expr`, asks this first.
+    pub(super) fn extension_value(&mut self, mut n: Node) -> Option<Expr> {
+        loop {
+            if let Some(value) = self.extension_expression(n) {
+                return Some(value);
+            }
+            if !is_paren_or_assertion(n) {
+                return None;
+            }
+            n = n.expression();
+        }
     }
 
     fn first_extension(

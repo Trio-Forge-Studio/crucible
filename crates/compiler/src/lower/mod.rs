@@ -342,7 +342,12 @@ impl<'a> Lower<'a> {
     }
 
     fn ordered_pair(&mut self, first: Node, second: Node) -> (Expr, Expr) {
-        let (first, first_setup) = self.capture(|l| l.expr(first));
+        let first = self.capture(|l| l.expr(first));
+        self.ordered_after(first, second)
+    }
+
+    /// `first`, lowered with the statements it needs, and then `second`, as `ordered_pair` orders them.
+    fn ordered_after(&mut self, (first, first_setup): (Expr, Block), second: Node) -> (Expr, Expr) {
         let (second, second_setup) = self.capture(|l| l.expr(second));
         self.current_block.extend(first_setup);
         let first = self.store_before(first, &second_setup, std::slice::from_ref(&second));
@@ -673,15 +678,19 @@ fn is_hole(e: Node) -> bool {
 }
 
 fn skip_parens_and_assertions(mut n: Node) -> Node {
-    while matches!(
+    while is_paren_or_assertion(n) {
+        n = n.expression();
+    }
+    n
+}
+
+fn is_paren_or_assertion(n: Node) -> bool {
+    matches!(
         n.kind(),
         Kind::ParenthesizedExpression
             | Kind::AsExpression
             | Kind::NonNullExpression
             | Kind::SatisfiesExpression
             | Kind::TypeAssertionExpression
-    ) {
-        n = n.expression();
-    }
-    n
+    )
 }

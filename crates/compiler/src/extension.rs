@@ -41,8 +41,13 @@ pub trait Extension: Send {
 
     /// Lowers an expression the extension owns in place of the compiler, or returns `None` to leave it to the
     /// compiler and the next extension. The compiler asks before it lowers any expression to a value, wherever it
-    /// sits, including in an optional chain and in a call another extension lowers. A call it lowers as a statement
-    /// goes to `lower_call` only. Decide before lowering anything, as for `lower_call`.
+    /// sits: as a callee, in a condition, in an optional chain, as a `LuaTuple` it spreads, indexes, destructures or
+    /// returns, and in a call another extension lowers. The value stands for the whole expression, so the compiler
+    /// lowers none of its parts, except that a method call whose callee the extension lowers still passes the object
+    /// it reads the method from. Where the compiler would have used a `LuaTuple`'s several values, it reads them from
+    /// the value as an array. A call it lowers as a statement goes to `lower_call` only, and the callee of a macro or
+    /// `super` call and the `$range(..)` of a for-of are not values. Decide before lowering anything, as for
+    /// `lower_call`.
     fn lower_expression(&self, _cx: &mut LowerCx<'_, '_>, _n: Node) -> Option<Expr> {
         None
     }
