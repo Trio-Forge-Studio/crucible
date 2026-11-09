@@ -45,9 +45,15 @@ pub trait Extension: Send {
     /// returns, and in a call another extension lowers. The value stands for the whole expression, so the compiler
     /// lowers none of its parts, except that a method call whose callee the extension lowers still passes the object
     /// it reads the method from. Where the compiler would have used a `LuaTuple`'s several values, it reads them from
-    /// the value as an array. A call it lowers as a statement goes to `lower_call` only, and the callee of a macro or
-    /// `super` call and the `$range(..)` of a for-of are not values. Decide before lowering anything, as for
-    /// `lower_call`.
+    /// the value as an array. A call it lowers as a statement goes to `lower_call` only. It never asks about:
+    ///
+    /// - the initializer of an enum member the checker evaluates to a constant, because the members computed from it
+    ///   and each inlined read of a `const enum` member take the checker's value too;
+    /// - the `$range(..)` of a for-of, which has no value at run time;
+    /// - the callee of a macro call;
+    /// - the callee of a `super(..)` or `super.m(..)` call.
+    ///
+    /// Decide before lowering anything, as for `lower_call`.
     fn lower_expression(&self, _cx: &mut LowerCx<'_, '_>, _n: Node) -> Option<Expr> {
         None
     }

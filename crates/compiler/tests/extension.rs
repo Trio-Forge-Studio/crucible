@@ -492,6 +492,24 @@ fn an_expression_the_compiler_takes_apart_is_asked_before_its_parts() {
 }
 
 #[test]
+fn a_constant_enum_member_holds_the_checker_s_value_without_asking_the_hook() {
+    let main = compile_hooks(
+        &["123", "code()"],
+        "declare function code(): number;\n\
+         enum Codes {\n\tA = 123,\n\tB = A + 1,\n\tC = code(),\n}\n\
+         const enum Inlined {\n\tA = 123,\n}\n\
+         export const read = Inlined.A;\n\
+         export const literal = 123;\n\
+         export const codes = Codes;\n",
+    );
+    has(&main, "Codes.A = 123\n");
+    has(&main, "Codes.B = 124\n");
+    has(&main, "Codes.C = replaced\n");
+    has(&main, "local read = 123\n");
+    has(&main, "local literal = replaced\n");
+}
+
+#[test]
 fn a_jsx_string_attribute_an_extension_lowers_lowers_in_place() {
     let game = Game::new();
     game.config(|config| config["compilerOptions"]["jsx"] = json!("react"));
