@@ -255,3 +255,22 @@ fn cru038_reports_a_value_taken_from_charm_and_not_a_value_typed_like_charm() {
     );
     assert_eq!(rules(&game), [], "no value here comes from Charm");
 }
+
+#[test]
+fn cru038_applies_where_crucible_resolves_through_paths() {
+    let game = with_charm();
+    std::fs::create_dir_all(game.dir.join("vendor")).unwrap();
+    std::fs::rename(game.dir.join("node_modules/@trioforge/crucible"), game.dir.join("vendor/crucible")).unwrap();
+    game.config(|config| {
+        config["compilerOptions"]["paths"] = serde_json::json!({
+            "@trioforge/crucible": ["./vendor/crucible/out/index.d.ts"],
+            "@trioforge/crucible/*": ["./vendor/crucible/out/*/index.d.ts"],
+        });
+    });
+    game.main(
+        "import { Subsystem } from \"@trioforge/crucible\";\n\
+         import { effect } from \"@rbxts/charm\";\n\
+         export const used = [Subsystem, effect];\n",
+    );
+    assert_eq!(lines(rules(&game)), [(2, 90038)]);
+}

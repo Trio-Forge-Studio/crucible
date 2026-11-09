@@ -74,7 +74,8 @@ pub fn analyze(
 #[derive(Default)]
 pub struct Crucible {
     api: Option<api::Api>,
-    /// Whether CRU038 applies, which it does wherever Crucible is installed, imported or not.
+    /// Whether CRU038 applies, which it does wherever Crucible is installed, imported or not, and wherever the
+    /// program reaches Crucible another way, such as through `paths`.
     charm: bool,
     state: State,
 }
@@ -122,7 +123,7 @@ impl Extension for Crucible {
         cx.declare_helper(&EMIT);
         let api = api::Api::new(cx);
         self.api = (!api.is_empty()).then_some(api);
-        self.charm = cx.installed(PACKAGE);
+        self.charm = cx.installed(PACKAGE) || self.api.is_some();
     }
 
     fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
