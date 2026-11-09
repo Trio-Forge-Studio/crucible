@@ -1,12 +1,13 @@
 //! Crucible's transform, the compiler extension that knows the framework. It checks that the installed runtime
 //! implements the ABI this transform emits, and owns registration, dependency injection, the network, data and config
-//! declarations, `boot` and the entries a game may import. The typed lints still run inside the compiler.
+//! declarations, `boot`, the entries a game may import, and the lints over Crucible's classes and Charm's lifetimes.
 
 mod api;
 mod boot;
 mod data;
 mod declarations;
 mod facts;
+mod lints;
 mod lower;
 mod network;
 mod registration;
@@ -131,6 +132,7 @@ impl Extension for Crucible {
         if cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE) {
             return;
         }
+        lints::Lints { cx: &mut *cx, crucible: self.api.is_some() }.file(file);
         if cx.metadata_invalid() {
             let (code, message) =
                 Code::Setup.render("Cannot read package metadata. Check the project's package.json files.");

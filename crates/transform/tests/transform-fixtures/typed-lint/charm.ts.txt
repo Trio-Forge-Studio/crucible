@@ -1,0 +1,12 @@
+import { atom, batch, computed, effect, effectScope as scoped, onCleanup } from "@rbxts/charm"; // fires 38 38 38
+import type { effect as typed } from "@rbxts/charm";
+import * as charm from "@rbxts/charm";
+export { onCleanup as cleanup } from "@rbxts/charm"; // fires 38
+export type { effect as Effect } from "@rbxts/charm";
+const count = atom(0);
+const doubled = computed(() => count() * 2);
+batch(() => count(1));
+charm.effect(() => print(doubled())); // fires 38
+charm.atom(1);
+export const lifetimes = [effect, scoped, onCleanup, charm.onCleanup]; // fires 38
+export type Typed = typeof typed;

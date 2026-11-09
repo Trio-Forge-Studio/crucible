@@ -19,8 +19,8 @@ use extension::Extension;
 // The fact table is internal. Tests read it through `analyze`, which the `test-support` feature exports.
 #[cfg(feature = "test-support")]
 pub use facts::{
-    Callee, ClassKind, Constant, Fact, Facts, Falsy, FileFacts, Import, Jsx, ModulePath, Place, Reason, Receiver,
-    RuntimeLib, Site, Span, Unanswered,
+    Callee, Constant, Fact, Facts, Falsy, FileFacts, Import, Jsx, ModulePath, Place, Reason, Receiver, RuntimeLib,
+    Site, Span, Unanswered,
 };
 #[cfg(not(feature = "test-support"))]
 use facts::{FileFacts, Unanswered};

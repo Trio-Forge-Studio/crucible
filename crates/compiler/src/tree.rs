@@ -263,7 +263,7 @@ impl File {
         self.file.file_name().replace('\\', "/")
     }
 
-    pub(crate) fn text(&self) -> &'static str {
+    pub fn text(&self) -> &'static str {
         self.file.text()
     }
 
@@ -645,6 +645,19 @@ impl Node {
         self.wrap(self.n.as_import_type_node().argument)
     }
 
+    /// The name a specifier imports or exports, before any `as`.
+    pub fn property_name_or_name(&self) -> Option<Node> {
+        self.property_name().or_else(|| self.name())
+    }
+
+    pub fn is_type_node(&self) -> bool {
+        tsrs_ast::is_type_node_kind(self.n.kind())
+    }
+
+    pub fn is_function_like(&self) -> bool {
+        tsrs_ast::is_function_like(self.n)
+    }
+
     pub fn argument_expression(&self) -> Node {
         self.wrap(self.n.as_element_access_expression().argument_expression)
     }
@@ -705,7 +718,7 @@ impl Node {
         self.n.label().is_some()
     }
 
-    pub(crate) fn is_type_only(&self) -> bool {
+    pub fn is_type_only(&self) -> bool {
         self.n.is_type_only()
     }
 
@@ -736,7 +749,7 @@ impl Node {
         self.wrap_opt(self.n.as_import_clause().named_bindings)
     }
 
-    pub(crate) fn export_clause(&self) -> Option<Node> {
+    pub fn export_clause(&self) -> Option<Node> {
         self.wrap_opt(self.n.as_export_declaration().export_clause)
     }
 

@@ -1,4 +1,3 @@
 # Architecture rule violations that `cargo xtask arch` found when it was added. This list may only shrink.
 # Each line is `<rule> <where> <what>`. Rust files are named by crate and crate-relative path, and lines carry no
 # line numbers, so an edit elsewhere in a file never changes the list. A repeated line is a repeated violation.
-1 crucible-compiler:src/extract/typed_lint.rs "/node_modules/@trioforge/crucible/"

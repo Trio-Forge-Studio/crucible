@@ -202,12 +202,6 @@ pub struct Helper {
     pub path: Option<ModulePath>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ClassKind {
-    Subsystem,
-    Behaviour,
-}
-
 /// The facts of one source file, sorted by span.
 #[derive(Clone, Debug)]
 pub struct FileFacts {
