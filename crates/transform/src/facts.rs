@@ -15,6 +15,11 @@ pub enum Fact {
     Declaration(Declaration),
     /// A `receive` call, which lowers to `receive(self, field, target, callback)`.
     Receive { field: Box<str> },
+    /// A `boot` call, which lowers as a call with each of its `Load` globs in place of the literal.
+    Boot,
+    /// A `boot` load glob, as the instance path pattern the runtime matches, such as
+    /// `crucible-path:ServerScriptService/TS/systems/**`.
+    Load(Box<str>),
 }
 
 /// `__crucible.<kind>(name, ...kept arguments, ...schemas, ...tail)`.

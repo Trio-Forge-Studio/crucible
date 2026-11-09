@@ -15,6 +15,7 @@ pub(crate) const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "Cr
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Macro {
     Attribute,
+    Boot,
     Inject,
     Receive,
     Declaration(DeclarationKind),
@@ -23,7 +24,7 @@ pub(crate) enum Macro {
 /// The entries whose exports are macros: the root's own, and the network and data macros any of them exports.
 /// `@trioforge/crucible/emit` exports runtime functions of the same names that are not the macros.
 const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
-    [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[]), ("./client", &[])];
+    [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[Macro::Boot]), ("./client", &[Macro::Boot])];
 
 impl Macro {
     /// The network and data macros, which declare something or receive a message.
@@ -37,6 +38,7 @@ impl Macro {
             Macro::Attribute => crucible_abi::ATTRIBUTE.name,
             Macro::Receive => crucible_abi::RECEIVE.name,
             Macro::Declaration(kind) => kind.name(),
+            Macro::Boot => "boot",
             Macro::Inject => "inject",
         }
     }

@@ -1,9 +1,9 @@
 //! Crucible's transform, the compiler extension that knows the framework. It checks that the installed runtime
-//! implements the ABI this transform emits, and owns registration, dependency injection, and the network, data and
-//! config declarations. The framework's other rules and lowerings still run inside the compiler and move here one
-//! feature at a time.
+//! implements the ABI this transform emits, and owns registration, dependency injection, the network, data and config
+//! declarations, `boot` and the entries a game may import. The typed lints still run inside the compiler.
 
 mod api;
+mod boot;
 mod data;
 mod declarations;
 mod facts;
@@ -128,11 +128,16 @@ impl Extension for Crucible {
     }
 
     fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
-        // The compiler reports metadata it cannot read, and the transform then leaves the program alone.
-        let Some(api) = self.api.as_mut() else { return };
-        if cx.metadata_invalid() || cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE) {
+        if cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE) {
             return;
         }
+        if cx.metadata_invalid() {
+            let (code, message) =
+                Code::Setup.render("Cannot read package metadata. Check the project's package.json files.");
+            cx.report(file.root(), code, &message);
+            return;
+        }
+        let Some(api) = self.api.as_mut() else { return };
         registration::Walk { cx, api, state: &mut self.state }.file(file);
     }
 
@@ -142,7 +147,8 @@ impl Extension for Crucible {
             Fact::Attribute => Some(lower::attribute(cx, call)),
             Fact::Declaration(declaration) => Some(lower::declaration(cx, call, declaration)),
             Fact::Receive { field } => Some(lower::receive(cx, call, field)),
-            Fact::Class(_) => None,
+            Fact::Boot => Some(lower::boot(cx, call, &self.state.facts)),
+            Fact::Class(_) | Fact::Load(_) => None,
         }
     }
 

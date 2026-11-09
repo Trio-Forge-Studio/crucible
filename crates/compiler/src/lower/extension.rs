@@ -63,6 +63,13 @@ impl LowerCx<'_, '_> {
         arguments
     }
 
+    /// A call's callee, lowered as the compiler lowers any expression. Like `arguments`, a `lower_call` that calls this
+    /// must lower the call itself.
+    pub fn callee(&mut self, call: Node) -> Expr {
+        self.lowered_arguments = true;
+        self.l.expr(call.expression())
+    }
+
     /// Some of a call's argument nodes in evaluation order, each lowered to one value, for a lowering that drops the
     /// others. Like `arguments`, a `lower_call` that calls this must lower the call itself.
     pub fn some_arguments(&mut self, nodes: &[Node]) -> Vec<Expr> {

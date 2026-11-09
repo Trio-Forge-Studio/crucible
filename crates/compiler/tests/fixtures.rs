@@ -237,14 +237,6 @@ fn re_exported_const_enums_keep_their_import() {
 }
 
 #[test]
-fn crucible_macros_come_from_their_entries() {
-    let emit = fact("crucible.ts", "emitAttribute({}", "emitAttribute");
-    assert_eq!(emit, callee(Callee::Function), "the emit module's attribute is not the macro");
-    let boot = fact("crucible.ts", "boot({ load: [] })", "boot");
-    assert_eq!(boot, callee(Callee::Macro(Macro::Boot)), "the server entry's boot is the macro");
-}
-
-#[test]
 fn unanswerable_sites_are_reported() {
     let unanswered: Vec<_> =
         FACTS.unanswered.iter().map(|u| (u.path.rsplit('/').next().unwrap(), u.span, u.site, &u.reason)).collect();

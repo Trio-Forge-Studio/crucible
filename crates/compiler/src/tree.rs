@@ -143,6 +143,7 @@ kinds! {
     TypeQuery,
     LiteralType,
     ImportType,
+    ExternalModuleReference,
 }
 
 macro_rules! operators {
@@ -631,8 +632,17 @@ impl Node {
         self.list(self.n.as_template_expression().template_spans.nodes())
     }
 
-    pub(crate) fn literal(&self) -> Node {
-        self.wrap(self.n.as_template_span().literal)
+    /// A template span's literal, or a literal type's.
+    pub fn literal(&self) -> Node {
+        match self.n.kind() {
+            TsKind::LiteralType => self.wrap(self.n.as_literal_type_node().literal),
+            _ => self.wrap(self.n.as_template_span().literal),
+        }
+    }
+
+    /// The type an `import("...")` type names its module with.
+    pub fn import_type_argument(&self) -> Node {
+        self.wrap(self.n.as_import_type_node().argument)
     }
 
     pub fn argument_expression(&self) -> Node {

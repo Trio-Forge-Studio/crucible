@@ -4,9 +4,9 @@
 //! not sites yet.
 
 mod collisions;
-mod crucible;
 pub(crate) mod extension;
 mod packages;
+mod report;
 mod typed_lint;
 mod types;
 
@@ -28,8 +28,8 @@ use crate::macros::Macro;
 use crate::program::Checked;
 use crate::project::{Game, absolute, installed_module};
 use crate::tree::File;
-use crucible::Code;
 use extension::{ExtractCx, ProgramCx};
+use report::Code;
 
 pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Facts {
     let root = checked.source_root();
@@ -39,8 +39,7 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
     let options = program.options();
     let globals = types::Globals::new(&mut checker);
-    let mut packages = packages::Packages::new(program, host);
-    let crucible = crucible::Api::new(&mut checker, &mut packages);
+    let packages = packages::Packages::new(program, host);
     let mut facts = Facts::default();
     let game = match target {
         crate::Target::Package => None,
@@ -70,7 +69,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         checker,
         resolver,
         globals,
-        crucible,
         packages,
         game,
         config_dir: PathBuf::from(&dir),
@@ -187,7 +185,6 @@ struct Extractor {
     checker: CheckerHandle,
     resolver: P<EmitResolver>,
     globals: types::Globals,
-    crucible: crucible::Api,
     packages: packages::Packages,
     game: Option<Game>,
     config_dir: PathBuf,
@@ -245,7 +242,6 @@ impl Extractor {
                 self.module_path(module.specifier);
             }
         }
-        self.crucible_file(file);
         let table = std::mem::take(&mut self.table);
         for (span, site) in table.conflicts {
             self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
@@ -399,42 +395,38 @@ impl Extractor {
         }
         self.site();
         let span = self.span(callee);
-        if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
-            self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
+        let t = self.type_of(callee);
+        let t = self.checker.get_non_optional_type(t);
+        if object.is_some() && types::is_any(t) {
+            self.unanswered(callee, Site::CallCallee, Reason::Any);
         } else {
-            let t = self.type_of(callee);
-            let t = self.checker.get_non_optional_type(t);
-            if object.is_some() && types::is_any(t) {
-                self.unanswered(callee, Site::CallCallee, Reason::Any);
-            } else {
-                let symbol = self.first_defined_symbol(t);
-                let found = match symbol {
-                    Some(s) if object.is_some() => self.globals.method_macro(s),
-                    Some(s) => self.globals.call_macro(s),
-                    None => None,
-                };
-                let resolved = match found {
-                    Some(m) => Callee::Macro(m),
-                    None if object.is_some() => self.callee_kind(callee, Site::CallCallee, t),
-                    None => Callee::Function,
-                };
-                self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
-                let arguments = n.arguments();
-                if resolved == Callee::Macro(Macro::Assert)
-                    && let Some(&first) = arguments.first()
+            let symbol = self.first_defined_symbol(t);
+            let found = match symbol {
+                Some(s) if object.is_some() => self.globals.method_macro(s),
+                Some(s) => self.globals.call_macro(s),
+                None => None,
+            };
+            let resolved = match found {
+                Some(m) => Callee::Macro(m),
+                None if object.is_some() => self.callee_kind(callee, Site::CallCallee, t),
+                None => Callee::Function,
+            };
+            self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
+            let arguments = n.arguments();
+            if resolved == Callee::Macro(Macro::Assert)
+                && let Some(&first) = arguments.first()
+            {
+                self.truthy(first);
+            }
+            if let Callee::Macro(_) = resolved {
+                if let Some(&last) = arguments.last()
+                    && last.kind() == Kind::SpreadElement
                 {
-                    self.truthy(first);
+                    self.unanswered(last, Site::Spread, Reason::MacroSpread);
                 }
-                if let Callee::Macro(_) = resolved {
-                    if let Some(&last) = arguments.last()
-                        && last.kind() == Kind::SpreadElement
-                    {
-                        self.unanswered(last, Site::Spread, Reason::MacroSpread);
-                    }
-                } else if arguments.iter().any(|&a| returns_values(a)) {
-                    let roblox = self.possibly_roblox(t);
-                    self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
-                }
+            } else if arguments.iter().any(|&a| returns_values(a)) {
+                let roblox = self.possibly_roblox(t);
+                self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
             }
         }
         if let Some(object) = object {

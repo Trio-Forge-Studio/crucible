@@ -71,6 +71,17 @@ fn the_emit_literal_declaration_accepts_boolean_string_and_number_literals() {
 }
 
 #[test]
+fn macros_come_from_their_entries_and_the_emit_functions_of_the_same_names_are_not_macros() {
+    let game = Game::new();
+    game.main("import { attribute as emitAttribute } from \"@trioforge/crucible/emit\";\nimport { boot } from \"@trioforge/crucible/server\";\nexport const fallback = emitAttribute({}, \"speed\", 1);\nconst globs: string[] = [];\nboot({ load: globs });\n");
+    assert_eq!(
+        game.found(),
+        ["CRU004@src/server/main.ts:1", "CRU006@src/server/main.ts:5"],
+        "the emit attribute is a plain call, not the macro CRU015 checks, and the server entry's boot is the macro"
+    );
+}
+
+#[test]
 fn the_random_and_spline_subpaths_are_importable_in_a_game() {
     let game = Game::new();
     game.main("import { Rng } from \"@trioforge/crucible/util/random\";\nimport { catmullRom } from \"@trioforge/crucible/maths/spline\";\nexport const draw = new Rng(\"x\").uint32();\nexport const curve = catmullRom([new Vector3(0, 0, 0), new Vector3(1, 1, 1)]);\n");

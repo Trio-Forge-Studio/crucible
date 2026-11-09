@@ -34,8 +34,6 @@ pub struct Fact {
     /// How many values each step of an iterated `LuaTuple` iterator has. Absent where the tuple's length varies.
     pub step_length: Option<u32>,
     pub import: Option<Import>,
-    /// Set at a declaration or `receive` call, and a `boot` load glob.
-    pub crucible: Option<Box<Crucible>>,
     /// Where an imported module's instance is, set at an import's module specifier in a game.
     pub module: Option<Box<ModulePath>>,
 }
@@ -152,13 +150,6 @@ pub enum Jsx {
     Unsupported,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Crucible {
-    /// A `boot` load glob, as the instance path pattern the runtime matches, such as
-    /// `crucible-path:ServerScriptService/TS/systems/**`.
-    Load(Box<str>),
-}
-
 /// An instance path a module reaches another module by.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModulePath {
@@ -264,7 +255,6 @@ pub enum Site {
     Function,
     Constant,
     Import,
-    Crucible,
 }
 
 #[derive(Clone, Debug, PartialEq)]

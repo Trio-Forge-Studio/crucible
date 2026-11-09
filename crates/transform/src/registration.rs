@@ -174,6 +174,13 @@ impl Walk<'_, '_> {
     fn walk(&mut self, n: Node, file: File, names: &HashSet<&'static str>) {
         match n.kind() {
             Kind::CallExpression => self.call(n, file),
+            Kind::ImportDeclaration | Kind::ExportDeclaration => self.entry_import(n, n.module_specifier()),
+            Kind::ImportType => {
+                let argument = n.import_type_argument();
+                let literal = (argument.kind() == Kind::LiteralType).then(|| argument.literal());
+                self.entry_import(n, literal);
+            }
+            Kind::ExternalModuleReference => self.entry_import(n, Some(n.expression())),
             Kind::StringLiteral => self.side_entry_specifier(n, file),
             Kind::BinaryExpression => self.process_receipt(n),
             Kind::ModuleDeclaration => self.augmentation(n),
@@ -219,6 +226,7 @@ impl Walk<'_, '_> {
 
     fn call(&mut self, n: Node, file: File) {
         if n.expression().kind() == Kind::ImportKeyword {
+            self.entry_import(n, n.arguments().get(0));
             return;
         }
         match self.macro_at(n) {
@@ -231,6 +239,7 @@ impl Walk<'_, '_> {
                 self.attribute_rules(n);
                 self.store(n, Fact::Attribute);
             }
+            Some(Macro::Boot) => self.boot(n),
             Some(Macro::Receive) => self.receive(n, file),
             Some(Macro::Declaration(kind)) => self.declaration(n, kind, file),
             None => {}

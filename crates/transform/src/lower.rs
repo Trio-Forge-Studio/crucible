@@ -1,17 +1,18 @@
 //! Lowers what the transform extracted: `inject` and `attribute` calls, each registered class's `defineClass` call,
-//! and the network and data macros with their wire schemas.
+//! the network and data macros with their wire schemas, and `boot` with its resolved load globs.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use crucible_abi::record::{
     ALL, ATTRIBUTES, BEHAVIOUR, CHECK, DEPS, ID, INSTANCE, KIND, NAME, PROVIDES, REQUIRED, SUBSYSTEM, TAG,
 };
 use crucible_abi::{ATTRIBUTE, DEFINE_CLASS, N, RECEIVE, RESOLVE, RESOLVE_ALL, T};
-use crucible_compiler::extension::{Kind, LowerCx, Node};
+use crucible_compiler::extension::{Kind, LowerCx, Node, SiteId};
 use crucible_luau::{Expr, Field, Name, Stmt};
 
 use crate::EMIT;
-use crate::facts::{Check, Class, ClassKind, Declaration, Dependency, KeyLiteral, Literal, MapKey, Schema, Tail};
+use crate::facts::{Check, Class, ClassKind, Declaration, Dependency, Fact, KeyLiteral, Literal, MapKey, Schema, Tail};
 
 fn string(text: &str) -> Expr {
     Expr::String(Cow::Owned(text.to_owned()))
@@ -244,4 +245,22 @@ fn schema(cx: &mut LowerCx<'_, '_>, schema: &Schema) -> Expr {
             n(cx, "variant").call(vec![string(key), literal(value), body])
         }
     }
+}
+
+/// `boot(options)`, with each load glob the instance path pattern extraction resolved it to.
+pub(crate) fn boot(cx: &mut LowerCx<'_, '_>, call: Node, facts: &HashMap<SiteId, Fact>) -> Expr {
+    let mut replacements = Vec::new();
+    for argument in call.arguments().iter() {
+        loads(cx, argument, facts, &mut replacements);
+    }
+    let callee = cx.callee(call);
+    let args = cx.arguments(call, replacements);
+    callee.call(args)
+}
+
+fn loads(cx: &LowerCx<'_, '_>, n: Node, facts: &HashMap<SiteId, Fact>, out: &mut Vec<(Node, Expr)>) {
+    if let Some(Fact::Load(glob)) = facts.get(&cx.site(n)) {
+        out.push((n, string(glob)));
+    }
+    n.for_each_child(&mut |child| loads(cx, child, facts, out));
 }

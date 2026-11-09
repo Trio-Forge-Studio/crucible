@@ -1,4 +1,4 @@
-use super::{Extractor, crucible::Code, types};
+use super::{Extractor, report::Code, types};
 use crate::facts::ClassKind;
 use tsrs_ast::{Kind, Node, SymbolFlags};
 use tsrs_checker::{Type, TypeFlags};

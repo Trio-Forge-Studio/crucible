@@ -1,5 +1,5 @@
 use super::Extractor;
-use super::crucible::Code;
+use super::report::Code;
 use tsrs_ast::{Kind, Node};
 use tsrs_core::P;
 

@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
 use super::Extractor;
-use super::crucible::Code;
+use super::report::Code;
 use crate::Diagnostic;
 use crate::extension::{
     HelperModule, IndexInfo, Manifest, Signature, SignatureKind, SiteId, Symbol, SymbolFlags, Type,
@@ -88,7 +88,7 @@ impl ProgramCx<'_> {
 
     /// The symbol an import alias resolves to, or `symbol` when it is not an alias.
     pub fn aliased(&mut self, symbol: Symbol) -> Symbol {
-        Symbol(super::crucible::unalias(&mut self.x.checker, symbol.0))
+        Symbol(super::report::unalias(&mut self.x.checker, symbol.0))
     }
 
     pub fn symbol_of_declaration(&mut self, declaration: Node) -> Option<Symbol> {
@@ -148,6 +148,27 @@ impl ProgramCx<'_> {
     /// The folder of the tsconfig the program was built from.
     pub fn config_dir(&self) -> PathBuf {
         self.x.config_dir.clone()
+    }
+
+    /// Whether the program compiles as a game, whose Rojo project maps its output into a place.
+    pub fn is_game(&self) -> bool {
+        self.x.game.is_some()
+    }
+
+    /// Where a game writes the output of a source file under the source root.
+    pub fn out_path(&self, source: &Path) -> Option<PathBuf> {
+        self.x.game.as_ref()?.out_path(source)
+    }
+
+    /// The output folder that a folder under a game's source root maps to.
+    pub fn out_folder(&self, folder: &Path) -> Option<PathBuf> {
+        self.x.game.as_ref()?.out_folder(folder)
+    }
+
+    /// The instance a game's output file or folder becomes, from the place's root. A `.server` or `.client` suffix
+    /// and an `init` module name the script's instance, as Rojo does.
+    pub fn instance_path(&self, out: &Path) -> Option<Vec<String>> {
+        self.x.game.as_ref()?.rojo.rbx_path(out)
     }
 
     pub fn base_types(&mut self, t: Type) -> Vec<Type> {

@@ -143,9 +143,6 @@ impl Rojo {
 
 pub(crate) struct Game {
     pub rojo: Rojo,
-    /// The package root `boot` globs are relative to: the nearest folder at or above `dir` with a `package.json`, or
-    /// `dir`.
-    pub package: PathBuf,
     root: PathBuf,
     out_dir: PathBuf,
     packages: Vec<Installed>,
@@ -177,14 +174,7 @@ impl Game {
         };
         let package = package_dir(tsconfig_dir).unwrap_or(tsconfig_dir);
         let packages = packages(&package.join("node_modules"));
-        Ok(Game {
-            rojo,
-            package: package.to_path_buf(),
-            root: root.to_path_buf(),
-            out_dir: normalize(out_dir),
-            packages,
-            runtime_lib,
-        })
+        Ok(Game { rojo, root: root.to_path_buf(), out_dir: normalize(out_dir), packages, runtime_lib })
     }
 
     /// Where the output of a source file under the source root goes.

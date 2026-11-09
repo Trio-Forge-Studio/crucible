@@ -1,5 +1,5 @@
-//! The macros the lowering expands inline. roblox-ts 3.0.0's call, constructor, identifier and property-call tables,
-//! plus Crucible's macros. The extractor matches each by symbol identity, never by name alone.
+//! The macros the lowering expands inline: roblox-ts 3.0.0's call, constructor, identifier and property-call tables.
+//! The extractor matches each by symbol identity, never by name alone.
 
 /// How a macro is found in source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12,8 +12,6 @@ pub enum MacroKind {
     Identifier,
     /// A call to a method declared on the named interface, such as `array.push(x)`.
     Method,
-    /// A call to a function that `@trioforge/crucible` or one of its side entries exports.
-    Crucible,
 }
 
 macro_rules! macros {
@@ -155,6 +153,4 @@ macros! {
     MapClear = Method("Map") "clear",
     MapSet = Method("Map") "set",
     PromiseThen = Method("Promise") "then",
-
-    Boot = Crucible "boot",
 }
