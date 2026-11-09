@@ -1,6 +1,6 @@
 //! The seam a framework transform plugs into. The compiler calls each extension at fixed points of its passes: once
 //! before extraction, after its own extraction of each source file, once after the last file, and while lowering, at
-//! each call and after each class declaration. An extension reads syntax through the compiler's tree view and the
+//! each expression, at each call and after each class declaration. An extension reads syntax through the compiler's tree view and the
 //! checker through the handles and queries below, and never names a tsrs type. It keeps its own facts, keyed by
 //! `SiteId`. The handles, flags and queries take tsrs's names, without the `_exported` suffix.
 
@@ -36,6 +36,14 @@ pub trait Extension: Send {
     /// compiler never asks about an optional-chain call, such as `a?.b()`, a `super(..)` or
     /// `super.m(..)` call, or a dynamic `import(..)`.
     fn lower_call(&self, _cx: &mut LowerCx<'_, '_>, _call: Node) -> Option<Expr> {
+        None
+    }
+
+    /// Lowers an expression the extension owns in place of the compiler, or returns `None` to leave it to the
+    /// compiler and the next extension. The compiler asks before it lowers any expression to a value, wherever it
+    /// sits, including in an optional chain and in a call another extension lowers. A call it lowers as a statement
+    /// goes to `lower_call` only. Decide before lowering anything, as for `lower_call`.
+    fn lower_expression(&self, _cx: &mut LowerCx<'_, '_>, _n: Node) -> Option<Expr> {
         None
     }
 

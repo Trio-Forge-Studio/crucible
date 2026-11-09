@@ -664,6 +664,25 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
 }
 
 #[test]
+fn an_optional_boot_in_a_server_file_lowers_its_load_globs() {
+    let game = Game::new();
+    game.main("import { boot } from \"@trioforge/crucible/server\";\nboot?.({ load: [\"src/server/**\"] });\n");
+    assert_eq!(
+        game.luau("server/main.luau"),
+        "-- Compiled with crucible-compiler\n\
+         local TS = require(game:GetService(\"ReplicatedStorage\"):WaitForChild(\"rbxts_include\"):WaitForChild(\"RuntimeLib\"))\n\
+         local boot = TS.import(script, game:GetService(\"ReplicatedStorage\"), \"rbxts_include\", \"node_modules\", \"@trioforge\", \"crucible\", \"out\", \"server\").boot\n\
+         local _0 = boot\n\
+         if _0 ~= nil then\n\
+         \t_0({\n\
+         \t\tload = { \"crucible-path:ServerScriptService/TS/**\" },\n\
+         \t})\n\
+         end\n\
+         return nil"
+    );
+}
+
+#[test]
 fn diagnostics_deduplicate_repeated_and_inherited_faults_across_files() {
     let game = Game::new();
     game.main("import { Subsystem, CrucibleBehaviour, attribute } from \"@trioforge/crucible\";\ndeclare global { interface Global {} }\nabstract class Base extends Subsystem { constructor(value: Global) { super(); } }\nclass A extends Base {}\nclass B extends Base {}\nclass Bad extends CrucibleBehaviour<\"Bad\"> { field = attribute<any>(); }");

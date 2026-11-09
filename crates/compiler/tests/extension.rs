@@ -1,8 +1,8 @@
 //! A test extension that uses every hook of the seam. It finds calls to `probe` from the `@rbxts/probe` package,
 //! records each one's types from the checker, and lowers it to a call into the package's runtime entry with those
 //! types and the program's probe count. It replaces each `HERE` in a probe's arguments with where the probe is, and
-//! registers every class with the runtime after its declaration. A second one, `Scopes`, nests the calls it lowers to
-//! test how long a replacement lasts.
+//! registers every class with the runtime after its declaration. A second one, `Heres`, replaces every `HERE` of a
+//! file to test that an expression an extension lowers lowers in place wherever it sits.
 
 mod support;
 
@@ -113,16 +113,14 @@ impl Extension for Probe {
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {
         let types = self.calls.get(&cx.site(call))?;
-        let replacements = call
-            .arguments()
-            .iter()
-            .flat_map(descendants)
-            .filter_map(|n| Some((n, Expr::string(self.heres.get(&cx.site(n))?.clone()))))
-            .collect();
-        let mut arguments = cx.arguments(call, replacements);
+        let mut arguments = cx.arguments(call);
         arguments.push(Expr::string(types.clone()));
         arguments.push(Expr::Number(self.total.expect("finish_program runs before lowering") as f64));
         Some(cx.helper(&RUNTIME, "probe").call(arguments))
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        self.heres.get(&cx.site(n)).map(|at| Expr::string(at.clone()))
     }
 
     fn lower_class_tail(&self, cx: &mut LowerCx<'_, '_>, class: Node, local: &Name) -> Vec<Stmt> {
@@ -271,24 +269,15 @@ fn a_helper_the_place_cannot_reach_fails_with_its_message() {
     assert!(Path::new(&errors[0].path).ends_with("src/server/main.ts"), "{}", errors[0]);
 }
 
-/// Each function `Scopes` lowers, the global its calls lower to, and what replaces a `HERE` while its arguments lower.
-/// `outer` and `claim` replace each `HERE` in their own arguments. `reach` replaces every `HERE` of its file, even one
-/// outside its call, and `inner` replaces none. `peek` lowers its arguments and then leaves the call to the compiler.
-const SCOPED: &[(&str, &str, &str)] = &[
-    ("outer", "out", "REPLACED"),
-    ("claim", "claimed", "CLAIMED"),
-    ("reach", "reached", "REACHED"),
-    ("inner", "inside", ""),
-    ("peek", "peek", ""),
-];
-
+/// Replaces every `HERE` of a file with `"REPLACED"`, and lowers each call to `outer` to a call to the global `out`.
+/// `peek` lowers its arguments and then leaves the call to the compiler.
 #[derive(Default)]
-struct Scopes {
-    /// Each call to a scoped function, as the global it lowers to, the replacement and the `HERE`s it replaces.
-    calls: HashMap<SiteId, (&'static str, &'static str, Vec<Node>)>,
+struct Heres {
+    heres: Vec<SiteId>,
+    calls: HashMap<SiteId, &'static str>,
 }
 
-impl Scopes {
+impl Heres {
     fn named(cx: &mut ExtractCx<'_>, n: Node) -> Option<&'static str> {
         if n.kind() != Kind::Identifier {
             return None;
@@ -297,77 +286,67 @@ impl Scopes {
     }
 }
 
-impl Extension for Scopes {
+impl Extension for Heres {
     fn name(&self) -> &'static str {
-        "scopes"
+        "heres"
     }
 
     fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
-        let heres: Vec<Node> =
-            descendants(file.root()).into_iter().filter(|&n| Scopes::named(cx, n) == Some("HERE")).collect();
         for n in descendants(file.root()) {
-            if n.kind() != Kind::CallExpression {
-                continue;
-            }
-            let Some(callee) = Scopes::named(cx, n.expression()) else { continue };
-            let Some(&(function, global, replacement)) = SCOPED.iter().find(|(name, ..)| *name == callee) else {
-                continue;
-            };
-            let replaced = match function {
-                "inner" | "peek" => Vec::new(),
-                "reach" => heres.clone(),
-                _ => {
-                    let inside = n.arguments().iter().flat_map(descendants).collect::<Vec<_>>();
-                    heres.iter().copied().filter(|h| inside.contains(h)).collect()
+            match Heres::named(cx, n) {
+                Some("HERE") => self.heres.push(cx.site(n)),
+                Some(callee @ ("outer" | "peek")) if n.parent().is_some_and(|p| p.kind() == Kind::CallExpression) => {
+                    let call = n.parent().unwrap();
+                    if call.expression() == n {
+                        self.calls.insert(cx.site(call), callee);
+                    }
                 }
-            };
-            self.calls.insert(cx.site(n), (global, replacement, replaced));
+                _ => {}
+            }
         }
     }
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {
-        let (global, replacement, replaced) = self.calls.get(&cx.site(call))?;
-        let replacements = replaced.iter().map(|&n| (n, Expr::string(*replacement))).collect();
-        let arguments = cx.arguments(call, replacements);
-        if *global == "peek" {
-            return None;
-        }
-        Some(Expr::global(global).call(arguments))
+        let callee = *self.calls.get(&cx.site(call))?;
+        let arguments = cx.arguments(call);
+        (callee == "outer").then(|| Expr::global("out").call(arguments))
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        self.heres.contains(&cx.site(n)).then(|| Expr::string("REPLACED"))
     }
 }
 
-fn compile_scopes(main: &str) -> String {
+fn compile_heres(main: &str) -> String {
     let game = Game::new();
     game.main(&format!(
-        "{}declare const HERE: string;\nexport {{}};\n{main}",
-        SCOPED
-            .iter()
-            .map(|(name, ..)| format!("declare function {name}(...values: unknown[]): unknown;\n"))
-            .collect::<String>()
+        "declare function outer(...values: unknown[]): unknown;\n\
+         declare function peek(...values: unknown[]): unknown;\n\
+         declare const maybe: ((...values: unknown[]) => unknown) | undefined;\n\
+         declare const HERE: string;\nexport {{}};\n{main}"
     ));
     let (instances, include) = in_place(&game);
-    let mut scopes = Scopes::default();
-    let modules = compile(&game, &mut scopes, Target::Game { instances: &instances, include: &include, modules: &[] })
+    let mut heres = Heres::default();
+    let modules = compile(&game, &mut heres, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     module(&modules, "server/main.luau").to_owned()
 }
 
 #[test]
-fn a_call_in_the_arguments_of_another_keeps_its_replacements_and_its_own_win() {
-    let main = compile_scopes("outer(inner(HERE));\nouter(claim(HERE), HERE);\n");
-    has(&main, "out((inside(\"REPLACED\")))");
-    has(&main, "out(claimed(\"CLAIMED\"), \"REPLACED\")");
+fn an_expression_an_extension_lowers_lowers_in_place_on_every_path() {
+    let main = compile_heres(
+        "outer(HERE);\nprint(HERE);\nmaybe?.(HERE);\nexport const values = [HERE, { at: HERE }];\nouter(print(HERE));\n",
+    );
+    has(&main, "\nout(\"REPLACED\")\n");
+    has(&main, "\nprint(\"REPLACED\")\n");
+    has(&main, "_0(\"REPLACED\")");
+    has(&main, "{ \"REPLACED\", {\n\tat = \"REPLACED\",\n} }");
+    has(&main, "out((print(\"REPLACED\")))");
+    assert!(!main.contains("HERE"), "every HERE lowered in place:\n{main}");
 }
 
 #[test]
-fn replacements_end_with_the_call_that_supplies_them() {
-    let main = compile_scopes("outer(reach(), inner(HERE));\nreach();\ninner(HERE);\n");
-    has(&main, "out(reached(), (inside(\"REPLACED\")))");
-    has(&main, "\nreached()\ninside(HERE)\n");
-}
-
-#[test]
-#[should_panic(expected = "extension `scopes` lowered the arguments of a call and then left the call to the compiler")]
+#[should_panic(expected = "extension `heres` lowered the parts of a node and then left the node to the compiler")]
 fn declining_a_call_after_lowering_its_arguments_panics() {
-    compile_scopes("outer(peek(HERE), HERE);\n");
+    compile_heres("outer(peek(HERE), HERE);\n");
 }

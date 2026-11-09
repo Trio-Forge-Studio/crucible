@@ -143,8 +143,15 @@ impl Extension for Crucible {
             Fact::Attribute => Some(lower::attribute(cx, call)),
             Fact::Declaration(declaration) => Some(lower::declaration(cx, call, declaration)),
             Fact::Receive { field } => Some(lower::receive(cx, call, field)),
-            Fact::Boot => Some(lower::boot(cx, call, &self.state.facts)),
+            Fact::Boot => Some(lower::boot(cx, call)),
             Fact::Class(_) | Fact::Load(_) => None,
+        }
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        match self.state.facts.get(&cx.site(n))? {
+            Fact::Load(glob) => Some(lower::load(glob)),
+            _ => None,
         }
     }
 

@@ -52,7 +52,6 @@ pub(crate) fn lower(
         facts,
         place,
         extensions,
-        replacements: Vec::new(),
         path: file.path(),
         import_base,
         errors: Vec::new(),
@@ -123,9 +122,6 @@ pub(crate) struct Lower<'a> {
     facts: &'a FileFacts,
     place: &'a Place,
     extensions: &'a [&'a dyn Extension],
-    /// The nodes extensions lower in place of the compiler, one scope for each call whose arguments the compiler is
-    /// lowering for an extension, innermost last.
-    replacements: Vec<Vec<(Node, Expr)>>,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,

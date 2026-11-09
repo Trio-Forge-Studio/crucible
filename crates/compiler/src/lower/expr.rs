@@ -45,8 +45,8 @@ fn offset_number(e: Expr, delta: f64) -> Expr {
 
 impl Lower<'_> {
     pub(super) fn expr(&mut self, n: Node) -> Expr {
-        if !self.replacements.is_empty()
-            && let Some(value) = self.replacement(n)
+        if !self.extensions.is_empty()
+            && let Some(value) = self.extension_expression(n)
         {
             return value;
         }
