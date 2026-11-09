@@ -119,14 +119,17 @@ impl Game {
 
     pub fn analyze_at(&self, tsconfig: &str) -> Result<Facts, Vec<Diagnostic>> {
         let (instances, include) = (self.instances(), self.include());
-        crucible_compiler::analyze(&self.dir.join(tsconfig), Target::Game { instances: &instances, include: &include })
+        crucible_compiler::analyze(
+            &self.dir.join(tsconfig),
+            Target::Game { instances: &instances, include: &include, modules: &[] },
+        )
     }
 
     pub fn try_compile(&self) -> Result<Compiled, Failure> {
         let (instances, include) = (self.instances(), self.include());
         crucible_compiler::compile(
             &self.dir.join("tsconfig.json"),
-            Target::Game { instances: &instances, include: &include },
+            Target::Game { instances: &instances, include: &include, modules: &[] },
         )
     }
 

@@ -65,8 +65,19 @@ pub enum Target<'a> {
     /// A library. Its modules reach each other relatively and take the runtime library from `_G[script]`.
     Package,
     /// A place. `instances` maps the output and `include`, the folder for the runtime library, which `write_include`
-    /// fills.
-    Game { instances: &'a InstanceMap, include: &'a Path },
+    /// fills. The place also holds `modules`, which the caller supplies.
+    Game { instances: &'a InstanceMap, include: &'a Path, modules: &'a [VirtualModule<'a>] },
+}
+
+/// A module that game code imports by a specifier with no file behind it, such as one a build generates. The program
+/// declares its types with `declare module`, as for any ambient module, and the compiler emits `source` at `path`.
+#[derive(Clone, Copy, Debug)]
+pub struct VirtualModule<'a> {
+    /// The exact specifier imports name, such as `crucible:experience`.
+    pub specifier: &'a str,
+    /// The output path relative to the output directory, with forward slashes, such as `shared/experience.luau`.
+    pub path: &'a str,
+    pub source: &'a str,
 }
 
 /// Builds the program for `tsconfig`, checks every file with one checker, and returns the fact table of every source
@@ -197,5 +208,17 @@ fn compile_on_thread(
             Err(e) => errors.extend(e),
         }
     }
-    if errors.is_empty() { Ok(Compiled { out_dir, modules }) } else { Err(Failure::Lower(errors)) }
+    if !errors.is_empty() {
+        return Err(Failure::Lower(errors));
+    }
+    if let Target::Game { modules: virtual_modules, .. } = target {
+        for module in virtual_modules {
+            if modules.iter().any(|m| m.path == module.path) {
+                let message = format!("the virtual module `{}` has the output path {}", module.specifier, module.path);
+                return Err(Failure::Crucible(vec![Diagnostic { path: None, line: 0, column: 0, code: 0, message }]));
+            }
+            modules.push(Module { path: module.path.to_owned(), source: format!("{HEADER}{}", module.source) });
+        }
+    }
+    Ok(Compiled { out_dir, modules })
 }

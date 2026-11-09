@@ -43,8 +43,15 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
     let mut facts = Facts::default();
     let game = match target {
         crate::Target::Package => None,
-        crate::Target::Game { instances, include } => {
-            match Game::load(instances, include, Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
+        crate::Target::Game { instances, include, modules } => {
+            match Game::load(
+                instances,
+                include,
+                modules,
+                Path::new(&dir),
+                Path::new(&root),
+                out_dir.as_deref().map(Path::new),
+            ) {
                 Ok(game) => Some(game),
                 Err(message) => {
                     facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code: 0, message });
@@ -946,16 +953,24 @@ impl Extractor {
             }
             return;
         };
-        let Some(target) = target else {
-            return self.report(specifier, Code::Place, "the module this names has no source file");
-        };
-        if target.ends_with(".server.ts") || target.ends_with(".client.ts") {
-            return self.report(specifier, Code::Place, "a script is not a module and cannot be imported");
+        let virtual_out = game.virtual_module(specifier.text());
+        if virtual_out.is_none() {
+            match target.as_deref() {
+                None => return self.report(specifier, Code::Place, "the module this names has no source file"),
+                Some(t) if t.ends_with(".server.ts") || t.ends_with(".client.ts") => {
+                    return self.report(specifier, Code::Place, "a script is not a module and cannot be imported");
+                }
+                Some(_) => {}
+            }
         }
         let Some(script) = game.module(Path::new(&self.path)) else {
             return self.report(specifier, Code::Place, "the Rojo project maps no instance for this file's output");
         };
-        let Some(module) = game.module(Path::new(&target)) else {
+        let module = match virtual_out {
+            Some(out) => game.instances.rbx_path(out),
+            None => target.as_deref().and_then(|t| game.module(Path::new(t))),
+        };
+        let Some(module) = module else {
             return self.report(specifier, Code::Place, "the Rojo project maps no instance for this module");
         };
         match game.instances.import(&script, &module) {

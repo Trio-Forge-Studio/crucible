@@ -208,7 +208,7 @@ pub fn instances(project: &Path) -> InstanceMap {
 
 pub fn game_or_package<'a>(instances: Option<&'a InstanceMap>, include: &'a Path) -> Target<'a> {
     match instances {
-        Some(instances) => Target::Game { instances, include },
+        Some(instances) => Target::Game { instances, include, modules: &[] },
         None => Target::Package,
     }
 }

@@ -24,7 +24,7 @@ fn main() -> ExitCode {
         }
     };
     let target = match &place {
-        Some((instances, include)) => Target::Game { instances, include },
+        Some((instances, include)) => Target::Game { instances, include, modules: &[] },
         None => Target::Package,
     };
     let start = Instant::now();

@@ -192,7 +192,7 @@ fn every_hook_runs_and_its_lowering_lands_in_the_module() {
     game.write("src/server/other.ts", "import { probe } from \"@rbxts/probe\";\nprobe(\"label\");\n");
     let (instances, include) = in_place(&game);
     let mut probe = Probe::default();
-    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include })
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     assert_eq!(probe.name(), "probe");
     assert_eq!(probe.version.as_deref(), Some("1.2.3"));
@@ -220,7 +220,7 @@ fn a_module_without_a_probe_imports_no_helper() {
     game.main("export const value = 1;\n");
     let (instances, include) = in_place(&game);
     let mut probe = Probe::default();
-    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include })
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     assert_eq!(probe.version, None, "the program has no file from the package");
     let main = module(&modules, "server/main.luau");
@@ -240,7 +240,7 @@ fn extension_reports_fail_the_compile_where_they_point() {
     let (instances, include) = in_place(&game);
     let mut probe = Probe { limit: Some(1), ..Probe::default() };
     let Err(Failure::Crucible(diagnostics)) =
-        compile(&game, &mut probe, Target::Game { instances: &instances, include: &include })
+        compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
     else {
         panic!("the extension's reports fail the compile");
     };
@@ -347,7 +347,7 @@ fn compile_scopes(main: &str) -> String {
     ));
     let (instances, include) = in_place(&game);
     let mut scopes = Scopes::default();
-    let modules = compile(&game, &mut scopes, Target::Game { instances: &instances, include: &include })
+    let modules = compile(&game, &mut scopes, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     module(&modules, "server/main.luau").to_owned()
 }

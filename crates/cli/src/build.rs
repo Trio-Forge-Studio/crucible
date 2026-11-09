@@ -255,7 +255,10 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> Ex
             return ExitCode::FAILURE;
         }
     };
-    match crucible_transform::compile(&tsconfig, Target::Game { instances: &instances, include: &include }) {
+    match crucible_transform::compile(
+        &tsconfig,
+        Target::Game { instances: &instances, include: &include, modules: &[] },
+    ) {
         Ok(compiled) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
             let child = ChildModules { out_dir: compiled.out_dir, modules };

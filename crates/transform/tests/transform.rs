@@ -646,7 +646,7 @@ fn load_globs_resolve_from_the_package_root_not_the_tsconfig_folder() {
     );
     let place = game.dir.join("gen/place/tsconfig.json");
     let (instances, include) = (support::instances(&game.dir.join("gen/place/default.project.json")), game.include());
-    let target = Target::Game { instances: &instances, include: &include };
+    let target = Target::Game { instances: &instances, include: &include, modules: &[] };
     game.main("import { boot } from \"@trioforge/crucible/server\"; boot({load: [\"src/server/**\"]});");
     let modules = crucible_transform::compile(&place, target).unwrap_or_else(|f| panic!("the place compiles:\n{f}"));
     let main = modules.modules.iter().find(|m| m.path == "server/main.luau").expect("main is emitted");

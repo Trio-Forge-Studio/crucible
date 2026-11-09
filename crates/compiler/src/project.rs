@@ -84,12 +84,15 @@ pub(crate) struct Game {
     out_dir: PathBuf,
     packages: Vec<Installed>,
     pub runtime_lib: RbxPath,
+    /// Each virtual module's specifier and output file.
+    virtual_modules: Vec<(Box<str>, PathBuf)>,
 }
 
 impl Game {
     pub fn load(
         instances: &InstanceMap,
         include: &Path,
+        modules: &[crate::VirtualModule<'_>],
         tsconfig_dir: &Path,
         root: &Path,
         out_dir: Option<&Path>,
@@ -105,10 +108,27 @@ impl Game {
                 include.display()
             ));
         };
+        let out_dir = normalize(out_dir);
+        let mut virtual_modules = Vec::with_capacity(modules.len());
+        for module in modules {
+            let inside = module.path.split('/').all(|s| !matches!(s, "" | "." | "..") && !s.contains(['\\', ':']));
+            if !inside || !module.path.ends_with(".luau") {
+                return Err(format!(
+                    "the virtual module `{}` needs a path inside the output folder that ends in .luau, not `{}`",
+                    module.specifier, module.path
+                ));
+            }
+            virtual_modules.push((module.specifier.into(), out_dir.join(module.path)));
+        }
         let package = package_dir(tsconfig_dir).unwrap_or(tsconfig_dir);
         let packages = packages(&package.join("node_modules"));
         let instances = instances.clone();
-        Ok(Game { instances, root: root.to_path_buf(), out_dir: normalize(out_dir), packages, runtime_lib })
+        Ok(Game { instances, root: root.to_path_buf(), out_dir, packages, runtime_lib, virtual_modules })
+    }
+
+    /// The output file of the virtual module that `specifier` names.
+    pub fn virtual_module(&self, specifier: &str) -> Option<&Path> {
+        self.virtual_modules.iter().find(|(s, _)| **s == *specifier).map(|(_, out)| out.as_path())
     }
 
     /// Where the output of a source file under the source root goes.
