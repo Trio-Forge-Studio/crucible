@@ -2,12 +2,14 @@
 resolver = "3"
 members = [
 	"crates/luau",
+	"crates/abi",
 	"crates/oc",
 	"crates/project",
 	"crates/docs",
 	"crates/oc-registry",
 	"crates/cli",
 	"crates/compiler",
+	"crates/transform",
 	"xtask",
 ]
 

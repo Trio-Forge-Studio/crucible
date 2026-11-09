@@ -27,8 +27,7 @@ fn keyed(key: &'static str, value: Expr) -> Field {
 
 impl Lower<'_> {
     fn runtime(&mut self, name: &'static str) -> Expr {
-        self.uses_crucible = true;
-        Expr::global("__crucible").field(name)
+        self.helper(&super::CRUCIBLE_EMIT, name)
     }
 
     pub(super) fn crucible_macro(&mut self, m: Macro, n: Node) -> Expr {
@@ -168,14 +167,6 @@ impl Lower<'_> {
                 n(self, "variant").call(vec![string(key), literal(value), body])
             }
         }
-    }
-
-    fn macro_arguments(&mut self, n: Node) -> Vec<Expr> {
-        let mut values = self.ordered(n.arguments().iter(), |l, a| l.expr(a));
-        if let Some(last) = values.pop() {
-            values.push(if last.is_multi() { Expr::Paren(Box::new(last)) } else { last });
-        }
-        values
     }
 
     /// `__crucible.defineClass(Class, { kind, id, deps, provides, tag, instance, attributes })`, which the runtime's

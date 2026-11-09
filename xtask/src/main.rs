@@ -1,3 +1,4 @@
+mod abi;
 mod arch;
 mod build;
 mod diff;
@@ -20,7 +21,7 @@ use sha2::{Digest, Sha256};
 const SPEC_REPOSITORY: &str = "Roblox/creator-docs";
 const SPEC_PATH: &str = "content/en-us/reference/cloud/openapi.json";
 
-const USAGE: &str = "usage: cargo xtask <spec|golden|arch|proof> ...";
+const USAGE: &str = "usage: cargo xtask <spec|golden|arch|abi|proof> ...";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,6 +29,7 @@ fn main() -> ExitCode {
         Some("spec") => spec(&args),
         Some("golden") => golden::main(&args[1..]),
         Some("arch") => arch::main(&args[1..]),
+        Some("abi") => abi::main(&args[1..]),
         Some("proof") => proof::main(&args[1..]),
         _ => Err(USAGE.into()),
     };

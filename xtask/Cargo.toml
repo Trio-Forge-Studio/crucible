@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+crucible-abi = { path = "../crates/abi" }
 oc-registry = { path = "../crates/oc-registry" }
 proc-macro2 = "1"
 quote = "1"

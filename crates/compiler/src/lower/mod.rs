@@ -2,15 +2,19 @@ mod call;
 mod class;
 mod crucible;
 mod expr;
+pub(crate) mod extension;
 mod jsx;
 mod pattern;
 mod stmt;
+
+pub(crate) use stmt::CRUCIBLE_EMIT;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::facts::{Fact, FileFacts, ModulePath, Place, Unanswered};
+use crate::extension::Extension;
+use crate::facts::{Fact, FileFacts, HelperModule, ModulePath, Place, Unanswered};
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 use crucible_luau::{Block, Expr, Name, Stmt};
 
@@ -42,11 +46,16 @@ pub(crate) fn lower(
     unanswered: &[&Unanswered],
     import_base: ImportBase,
     place: &Place,
+    file_id: u32,
+    extensions: &[&dyn Extension],
 ) -> Result<Block, Vec<Error>> {
     let mut l = Lower {
         file,
+        file_id,
         facts,
         place,
+        extensions,
+        replacements: Vec::new(),
         path: file.path(),
         import_base,
         errors: Vec::new(),
@@ -54,7 +63,7 @@ pub(crate) fn lower(
         temp_prefix: temp_prefix(file.text()),
         temps: 0,
         uses_ts: false,
-        uses_crucible: false,
+        helpers: Vec::new(),
         refs: references(file.root()),
         closure_assigned: closure_assigned(file.root()),
         hoisted_name_starts: HashSet::new(),
@@ -112,8 +121,14 @@ enum Usage {
 
 pub(crate) struct Lower<'a> {
     file: File,
+    /// The file's index in the fact table, which an extension's `SiteId` names.
+    file_id: u32,
     facts: &'a FileFacts,
     place: &'a Place,
+    extensions: &'a [&'a dyn Extension],
+    /// The nodes extensions lower in place of the compiler, one scope for each call whose arguments the compiler is
+    /// lowering for an extension, innermost last.
+    replacements: Vec<Vec<(Node, Expr)>>,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,
@@ -121,7 +136,8 @@ pub(crate) struct Lower<'a> {
     temp_prefix: String,
     temps: u32,
     uses_ts: bool,
-    uses_crucible: bool,
+    /// The indexes in `place.helpers` of the helper modules this file uses, in the order of first use.
+    helpers: Vec<usize>,
     refs: Vec<Reference>,
     closure_assigned: HashSet<&'static str>,
     hoisted_name_starts: HashSet<u32>,
@@ -448,9 +464,34 @@ impl<'a> Lower<'a> {
         self.hoisted_name_starts.contains(&name.span().start)
     }
 
+    /// A call's arguments in evaluation order, with a last argument that may return several values cut to one.
+    fn macro_arguments(&mut self, n: Node) -> Vec<Expr> {
+        let mut values = self.ordered(n.arguments().iter(), |l, a| l.expr(a));
+        if let Some(last) = values.pop() {
+            values.push(if last.is_multi() { Expr::Paren(Box::new(last)) } else { last });
+        }
+        values
+    }
+
+    /// `name` in a helper module, which this file then imports.
+    fn helper(&mut self, module: &HelperModule, name: &'static str) -> Expr {
+        match self.place.helpers.iter().position(|h| h.module.local == module.local) {
+            Some(index) if !self.helpers.contains(&index) => self.helpers.push(index),
+            Some(_) => {}
+            None => {
+                let root = self.file.root();
+                self.error(root, format!("the `{}` helper module was not declared", module.local));
+            }
+        }
+        Expr::global(module.local).field(name)
+    }
+
     fn local_name(&mut self, n: Node) -> Name {
         let text = n.text();
-        if !crucible_luau::is_name(text) || EMITTED_GLOBALS.contains(&text) {
+        if !crucible_luau::is_name(text)
+            || EMITTED_GLOBALS.contains(&text)
+            || self.place.helpers.iter().any(|h| h.module.local == text)
+        {
             self.error(n, format!("`{text}` cannot be a Luau local name"));
         }
         Cow::Borrowed(text)
@@ -484,7 +525,6 @@ const EMITTED_GLOBALS: &[&str] = &[
     "self",
     "super",
     "TS",
-    "__crucible",
     "_G",
     "script",
     "table",

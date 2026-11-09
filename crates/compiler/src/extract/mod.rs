@@ -6,9 +6,12 @@
 mod collisions;
 mod crucible;
 mod data;
+pub(crate) mod extension;
 mod network;
 mod typed_lint;
 mod types;
+
+pub(crate) use crucible::PACKAGE;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -19,15 +22,19 @@ use tsrs_compiler::CheckerHandle;
 use tsrs_core::{CompilerOptions, JsxEmit, P, jsnum};
 
 use crate::Diagnostic;
+use crate::extension::Extension;
 use crate::facts::{
-    Callee, Fact, Facts, Falsy, FileFacts, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span, Unanswered,
+    Callee, Fact, Facts, Falsy, FileFacts, Helper, HelperModule, Import, Jsx, Reason, Receiver, RuntimeLib, Site, Span,
+    Unanswered,
 };
 use crate::macros::Macro;
 use crate::program::Checked;
 use crate::project::{Game, absolute, installed_module};
+use crate::tree::File;
 use crucible::Code;
+use extension::{ExtractCx, ProgramCx};
 
-pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
+pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Facts {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -60,8 +67,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
                 message: "roblox-ts's runtime library has no instance path".to_owned(),
             }),
         }
-        facts.place.crucible_emit =
-            crucible.emit.as_deref().and_then(|emit| game.module(emit)).and_then(|r| absolute(&r));
     }
     let mut x = Extractor {
         checker,
@@ -81,11 +86,22 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>) -> Facts {
         options,
         jsx: None,
     };
+    x.declare_helper(&crate::lower::CRUCIBLE_EMIT);
+    for extension in extensions.iter_mut() {
+        extension.begin_program(&mut ProgramCx { x: &mut x });
+    }
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
             continue;
         }
+        let id = x.facts.files.len() as u32;
         x.source_file(file);
+        for extension in extensions.iter_mut() {
+            extension.extract_file(&mut ExtractCx { x: &mut x, file: id }, File::new(file));
+        }
+    }
+    for extension in extensions.iter_mut() {
+        extension.finish_program(&mut ProgramCx { x: &mut x });
     }
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     x.facts
@@ -190,6 +206,22 @@ struct Extractor {
 }
 
 impl Extractor {
+    /// Resolves a helper module for the program's place. A second declaration of a local is ignored.
+    fn declare_helper(&mut self, module: &HelperModule) {
+        if self.facts.place.helpers.iter().any(|h| h.module.local == module.local) {
+            return;
+        }
+        let path = match &self.game {
+            Some(game) => self
+                .crucible
+                .entry_declaration(module.package, module.entry)
+                .and_then(|declaration| game.module(&declaration))
+                .and_then(|r| absolute(&r)),
+            None => None,
+        };
+        self.facts.place.helpers.push(Helper { module: *module, path });
+    }
+
     fn source_file(&mut self, file: P<SourceFile>) {
         self.text = file.text();
         self.path = file.file_name().replace('\\', "/");

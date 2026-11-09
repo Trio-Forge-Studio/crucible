@@ -8,10 +8,8 @@
 1 crucible-compiler:src/extract/network.rs …"@trioforge"…
 1 crucible-compiler:src/extract/network.rs …"@trioforge"…
 1 crucible-compiler:src/extract/typed_lint.rs "/node_modules/@trioforge/crucible/"
-1 crucible-compiler:src/lower/crucible.rs "__crucible"
 1 crucible-compiler:src/lower/crucible.rs "attribute"
 1 crucible-compiler:src/lower/crucible.rs "receive"
-1 crucible-compiler:src/lower/mod.rs "__crucible"
 1 crucible-compiler:src/lower/stmt.rs "__crucible"
 1 crucible-compiler:src/lower/stmt.rs …"@trioforge"…
 1 crucible-compiler:src/macros.rs "askServer"

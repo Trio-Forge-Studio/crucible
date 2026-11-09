@@ -16,7 +16,7 @@ use crate::program::ConfigHost;
 use crate::project::{Game as Place, RbxPath, normalize};
 use crate::tree::{File, Position};
 
-const PACKAGE: &str = "@trioforge/crucible";
+pub(crate) const PACKAGE: &str = "@trioforge/crucible";
 const OWN_CLASSES: [&str; 3] = ["Subsystem", "CrucibleBehaviour", "CrucibleObject"];
 /// `@trioforge/crucible/emit` exports a runtime `attribute` and runtime declaration functions that are not the macros.
 const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
@@ -54,6 +54,8 @@ pub(super) enum Code {
     Setup,
     /// The place cannot hold a module where the program needs it.
     Place,
+    /// An extension's, with its TypeScript error number. It writes the whole message.
+    Extension(i32),
 }
 
 impl Code {
@@ -63,6 +65,7 @@ impl Code {
             Code::Rule(rule) => (90000 + i32::from(rule), format!("CRU{rule:03}: {message}")),
             Code::Setup => (90000, format!("Crucible: {message}")),
             Code::Place => (0, message.to_owned()),
+            Code::Extension(code) => (code, message.to_owned()),
         }
     }
 }
@@ -99,8 +102,6 @@ pub(super) struct Api {
     invalid_metadata: bool,
     /// When TypeScript 5 makes each class and interface type, computed when a union of instance classes needs it.
     made: Option<HashMap<P<Symbol>, Made>>,
-    /// The declarations of `@trioforge/crucible/emit`.
-    pub emit: Option<PathBuf>,
     pub widths: HashSet<P<Symbol>>,
     pub entries: HashMap<PathBuf, Side>,
     pub entry_exports: HashMap<P<Symbol>, Side>,
@@ -123,7 +124,6 @@ impl Api {
             host,
             invalid_metadata: false,
             made: None,
-            emit: None,
             widths: HashSet::new(),
             entries: HashMap::new(),
             entry_exports: HashMap::new(),
@@ -134,9 +134,6 @@ impl Api {
             let Some(owner) = api.package_of(&path) else { continue };
             if owner.json["name"] != PACKAGE {
                 continue;
-            }
-            if api.emit.is_none() {
-                api.emit = entry_types(&owner, "./emit");
             }
             widths(c, file.as_node(), &mut api.widths);
             let Some(module) = file.as_node().symbol() else { continue };
@@ -232,6 +229,28 @@ impl Api {
 
     pub fn package_name(&mut self, file: &Path) -> Option<String> {
         self.package_of(file).and_then(|p| p.json["name"].as_str().map(str::to_owned))
+    }
+
+    /// The declaration file of the `entry` export of the program's first file from `package`.
+    pub fn entry_declaration(&mut self, package: &str, entry: &str) -> Option<PathBuf> {
+        let program = self.program;
+        program.source_files().iter().find_map(|file| {
+            let owner = self.package_of(Path::new(file.file_name()))?;
+            if owner.json["name"] != package {
+                return None;
+            }
+            entry_types(&owner, entry)
+        })
+    }
+
+    /// The `package.json` of the program's first file from `package`.
+    pub fn manifest(&mut self, package: &str) -> Option<crate::extension::Manifest> {
+        let program = self.program;
+        program.source_files().iter().find_map(|file| {
+            let owner = self.package_of(Path::new(file.file_name()))?;
+            (owner.json["name"] == package)
+                .then(|| crate::extension::Manifest { path: owner.dir.join("package.json"), json: owner.json.clone() })
+        })
     }
 
     fn package_of(&mut self, file: &Path) -> Option<Rc<Package>> {
@@ -1231,12 +1250,12 @@ impl Extractor {
         if let Some(specifier) = specifier
             && specifier.kind() == Kind::StringLiteral
             && let Some(entry) = specifier.text().strip_prefix("@trioforge/crucible/")
-            && !matches!(entry, "server" | "client" | "vide" | "util/random" | "maths/spline")
+            && !matches!(entry, "server" | "client" | "util/random" | "maths/spline")
         {
             self.report(
                 n,
                 Code::Rule(4),
-                "Import only the root, server, client, vide, util/random or maths/spline Crucible entries.",
+                "Import only the root, server, client, util/random or maths/spline Crucible entries.",
             );
         }
     }

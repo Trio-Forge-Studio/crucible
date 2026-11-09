@@ -8,6 +8,12 @@ export { dataStore, profileStore, profileMessage } from "./data";
 import type { All } from "../all";
 import type { CrucibleObject } from "../crucible-object";
 import { define, resolveOne, setFor, type TypeId } from "../internal/registry";
+import type { Abi, Arguments, ParametersOf } from "./abi";
+import type * as Emit from "./index";
+
+type Satisfies<T extends U, U> = T;
+type _Calls = Satisfies<typeof Emit, Abi>;
+type _Arguments = Satisfies<Arguments, ParametersOf<typeof Emit>>;
 
 export type EmittedDep = string | { readonly all: string };
 

@@ -98,6 +98,9 @@ impl Lower<'_> {
             all.extend(args);
             return Some(Expr::global("super").field(name).call(all));
         }
+        if let Some(lowered) = self.extension_call(n) {
+            return Some(lowered);
+        }
         let Some(kind) = self.fact(callee).and_then(|f| f.callee) else {
             self.error(callee, "the type facts do not say how to call this");
             return Some(Expr::Nil);
