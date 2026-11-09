@@ -426,7 +426,10 @@ class ServerSync extends Subsystem {
 		if (spent > 0 && spent + cost.bytes > SYNC_HEARTBEAT_BYTES) return undefined;
 		const [ok, accepted] = pcall(sender, view.player, frame, cost.packet);
 		if (!ok) {
-			this.fail(view, `encode refused a preflighted frame (${cost.bytes} bytes; ${names.join(", ")})`);
+			this.fail(
+				view,
+				`send failed for a preflighted frame (${cost.bytes} bytes; ${names.join(", ")}): ${accepted}`,
+			);
 			return 0;
 		}
 		if (!accepted) {

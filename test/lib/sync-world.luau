@@ -49,7 +49,7 @@ function world.new(options)
 		local ok, result
 		if token == frameModule.SyncFrameMessage and self.refuse > 0 then
 			self.refuse -= 1
-			ok, result = false, "injected encode refusal"
+			ok, result = false, "injected send refusal"
 		else
 			ok, result = pcall(send)
 		end

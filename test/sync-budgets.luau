@@ -518,7 +518,7 @@ return {
 		w.link:flush()
 		w:finish()
 	end,
-	["66 69 encode refused on a preflighted frame fails the peer, keeps its baseline, and kicks"] = function()
+	["66 69 a refused send of a preflighted frame fails the peer, keeps its baseline, and kicks"] = function()
 		local w = World.new(projected(function(n)
 			return n.f64
 		end))
@@ -532,7 +532,8 @@ return {
 		w.score(5)
 		w.refuse = 1
 		w:heartbeat()
-		spec.eq(w:logged("encode refused a preflighted frame"), 1, "reported")
+		spec.eq(w:logged("send failed for a preflighted frame"), 1, "reported")
+		spec.eq(w:logged("injected send refusal"), 1, "with its cause")
 		spec.eq(view.accepted[declaration].version, version, "nothing staged was committed")
 		spec.list(kinds(w, ann), { "snapshot", "failed" }, "only the failed frame followed")
 		spec.eq(kicked(w, "Ann"), 1, "kicked")
