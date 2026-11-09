@@ -1,5 +1,3 @@
-//! The errors extraction reports at a node.
-
 use tsrs_ast::{Node, Symbol, SymbolFlags};
 use tsrs_checker::Checker;
 use tsrs_core::P;
@@ -7,7 +5,6 @@ use tsrs_core::P;
 use super::Extractor;
 use crate::tree::{File, Position};
 
-/// What an error at a node reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Code {
     Rule(u16),
@@ -32,12 +29,19 @@ pub(super) fn unalias(c: &mut Checker, s: P<Symbol>) -> P<Symbol> {
     if s.flags().intersects(SymbolFlags::Alias) { c.get_aliased_symbol(s) } else { s }
 }
 
+#[derive(PartialEq, Eq, Hash)]
+pub(super) struct Reported {
+    path: String,
+    start: u32,
+    code: i32,
+}
+
 impl Extractor {
     pub(super) fn report(&mut self, at: P<Node>, code: Code, message: &str) {
         let Some(file) = tsrs_ast::get_source_file_of_node(at) else { return };
         let span = crate::tree::span(at, file.text());
         let path = file.file_name().replace('\\', "/");
-        if self.reported.insert((path, span.start, code.render("").0)) {
+        if self.reported.insert(Reported { path, start: span.start, code: code.render("").0 }) {
             self.push_diagnostic(at, span, code, message);
         }
     }

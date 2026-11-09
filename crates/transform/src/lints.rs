@@ -1,7 +1,3 @@
-//! The lints that know Crucible's classes and Charm's lifetimes. CRU035 rejects a frame connection that outlives the
-//! object that made it, CRU036 a Subsystem that owns a shorter lifetime, and CRU038 a Charm lifetime call in game code,
-//! which attaches to whatever scope is running instead of the object whose code made the call.
-
 use crucible_abi::PACKAGE;
 use crucible_compiler::extension::{ExtractCx, File, Kind, Node, NodeFlags, Op, Symbol};
 
@@ -24,8 +20,7 @@ impl Rule {
         }
     }
 
-    /// The oxlint rule a migrated game may still suppress this one with.
-    const fn legacy(self) -> &'static str {
+    const fn oxlint_name(self) -> &'static str {
         match self {
             Rule::FrameHooks => "fragile-delivery/frame-hooks",
             Rule::SessionLifetime => "fragile-delivery/session-lifetime",
@@ -33,7 +28,6 @@ impl Rule {
     }
 }
 
-/// Crucible's call that replaces a Charm lifetime call.
 fn crucible_call(charm: &str) -> Option<&'static str> {
     match charm {
         "effect" => Some("effect"),
@@ -60,19 +54,17 @@ fn parent(n: Node) -> Option<Node> {
 
 pub(crate) struct Lints<'w, 'x> {
     pub(crate) cx: &'w mut ExtractCx<'x>,
-    /// Whether the program uses Crucible, whose lifetime calls replace Charm's.
-    pub(crate) crucible: bool,
+    pub(crate) uses_crucible: bool,
 }
 
 impl Lints<'_, '_> {
     pub(crate) fn file(&mut self, file: File) {
-        let charm = self.crucible && !file.path().contains("/node_modules/");
+        let charm = self.uses_crucible && !file.path().contains("/node_modules/");
         for statement in file.root().statements().iter() {
             self.visit(statement, charm);
         }
     }
 
-    /// Skips what the compiler erases, as its own lints do.
     fn visit(&mut self, n: Node, charm: bool) {
         if n.is_type_node()
             || matches!(n.kind(), Kind::InterfaceDeclaration | Kind::TypeAliasDeclaration)
@@ -103,7 +95,7 @@ impl Lints<'_, '_> {
             .unwrap_or("");
         if let Some((_, rules)) = previous.split_once("oxlint-disable-next-line") {
             let rules = rules.split("--").next().unwrap_or("").trim().trim_end_matches("*/");
-            if rules.split(',').any(|r| r.trim() == rule.legacy()) {
+            if rules.split(',').any(|r| r.trim() == rule.oxlint_name()) {
                 return;
             }
         }
@@ -111,13 +103,11 @@ impl Lints<'_, '_> {
         self.cx.report(n, code, &message);
     }
 
-    /// Whether a class extends `Subsystem` or `CrucibleBehaviour` as the installed package declares them, through its
-    /// `extends` clauses. `seen` collects the classes on the way, the class itself first.
-    fn lineage(&mut self, n: Node, seen: &mut Vec<Node>) -> Option<ClassKind> {
-        if seen.contains(&n) {
+    fn lineage(&mut self, n: Node, chain: &mut Vec<Node>) -> Option<ClassKind> {
+        if chain.contains(&n) {
             return None;
         }
-        seen.push(n);
+        chain.push(n);
         for clause in n.heritage_clauses().iter() {
             if clause.token() != Kind::ExtendsKeyword {
                 continue;
@@ -136,7 +126,7 @@ impl Lints<'_, '_> {
                         _ => {}
                     }
                 }
-                if let Some(kind) = self.lineage(declaration, seen) {
+                if let Some(kind) = self.lineage(declaration, chain) {
                     return Some(kind);
                 }
             }
@@ -144,7 +134,6 @@ impl Lints<'_, '_> {
         None
     }
 
-    /// CRU035: a `RunService` frame signal connected in a constructor, `awake` or `start`.
     fn frame(&mut self, n: Node) {
         let e = n.expression();
         if e.kind() != Kind::PropertyAccessExpression
@@ -214,7 +203,6 @@ impl Lints<'_, '_> {
         self.report(n, Rule::FrameHooks, &message);
     }
 
-    /// CRU036: a Subsystem that destroys itself or owns a Janitor.
     fn session(&mut self, n: Node) {
         if self.lineage(n, &mut Vec::new()) != Some(ClassKind::Subsystem) {
             return;
@@ -258,7 +246,6 @@ impl Lints<'_, '_> {
         module.declarations().into_iter().any(|d| self.cx.package_of(d).as_deref() == Some(CHARM))
     }
 
-    /// CRU038 at each Charm lifetime call a game file imports or re-exports by name.
     fn charm_specifiers(&mut self, n: Node) {
         let Some(specifier) = n.module_specifier().filter(|s| s.kind() == Kind::StringLiteral) else { return };
         let module = self.cx.resolve_external_module(specifier);
@@ -283,7 +270,6 @@ impl Lints<'_, '_> {
         }
     }
 
-    /// CRU038 at a Charm lifetime call read through a namespace import of the package.
     fn charm_access(&mut self, n: Node) {
         let Some(name) = n.name() else { return };
         if crucible_call(name.text()).is_none() {

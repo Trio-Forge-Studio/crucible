@@ -1,21 +1,18 @@
-//! What Crucible's extraction leaves for its lowering, keyed by the site it lowers.
-
 use crate::declarations::DeclarationKind;
 
-/// What a call or class lowers from.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Fact {
     /// A class that extends `Subsystem` or `CrucibleBehaviour`, registered with `defineClass`.
     Class(Class),
     /// An `inject` call. Without a type argument its target is `Invalid`.
     Inject(Dependency),
-    /// An `attribute` call.
     Attribute,
     /// A declaration macro call, which lowers to the `@trioforge/crucible/emit` function of the same name.
     Declaration(Declaration),
     /// A `receive` call, which lowers to `receive(self, field, target, callback)`.
-    Receive { field: Box<str> },
-    /// A `boot` call, which lowers as a call with each of its `Load` globs in place of the literal.
+    Receive {
+        field: Box<str>,
+    },
     Boot,
     /// A `boot` load glob, as the instance path pattern the runtime matches, such as
     /// `crucible-path:ServerScriptService/TS/systems/**`.

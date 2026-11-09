@@ -1,6 +1,3 @@
-//! The macros the lowering expands inline: roblox-ts 3.0.0's call, constructor, identifier and property-call tables.
-//! The extractor matches each by symbol identity, never by name alone.
-
 /// How a macro is found in source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MacroKind {

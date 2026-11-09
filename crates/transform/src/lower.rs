@@ -1,6 +1,3 @@
-//! Lowers what the transform extracted: `inject` and `attribute` calls, each registered class's `defineClass` call,
-//! the network and data macros with their wire schemas, and `boot` with its resolved load globs.
-
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -44,7 +41,6 @@ fn skip_parens_and_assertions(mut n: Node) -> Node {
     n
 }
 
-/// `t.<name>` of the runtime's attribute checks.
 fn t(cx: &mut LowerCx<'_, '_>, name: &'static str) -> Expr {
     cx.helper(&EMIT, T.name).field(name)
 }
@@ -72,7 +68,6 @@ pub(crate) fn attribute(cx: &mut LowerCx<'_, '_>, call: Node) -> Expr {
     cx.helper(&EMIT, ATTRIBUTE.name).call(args)
 }
 
-/// `defineClass(<class>, <record>)` after a registered class.
 pub(crate) fn register(cx: &mut LowerCx<'_, '_>, class: &Class, local: &Name) -> Stmt {
     let ids = |ids: &[Box<str>]| Expr::Table(ids.iter().map(|id| Field::Item(string(id))).collect());
     let kind = match class.kind {
@@ -137,14 +132,12 @@ fn check(cx: &mut LowerCx<'_, '_>, check: &Check) -> Expr {
     }
 }
 
-/// `receive(self, field, ...arguments)` for a receiver field's initializer.
 pub(crate) fn receive(cx: &mut LowerCx<'_, '_>, call: Node, field: &str) -> Expr {
     let mut args = vec![Expr::global("self"), string(field)];
     args.extend(cx.arguments(call, Vec::new()));
     cx.helper(&EMIT, RECEIVE.name).call(args)
 }
 
-/// `<kind>(name, ...kept arguments, ...schemas, ...tail)`.
 pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &Declaration) -> Expr {
     let arguments = call.arguments();
     let kept: Vec<Node> = arguments
@@ -169,7 +162,6 @@ pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &De
     cx.helper(&EMIT, declaration.kind.name()).call(args)
 }
 
-/// `n.<name>` of the runtime's schema builders.
 fn n(cx: &mut LowerCx<'_, '_>, name: &'static str) -> Expr {
     cx.helper(&EMIT, N.name).field(name)
 }
@@ -247,7 +239,6 @@ fn schema(cx: &mut LowerCx<'_, '_>, schema: &Schema) -> Expr {
     }
 }
 
-/// `boot(options)`, with each load glob the instance path pattern extraction resolved it to.
 pub(crate) fn boot(cx: &mut LowerCx<'_, '_>, call: Node, facts: &HashMap<SiteId, Fact>) -> Expr {
     let mut replacements = Vec::new();
     for argument in call.arguments().iter() {

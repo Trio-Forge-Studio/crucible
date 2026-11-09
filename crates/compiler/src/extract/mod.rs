@@ -201,8 +201,7 @@ struct Extractor {
     table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
-    /// The path, start and TypeScript error number of each diagnostic at a node.
-    reported: HashSet<(String, u32, i32)>,
+    reported: HashSet<report::Reported>,
     options: P<CompilerOptions>,
     jsx: Option<Jsx>,
 }

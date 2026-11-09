@@ -1,6 +1,3 @@
-//! The packages the program's files belong to: each `package.json` above a file, the source root a package compiles
-//! from, and the module path a file has within its package.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -28,7 +25,6 @@ pub(crate) struct Packages {
 }
 
 impl Packages {
-    /// Reads the package of every file of the program, so `invalid_metadata` is final.
     pub fn new(program: &'static Program, host: ConfigHost) -> Packages {
         let options = program.options();
         let root_dir = (!options.root_dir.is_empty()).then(|| PathBuf::from(&options.root_dir));

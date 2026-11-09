@@ -10,7 +10,6 @@ fn rules(game: &Game) -> Vec<(usize, usize, i32)> {
         .collect()
 }
 
-/// The lines a fixture marks with `// fires <rules>`, once for each rule the line fires.
 fn marked(source: &str, code: impl Fn(&str) -> i32) -> Vec<(usize, i32)> {
     source
         .lines()
@@ -26,7 +25,6 @@ fn lines(found: Vec<(usize, usize, i32)>) -> Vec<(usize, i32)> {
     found.into_iter().map(|(l, _, c)| (l, c)).collect()
 }
 
-/// A game with Charm's declarations installed, as a game that uses Crucible has them.
 fn with_charm() -> Game {
     let game = Game::new();
     let charm = repo().join("packages/crucible/node_modules/@rbxts/charm");

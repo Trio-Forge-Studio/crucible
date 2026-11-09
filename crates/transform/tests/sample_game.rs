@@ -1,5 +1,3 @@
-//! The sample game through Crucible's transform: every site answered, its registrations, and its boot globs.
-
 mod support;
 
 use std::path::{Path, PathBuf};

@@ -1,7 +1,3 @@
-//! Crucible's transform, the compiler extension that knows the framework. It checks that the installed runtime
-//! implements the ABI this transform emits, and owns registration, dependency injection, the network, data and config
-//! declarations, `boot`, the entries a game may import, and the lints over Crucible's classes and Charm's lifetimes.
-
 mod api;
 mod boot;
 mod data;
@@ -35,7 +31,6 @@ pub use facts::{
 /// TypeScript's number for a Crucible error that is not a rule.
 const SETUP: i32 = 90000;
 
-/// The runtime functions compiled code calls.
 pub(crate) const EMIT: HelperModule = HelperModule {
     package: PACKAGE,
     entry: EMIT_ENTRY,
@@ -66,7 +61,6 @@ pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure>
     crucible_compiler::compile_with(tsconfig, target, &mut [&mut Crucible::default()])
 }
 
-/// `crucible_compiler::analyze` with Crucible's extension, which returns the extension with the facts it kept.
 #[cfg(feature = "test-support")]
 pub fn analyze(
     tsconfig: &Path,
@@ -83,34 +77,34 @@ pub struct Crucible {
     state: State,
 }
 
-/// What the transform keeps across the files of a program.
 #[derive(Default)]
 pub(crate) struct State {
     facts: HashMap<SiteId, Fact>,
     network: network::Network,
-    /// Each fact with the path of its file and its node's span, in the order extraction found them.
     #[cfg(feature = "test-support")]
     recorded: Vec<(String, Span, Fact)>,
 }
 
 #[cfg(feature = "test-support")]
 impl Crucible {
-    /// The classes registered in the file whose path ends with `file`.
-    pub fn classes(&self, file: &str) -> Vec<Class> {
-        self.facts_in(file)
+    pub fn classes(&self, path_suffix: &str) -> Vec<Class> {
+        self.facts_in(path_suffix)
             .filter_map(|(_, fact)| if let Fact::Class(c) = fact { Some(c.clone()) } else { None })
             .collect()
     }
 
-    /// The declaration macro calls in the file whose path ends with `file`, by the span of each call.
-    pub fn declarations(&self, file: &str) -> Vec<(Span, Declaration)> {
-        self.facts_in(file)
+    pub fn declarations(&self, path_suffix: &str) -> Vec<(Span, Declaration)> {
+        self.facts_in(path_suffix)
             .filter_map(|(span, fact)| if let Fact::Declaration(d) = fact { Some((span, d.clone())) } else { None })
             .collect()
     }
 
-    fn facts_in(&self, file: &str) -> impl Iterator<Item = (Span, &Fact)> {
-        self.state.recorded.iter().filter(move |(path, ..)| path.ends_with(file)).map(|(_, span, fact)| (*span, fact))
+    fn facts_in(&self, path_suffix: &str) -> impl Iterator<Item = (Span, &Fact)> {
+        self.state
+            .recorded
+            .iter()
+            .filter(move |(path, ..)| path.ends_with(path_suffix))
+            .map(|(_, span, fact)| (*span, fact))
     }
 }
 
@@ -132,7 +126,7 @@ impl Extension for Crucible {
         if cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE) {
             return;
         }
-        lints::Lints { cx: &mut *cx, crucible: self.api.is_some() }.file(file);
+        lints::Lints { cx: &mut *cx, uses_crucible: self.api.is_some() }.file(file);
         if cx.metadata_invalid() {
             let (code, message) =
                 Code::Setup.render("Cannot read package metadata. Check the project's package.json files.");

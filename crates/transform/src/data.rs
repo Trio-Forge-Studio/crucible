@@ -1,6 +1,3 @@
-//! The data module's rules: profile store calls on the wrong side, CRU027, and a hand-written `ProcessReceipt` beside
-//! a store that grants products, CRU025.
-
 use crucible_compiler::extension::{File, Kind, Node, Op};
 
 use crate::Code;

@@ -23,7 +23,6 @@ pub struct Game {
     pub dir: PathBuf,
 }
 
-/// The compiler's facts, and the extension with the facts the transform kept.
 pub struct Analysis {
     pub facts: Facts,
     pub crucible: Crucible,
@@ -132,7 +131,6 @@ impl Game {
         self.dir.join("include")
     }
 
-    /// The game's place, or `None` when it has no project and compiles as a package.
     pub fn instances(&self) -> Option<InstanceMap> {
         let project = self.project();
         project.is_file().then(|| instances(&project))

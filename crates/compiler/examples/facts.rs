@@ -1,5 +1,3 @@
-//! Checks a package and prints a summary of its fact table.
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;

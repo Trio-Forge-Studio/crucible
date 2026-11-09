@@ -1,6 +1,3 @@
-//! The network, replicated, data and config declaration macros: where each may be declared, the wire schema of each
-//! type it carries, `receive`, and the rules that keep the server and client entries on their sides.
-
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -19,7 +16,6 @@ use crate::declarations::{
 use crate::facts::{ClassKind, Declaration, Fact, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
 use crate::registration::{Walk, is_global, is_reference};
 
-/// What the declaration rules compute once for the whole program.
 #[derive(Default)]
 pub(crate) struct Network {
     declarations: Option<Vec<Indexed>>,
@@ -1214,7 +1210,7 @@ impl Walk<'_, '_> {
             }
             let expression = name.expression();
             let symbol = self.cx.symbol_at(expression).map(|s| self.cx.aliased(s));
-            if !symbol.is_some_and(|s| self.api.widths.contains(&s)) {
+            if !symbol.is_some_and(|s| self.api.width_keys.contains(&s)) {
                 return None;
             }
             let value = self.cx.non_missing_type_of_symbol(property);
@@ -1348,7 +1344,7 @@ impl Walk<'_, '_> {
     }
 
     pub(crate) fn side_entry_specifier(&mut self, literal: Node, file: File) {
-        if self.api.entries.is_empty() {
+        if self.api.side_entries.is_empty() {
             return;
         }
         let Some(parent) = literal.parent() else { return };
@@ -1369,7 +1365,7 @@ impl Walk<'_, '_> {
     }
 
     fn wrong_side(&mut self, at: Node, path: &Path, file: File) -> bool {
-        let Some(&side) = self.api.entries.get(path) else { return false };
+        let Some(&side) = self.api.side_entries.get(path) else { return false };
         if self.file_side(file) != Some(side) {
             let folder = side.folder();
             let message =
@@ -1380,7 +1376,7 @@ impl Walk<'_, '_> {
     }
 
     pub(crate) fn side_entry_reference(&mut self, n: Node, file: File) {
-        if self.api.entries.is_empty() {
+        if self.api.side_entries.is_empty() {
             return;
         }
         let Some(symbol) = self.cx.symbol_at(n).map(|s| self.cx.aliased(s)) else {

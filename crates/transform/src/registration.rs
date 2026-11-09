@@ -1,6 +1,3 @@
-//! Registration and dependency injection: the rules a Crucible class and an `inject` or `attribute` call must follow, and
-//! the facts `defineClass`, `resolve`, `resolveAll` and `attribute` lower from.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 

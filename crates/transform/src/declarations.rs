@@ -1,5 +1,3 @@
-//! The declaration macros: what each declares, where, and the runtime limits its names and schemas keep.
-
 use crucible_abi::Function;
 
 pub const MESSAGE_NAME_MAX_BYTES: usize = 64;
@@ -159,7 +157,6 @@ impl DeclarationKind {
         }
     }
 
-    /// The emit function the macro lowers to, which has the macro's name.
     pub const fn function(self) -> Function {
         match self {
             DeclarationKind::ToServer => crucible_abi::TO_SERVER,

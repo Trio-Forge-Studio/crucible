@@ -1,6 +1,3 @@
-//! The Roblox place a game compiles into. An instance map places the output folders and packages, and the emitted
-//! code reaches roblox-ts's runtime library and other modules by those instance paths.
-
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
@@ -84,7 +81,6 @@ pub(crate) struct Game {
     out_dir: PathBuf,
     packages: Vec<Installed>,
     pub runtime_lib: RbxPath,
-    /// Each virtual module's specifier and output file.
     virtual_modules: Vec<(Box<str>, PathBuf)>,
 }
 
@@ -126,7 +122,6 @@ impl Game {
         Ok(Game { instances, root: root.to_path_buf(), out_dir, packages, runtime_lib, virtual_modules })
     }
 
-    /// The output file of the virtual module that `specifier` names.
     pub fn virtual_module(&self, specifier: &str) -> Option<&Path> {
         self.virtual_modules.iter().find(|(s, _)| **s == *specifier).map(|(_, out)| out.as_path())
     }

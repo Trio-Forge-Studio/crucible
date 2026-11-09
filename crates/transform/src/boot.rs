@@ -1,7 +1,3 @@
-//! `boot` and the entries a game may import. CRU006 checks that `boot`'s options name their load globs literally, and
-//! each glob becomes the instance path pattern of the modules it matches. CRU004 keeps imports to the published
-//! subpaths.
-
 use std::path::{Path, PathBuf};
 
 use crucible_abi::{PACKAGE, SUBPATHS};
@@ -67,14 +63,12 @@ fn property_name(p: Node) -> Option<&'static str> {
     }
 }
 
-/// The subpaths CRU004 allows, as its message lists them.
 fn allowed() -> String {
     let (last, rest) = SUBPATHS.split_last().expect("the package publishes subpaths");
     format!("the root, {} or {last}", rest.join(", "))
 }
 
 impl Walk<'_, '_> {
-    /// CRU004: an import of a subpath the package does not publish.
     pub(crate) fn entry_import(&mut self, n: Node, specifier: Option<Node>) {
         if let Some(specifier) = specifier
             && specifier.kind() == Kind::StringLiteral
