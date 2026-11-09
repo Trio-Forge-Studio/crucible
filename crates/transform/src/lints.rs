@@ -72,12 +72,12 @@ fn parent(n: Node) -> Option<Node> {
 
 pub(crate) struct Lints<'w, 'x> {
     pub(crate) cx: &'w mut ExtractCx<'x>,
-    pub(crate) uses_crucible: bool,
+    pub(crate) charm: bool,
 }
 
 impl Lints<'_, '_> {
     pub(crate) fn file(&mut self, file: File) {
-        let charm = self.uses_crucible && linted(file);
+        let charm = self.charm && linted(file);
         for statement in file.root().statements().iter() {
             self.visit(statement, charm);
         }

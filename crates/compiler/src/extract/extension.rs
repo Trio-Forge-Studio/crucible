@@ -48,6 +48,14 @@ impl ProgramCx<'_> {
         self.x.packages.invalid_metadata
     }
 
+    /// Whether `package` is installed for the program, in a `node_modules` folder of the folder of the program's
+    /// package or of a folder above it, where Node looks for a bare import of it.
+    pub fn installed(&mut self, package: &str) -> bool {
+        let config = self.x.config_dir.clone();
+        let start = self.package_dir(&config.join("tsconfig.json")).unwrap_or(config);
+        start.ancestors().any(|dir| dir.join("node_modules").join(package).join("package.json").is_file())
+    }
+
     /// The `name` of the `package.json` nearest above `file`.
     pub fn package_name(&mut self, file: &Path) -> Option<String> {
         self.x.packages.package_name(file)

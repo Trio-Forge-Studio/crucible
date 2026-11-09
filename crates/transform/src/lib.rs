@@ -74,6 +74,8 @@ pub fn analyze(
 #[derive(Default)]
 pub struct Crucible {
     api: Option<api::Api>,
+    /// Whether CRU038 applies, which it does wherever Crucible is installed, imported or not.
+    charm: bool,
     state: State,
 }
 
@@ -120,13 +122,14 @@ impl Extension for Crucible {
         cx.declare_helper(&EMIT);
         let api = api::Api::new(cx);
         self.api = (!api.is_empty()).then_some(api);
+        self.charm = cx.installed(PACKAGE);
     }
 
     fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
         if cx.package_name(Path::new(&file.path())).as_deref() == Some(PACKAGE) {
             return;
         }
-        lints::Lints { cx: &mut *cx, uses_crucible: self.api.is_some() }.file(file);
+        lints::Lints { cx: &mut *cx, charm: self.charm }.file(file);
         if cx.metadata_invalid() {
             let (code, message) =
                 Code::Setup.render("Cannot read package metadata. Check the project's package.json files.");

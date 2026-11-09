@@ -198,3 +198,14 @@ fn charm_lifetime_calls_through_brackets_destructuring_and_barrels_report_cru038
          barrel and the re-export are"
     );
 }
+
+#[test]
+fn cru038_applies_wherever_crucible_is_installed_even_in_a_program_that_never_imports_it() {
+    let game = with_charm();
+    game.main("import { effect } from \"@rbxts/charm\";\neffect(() => {});\n");
+    assert_eq!(lines(rules(&game)), [(1, 90038)]);
+
+    std::fs::remove_dir_all(game.dir.join("node_modules/@trioforge/crucible")).unwrap();
+    game.remove("default.project.json");
+    assert_eq!(rules(&game), [], "a program without Crucible installed is exempt");
+}
