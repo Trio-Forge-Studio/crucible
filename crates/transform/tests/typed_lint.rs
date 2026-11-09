@@ -240,7 +240,7 @@ fn cru038_reads_the_keys_the_checker_knows_and_destructuring_assignments() {
 }
 
 #[test]
-fn cru038_reports_a_value_taken_from_charm_and_not_a_value_typed_like_charm() {
+fn cru038_reports_a_value_whose_type_reuses_charm_s_lifetime_functions_and_not_one_with_its_own_function_type() {
     let game = with_charm();
     game.main(
         "import type * as charm from \"@rbxts/charm\";\n\
@@ -251,9 +251,93 @@ fn cru038_reports_a_value_taken_from_charm_and_not_a_value_typed_like_charm() {
          let later: typeof charm.onCleanup;\n\
          ({ onCleanup: later } = safe);\n\
          function run({ effectScope }: typeof charm) {\n\treturn effectScope;\n}\n\
+         type Run = (run: () => void) => () => void;\n\
+         const own: { effect: Run } = { effect: () => () => {} };\n\
+         own.effect(() => {});\n\
          export const values = [effect, later, run];\n",
     );
-    assert_eq!(rules(&game), [], "no value here comes from Charm");
+    let found: Vec<_> =
+        game.facts().diagnostics.iter().filter(|d| d.code == 90038).map(|d| (d.line, d.column)).collect();
+    assert_eq!(
+        found,
+        [(3, 1), (4, 1), (5, 9), (7, 4), (8, 16)],
+        "accepted: the checker resolves each of these to Charm's declaration, which a lint cannot tell from Charm's \
+         own value, and the import type and the annotations are not reported; a function type of the game's own is \
+         fine"
+    );
+}
+
+#[test]
+fn cru038_reports_charm_s_lifetime_calls_however_a_value_carries_charm() {
+    const FORMS: [(&str, u32); 16] = [
+        ("const [copy] = [charm]; copy.effect(() => {});", 25),
+        ("(charm as typeof charm).effect(() => {});", 1),
+        ("const {effect} = charm as typeof charm; effect(() => {});", 8),
+        (
+            "function assign<T>(target: {}, source: T): T { return source; } const copy = assign({}, charm); \
+             copy.effect(() => {});",
+            97,
+        ),
+        ("class Holder { c = charm; } new Holder().c.effect(() => {});", 29),
+        ("(math.random() > 0.5 ? charm : charm).effect(() => {});", 1),
+        ("function identity<T>(x: T): T { return x; } identity(charm).effect(() => {});", 45),
+        ("function use<T extends typeof charm>(x:T) { x.effect(() => {}); } use(charm);", 45),
+        ("let c = charm; c = charm; c.effect(() => {});", 27),
+        ("charm!.effect(() => {});", 1),
+        ("(charm satisfies typeof charm).effect(() => {});", 1),
+        ("const copy = {...charm}; copy.effect(() => {});", 26),
+        ("const c = charm; c.effect(() => {});", 18),
+        ("const wrapped = {nested: charm}; wrapped.nested.effect(() => {});", 34),
+        ("const run = ({ effect } = charm) => effect(() => print(\"parameter\")); run();", 16),
+        (
+            "const wrapped = { nested: charm }; const { nested: { effect } } = wrapped; effect(() => print(\"nested\"));",
+            54,
+        ),
+    ];
+    let game = with_charm();
+    game.write("src/shared/local.ts", "export function effect(run: () => void) {\n\trun();\n}\n");
+    for (i, (form, _)) in FORMS.iter().enumerate() {
+        game.write(
+            &format!("src/server/form{i:02}.ts"),
+            &format!("import * as charm from \"@rbxts/charm\";\n{form}\n"),
+        );
+    }
+    game.main(
+        "import * as charm from \"@rbxts/charm\";\n\
+         import { atom, computed, batch } from \"@rbxts/charm\";\n\
+         import * as local from \"../shared/local\";\n\
+         local.effect(() => {});\n\
+         const count = charm.atom(0);\n\
+         const doubled = charm[\"computed\"](() => 2);\n\
+         charm.batch(() => {});\n\
+         const { atom: make, computed: derive, batch: group } = charm;\n\
+         batch(() => atom(0));\n\
+         function effect(run: () => void) {\n\trun();\n}\n\
+         effect(() => print(doubled()));\n\
+         const unrelated = { effect: (run: () => void) => run(), onCleanup: () => {} };\n\
+         unrelated.effect(() => {});\n\
+         unrelated[\"onCleanup\"]();\n\
+         const { effectScope: scope = () => {} } = { effectScope: undefined as (() => void) | undefined };\n\
+         const { effect: also } = unrelated;\n\
+         export const values = [count, make, derive, group, also, scope, computed];\n",
+    );
+    let found: Vec<_> = game
+        .facts()
+        .diagnostics
+        .iter()
+        .filter(|d| (90032..=90038).contains(&d.code))
+        .map(|d| (game.relative(d), d.line, d.column, d.code))
+        .collect();
+    let expected: Vec<_> = FORMS
+        .iter()
+        .enumerate()
+        .map(|(i, &(_, column))| (format!("src/server/form{i:02}.ts"), 2, column, 90038))
+        .collect();
+    assert_eq!(
+        found, expected,
+        "each form reports once, at its read or destructured name; atom, computed, batch, a local effect function and \
+         objects of the game's own in main.ts are fine"
+    );
 }
 
 #[test]

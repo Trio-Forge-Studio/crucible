@@ -86,13 +86,9 @@ impl Lints<'_, '_> {
                 self.charm_bindings(n)
             }
             Kind::PropertyAccessExpression | Kind::ElementAccessExpression if charm => self.charm_read(n),
-            Kind::VariableDeclaration if charm => {
-                if let Some(pattern) = n.name() {
-                    self.charm_destructuring(pattern, n.initializer());
-                }
-            }
+            Kind::BindingElement if charm => self.charm_binding(n),
             Kind::BinaryExpression if charm && n.operator() == Op::Assign => {
-                self.charm_destructuring(unwrap(n.left()), Some(n.right()));
+                self.charm_assignment(unwrap(n.left()), n.right());
             }
             _ => {}
         }
@@ -309,77 +305,56 @@ impl Lints<'_, '_> {
     }
 
     fn charm_read(&mut self, n: Node) {
-        if !self.is_namespace(n.expression()) {
-            return;
-        }
         let names = match n.kind() {
             Kind::PropertyAccessExpression => n.name().map(|name| vec![name.text()]).unwrap_or_default(),
             _ => self.literal_names(n.argument_expression()),
         };
-        if let Some(name) = self.namespace_lifetime(n.expression(), names) {
+        if let Some(name) = self.property_lifetime(n.expression(), names) {
             self.charm_report(n, name);
         }
     }
 
-    fn charm_destructuring(&mut self, pattern: Node, source: Option<Node>) {
-        let Some(source) = source.map(unwrap) else { return };
+    fn charm_binding(&mut self, element: Node) {
+        let Some(pattern) = element.parent().filter(|p| p.kind() == Kind::ObjectBindingPattern) else { return };
+        let Some(key) = element.property_name_or_name().filter(|_| !element.is_rest()) else { return };
+        let names = self.key_names(key);
+        if let Some(name) = self.property_lifetime(pattern, names) {
+            self.charm_report(element, name);
+        }
+    }
+
+    fn charm_assignment(&mut self, pattern: Node, source: Node) {
+        let source = unwrap(source);
         match pattern.kind() {
-            Kind::ObjectBindingPattern | Kind::ObjectLiteralExpression => {
-                if !self.is_namespace(source) {
-                    return;
-                }
-                let members = if pattern.kind() == Kind::ObjectBindingPattern {
-                    pattern.elements()
-                } else {
-                    pattern.properties()
-                };
-                for member in members.iter() {
+            Kind::ObjectLiteralExpression => {
+                for member in pattern.properties().iter() {
                     let key = match member.kind() {
-                        Kind::BindingElement if !member.is_rest() => member.property_name_or_name(),
                         Kind::ShorthandPropertyAssignment | Kind::PropertyAssignment => member.name(),
                         _ => None,
                     };
                     let Some(key) = key else { continue };
                     let names = self.key_names(key);
-                    if let Some(name) = self.namespace_lifetime(source, names) {
+                    if let Some(name) = self.property_lifetime(source, names) {
                         self.charm_report(member, name);
                     }
                 }
             }
-            Kind::ArrayBindingPattern | Kind::ArrayLiteralExpression
-                if source.kind() == Kind::ArrayLiteralExpression =>
-            {
+            Kind::ArrayLiteralExpression if source.kind() == Kind::ArrayLiteralExpression => {
                 for (target, value) in pattern.elements().iter().zip(source.elements().iter()) {
-                    if target.is_rest() || target.kind() == Kind::SpreadElement || value.kind() == Kind::SpreadElement {
+                    if target.kind() == Kind::SpreadElement || value.kind() == Kind::SpreadElement {
                         break;
                     }
-                    let target = if target.kind() == Kind::BindingElement { target.name() } else { Some(target) };
-                    if let Some(target) = target {
-                        self.charm_destructuring(unwrap(target), Some(value));
-                    }
+                    self.charm_assignment(unwrap(target), value);
                 }
             }
             _ => {}
         }
     }
 
-    /// Whether `n` reads a module's namespace through the aliases that lead to it, as `import * as charm`,
-    /// `import charm = require(..)` and a default import of a module without a default export do.
-    fn is_namespace(&mut self, n: Node) -> bool {
-        let n = unwrap(n);
-        let name = match n.kind() {
-            Kind::Identifier => Some(n),
-            Kind::PropertyAccessExpression => n.name(),
-            _ => None,
-        };
-        let Some(symbol) = name.and_then(|name| self.cx.symbol_at(name)) else { return false };
-        self.cx.aliased(symbol).flags().intersects(SymbolFlags::ValueModule)
-    }
-
-    fn namespace_lifetime(&mut self, namespace: Node, names: Vec<&'static str>) -> Option<&'static str> {
-        let namespace = self.cx.type_at(unwrap(namespace));
+    fn property_lifetime(&mut self, object: Node, names: Vec<&'static str>) -> Option<&'static str> {
+        let object = self.cx.type_at(unwrap(object));
         names.into_iter().find_map(|name| {
-            let symbol = self.cx.property_of_type(namespace, name)?;
+            let symbol = self.cx.property_of_type(object, name)?;
             self.charm_lifetime(symbol)
         })
     }
