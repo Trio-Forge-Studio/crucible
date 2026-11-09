@@ -1,7 +1,10 @@
 mod support;
 
+use std::process::Command;
+
 use crucible_compiler::{Compiled, Failure, Target, VirtualModule};
-use support::{Game, has};
+use serde_json::json;
+use support::{Game, has, repo};
 
 const DECLARATION: &str = "declare module \"virtual:experience\" {\n\texport const coins: number;\n}\n";
 
@@ -100,6 +103,86 @@ fn an_output_path_that_differs_from_another_module_s_only_in_case_is_refused() {
             ),
         );
     }
+}
+
+#[test]
+fn a_path_rojo_builds_as_a_script_or_folds_into_its_folder_is_refused() {
+    let game = game();
+    for path in [
+        "shared/experience.server.luau",
+        "shared/experience.client.luau",
+        "shared/init.luau",
+        "shared/init.server.luau",
+        "shared/init.client.luau",
+        "init.luau",
+    ] {
+        assert_eq!(
+            failure(&game, &[experience(path)]),
+            format!(
+                "error: the virtual module `virtual:experience` has the path {path}, which Rojo builds as a script or \
+                 as its folder, not as a module\n"
+            ),
+        );
+    }
+}
+
+#[test]
+#[ignore = "builds a place with Rojo and runs it in Lune, which must both be on PATH"]
+fn a_place_built_with_a_virtual_module_imports_its_value_at_run_time() {
+    let game = Game::new();
+    game.write(
+        "src/crucible-experience.d.ts",
+        "declare module \"crucible:experience\" {\n\texport const coins: number;\n}\n",
+    );
+    game.main("import { coins } from \"crucible:experience\";\nexport const value = coins;\n");
+    let experience = VirtualModule {
+        specifier: "crucible:experience",
+        path: "shared/experience.luau",
+        source: "return { coins = 5 }\n",
+    };
+    let compiled = compile(&game, &[experience]).unwrap_or_else(|failure| panic!("the game compiles:\n{failure}"));
+    crucible_compiler::write(&compiled.out_dir, &compiled.modules).expect("the modules are written");
+    crucible_compiler::write_include(&game.include()).expect("the runtime library is written");
+    game.json(
+        "default.project.json",
+        &json!({
+            "name": "virtual",
+            "tree": {
+                "$className": "DataModel",
+                "ReplicatedStorage": {
+                    "$className": "ReplicatedStorage",
+                    "rbxts_include": {
+                        "$path": "include",
+                        "node_modules": {
+                            "$className": "Folder",
+                            "@rbxts": { "$path": "node_modules/@rbxts" },
+                            "@trioforge": { "$className": "Folder", "crucible": { "$path": "node_modules/@trioforge/crucible" } },
+                        },
+                    },
+                    "TS": { "$path": "out/shared" },
+                },
+                "ServerScriptService": { "$className": "ServerScriptService", "TS": { "$path": "out/server" } },
+            },
+        }),
+    );
+    let place = game.dir.join("game.rbxl");
+    let built = Command::new("rojo")
+        .arg("build")
+        .arg(game.dir.join("default.project.json"))
+        .arg("--output")
+        .arg(&place)
+        .output()
+        .expect("rojo runs");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let ran = Command::new("lune")
+        .arg("run")
+        .arg(repo().join("crates/compiler/tests/virtual/run.luau"))
+        .arg(&place)
+        .output()
+        .expect("lune runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    assert!(ran.status.success(), "{stdout}{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(stdout.contains("main read 5 from crucible:experience"), "{stdout}");
 }
 
 #[test]

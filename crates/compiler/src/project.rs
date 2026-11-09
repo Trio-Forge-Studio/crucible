@@ -114,6 +114,14 @@ impl Game {
                     module.specifier, module.path
                 ));
             }
+            let name = module.path.rsplit('/').next().and_then(|name| name.strip_suffix(".luau")).unwrap_or_default();
+            if name == "init" || name.ends_with(".server") || name.ends_with(".client") {
+                return Err(format!(
+                    "the virtual module `{}` has the path {}, which Rojo builds as a script or as its folder, not as a \
+                     module",
+                    module.specifier, module.path
+                ));
+            }
             if let Some(other) = modules[..i].iter().find(|other| same_file(other.path, module.path)) {
                 return Err(format!(
                     "the virtual module `{}` has the output path {}, which collides with the virtual module `{}`",
