@@ -17,6 +17,13 @@ fn compile(game: &Game, modules: &[VirtualModule<'_>]) -> Result<Compiled, Failu
     )
 }
 
+fn failure(game: &Game, modules: &[VirtualModule<'_>]) -> String {
+    match compile(game, modules) {
+        Ok(_) => panic!("the compile fails"),
+        Err(failure) => failure.to_string(),
+    }
+}
+
 fn game() -> Game {
     let game = Game::new();
     game.write("src/experience.d.ts", DECLARATION);
@@ -41,10 +48,7 @@ fn a_virtual_module_is_emitted_and_imported_through_the_place() {
 #[test]
 fn a_virtual_module_needs_a_mapped_path_of_its_own_inside_the_output_folder() {
     let game = game();
-    let failure = |modules: &[VirtualModule<'_>]| match compile(&game, modules) {
-        Ok(_) => panic!("the compile fails"),
-        Err(failure) => failure.to_string(),
-    };
+    let failure = |modules: &[VirtualModule<'_>]| failure(&game, modules);
     for path in [
         "../experience.luau",
         "/experience.luau",
@@ -64,13 +68,38 @@ fn a_virtual_module_needs_a_mapped_path_of_its_own_inside_the_output_folder() {
     }
     assert_eq!(
         failure(&[experience("server/main.luau")]),
-        "error: the virtual module `virtual:experience` has the output path server/main.luau\n",
+        "error: the virtual module `virtual:experience` has the output path server/main.luau, which collides with the \
+         compiled module server/main.luau\n",
     );
     assert!(
         failure(&[experience("elsewhere/experience.luau")])
             .ends_with("error: the Rojo project maps no instance for this module\n"),
         "an unmapped virtual module cannot be imported"
     );
+}
+
+#[test]
+fn an_output_path_that_differs_from_another_module_s_only_in_case_is_refused() {
+    let game = game();
+    assert_eq!(
+        failure(&game, &[experience("server/MAIN.luau")]),
+        "error: the virtual module `virtual:experience` has the output path server/MAIN.luau, which collides with the \
+         compiled module server/main.luau\n",
+    );
+    let other = VirtualModule { specifier: "virtual:other", path: "shared/Experience.luau", source: "return {}\n" };
+    for paths in
+        [["shared/experience.luau", "shared/Experience.luau"], ["shared/experience.luau", "shared/experience.luau"]]
+    {
+        let other = VirtualModule { path: paths[1], ..other };
+        assert_eq!(
+            failure(&game, &[experience(paths[0]), other]),
+            format!(
+                "error: the virtual module `virtual:other` has the output path {}, which collides with the virtual \
+                 module `virtual:experience`\n",
+                paths[1]
+            ),
+        );
+    }
 }
 
 #[test]

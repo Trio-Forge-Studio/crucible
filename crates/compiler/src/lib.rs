@@ -212,9 +212,13 @@ fn compile_on_thread(
         return Err(Failure::Lower(errors));
     }
     if let Target::Game { modules: virtual_modules, .. } = target {
+        let compiled = modules.len();
         for module in virtual_modules {
-            if modules.iter().any(|m| m.path == module.path) {
-                let message = format!("the virtual module `{}` has the output path {}", module.specifier, module.path);
+            if let Some(other) = modules[..compiled].iter().find(|m| project::same_file(&m.path, module.path)) {
+                let message = format!(
+                    "the virtual module `{}` has the output path {}, which collides with the compiled module {}",
+                    module.specifier, module.path, other.path
+                );
                 return Err(Failure::Crucible(vec![Diagnostic { path: None, line: 0, column: 0, code: 0, message }]));
             }
             modules.push(Module { path: module.path.to_owned(), source: format!("{HEADER}{}", module.source) });

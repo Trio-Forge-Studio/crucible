@@ -106,12 +106,18 @@ impl Game {
         };
         let out_dir = normalize(out_dir);
         let mut virtual_modules = Vec::with_capacity(modules.len());
-        for module in modules {
+        for (i, module) in modules.iter().enumerate() {
             let inside = module.path.split('/').all(|s| !matches!(s, "" | "." | "..") && !s.contains(['\\', ':']));
             if !inside || !module.path.ends_with(".luau") {
                 return Err(format!(
                     "the virtual module `{}` needs a path inside the output folder that ends in .luau, not `{}`",
                     module.specifier, module.path
+                ));
+            }
+            if let Some(other) = modules[..i].iter().find(|other| same_file(other.path, module.path)) {
+                return Err(format!(
+                    "the virtual module `{}` has the output path {}, which collides with the virtual module `{}`",
+                    module.specifier, module.path, other.specifier
                 ));
             }
             virtual_modules.push((module.specifier.into(), out_dir.join(module.path)));
@@ -160,6 +166,11 @@ struct Installed {
     path: PathBuf,
     /// `None` when the link cannot be resolved.
     real: Option<PathBuf>,
+}
+
+/// Whether two output paths name one file where file names ignore case, as on Windows and macOS.
+pub(crate) fn same_file(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
 }
 
 /// The nearest folder at or above `dir` with a `package.json`.
