@@ -217,6 +217,7 @@ impl ProgramCx<'_> {
 pub struct ExtractCx<'x> {
     pub(super) program: ProgramCx<'x>,
     pub(super) file: u32,
+    pub(super) extension: usize,
 }
 
 impl<'x> Deref for ExtractCx<'x> {
@@ -239,9 +240,9 @@ impl ExtractCx<'_> {
         SiteId { file: self.file, span: n.span() }
     }
 
-    /// Reports an error at `at`, once per file, position and code, which fails the compile. `code` is TypeScript's
-    /// error number, or 0.
+    /// Reports an error at `at`, which fails the compile. A second report of the same code at the same position by
+    /// the same extension is dropped. `code` is TypeScript's error number, or 0.
     pub fn report(&mut self, at: Node, code: i32, message: &str) {
-        self.program.x.report(at.raw(), Code::Extension(code), message);
+        self.program.x.report(at.raw(), Code::Extension { extension: self.extension, code }, message);
     }
 }

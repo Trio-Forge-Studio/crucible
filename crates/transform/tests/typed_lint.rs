@@ -1,5 +1,7 @@
 mod support;
-use support::{Game, copy_declarations, repo};
+use crucible_compiler::extension::{Extension, ExtractCx, File, Kind};
+use crucible_transform::Crucible;
+use support::{Game, copy_declarations, game_or_package, repo};
 
 fn rules(game: &Game) -> Vec<(usize, usize, i32)> {
     game.facts()
@@ -80,4 +82,45 @@ fn charm_imports_inside_installed_packages_raise_nothing() {
     );
     game.main("import { boot } from \"@trioforge/crucible/server\";\nimport { useAtom } from \"@rbxts/vide-charm\";\nimport { atom } from \"@rbxts/charm\";\nexport const value = useAtom(atom(0));\nprint(boot);\n");
     assert_eq!(rules(&game), []);
+}
+
+/// Reports TS90035 at every `.Connect(..)` call, the number CRU035 renders to.
+struct Echo;
+
+impl Extension for Echo {
+    fn name(&self) -> &'static str {
+        "echo"
+    }
+
+    fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
+        let mut nodes = vec![file.root()];
+        while let Some(n) = nodes.pop() {
+            if n.kind() == Kind::CallExpression
+                && n.expression().kind() == Kind::PropertyAccessExpression
+                && n.expression().name().is_some_and(|name| name.text() == "Connect")
+            {
+                cx.report(n, 90035, "echo: a connection");
+            }
+            n.for_each_child(&mut |child| nodes.push(child));
+        }
+    }
+}
+
+#[test]
+fn another_extension_s_report_where_a_crucible_rule_reports_with_the_same_number_is_kept() {
+    let game = Game::new();
+    game.main(
+        "import { Subsystem } from \"@trioforge/crucible\";\nconst RunService = game.GetService(\"RunService\");\n\
+         declare function step(): void;\nexport class Direct extends Subsystem { start() { RunService.Heartbeat.Connect(step); } }\n",
+    );
+    let (instances, include) = (game.instances(), game.include());
+    let facts = crucible_compiler::analyze_with(
+        &game.dir.join("tsconfig.json"),
+        game_or_package(instances.as_ref(), &include),
+        &mut [&mut Crucible::default(), &mut Echo],
+    )
+    .unwrap_or_else(|d| panic!("the game type-checks: {d:?}"));
+    let found: Vec<(u32, u32, i32, &str)> =
+        facts.diagnostics.iter().map(|d| (d.line, d.column, d.code, d.message.split(':').next().unwrap())).collect();
+    assert_eq!(found, [(4, 51, 90035, "CRU035"), (4, 51, 90035, "echo")]);
 }

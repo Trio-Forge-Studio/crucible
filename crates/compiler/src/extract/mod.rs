@@ -98,8 +98,9 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         }
         let id = x.facts.files.len() as u32;
         x.source_file(file);
-        for extension in extensions.iter_mut() {
-            extension.extract_file(&mut ExtractCx { program: ProgramCx { x: &mut x }, file: id }, File::new(file));
+        for (index, extension) in extensions.iter_mut().enumerate() {
+            let mut cx = ExtractCx { program: ProgramCx { x: &mut x }, file: id, extension: index };
+            extension.extract_file(&mut cx, File::new(file));
         }
     }
     for extension in extensions.iter_mut() {
