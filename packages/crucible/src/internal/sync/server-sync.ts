@@ -5,6 +5,7 @@ import { enginePort } from "../binding";
 import { runtimeDiagnostic } from "../diagnostics";
 import { stateOf } from "../lifecycle";
 import { claim } from "../network/claims";
+import type { Packet } from "../network/envelope";
 import { KICK_MESSAGE } from "../network/limits";
 import { networkPort } from "../network/port";
 import { FrameEvent } from "../port";
@@ -35,8 +36,8 @@ import { admit, isOverBudget, spend, type Work } from "./values";
 
 checkCharm();
 
-/** @internal How ServerSync sends: exactly `Network.send` on the frame message. */
-export type FrameSender = (player: Player, frame: SyncFrame) => boolean;
+/** @internal Delivers the frame's preflighted transport packet. */
+export type FrameSender = (player: Player, frame: SyncFrame, packet: Packet) => boolean;
 
 /** What a peer accepted for one declaration: the version and frozen value of the last frame `send` took. */
 interface Accepted {
@@ -121,6 +122,11 @@ interface Staged {
 }
 
 let sender: FrameSender = () => false;
+
+function sendFailed(player: Player, revision: number) {
+	const frame: SyncFrame = { failed: [], kind: "failed", revision, values: [] };
+	return sender(player, frame, frameCost(frame, SyncFrameMessage.index!).packet);
+}
 
 class ServerSync extends Subsystem {
 	private readonly peers = new Map<Player, View>();
@@ -418,7 +424,7 @@ class ServerSync extends Subsystem {
 			return 0;
 		}
 		if (spent > 0 && spent + cost.bytes > SYNC_HEARTBEAT_BYTES) return undefined;
-		const [ok, accepted] = pcall(sender, view.player, frame);
+		const [ok, accepted] = pcall(sender, view.player, frame, cost.packet);
 		if (!ok) {
 			this.fail(view, `encode refused a preflighted frame (${cost.bytes} bytes; ${names.join(", ")})`);
 			return 0;
@@ -447,7 +453,7 @@ class ServerSync extends Subsystem {
 	private fail(view: View, reason: string) {
 		if (!view.live) return;
 		const player = view.player;
-		pcall(sender, player, { failed: [], kind: "failed", revision: view.revision, values: [] });
+		pcall(sendFailed, player, view.revision);
 		this.end(view);
 		runtimeDiagnostic(
 			"error",
@@ -495,7 +501,7 @@ class ServerSync extends Subsystem {
 		this.disconnect?.();
 		this.disconnect = undefined;
 		for (const view of [...this.order]) {
-			pcall(sender, view.player, { failed: [], kind: "failed", revision: view.revision, values: [] });
+			pcall(sendFailed, view.player, view.revision);
 			this.end(view);
 		}
 	}

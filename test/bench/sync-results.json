@@ -19,248 +19,154 @@
 		"warmup": "60 quiet Heartbeats",
 		"bytes": "EVENT buffers including snapshots over ten simulated seconds",
 		"heartbeat": "server callbacks including codec and bounded scheduler; writes and all client apply outside timer; shipped runtime on Charm arm",
-		"frameBudget": 196608
+		"frameBudget": 196608,
+		"packetEncoding": "Charm sends its preflight packet; trunk retains its send-time transport encoding."
 	},
 	"host": {
-		"waitStartedUtc": "2026-11-08T19:40:00Z",
+		"waitStartedUtc": "2026-11-09T00:02:12.3657674Z",
 		"waitCapMinutes": 60,
-		"start": {
-			"utc": "2026-11-08T20:08:58Z",
-			"osCpuPercent": 10.16,
-			"idleCounterStalled": false,
-			"processCpuPercent": 6.3,
-			"busyProcesses": [
-				[1.015625, "MsMpEng.exe", 5604],
-				[0.421875, "python.exe", 39792],
-				[0.3125, "System", 4],
-				[0.25, "RobloxPlayerBeta.exe", 38416],
-				[0.125, "chrome.exe", 19668],
-				[0.078125, "chrome.exe", 16248],
-				[0.0625, "audiodg.exe", 16972],
-				[0.03125, "dwm.exe", 1736]
-			],
-			"logicalProcessors": 16
-		},
-		"end": {
-			"utc": "2026-11-08T20:09:21Z",
-			"osCpuPercent": 41.16,
-			"idleCounterStalled": false,
-			"processCpuPercent": 43.58,
-			"busyProcesses": [
-				[8.921875, "MsMpEng.exe", 5604],
-				[7.40625, "node.exe", 36704],
-				[1.203125, "System", 4],
-				[0.859375, "python.exe", 20592],
-				[0.6875, "RobloxPlayerBeta.exe", 38416],
-				[0.3125, "chrome.exe", 19668],
-				[0.109375, "audiodg.exe", 16972],
-				[0.09375, "chrome.exe", 16248]
-			],
-			"logicalProcessors": 16
-		},
+		"quietCriterion": "two consecutive 2-second GetSystemTimes samples at or below 15% CPU",
 		"qualification": [
 			{
-				"probes": [
-					{
-						"utc": "2026-11-08T20:04:54Z",
-						"osCpuPercent": 83.45,
-						"idleCounterStalled": false,
-						"processCpuPercent": 82.65,
-						"busyProcesses": [
-							[27.71875, "network-d99baae1f9d6f907.exe", 37764],
-							[7.90625, "MsMpEng.exe", 5604],
-							[1.0625, "RobloxPlayerBeta.exe", 38416],
-							[1.046875, "System", 4],
-							[0.953125, "python.exe", 9564],
-							[0.359375, "chrome.exe", 19668],
-							[0.171875, "svchost.exe", 7964],
-							[0.09375, "audiodg.exe", 16972]
-						],
-						"logicalProcessors": 16
-					}
-				],
-				"qualified": false,
-				"capReached": false
+				"utc": "2026-11-09T00:02:14.4028871Z",
+				"osCpuPercent": 12.78,
+				"logicalProcessors": 16,
+				"idleCounterStalled": false
 			},
 			{
-				"probes": [
-					{
-						"utc": "2026-11-08T20:07:29Z",
-						"osCpuPercent": 25.54,
-						"idleCounterStalled": false,
-						"processCpuPercent": 27.16,
-						"busyProcesses": [
-							[9.34375, "rustc.exe", 20240],
-							[0.6875, "python.exe", 28948],
-							[0.65625, "RobloxPlayerBeta.exe", 38416],
-							[0.109375, "System", 4],
-							[0.09375, "chrome.exe", 16248],
-							[0.09375, "audiodg.exe", 16972],
-							[0.09375, "RobloxCrashHandler.exe", 21156],
-							[0.078125, "pwsh.exe", 28512]
-						],
-						"logicalProcessors": 16
-					}
-				],
-				"qualified": false,
-				"capReached": false
-			},
-			{
-				"probes": [
-					{
-						"utc": "2026-11-08T20:08:51Z",
-						"osCpuPercent": 9.93,
-						"idleCounterStalled": false,
-						"processCpuPercent": 8.37,
-						"busyProcesses": [
-							[1.5, "MsMpEng.exe", 5604],
-							[0.609375, "python.exe", 17952],
-							[0.484375, "System", 4],
-							[0.3125, "RobloxPlayerBeta.exe", 38416],
-							[0.140625, "chrome.exe", 16248],
-							[0.09375, "svchost.exe", 7964],
-							[0.0625, "chrome.exe", 19668],
-							[0.03125, "svchost.exe", 2372]
-						],
-						"logicalProcessors": 16
-					},
-					{
-						"utc": "2026-11-08T20:08:55Z",
-						"osCpuPercent": 11.33,
-						"idleCounterStalled": false,
-						"processCpuPercent": 8.13,
-						"busyProcesses": [
-							[1.015625, "MsMpEng.exe", 5604],
-							[0.546875, "python.exe", 31112],
-							[0.40625, "RobloxPlayerBeta.exe", 38416],
-							[0.328125, "svchost.exe", 5024],
-							[0.28125, "System", 4],
-							[0.109375, "chrome.exe", 16248],
-							[0.09375, "chrome.exe", 19668],
-							[0.078125, "audiodg.exe", 16972]
-						],
-						"logicalProcessors": 16
-					}
-				],
-				"qualified": true,
-				"capReached": false
+				"utc": "2026-11-09T00:02:36.4614109Z",
+				"osCpuPercent": 12.9,
+				"logicalProcessors": 16,
+				"idleCounterStalled": false
 			}
 		],
-		"interruptedAttempt": "An initial attempt was stopped during pair 2 because the second preflight load sample was 87%; partial samples were preserved in .review/fix2/gate-unqualified.jsonl. One complete 15-pair gate was then run, with no runtime changes between attempts.",
-		"notes": "Owned mutation runs were suspended for gate timing. Other host work was uncontrolled; start/end samples include busy process counters and occasional idle-counter stalls are marked."
+		"start": {
+			"utc": "2026-11-09T00:02:38.4689892Z",
+			"osCpuPercent": 14.98,
+			"logicalProcessors": 16,
+			"idleCounterStalled": false
+		},
+		"end": {
+			"utc": "2026-11-09T00:02:58.5495085Z",
+			"osCpuPercent": 14.44,
+			"logicalProcessors": 16,
+			"idleCounterStalled": false
+		},
+		"capReached": false,
+		"notes": "Shared laptop; background work uncontrolled. No owned Cargo checks or mutation runs overlapped timing. One completed gate; no runtime tuning after measurement."
 	},
 	"medians": {
 		"trunk": {
 			"bytesPerSecond": 28900,
 			"largestFrame": 20699,
-			"usPerHeartbeat": 204.88266624549095
+			"usPerHeartbeat": 217.98366641936204
 		},
 		"charm": {
 			"bytesPerSecond": 19137.2,
 			"largestFrame": 20719,
-			"usPerHeartbeat": 260.38866640495445
+			"usPerHeartbeat": 174.20600051991642
 		}
 	},
 	"medianRatios": {
 		"bytesPerSecond": 0.6621868512110727,
 		"largestFrame": 1.0009662302526692,
-		"usPerHeartbeat": 1.2709160378309214
+		"usPerHeartbeat": 0.7991699716839099
 	},
 	"medianPairedRatios": {
 		"bytesPerSecond": 0.6621868512110727,
 		"largestFrame": 1.0009662302526692,
-		"usPerHeartbeat": 1.2553827587170352
+		"usPerHeartbeat": 0.7858165759678805
 	},
 	"pairedRatios": [
 		{
 			"pair": 1,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.3723855983635311
+			"usPerHeartbeat": 0.7853178249323408
 		},
 		{
 			"pair": 2,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.312973028094351
+			"usPerHeartbeat": 0.7465964164551387
 		},
 		{
 			"pair": 3,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.2545306552028972
+			"usPerHeartbeat": 0.7858165759678805
 		},
 		{
 			"pair": 4,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.4369380600561639
+			"usPerHeartbeat": 0.8715096941540184
 		},
 		{
 			"pair": 5,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.1538153926981505
+			"usPerHeartbeat": 0.9089449254122249
 		},
 		{
 			"pair": 6,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.3323213471540793
+			"usPerHeartbeat": 0.7689845764278626
 		},
 		{
 			"pair": 7,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.2553827587170352
+			"usPerHeartbeat": 0.8290667877526813
 		},
 		{
 			"pair": 8,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.1993829146451656
+			"usPerHeartbeat": 0.76690051616029
 		},
 		{
 			"pair": 9,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 0.7794267634612437
+			"usPerHeartbeat": 0.7803594399477058
 		},
 		{
 			"pair": 10,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.2723116679608844
+			"usPerHeartbeat": 0.5520924158551805
 		},
 		{
 			"pair": 11,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.3120945606112921
+			"usPerHeartbeat": 0.837669155360356
 		},
 		{
 			"pair": 12,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.3036712523360063
+			"usPerHeartbeat": 0.7275468672602877
 		},
 		{
 			"pair": 13,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.1573851021666244
+			"usPerHeartbeat": 0.8215408840801349
 		},
 		{
 			"pair": 14,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.2287068270599741
+			"usPerHeartbeat": 0.8072701907392259
 		},
 		{
 			"pair": 15,
 			"bytesPerSecond": 0.6621868512110727,
 			"largestFrame": 1.0009662302526692,
-			"usPerHeartbeat": 1.1009385071638644
+			"usPerHeartbeat": 0.9009558012508869
 		}
 	],
 	"samples": [
@@ -274,11 +180,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 1,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 189.73433320449354,
-			"pair": 1
+			"usPerHeartbeat": 227.6388324874764
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -290,11 +196,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 1,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 260.38866640495445,
-			"pair": 1
+			"usPerHeartbeat": 178.76883279920244
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -306,11 +212,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 2,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 202.02433292676386,
-			"pair": 2
+			"usPerHeartbeat": 223.51433280467367
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -322,11 +228,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 2,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 265.25250015159446,
-			"pair": 2
+			"usPerHeartbeat": 166.87499989833063
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -338,11 +244,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 3,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 207.93566606395567,
-			"pair": 3
+			"usPerHeartbeat": 212.8658331154535
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -354,11 +260,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 3,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 260.86166738726513,
-			"pair": 3
+			"usPerHeartbeat": 167.27350011933595
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -370,11 +276,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 4,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 204.92416617344134,
-			"pair": 4
+			"usPerHeartbeat": 219.5366666031381
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -386,11 +292,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 4,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 294.46333379989176,
-			"pair": 4
+			"usPerHeartbeat": 191.32833316689357
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -402,11 +308,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 5,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 206.72399982383163,
-			"pair": 5
+			"usPerHeartbeat": 231.77183466032147
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -418,11 +324,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 5,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 238.52133303686668,
-			"pair": 5
+			"usPerHeartbeat": 210.66783296798044
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -434,11 +340,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 6,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 201.6938333690632,
-			"pair": 6
+			"usPerHeartbeat": 207.9363338028391
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -450,11 +356,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 6,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 268.7209997869407,
-			"pair": 6
+			"usPerHeartbeat": 159.89983357333887
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -466,11 +372,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 7,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 204.88266624549095,
-			"pair": 7
+			"usPerHeartbeat": 210.12299985159189
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -482,11 +388,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 7,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 257.20616676456603,
-			"pair": 7
+			"usPerHeartbeat": 174.20600051991642
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -498,11 +404,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 8,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 217.47433367030075,
-			"pair": 8
+			"usPerHeartbeat": 224.33983297863355
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -514,11 +420,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 8,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 260.8350001780006,
-			"pair": 8
+			"usPerHeartbeat": 172.0463337066273
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -530,11 +436,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 9,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 354.7408334755649,
-			"pair": 9
+			"usPerHeartbeat": 223.52050029439852
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -546,11 +452,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 9,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 276.49449970340356,
-			"pair": 9
+			"usPerHeartbeat": 174.42633242656785
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -562,11 +468,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 10,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 203.4996667255958,
-			"pair": 10
+			"usPerHeartbeat": 308.6101670245019
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -578,11 +484,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 10,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 258.91500040112686,
-			"pair": 10
+			"usPerHeartbeat": 170.38133267002803
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -594,11 +500,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 11,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 203.91949995731315,
-			"pair": 11
+			"usPerHeartbeat": 216.4201679018637
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -610,11 +516,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 11,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 267.5616666965652,
-			"pair": 11
+			"usPerHeartbeat": 181.2884992493006
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -626,11 +532,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 12,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 194.1161668704202,
-			"pair": 12
+			"usPerHeartbeat": 217.98366641936204
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -642,11 +548,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 12,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 253.06366636262587,
-			"pair": 12
+			"usPerHeartbeat": 158.59333361731842
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -658,11 +564,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 13,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 221.9873340315341,
-			"pair": 13
+			"usPerHeartbeat": 212.74899889249355
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -674,11 +580,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 13,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 256.92483327778365,
-			"pair": 13
+			"usPerHeartbeat": 174.7820006373028
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -690,11 +596,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 14,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 199.79799976378368,
-			"pair": 14
+			"usPerHeartbeat": 209.9303333670832
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -706,11 +612,11 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 14,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 245.4931663426881,
-			"pair": 14
+			"usPerHeartbeat": 169.47050025919452
 		},
 		{
 			"bytesPerSecond": 28900,
@@ -722,11 +628,11 @@
 			"hz": 60,
 			"largestFrame": 20699,
 			"packets": 332,
+			"pair": 15,
 			"peers": 4,
 			"protocol": "trunk",
 			"settled": true,
-			"usPerHeartbeat": 214.75616653333418,
-			"pair": 15
+			"usPerHeartbeat": 199.13500058464703
 		},
 		{
 			"bytesPerSecond": 19137.2,
@@ -738,12 +644,12 @@
 			"hz": 60,
 			"largestFrame": 20719,
 			"packets": 332,
+			"pair": 15,
 			"peers": 4,
 			"protocol": "charm",
 			"settled": true,
-			"usPerHeartbeat": 236.43333338744318,
-			"pair": 15
+			"usPerHeartbeat": 179.4118340088365
 		}
 	],
-	"gatePass": false
+	"gatePass": true
 }

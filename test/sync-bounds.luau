@@ -24,6 +24,83 @@ local function fill(count, value, prefix)
 end
 
 local tests = {}
+tests["pre-encoded sends retain session guards and queue the supplied packet"] = function()
+	local port = require("./lib/network-port")()
+	local player = { Name = "Ann" }
+	port.players = function()
+		return { player }
+	end
+	local graph = spec.runtime(nil, nil, nil, port)
+	local Session = graph.module("internal/network/server-session").ServerSession
+	local session = Session.new(port)
+	local wire = graph.module("internal/network/envelope")
+	local packet = wire.controlPacket(4, {})
+	local ok, err = pcall(function()
+		session:sendEncoded(player, packet)
+	end)
+	spec.eq(ok, false, "idle session rejects sends")
+	spec.has(err, "networking is not ready", "same lifecycle diagnostic")
+	session:open()
+	session:loaded()
+	spec.eq(session:sendEncoded({}, packet), false, "unknown player has no peer")
+	spec.eq(session:sendEncoded(player, packet), true, "queued before commit and READY")
+	local peer = session.peers[player]
+	spec.eq(peer.queue[1], packet, "the supplied packet is queued without rebuilding")
+	spec.eq(peer.queuedBytes, packet.charge, "transport charge retained")
+	spec.eq(#port.fired, 0, "nothing fires early")
+	session:commit()
+	local ready = wire.controlPacket(4, {})
+	port.receive(player, ready.bytes, ready.sidecar)
+	spec.eq(#port.fired, 1, "READY flushes the queue")
+	spec.eq(port.fired[1].packet, packet.bytes, "same buffer fired")
+	spec.eq(port.fired[1].sidecar, packet.sidecar, "same sidecar fired")
+	session:close()
+	spec.eq(session:sendEncoded(player, packet), false, "closed session refuses sends")
+end
+tests["each sent frame uses one transport encode"] = function()
+	spec.rewrite(function(path, source)
+		if path == "packages/crucible/out/internal/network/envelope" then
+			local rewritten, count = string.gsub(
+				source,
+				"local function encodeBody%(name, codec, path, value%)",
+				function(signature)
+					return signature .. '\n if name == "Crucible.State.Frame" then transportEncodeCount += 1 end'
+				end
+			)
+			assert(count == 1, "one transport encoder")
+			return "local transportEncodeCount = 0\n"
+				.. string.gsub(rewritten, "\nreturn {", function()
+					return "\nreturn {\n transportEncodes = function() return transportEncodeCount end,"
+				end)
+		end
+		return source
+	end)
+	local w = World.new({
+		declare = function(r)
+			return r.emit.replicated("Encode.Score", 0, r.n.f64)
+		end,
+		serve = function(s, d, world)
+			s.service("Encode", function()
+				world.write = s.entry.publish(d)
+			end)
+		end,
+	})
+	spec.rewrite(nil)
+	local ann, bob = w:join("Ann"), w:join("Bob")
+	spec.eq(#w.sent, 2, "two snapshots sent")
+	spec.eq(w.wire.envelope.transportEncodes(), #w.sent, "one transport encode per snapshot")
+	w.write(42)
+	w:heartbeat()
+	spec.eq(#w.sent, 4, "two updates sent")
+	spec.eq(w.wire.envelope.transportEncodes(), #w.sent, "one transport encode per sent frame")
+	spec.eq(ann.d(), 42, "Ann received the update")
+	spec.eq(bob.d(), 42, "Bob received the update")
+	w:sync():stop()
+	w.link:flush()
+	spec.eq(#w.sent, 6, "two failed frames sent on stop")
+	spec.eq(w.wire.envelope.transportEncodes(), #w.sent, "one transport encode per failed frame too")
+	w:finish()
+end
 for _, count in { 3, 6000, 7000, 11000 } do
 	tests[`clearing {count} map keys uses a bounded full replacement`] = function()
 		local w = newWorld(function(n)

@@ -19,6 +19,16 @@ local function decoder(realm)
 	}
 end
 
+local function decode(wire, packet: buffer)
+	local header = wire.envelope.readHeader(2, packet, {})
+	if header == nil or header.opcode ~= EVENT or header.index ~= wire.frame.SyncFrameMessage.index then
+		return nil
+	end
+	local reader = wire.codec.Reader.new(packet, header.payloadAt, {}, 0)
+	local frame = wire.frame.SyncFrameMessage.input.decode(reader, "payload")
+	return { frame = frame, visits = reader.budget.visits, entries = reader.budget.entries, bytes = buffer.len(packet) }
+end
+
 -- options.declare(realm) returns the realm's declarations; options.serve(server, declarations, world) defines the
 -- server's publishers; options.patch(world) runs before boot; options.globals reaches every realm's module env.
 function world.new(options)
@@ -34,20 +44,20 @@ function world.new(options)
 	self.wire = decoder(server)
 	local frameModule = self.wire.frame
 	local Session = server.graph.module("internal/network/server-session").ServerSession
-	local send = Session.send
-	Session.send = function(session, player, token, value)
+	local function intercept(send, player, token, value, packet)
 		local before = #link.log
 		local ok, result
 		if token == frameModule.SyncFrameMessage and self.refuse > 0 then
 			self.refuse -= 1
 			ok, result = false, "injected encode refusal"
 		else
-			ok, result = pcall(send, session, player, token, value)
+			ok, result = pcall(send)
 		end
 		if token == frameModule.SyncFrameMessage then
 			table.insert(self.sent, {
 				player = player.Name,
 				frame = value,
+				packet = packet,
 				ok = ok,
 				result = result,
 				entry = if #link.log > before then link.log[before + 1] else nil,
@@ -57,6 +67,18 @@ function world.new(options)
 			error(result, 0)
 		end
 		return result
+	end
+	local send, sendEncoded = Session.send, Session.sendEncoded
+	Session.send = function(session, player, token, value)
+		return intercept(function()
+			return send(session, player, token, value)
+		end, player, token, value)
+	end
+	Session.sendEncoded = function(session, player, packet)
+		local decoded = assert(decode(self.wire, packet.bytes), "pre-encoded sync frame")
+		return intercept(function()
+			return sendEncoded(session, player, packet)
+		end, player, frameModule.SyncFrameMessage, decoded.frame, packet)
 	end
 	if options.patch then
 		options.patch(self)
@@ -105,16 +127,6 @@ function world:sync()
 		end
 	end
 	error("no ServerSync")
-end
-
-local function decode(wire, packet: buffer)
-	local header = wire.envelope.readHeader(2, packet, {})
-	if header == nil or header.opcode ~= EVENT or header.index ~= wire.frame.SyncFrameMessage.index then
-		return nil
-	end
-	local reader = wire.codec.Reader.new(packet, header.payloadAt, {}, 0)
-	local frame = wire.frame.SyncFrameMessage.input.decode(reader, "payload")
-	return { frame = frame, visits = reader.budget.visits, entries = reader.budget.entries, bytes = buffer.len(packet) }
 end
 
 -- Every sync frame on the wire to `client`, decoded by networking's codec, in order.

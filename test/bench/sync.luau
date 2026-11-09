@@ -523,9 +523,12 @@ local function run(protocol)
 	local index = w.wire.frame.SyncFrameMessage.index
 	local pending, clients, players = {}, {}, {}
 	local totalBytes, largestFrame, packets = 0, 0, 0
-	local function send(player, payload, wireCodec)
-		local body = envelope.encodeBody("Bench.Sync", wireCodec, "payload", payload)
-		local packet = envelope.frame(body, 0, { index })
+	local function send(player, payload, wireCodec, packet)
+		if protocol == "trunk" then
+			local body = envelope.encodeBody("Bench.Sync", wireCodec, "payload", payload)
+			packet = envelope.frame(body, 0, { index })
+		end
+		assert(packet, "preflight packet")
 		local bytes = buffer.len(packet.bytes)
 		totalBytes += bytes
 		largestFrame = math.max(largestFrame, bytes)
@@ -535,13 +538,11 @@ local function run(protocol)
 			packet = packet,
 			codec = wireCodec,
 			payload = payload,
-			entries = body.writer.budget.entries,
-			visits = body.writer.budget.visits,
 		})
 		return true
 	end
-	s.graph.module("internal/sync/server-sync").installServerSync(function(player, frame)
-		send(player, frame, w.wire.frame.SyncFrameMessage.input)
+	s.graph.module("internal/sync/server-sync").installServerSync(function(player, frame, packet)
+		send(player, frame, w.wire.frame.SyncFrameMessage.input, packet)
 		return true
 	end)
 	local function tick()

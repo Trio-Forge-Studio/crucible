@@ -1,7 +1,7 @@
 import { defineFramework, type Definition } from "../network/catalog";
 import { n } from "../network/schema";
 import { SYNC_FRAME_BYTES, SYNC_FRAME_COLLECTION_ENTRIES, SYNC_FRAME_VALUE_VISITS } from "../reactive/limits";
-import { encodeBody, frame as packet } from "../network/envelope";
+import { encodeBody, frame as packet, type Packet } from "../network/envelope";
 
 /** @internal One declaration's full value, Charm Sync delta, or status-only recovery. */
 export interface SyncValue {
@@ -48,6 +48,7 @@ export const SyncFaultMessage: Definition = defineFramework({
 
 /** @internal */
 export interface FrameCost {
+	readonly packet: Packet;
 	readonly bytes: number;
 	readonly entries: number;
 	readonly visits: number;
@@ -58,6 +59,7 @@ export function frameCost(frame: SyncFrame, catalogIndex: number): FrameCost {
 	const body = encodeBody(SyncFrameMessage.name, SyncFrameMessage.input!, "payload", frame);
 	const encoded = packet(body, 0, [catalogIndex]);
 	return {
+		packet: encoded,
 		bytes: buffer.len(encoded.bytes),
 		entries: body.writer.budget.entries,
 		visits: body.writer.budget.visits,

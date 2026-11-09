@@ -12,6 +12,7 @@ const P = src + "internal/sync/patches.ts";
 const D = src + "internal/sync/declarations.ts";
 const F = src + "internal/sync/frame.ts";
 const SS = src + "internal/sync/server-sync.ts";
+const SESSION = src + "internal/network/server-session.ts";
 const CS = src + "internal/sync/client-sync.ts";
 const CAT = src + "internal/network/catalog.ts";
 const B = src + "internal/boot.ts";
@@ -408,7 +409,7 @@ const rules = [
 		[
 			"guard",
 			SS,
-			'\t\tpcall(sender, player, { failed: [], kind: "failed", revision: view.revision, values: [] });\n\t\tthis.end(view);\n\t\truntimeDiagnostic(',
+			"\t\tpcall(sendFailed, player, view.revision);\n\t\tthis.end(view);\n\t\truntimeDiagnostic(",
 			"\t\tthis.end(view);\n\t\truntimeDiagnostic(",
 		],
 		["swap", "a failure sends one frame to one player with nothing of one type to swap"],
@@ -454,6 +455,29 @@ const rules = [
 			"entry.value = staged.accept.get(declarationNamed(entry.key)!)!.value;",
 			"entry.value = undefined;",
 		],
+	],
+	[
+		"69",
+		["guard pre-encoded lifecycle", SESSION, "\t\tif (!this.sendable()) return false;\n", "\n"],
+		[
+			"swap pre-encoded peer",
+			SESSION,
+			"const peer = this.peers.get(player);\n\t\treturn peer !== undefined && this.deliver(peer, packet);",
+			"const peer = this.order[0];\n\t\treturn peer !== undefined && this.deliver(peer, packet);",
+		],
+		[
+			"pair pre-encoded delivery",
+			SESSION,
+			"return peer !== undefined && this.deliver(peer, packet);",
+			"return peer !== undefined;",
+		],
+		[
+			"pair packet reuse",
+			SS,
+			"pcall(sender, view.player, frame, cost.packet)",
+			"pcall(sender, view.player, frame, frameCost(frame, SyncFrameMessage.index!).packet)",
+		],
+		["swap packet opcode", F, "packet(body, 0, [catalogIndex])", "packet(body, 2, [catalogIndex])"],
 	],
 	[
 		"70",
@@ -521,12 +545,7 @@ const rules = [
 	],
 	[
 		"73",
-		[
-			"guard",
-			SS,
-			'\t\t\tpcall(sender, view.player, { failed: [], kind: "failed", revision: view.revision, values: [] });\n',
-			"\n",
-		],
+		["guard", SS, "\t\t\tpcall(sendFailed, view.player, view.revision);\n", "\n"],
 		["swap", "the end sends one frame per peer with nothing to swap"],
 		["pair", SS, "\t\tstate.subscriptions.push(() => this.stop());\n", "\n"],
 		["pair disconnect", SS, "\t\tthis.disconnect?.();\n", "\n"],

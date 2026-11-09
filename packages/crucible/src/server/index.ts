@@ -4,7 +4,6 @@ import { boot as bootSide } from "../internal/boot";
 import { installConfigRuntime } from "../internal/configs/runtime";
 import { networkPort } from "../internal/network/port";
 import { ServerSession } from "../internal/network/server-session";
-import { SyncFrameMessage } from "../internal/sync/frame";
 import { installServerSync } from "../internal/sync/server-sync";
 import "../internal/data/record-bindings";
 import { installDataRuntime } from "../internal/data/runtime";
@@ -44,7 +43,7 @@ installDataRuntime();
 export function boot(options: BootOptions) {
 	const network = new ServerSession(networkPort());
 	session = network;
-	installServerSync((player, frame) => active().send(player, SyncFrameMessage, frame));
+	installServerSync((player, _frame, packet) => active().sendEncoded(player, packet));
 	bootSide(
 		{
 			name: "server",
