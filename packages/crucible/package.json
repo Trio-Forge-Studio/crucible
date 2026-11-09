@@ -22,6 +22,10 @@
 			"types": "./out/client/index.d.ts",
 			"default": "./out/client/init.luau"
 		},
+		"./ui": {
+			"types": "./out/ui/index.d.ts",
+			"default": "./out/ui/init.luau"
+		},
 		"./util/random": {
 			"types": "./out/util/random/index.d.ts",
 			"default": "./out/util/random/init.luau"
@@ -45,7 +49,13 @@
 		"@trioforge/compiler-types": "workspace:*"
 	},
 	"peerDependencies": {
-		"@rbxts/charm": "0.11.1"
+		"@rbxts/charm": "0.11.1",
+		"@rbxts/vide": "^0.6.1"
+	},
+	"peerDependenciesMeta": {
+		"@rbxts/vide": {
+			"optional": true
+		}
 	},
 	"files": [
 		"out",

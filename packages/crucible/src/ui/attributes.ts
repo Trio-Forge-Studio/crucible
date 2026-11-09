@@ -1,0 +1,15 @@
+export const Attribute = table.freeze({
+	Highlighted: "Highlighted",
+	Pressed: "Pressed",
+	Dragging: "Dragging",
+	Disabled: "Disabled",
+	Selected: "Selected",
+	Checked: "Checked",
+	Editing: "Editing",
+	Invalid: "Invalid",
+	Notice: "Notice",
+	Closing: "Closing",
+	Expanded: "Expanded",
+	Swiping: "Swiping",
+	Depth: "Depth",
+} as const);

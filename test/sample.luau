@@ -2,10 +2,12 @@ local roblox = require("@lune/roblox")
 local DM = require("./lib/data-migrations")
 local World = require("./lib/sample-world")
 local spec = require("./lib/load")
+local ui = require("./lib/ui-instances")
 
 local STORE = "Sample.Players"
 local COINS_VIEW = "Crucible.Data.Sample.Players.coins"
 local E = roblox.Enum.KeyCode.E
+local M = roblox.Enum.KeyCode.M
 
 local ANN, BOB = 4120, 4121
 local ANN_PICKUPS, BOB_COINS, BOB_PICKUPS = 4242, 777, 31337
@@ -323,6 +325,94 @@ return {
 		w:settle()
 		saved(w, ann.player)
 		spec.eq(stored(w, ANN).payload.coins, 1, "zero coins plus the press")
+		w.place:Destroy()
+	end,
+
+	["compiled sample the settings menu mounts a checkbox and a dialog and unmounts them cleanly"] = function()
+		local w = newWorld()
+		local ann = connect(w, "Ann", ANN)
+		local playerGui = ann.player.PlayerGui
+		local function press(button)
+			ui.fire(button, "Activated")
+			w.link:flush()
+		end
+		local function modal(): { string }
+			local lines = {}
+			for _, message in ann.messages do
+				if string.find(message, "Sample menu modal", 1, true) then
+					table.insert(lines, message)
+				end
+			end
+			return lines
+		end
+
+		w:press(ann, M)
+		local screen = assert(playerGui:FindFirstChild("SettingsMenu"), "M mounts the menu")
+		local music = assert(screen:FindFirstChild("Music", true), "the checkbox mounts")
+		local help = assert(screen:FindFirstChild("Help", true), "the dialog trigger mounts")
+		assert(music:GetAttribute("Checked") == true, "music starts on")
+		press(music)
+		assert(music:GetAttribute("Checked") == false, "a press unchecks it")
+
+		press(help)
+		ui.ancestryChanged(screen)
+		local done = assert(screen:FindFirstChild("Done", true), "the trigger opens the dialog")
+		assert(not music.Selectable and not help.Selectable, "the dialog traps selection")
+		press(done)
+		assert(screen:FindFirstChild("HelpPanel", true) == nil, "Done closes the dialog")
+		press(help)
+		ui.ancestryChanged(screen)
+		assert(screen:FindFirstChild("HelpPanel", true) ~= nil, "the dialog opens again")
+
+		w:press(ann, M)
+		assert(playerGui:FindFirstChild("SettingsMenu") == nil, "M again unmounts the menu with its open dialog")
+		spec.list(modal(), {
+			"Sample menu modal false",
+			"Sample menu modal true",
+			"Sample menu modal false",
+			"Sample menu modal true",
+			"Sample menu modal false",
+		}, "modalOpen follows the dialog, and unmounting closes it")
+
+		w:press(ann, M)
+		local again = assert(playerGui:FindFirstChild("SettingsMenu"), "M mounts the menu again")
+		local remounted = assert(again:FindFirstChild("Music", true), "the checkbox mounts again")
+		assert(remounted:GetAttribute("Checked") == false, "the checkbox remounts with the music setting")
+		w:press(ann, M)
+		assert(#ann.engine.logs == 0, "no runtime faults")
+		w.link:assertClean()
+		w.place:Destroy()
+	end,
+
+	["compiled sample ending the Menu releases its input connections"] = function()
+		local w = newWorld()
+		local ann = connect(w, "Ann", ANN)
+		local menu
+		for _, record in ann.graph.module("internal/registry").records() do
+			if record.id == "@trioforge/crucible-sample-game/client/systems/menu:Menu" then
+				menu = record.state
+			end
+		end
+		assert(menu, "the client runs the Menu")
+		local function listeners()
+			return {
+				#ann.userInput.LastInputTypeChanged.listeners,
+				#ann.inputs.listeners,
+				#ann.userInput.InputEnded.listeners,
+			}
+		end
+		spec.list(listeners(), { 1, 5, 2 }, "the Menu, its close input and the menu runtime listen")
+		w:press(ann, M)
+		assert(menu.object.shown(), "M opens the menu")
+		w:press(ann, M)
+
+		ann.graph.module("internal/lifecycle").fault(menu, 8, "retired")
+		w.link:flush()
+		-- The Hud's coin key is the one InputBegan listener that is not the Menu's.
+		spec.list(listeners(), { 0, 1, 0 }, "ending the Menu disconnects every listener it made")
+		w:press(ann, M)
+		assert(not menu.object.shown(), "M no longer reaches the ended Menu")
+		assert(ann.player.PlayerGui:FindFirstChild("SettingsMenu") == nil, "and mounts nothing")
 		w.place:Destroy()
 	end,
 }

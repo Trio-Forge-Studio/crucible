@@ -106,6 +106,9 @@ return function(client: boolean?)
 					Instance = roblox.Instance,
 					Enum = roblox.Enum,
 					Color3 = roblox.Color3,
+					Font = roblox.Font,
+					UDim = roblox.UDim,
+					UDim2 = roblox.UDim2,
 					Vector2 = roblox.Vector2,
 					Vector3 = roblox.Vector3,
 					print = function(...)

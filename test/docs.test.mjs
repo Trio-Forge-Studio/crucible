@@ -37,10 +37,11 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 		[...files.keys()].some((file) => file.includes("/logging-block-")),
 		"the logging guide has ts blocks",
 	);
-	assert.ok(
-		[...files.keys()].some((file) => file.includes("/vide-block-") && file.endsWith(".tsx")),
-		"the vide guide has tsx blocks",
-	);
+	for (const guide of ["ui", "vide"])
+		assert.ok(
+			[...files.keys()].some((file) => file.includes(`/${guide}-block-`) && file.endsWith(".tsx")),
+			`the ${guide} guide has tsx blocks`,
+		);
 	for (const guide of ["random", "spline"])
 		assert.ok(
 			[...files.keys()].some((file) => file.includes(`/${guide}-block-`)),
