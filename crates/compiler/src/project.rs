@@ -200,9 +200,21 @@ fn portable(segment: &str) -> bool {
         && !numbered("LPT")
 }
 
-/// Whether two output paths name one file where file names ignore case, as on Windows and macOS.
+/// Whether two output paths may name one file where file names ignore case. NTFS upcases each character through a
+/// one-to-one table and APFS folds case, so each character compares as its single-character uppercase and then that
+/// character's single-character lowercase. `str::to_lowercase` would turn a final `Σ` into `ς`, apart from `σ`.
 pub(crate) fn same_file(a: &str, b: &str) -> bool {
-    a.to_lowercase() == b.to_lowercase()
+    a.chars().map(fold).eq(b.chars().map(fold))
+}
+
+fn fold(c: char) -> char {
+    let upper = single(c.to_uppercase()).unwrap_or(c);
+    single(upper.to_lowercase()).unwrap_or(upper)
+}
+
+fn single(mut mapped: impl Iterator<Item = char>) -> Option<char> {
+    let first = mapped.next()?;
+    mapped.next().is_none().then_some(first)
 }
 
 /// The nearest folder at or above `dir` with a `package.json`.

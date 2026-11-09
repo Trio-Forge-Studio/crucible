@@ -251,3 +251,33 @@ fn without_a_virtual_module_the_specifier_has_no_place() {
     let failure = compile(&game, &[]).expect_err("the compile fails").to_string();
     assert!(failure.ends_with("error: the Rojo project maps no instance for this module\n"), "{failure}");
 }
+
+#[test]
+fn a_virtual_path_that_differs_from_a_compiled_one_only_in_unicode_case_is_refused() {
+    let game = game();
+    game.write("src/shared/A\u{3a3}/thing.ts", "export const thing = 1;\n");
+    assert_eq!(
+        failure(&game, &[experience("shared/A\u{3c3}/thing.luau")]),
+        "error: the virtual module `virtual:experience` has the output path shared/A\u{3c3}/thing.luau, which collides \
+         with the compiled module shared/A\u{3a3}/thing.luau\n",
+    );
+}
+
+#[test]
+fn two_virtual_paths_that_differ_only_in_unicode_case_are_refused() {
+    let game = game();
+    let other = VirtualModule { specifier: "virtual:other", path: "", source: "return {}\n" };
+    for (first, second) in [
+        ("shared/A\u{3a3}/experience.luau", "shared/A\u{3c3}/experience.luau"),
+        ("shared/\u{2126}/experience.luau", "shared/\u{3c9}/experience.luau"),
+    ] {
+        assert_eq!(
+            failure(&game, &[experience(first), VirtualModule { path: second, ..other }]),
+            format!(
+                "error: the virtual module `virtual:other` has the output path {second}, which collides with the \
+                 virtual module `virtual:experience`\n"
+            ),
+            "{first} and {second} name one file where names ignore case",
+        );
+    }
+}
