@@ -96,6 +96,54 @@ return {
 		w:finish()
 	end,
 
+	["121 an untracked read of a handle leaves nothing subscribed to the player's slot"] = function()
+		local w = World.new({ declare = declare })
+		local ann = w:player("Ann", 4120)
+		w:settle()
+		local data, charm = w.server.d.PlayerData, w.server.charm
+		data(ann.player).upgrades.speed:set(3)
+		data(ann.player).questProgress:set({ 1, 2, 3 })
+		local slot
+		charm.effect(function()
+			data(ann.player).currency()
+			slot = charm.getActiveSub().deps.dep.deps.dep
+		end)()
+		local function subscribers()
+			local total = 0
+			local link = slot.subs
+			while link do
+				total += 1
+				link = link.nextSub
+			end
+			return total
+		end
+		local baseline = subscribers()
+		local held = data(ann.player).upgrades.speed
+		for _ = 1, 10 do
+			spec.eq(held(), 3, "a held entry reads its value")
+		end
+		for i = 1, 50 do
+			spec.eq(data(ann.player).upgrades[`key{i}`](), nil, "a missing key reads nil")
+			spec.eq(data(ann.player).questProgress[i % 3](), i % 3 + 1, "an element reads its value")
+		end
+		spec.eq(subscribers() - baseline, 0, "untracked reads subscribe nothing to the slot")
+		local seen
+		local stop = charm.effect(function()
+			seen = held()
+		end)
+		spec.eq(seen, 3, "a tracked read sees the value")
+		spec.eq(subscribers() - baseline, 1, "a tracked read subscribes the handle's computed")
+		held:set(4)
+		spec.eq(seen, 4, "and reruns on a write")
+		stop()
+		spec.eq(subscribers() - baseline, 0, "its consumer stopping releases the computed")
+		spec.eq(held(), 4, "an untracked read after the consumer stopped is current")
+		data(ann.player).upgrades.speed:set(5)
+		spec.eq(held(), 5, "and stays current with no consumer")
+		spec.eq(subscribers() - baseline, 0, "and subscribes nothing")
+		w:finish()
+	end,
+
 	["9 loaded(player) is a tracked read"] = function()
 		local w = World.new({ declare = declare })
 		local data = w.server.d.PlayerData
