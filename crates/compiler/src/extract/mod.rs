@@ -33,10 +33,7 @@ use extension::{ExtractCx, ProgramCx};
 use report::Code;
 
 pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Extracted {
-    let root = checked.source_root();
-    let out_dir = checked.out_dir();
-    let dir = checked.config_dir();
-    let Checked { program, mut checker, host } = checked;
+    let (program, mut checker, host, layout) = checked.into_parts();
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
     let options = program.options();
     let globals = types::Globals::new(&mut checker);
@@ -49,9 +46,9 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
                 instances,
                 include,
                 modules,
-                Path::new(&dir),
-                Path::new(&root),
-                out_dir.as_deref().map(Path::new),
+                Path::new(layout.config_dir()),
+                Path::new(layout.root()),
+                layout.out_dir().map(Path::new),
             ) {
                 Ok(game) => Some(game),
                 Err(message) => {
@@ -79,7 +76,7 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         globals,
         packages,
         game,
-        config_dir: PathBuf::from(&dir),
+        config_dir: PathBuf::from(layout.config_dir()),
         facts,
         file: FileScan::default(),
         reported: HashSet::new(),
@@ -106,8 +103,7 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         extension.finish_program(&mut ProgramCx { x: &mut x });
     }
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
-    let out_dir = PathBuf::from(out_dir.unwrap_or_else(|| root.clone()));
-    Extracted::new(root, out_dir, sources, x.facts)
+    Extracted::new(layout, sources, x.facts)
 }
 
 /// When an import's module must be reachable in the place.
