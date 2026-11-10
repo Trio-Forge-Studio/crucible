@@ -179,6 +179,45 @@ return {
 		close(binding.view().zoom, 1.2, "a pinch outside the viewport does nothing")
 		h.stop()
 	end,
+	["a hidden viewport takes no wheel or pinch, and hiding it ends a drag"] = function()
+		local h = harness()
+		local changes = 0
+		local binding, viewport = mount(h, {
+			contentSize = Vector2.new(1600, 1200),
+			onViewChange = function()
+				changes += 1
+			end,
+		})
+		layout(viewport, Vector2.new(800, 600), Vector2.zero)
+		changes = 0
+		viewport.Visible = false
+		h.input.InputChanged:Fire(pointer("MouseWheel", 300, 200, 1))
+		close(binding.view().zoom, 1, "the wheel over a hidden viewport does nothing")
+		local fingers = { Vector2.new(280, 200), Vector2.new(320, 200) }
+		h.input.TouchPinch:Fire(fingers, 1, 0, Enum.UserInputState.Begin)
+		h.input.TouchPinch:Fire(fingers, 1.4, 0, Enum.UserInputState.Change)
+		close(binding.view().zoom, 1, "nor does a pinch")
+		assert(changes == 0, "and nothing reports a change")
+		viewport.Visible = true
+		h.input.InputChanged:Fire(pointer("MouseWheel", 300, 200, 1))
+		close(binding.view().zoom, 1.15, "the wheel zooms once the viewport shows again")
+		local mouse = pointer("MouseButton1", 400, 300)
+		viewport.InputBegan:Fire(mouse)
+		assert(binding.dragging(), "a press drags")
+		local pan = binding.view().pan
+		viewport.Visible = false
+		h.input.InputChanged:Fire(pointer("MouseMovement", 500, 300))
+		near(binding.view().pan, pan, "a hidden viewport does not pan")
+		assert(not binding.dragging(), "and its drag ended")
+		viewport.Visible = true
+		h.input.TouchPinch:Fire(fingers, 1, 0, Enum.UserInputState.Begin)
+		viewport.Visible = false
+		h.input.TouchPinch:Fire(fingers, 1.2, 0, Enum.UserInputState.Change)
+		viewport.Visible = true
+		h.input.TouchPinch:Fire(fingers, 1.3, 0, Enum.UserInputState.Change)
+		close(binding.view().zoom, 1.15, "hiding the viewport ended its pinch")
+		h.stop()
+	end,
 	["the default clamp keeps content covering the viewport and clampPan replaces it"] = function()
 		local h = harness()
 		local binding, viewport = mount(h, { contentSize = Vector2.new(1600, 1200), fit = fitOne })

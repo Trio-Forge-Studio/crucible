@@ -236,10 +236,19 @@ function endRun(run: Owner) {
 function halt(run: Owner) {
 	const stop = run.halt;
 	if (stop === undefined) return;
-	run.halt = undefined;
 	run.node.subs = undefined;
 	run.node.subsTail = undefined;
 	stop();
+}
+
+/**
+ * Stops the Charm effect of a Run that ended during its own run, once the body returns. Charm links a computed that
+ * the body reads after the end into the stopped node, so the computed keeps the node and the node keeps the computed.
+ */
+function stopEnded(run: Owner) {
+	if (!isEnded(run)) return;
+	if (run.stop !== undefined) run.stop();
+	else halt(run);
 }
 
 function generation(s: ObjectState): Owner {
@@ -449,6 +458,7 @@ function runEffect(run: Owner) {
 	run.ended = false;
 	openScope();
 	const [result, value] = call(body, undefined, undefined, run.state, run);
+	stopEnded(run);
 	let failed = result !== CallResult.Ok;
 	let failure = value;
 	if (!failed && value !== undefined) {
@@ -488,6 +498,8 @@ function create(run: Owner, lifetime: Owner) {
 	if (ok) {
 		if (nested) run.halt = stop;
 		else run.stop = stop;
+		// A first run that ended its own Run did so before Charm returned the stop.
+		stopEnded(run);
 	}
 	const failure = ok ? run.failure : stop;
 	run.failure = undefined;
@@ -496,9 +508,6 @@ function create(run: Owner, lifetime: Owner) {
 		settle("an effect's first run failed");
 		error(failure, 0);
 	}
-	// A root disposed by its own first run, before Charm returned the stop. A nested one can only end then with an
-	// ancestor, whose stop drops it.
-	if (run.body === undefined) run.stop?.();
 	const [flushed, err] = pcall(endBatch);
 	if (flushed) return;
 	dispose(run);

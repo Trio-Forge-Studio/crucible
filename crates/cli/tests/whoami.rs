@@ -67,6 +67,32 @@ fn dot_env_feeds_oc_calls_too() {
 }
 
 #[test]
+fn a_dot_env_saved_with_a_utf8_bom_still_gives_its_key() {
+    let server = MockServer::start();
+    let m = introspection(&server, "bom key");
+    for text in
+        ["\u{feff}CRUCIBLE_OC_API_KEY=\"bom key\"\r\n", "\u{feff}# keys\r\nexport CRUCIBLE_OC_API_KEY='bom key'\r\n"]
+    {
+        let dir = project(text);
+        let out = without_key(&server.base_url(), dir.path()).output().unwrap();
+        assert_eq!(code(&out), 0, "{}", document(&out));
+        assert_eq!(document(&out)["keySource"], ".env");
+    }
+    m.assert_calls(2);
+    let twice = project("\u{feff}\u{feff}CRUCIBLE_OC_API_KEY=\"bom key\"\n");
+    let out = without_key(&server.base_url(), twice.path()).output().unwrap();
+    assert_eq!(code(&out), 2, "only one leading BOM is an encoding mark");
+    assert_eq!(document(&out)["error"]["message"], "cannot parse .env");
+    let environment = introspection(&server, KEY);
+    let dir = project("\u{feff}CRUCIBLE_OC_API_KEY=dot-env-key\n");
+    let out = whoami(&server.base_url()).current_dir(dir.path()).output().unwrap();
+    assert_eq!(code(&out), 0, "{}", document(&out));
+    assert_eq!(document(&out)["keySource"], "CRUCIBLE_OC_API_KEY", "the environment still wins");
+    m.assert_calls(2);
+    environment.assert_calls(1);
+}
+
+#[test]
 fn the_process_variable_wins_over_a_different_dot_env_key() {
     let server = MockServer::start();
     let m = introspection(&server, KEY);

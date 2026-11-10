@@ -41,19 +41,32 @@ export function createGroup(options: GroupOptions = {}): Group {
 				if (index >= 0) items.remove(index);
 				changed();
 			});
+			let written: { horizontal: boolean; previous: GuiObject; following: GuiObject } | undefined;
 			effect(() => {
 				version();
 				if (selectedObject() !== object) return;
 				const index = items.indexOf(entry);
 				const previous = step(index, -1) ?? object;
 				const following = step(index, 1) ?? object;
-				if (read(options.orientation ?? "Horizontal") === "Horizontal") {
+				const horizontal = read(options.orientation ?? "Horizontal") === "Horizontal";
+				// The old axis would keep pointing along the group, so clear the links written there that still hold.
+				if (written !== undefined && written.horizontal !== horizontal) {
+					if (written.horizontal) {
+						if (object.NextSelectionLeft === written.previous) object.NextSelectionLeft = undefined;
+						if (object.NextSelectionRight === written.following) object.NextSelectionRight = undefined;
+					} else {
+						if (object.NextSelectionUp === written.previous) object.NextSelectionUp = undefined;
+						if (object.NextSelectionDown === written.following) object.NextSelectionDown = undefined;
+					}
+				}
+				if (horizontal) {
 					object.NextSelectionLeft = previous;
 					object.NextSelectionRight = following;
 				} else {
 					object.NextSelectionUp = previous;
 					object.NextSelectionDown = following;
 				}
+				written = { horizontal, previous, following };
 			});
 		},
 	};

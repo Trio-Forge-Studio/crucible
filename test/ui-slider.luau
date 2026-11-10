@@ -195,6 +195,70 @@ return {
 		hold(dispose, "unmounting ends the hold")
 		h.stop()
 	end,
+	["slider ends a gesture that its first change disables, and leaves no listener behind"] = function()
+		local h = harness()
+		local listeners = 0
+		local function count(signal)
+			local connect = signal.Connect
+			signal.Connect = function(self, run)
+				listeners += 1
+				local connection = connect(self, run)
+				local disconnect = connection.Disconnect
+				local connected = true
+				connection.Disconnect = function()
+					if connected then
+						listeners -= 1
+					end
+					connected = false
+					disconnect()
+				end
+				return connection
+			end
+		end
+		count(h.input.InputChanged)
+		count(h.input.InputEnded)
+		local disabled = h.vide.source(false)
+		local changes = 0
+		local control, _, binding, dispose = slider(h, {
+			max = 10,
+			disabled = disabled,
+			onValueChange = function()
+				changes += 1
+				disabled(true)
+			end,
+		})
+		local mouse = pointer("MouseButton1", 160)
+		control.InputBegan:Fire(mouse)
+		assert(binding.value() == 3 and changes == 1, "the press made its first change")
+		assert(not binding.dragging(), "the change disabled the slider, which ended the drag")
+		h.input.InputChanged:Fire(pointer("MouseMovement", 300))
+		assert(binding.value() == 3 and changes == 1, "the ended drag does not follow the pointer")
+		h.input.InputEnded:Fire(mouse)
+		dispose()
+		assert(listeners == 0, "the ended drag left no listener")
+
+		local gamepadDisabled = h.vide.source(false)
+		local held = 0
+		local pad, _, padBinding, padDispose = slider(h, {
+			max = 10,
+			disabled = gamepadDisabled,
+			onValueChange = function()
+				held += 1
+				gamepadDisabled(true)
+			end,
+		})
+		h.select(pad)
+		local right = h.begin(Enum.KeyCode.DPadRight)
+		assert(padBinding.value() == 1 and held == 1, "the hold made its first step")
+		h.tick(0.5)
+		h.tick(0.5)
+		assert(padBinding.value() == 1 and held == 1, "the ended hold does not repeat")
+		h.finish(right)
+		padDispose()
+		h.tick(0.5)
+		assert(padBinding.value() == 1 and held == 1, "nor after release and unmount")
+		h.stop()
+	end,
 	["slider snaps values, writes attributes and refuses while disabled"] = function()
 		local h = harness()
 		local disabled = h.vide.source(false)

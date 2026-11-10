@@ -85,7 +85,9 @@ export function difference(current: unknown, updated: unknown, work: Work): unkn
 
 /** @internal Compare the actual patch encoding with the admitted full value; oversized patches are disposable. */
 export function smaller(delta: unknown, value: unknown): boolean {
-	let bytes = typeIs(delta, "table") ? patchSizes.get(delta) : undefined;
+	// Charm Sync's diff returns a value that is not a table only as the new value itself, which encodes to its full cost.
+	if (!typeIs(delta, "table")) return false;
+	let bytes = patchSizes.get(delta);
 	if (bytes === undefined) {
 		const [ok, size] = pcall(() => {
 			const writer = new Writer();
@@ -96,7 +98,7 @@ export function smaller(delta: unknown, value: unknown): boolean {
 			return buffer.len(packet);
 		});
 		bytes = ok ? size : SYNC_FRAME_BYTES + 1;
-		if (typeIs(delta, "table")) patchSizes.set(delta, bytes);
+		patchSizes.set(delta, bytes);
 	}
 	return bytes < costOf(value).bytes;
 }

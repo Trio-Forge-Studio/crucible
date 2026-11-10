@@ -152,6 +152,33 @@ return {
 		spec.eq(frames[2].bytes, 75, "three modes add one byte each")
 		w:finish()
 	end,
+	["T12 a primitive change is encoded only in each peer's frame, which keeps its 75 bytes"] = function()
+		local w = newWorld()
+		local peers = { w:join("Ann"), w:join("Bea"), w:join("Cal") }
+		w:heartbeat()
+		local Writer = w.server.graph.module("internal/network/codec").Writer
+		local f64 = Writer.f64
+		local numbers = 0
+		Writer.f64 = function(...)
+			numbers += 1
+			return f64(...)
+		end
+		w.job.started(12)
+		w.job.ends(312)
+		w.job.phase("Running")
+		w:heartbeat()
+		Writer.f64 = f64
+		spec.eq(numbers, 2 * #peers, "each changed number is encoded once per peer")
+		for _, peer in peers do
+			local frames = w:frames(peer)
+			local update = frames[#frames]
+			spec.eq(update.bytes, 75, `{peer.name}'s update is the same 75 bytes`)
+			for _, entry in update.frame.values do
+				spec.eq(entry.mode, "full", `{peer.name}'s {entry.key} is sent whole`)
+			end
+		end
+		w:finish()
+	end,
 	["61 an equal fresh table sends nothing and a changed one sends the whole value"] = function()
 		local w = World.new({
 			declare = function(r)

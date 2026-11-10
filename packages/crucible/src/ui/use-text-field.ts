@@ -1,4 +1,4 @@
-import { cleanup, effect, read, source } from "@rbxts/vide";
+import { cleanup, effect, read, source, untrack } from "@rbxts/vide";
 import { Attribute } from "./attributes";
 import { useModalActive } from "./focus-scope";
 import type { Value } from "./props";
@@ -69,13 +69,20 @@ export function useTextField(options: TextFieldOptions): TextFieldBinding {
 			instance.ClearTextOnFocus = false;
 			instance.Selectable = false;
 			effect(() => {
-				instance.TextEditable = !disabled();
+				instance.TextEditable = active() && !disabled();
+			});
+			// A modal that opens over the field while it is edited takes the keyboard and its close input.
+			effect(() => {
+				if (active()) return;
+				untrack(() => {
+					if (instance.IsFocused()) instance.ReleaseFocus();
+				});
 			});
 			effect(() => write(value()));
 			cleanup(
 				instance.GetPropertyChangedSignal("Text").Connect(() => {
 					if (!attached || instance.Text === currentText) return;
-					if (disabled()) {
+					if (!active() || disabled()) {
 						write(value());
 						return;
 					}

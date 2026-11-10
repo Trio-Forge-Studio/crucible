@@ -1,4 +1,4 @@
-import { computed } from "@rbxts/charm";
+import { computed, getActiveSub } from "@rbxts/charm";
 import type { Node } from "../network/schema";
 import { childNode, describePath, getPath, luaKey, setPath, tableBranch, type Segment } from "./paths";
 
@@ -11,7 +11,7 @@ export interface HandleSource {
 	readonly name: string;
 	/** Client handles have no write members (rule 124). */
 	readonly client: boolean;
-	/** The body of a handle's read computed: a tracked read of the value at `path`. */
+	/** The value at `path`: the body of a handle's read computed, and what an untracked read returns. */
 	read(path: readonly Segment[]): unknown;
 	/** Throws where reading this source's handles is refused: its own session's claims (rule 123). */
 	beforeRead(): void;
@@ -172,6 +172,9 @@ const handleCall = (handle: object, ...args: unknown[]) => {
 			2,
 		);
 	source.beforeRead();
+	// Charm links a computed to its sources at its first read, observed or not, and nothing unlinks one whose handle is
+	// collected, so an untracked read makes none.
+	if (getActiveSub() === undefined) return source.read(node.path);
 	let read = node.read;
 	if (read === undefined) {
 		const path = node.path;

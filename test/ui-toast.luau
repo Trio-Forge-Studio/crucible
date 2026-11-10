@@ -373,6 +373,69 @@ return {
 		assert(view.roots.b:GetAttribute("Swiping") == false, "a drag across the swipe axis is not a swipe")
 		h.stop()
 	end,
+	["a swipe dismisses only a toast it reaches, never one under a modal, hidden or covered"] = function()
+		local h = harness()
+		h.device("Touch")
+		local toasts = toaster(h, { duration = math.huge })
+		local view = show(h, toasts)
+		local reasons = {}
+		toasts.add({
+			id = "a",
+			data = "a",
+			onClose = function(reason)
+				table.insert(reasons, reason)
+			end,
+		})
+		h.flush()
+		local function swipe()
+			local finger = touch(50, 30)
+			h.input.InputBegan:Fire(finger)
+			finger.Position = Vector3.new(120, 30, 0)
+			h.input.InputChanged:Fire(finger)
+			h.input.InputEnded:Fire(finger)
+			h.tick(1 / 60)
+		end
+		local modal, modalRoot = h.root(10)
+		local cover = h.instance("Frame", modal)
+		cover.AbsoluteSize = Vector2.new(1000, 1000)
+		cover.Active = true
+		h.flush()
+		swipe()
+		assert(phase(toasts, "a") == "Open" and #reasons == 0, "a swipe on a modal over the toast dismisses nothing")
+		h.runtime.closeScope(modal)
+		modalRoot.Parent = nil
+		h.flush()
+		view.roots.a.Visible = false
+		swipe()
+		assert(phase(toasts, "a") == "Open", "a hidden toast is not swiped")
+		view.roots.a.Visible = true
+		local other = h.instance("Frame")
+		other.Parent = h.screen(5)
+		other.AbsoluteSize = Vector2.new(200, 200)
+		swipe()
+		assert(phase(toasts, "a") == "Open", "a swipe on another GUI drawn over the toast misses it")
+		other.Parent = nil
+		local finger = touch(50, 30)
+		h.input.InputBegan:Fire(finger)
+		finger.Position = Vector3.new(70, 30, 0)
+		h.input.InputChanged:Fire(finger)
+		assert(view.roots.a:GetAttribute("Swiping") == true, "an uncovered swipe is claimed")
+		local late, lateRoot = h.root(10)
+		h.flush()
+		assert(view.roots.a:GetAttribute("Swiping") == false, "a modal opening mid-swipe cancels it")
+		assert(view.bindings.a.swipe() == 0, "and puts the toast back")
+		finger.Position = Vector3.new(120, 30, 0)
+		h.input.InputChanged:Fire(finger)
+		h.input.InputEnded:Fire(finger)
+		assert(phase(toasts, "a") == "Open" and #reasons == 0, "the cancelled swipe's release dismisses nothing")
+		h.runtime.closeScope(late)
+		lateRoot.Parent = nil
+		h.flush()
+		h.tick(1 / 60)
+		swipe()
+		assert(phase(toasts, "a") ~= "Open" and #reasons == 1 and reasons[1] == "Swipe", "an uncovered swipe dismisses")
+		h.stop()
+	end,
 	["a control inside a toast is never chosen by restore or fallback selection"] = function()
 		local h = harness()
 		local toasts = toaster(h)

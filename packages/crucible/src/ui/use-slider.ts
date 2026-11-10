@@ -107,8 +107,7 @@ export function useSlider(options: SliderOptions): SliderBinding {
 		if (gesture || untrack(blocked)) return;
 		const started = begin("Drag", input);
 		if (!started) return;
-		dragging(true);
-		point(input.Position.X);
+		// Listeners join the gesture before the first change, whose onValueChange can end it.
 		const moved = UserInputService.InputChanged.Connect((changed) => {
 			if (mouse ? changed.UserInputType === Enum.UserInputType.MouseMovement : changed === input)
 				point(changed.Position.X);
@@ -120,13 +119,14 @@ export function useSlider(options: SliderOptions): SliderBinding {
 			() => moved.Disconnect(),
 			() => ended.Disconnect(),
 		);
+		dragging(true);
+		if (gesture === started) point(input.Position.X);
 	};
 	const beginHold = (input: InputObject, direction: number) => {
 		finish();
 		const started = begin("Hold", input);
 		if (!started) return;
 		const nudge = () => set(untrack(value) + direction * range.step);
-		nudge();
 		let schedule = holdStart;
 		started.stop.push(
 			heartbeat((_, delta) => {
@@ -135,6 +135,7 @@ export function useSlider(options: SliderOptions): SliderBinding {
 				if (result.fire) nudge();
 			}),
 		);
+		nudge();
 	};
 
 	effect(() => {

@@ -2,7 +2,7 @@ import { cleanup, derive, effect, source, untrack } from "@rbxts/vide";
 import { adapter } from "./adapter";
 import { Attribute } from "./attributes";
 import { heartbeat } from "./frame-loop";
-import { menuOpen, selectedObject } from "./runtime";
+import { active, alive, menuOpen, ownerContext, selectedObject } from "./runtime";
 import {
 	glidePose,
 	placementOf,
@@ -72,6 +72,14 @@ function point(input: InputObject): Vector2 {
 function touch(input: InputObject): boolean {
 	return input.UserInputType === Enum.UserInputType.Touch;
 }
+// The swipe listens to global input, so it checks that the touch lands on the toast and not on a GUI drawn above it.
+function reaches(toast: GuiObject, at: Vector2): boolean {
+	const gui = toast.FindFirstAncestorOfClass("PlayerGui");
+	for (const object of gui?.GetGuiObjectsAtPosition(at.X, at.Y) ?? []) {
+		if (object.Active || object.BackgroundTransparency < 1) return object === toast || object.IsDescendantOf(toast);
+	}
+	return true;
+}
 
 export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 	const core = toasterCore(options.toaster);
@@ -80,6 +88,8 @@ export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 	const gap = options.gap ?? 10;
 	const peek = options.peek ?? 12;
 	const device = adapter().device;
+	const owner = ownerContext();
+	const live = derive(() => active(owner) && !menuOpen());
 	cleanup(core.attach());
 
 	const sizes = source<ReadonlyMap<ToastId, Vector2>>(new Map());
@@ -290,6 +300,7 @@ export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 			cleanup(instance.MouseLeave.Connect(() => hovered(false)));
 
 			let gesture: Gesture | undefined;
+			const swipeable = () => live() && alive(instance);
 			const cancel = () => {
 				if (gesture?.claimed) {
 					swiping(undefined);
@@ -300,11 +311,12 @@ export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 			cleanup(
 				UserInputService.InputBegan.Connect((input) =>
 					untrack(() => {
-						if (!touch(input) || gesture || swiping() !== undefined || inert()) return;
+						if (!touch(input) || gesture || swiping() !== undefined || inert() || !swipeable()) return;
 						const at = point(input);
 						const low = instance.AbsolutePosition;
 						const high = low.add(instance.AbsoluteSize);
 						if (at.X < low.X || at.Y < low.Y || at.X > high.X || at.Y > high.Y) return;
+						if (!reaches(instance, at)) return;
 						gesture = { input, from: at, claimed: false, samples: [] };
 					}),
 				),
@@ -313,6 +325,7 @@ export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 				UserInputService.InputChanged.Connect((input) =>
 					untrack(() => {
 						if (!gesture || input !== gesture.input) return;
+						if (!swipeable()) return cancel();
 						const moved = point(input).sub(gesture.from).div(ratio);
 						const along = moved.Dot(placement.swipe);
 						if (!gesture.claimed) {
@@ -339,6 +352,7 @@ export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 				UserInputService.InputEnded.Connect((input) =>
 					untrack(() => {
 						if (!gesture || input !== gesture.input) return;
+						if (!swipeable()) return cancel();
 						const ended = gesture;
 						gesture = undefined;
 						if (!ended.claimed) return;
@@ -351,7 +365,7 @@ export function useToastViewport<D>(options: ToastViewportOptions<D>) {
 			);
 			cleanup(UserInputService.WindowFocusReleased.Connect(() => untrack(cancel)));
 			effect(() => {
-				if (closing()) untrack(cancel);
+				if (closing() || !live()) untrack(cancel);
 			});
 			cleanup(() => {
 				cancel();
