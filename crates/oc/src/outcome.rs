@@ -28,7 +28,6 @@ impl Acceptance {
             *self = Self::Accepted;
         }
     }
-    /// Sets the GET-only command that picks the work up, replacing an earlier one.
     pub fn resume(&mut self, command: String) {
         *self = match self {
             Self::Open | Self::Resuming { .. } => Self::Resuming { resume: command },

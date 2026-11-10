@@ -10,7 +10,6 @@ use crate::tree::File;
 use crate::write::HEADER;
 use crate::{Compiled, Diagnostic, Failure, Module, Target, project};
 
-/// A checked program's facts, beside the source file each file's facts are about.
 pub(crate) struct Extracted {
     /// The folder the output layout mirrors.
     root: String,
@@ -67,7 +66,6 @@ impl Validated {
     }
 }
 
-/// The modules of a program's source files.
 pub(crate) struct Lowered {
     out_dir: PathBuf,
     modules: Vec<Module>,
