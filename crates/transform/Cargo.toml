@@ -8,6 +8,13 @@ publish.workspace = true
 [dependencies]
 crucible-abi = { path = "../abi" }
 crucible-compiler = { path = "../compiler" }
-
-[dev-dependencies]
+crucible-luau = { path = "../luau" }
 serde_json.workspace = true
+
+[features]
+test-support = ["crucible-compiler/test-support"]
+
+# Tests build with dev-dependencies, so this turns test-support on for them and for nothing else.
+[dev-dependencies]
+crucible-project = { path = "../project" }
+crucible-transform = { path = ".", features = ["test-support"] }

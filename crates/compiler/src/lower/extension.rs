@@ -1,7 +1,7 @@
 //! The lowering half of the extension seam.
 
-use super::Lower;
-use crate::extension::{HelperModule, SiteId};
+use super::{Lower, is_paren_or_assertion};
+use crate::extension::{Extension, HelperModule, SiteId};
 use crate::tree::Node;
 use crucible_luau::{Expr, Name};
 
@@ -14,14 +14,40 @@ pub struct LowerCx<'l, 'a> {
 impl Lower<'_> {
     /// The first extension's lowering of a call.
     pub(super) fn extension_call(&mut self, call: Node) -> Option<Expr> {
+        self.first_extension(call, |e, cx, n| e.lower_call(cx, n))
+    }
+
+    /// The first extension's lowering of an expression.
+    pub(super) fn extension_expression(&mut self, n: Node) -> Option<Expr> {
+        self.first_extension(n, |e, cx, n| e.lower_expression(cx, n))
+    }
+
+    /// A path that lowers a node by its parts, instead of through `expr`, asks this first.
+    pub(super) fn extension_value(&mut self, mut n: Node) -> Option<Expr> {
+        loop {
+            if let Some(value) = self.extension_expression(n) {
+                return Some(value);
+            }
+            if !is_paren_or_assertion(n) {
+                return None;
+            }
+            n = n.expression();
+        }
+    }
+
+    fn first_extension(
+        &mut self,
+        n: Node,
+        lower: impl Fn(&dyn Extension, &mut LowerCx<'_, '_>, Node) -> Option<Expr>,
+    ) -> Option<Expr> {
         let extensions = self.extensions;
-        extensions.iter().find_map(|e| {
+        extensions.iter().find_map(|&e| {
             let mut cx = LowerCx { l: self, lowered_arguments: false };
-            let lowered = e.lower_call(&mut cx, call);
+            let lowered = lower(e, &mut cx, n);
             // Lowering the arguments may already have emitted statements, so the compiler cannot lower them again.
             assert!(
                 lowered.is_some() || !cx.lowered_arguments,
-                "extension `{}` lowered the arguments of a call and then left the call to the compiler",
+                "extension `{}` lowered the parts of a node and then left the node to the compiler",
                 e.name()
             );
             lowered
@@ -36,13 +62,6 @@ impl Lower<'_> {
             self.current_block.extend(tail);
         }
     }
-
-    pub(super) fn replacement(&mut self, n: Node) -> Option<Expr> {
-        self.replacements.iter_mut().rev().find_map(|scope| {
-            let at = scope.iter().position(|(node, _)| *node == n)?;
-            Some(scope.swap_remove(at).1)
-        })
-    }
 }
 
 impl LowerCx<'_, '_> {
@@ -51,21 +70,35 @@ impl LowerCx<'_, '_> {
         SiteId { file: self.l.file_id, span: n.span() }
     }
 
-    /// A call's arguments in evaluation order, with a last argument that may return several values cut to one. Each
-    /// replacement lowers in place of its node, wherever that node sits in the arguments, until this returns. A call
-    /// lowered inside the arguments keeps the replacements of the calls around it, and its own replacement of the same
-    /// node wins. A `lower_call` that calls this must lower the call itself: returning `None` afterwards panics.
-    pub fn arguments(&mut self, call: Node, replacements: Vec<(Node, Expr)>) -> Vec<Expr> {
+    /// A call's arguments in evaluation order, with a last argument that may return several values cut to one. A hook
+    /// that calls this must lower the node itself: returning `None` afterwards panics.
+    pub fn arguments(&mut self, call: Node) -> Vec<Expr> {
         self.lowered_arguments = true;
-        self.l.replacements.push(replacements);
-        let arguments = self.l.macro_arguments(call);
-        self.l.replacements.pop();
-        arguments
+        self.l.macro_arguments(call)
     }
 
-    /// `name` in a helper module the extension declared, which the file then imports, even if `lower_call` goes on to
+    /// A call's callee, lowered as the compiler lowers any expression. Like `arguments`, a hook that calls this must
+    /// lower the node itself.
+    pub fn callee(&mut self, call: Node) -> Expr {
+        self.lowered_arguments = true;
+        self.l.expr(call.expression())
+    }
+
+    /// Some of a call's argument nodes in evaluation order, each lowered to one value, for a lowering that drops the
+    /// others. Like `arguments`, a hook that calls this must lower the node itself.
+    pub fn some_arguments(&mut self, nodes: &[Node]) -> Vec<Expr> {
+        self.lowered_arguments = true;
+        self.l.ordered(nodes.iter().copied(), |l, n| l.expr(n))
+    }
+
+    /// `name` in a helper module the extension declared, which the file then imports, even if the hook goes on to
     /// return `None`.
     pub fn helper(&mut self, module: &HelperModule, name: &'static str) -> Expr {
         self.l.helper(module, name)
+    }
+
+    /// Fails the compile with `<what> is not supported` at `n`, and gives `nil` to lower in its place.
+    pub fn unsupported(&mut self, n: Node, what: &str) -> Expr {
+        self.l.unsupported(n, what)
     }
 }

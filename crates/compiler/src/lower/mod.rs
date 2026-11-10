@@ -1,13 +1,10 @@
 mod call;
 mod class;
-mod crucible;
 mod expr;
 pub(crate) mod extension;
 mod jsx;
 mod pattern;
 mod stmt;
-
-pub(crate) use stmt::CRUCIBLE_EMIT;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -55,7 +52,6 @@ pub(crate) fn lower(
         facts,
         place,
         extensions,
-        replacements: Vec::new(),
         path: file.path(),
         import_base,
         errors: Vec::new(),
@@ -126,9 +122,6 @@ pub(crate) struct Lower<'a> {
     facts: &'a FileFacts,
     place: &'a Place,
     extensions: &'a [&'a dyn Extension],
-    /// The nodes extensions lower in place of the compiler, one scope for each call whose arguments the compiler is
-    /// lowering for an extension, innermost last.
-    replacements: Vec<Vec<(Node, Expr)>>,
     path: String,
     import_base: ImportBase,
     errors: Vec<Error>,
@@ -349,7 +342,11 @@ impl<'a> Lower<'a> {
     }
 
     fn ordered_pair(&mut self, first: Node, second: Node) -> (Expr, Expr) {
-        let (first, first_setup) = self.capture(|l| l.expr(first));
+        let first = self.capture(|l| l.expr(first));
+        self.ordered_after(first, second)
+    }
+
+    fn ordered_after(&mut self, (first, first_setup): (Expr, Block), second: Node) -> (Expr, Expr) {
         let (second, second_setup) = self.capture(|l| l.expr(second));
         self.current_block.extend(first_setup);
         let first = self.store_before(first, &second_setup, std::slice::from_ref(&second));
@@ -680,15 +677,19 @@ fn is_hole(e: Node) -> bool {
 }
 
 fn skip_parens_and_assertions(mut n: Node) -> Node {
-    while matches!(
+    while is_paren_or_assertion(n) {
+        n = n.expression();
+    }
+    n
+}
+
+fn is_paren_or_assertion(n: Node) -> bool {
+    matches!(
         n.kind(),
         Kind::ParenthesizedExpression
             | Kind::AsExpression
             | Kind::NonNullExpression
             | Kind::SatisfiesExpression
             | Kind::TypeAssertionExpression
-    ) {
-        n = n.expression();
-    }
-    n
+    )
 }

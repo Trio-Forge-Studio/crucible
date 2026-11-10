@@ -1,8 +1,9 @@
 //! A test extension that uses every hook of the seam. It finds calls to `probe` from the `@rbxts/probe` package,
 //! records each one's types from the checker, and lowers it to a call into the package's runtime entry with those
 //! types and the program's probe count. It replaces each `HERE` in a probe's arguments with where the probe is, and
-//! registers every class with the runtime after its declaration. A second one, `Scopes`, nests the calls it lowers to
-//! test how long a replacement lasts.
+//! registers every class with the runtime after its declaration. A second one, `Heres`, replaces every `HERE` of a
+//! file to test that an expression an extension lowers lowers in place wherever it sits. A third, `Hooks`, replaces
+//! the expressions the compiler lowers by their parts instead of whole.
 
 mod support;
 
@@ -113,16 +114,14 @@ impl Extension for Probe {
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {
         let types = self.calls.get(&cx.site(call))?;
-        let replacements = call
-            .arguments()
-            .iter()
-            .flat_map(descendants)
-            .filter_map(|n| Some((n, Expr::string(self.heres.get(&cx.site(n))?.clone()))))
-            .collect();
-        let mut arguments = cx.arguments(call, replacements);
+        let mut arguments = cx.arguments(call);
         arguments.push(Expr::string(types.clone()));
         arguments.push(Expr::Number(self.total.expect("finish_program runs before lowering") as f64));
         Some(cx.helper(&RUNTIME, "probe").call(arguments))
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        self.heres.get(&cx.site(n)).map(|at| Expr::string(at.clone()))
     }
 
     fn lower_class_tail(&self, cx: &mut LowerCx<'_, '_>, class: Node, local: &Name) -> Vec<Stmt> {
@@ -170,8 +169,8 @@ fn compile(game: &Game, extension: &mut dyn Extension, target: Target<'_>) -> Re
     Ok(compiled.modules.into_iter().map(|m| (m.path, m.source)).collect())
 }
 
-fn in_place(game: &Game) -> (std::path::PathBuf, std::path::PathBuf) {
-    (game.project(), game.include())
+fn in_place(game: &Game) -> (crucible_compiler::InstanceMap, std::path::PathBuf) {
+    (game.instances(), game.include())
 }
 
 fn module<'a>(modules: &'a [(String, String)], path: &str) -> &'a str {
@@ -190,9 +189,9 @@ fn every_hook_runs_and_its_lowering_lands_in_the_module() {
          export const crate = probe(new Crate());\n",
     );
     game.write("src/server/other.ts", "import { probe } from \"@rbxts/probe\";\nprobe(\"label\");\n");
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut probe = Probe::default();
-    let modules = compile(&game, &mut probe, Target::Game { project: &project, include: &include })
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     assert_eq!(probe.name(), "probe");
     assert_eq!(probe.version.as_deref(), Some("1.2.3"));
@@ -218,9 +217,9 @@ fn every_hook_runs_and_its_lowering_lands_in_the_module() {
 fn a_module_without_a_probe_imports_no_helper() {
     let game = probe_game();
     game.main("export const value = 1;\n");
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut probe = Probe::default();
-    let modules = compile(&game, &mut probe, Target::Game { project: &project, include: &include })
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     assert_eq!(probe.version, None, "the program has no file from the package");
     let main = module(&modules, "server/main.luau");
@@ -237,10 +236,10 @@ fn extension_reports_fail_the_compile_where_they_point() {
          probe(1);\n\
          probe(2);\n",
     );
-    let (project, include) = in_place(&game);
+    let (instances, include) = in_place(&game);
     let mut probe = Probe { limit: Some(1), ..Probe::default() };
     let Err(Failure::Crucible(diagnostics)) =
-        compile(&game, &mut probe, Target::Game { project: &project, include: &include })
+        compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
     else {
         panic!("the extension's reports fail the compile");
     };
@@ -271,24 +270,15 @@ fn a_helper_the_place_cannot_reach_fails_with_its_message() {
     assert!(Path::new(&errors[0].path).ends_with("src/server/main.ts"), "{}", errors[0]);
 }
 
-/// Each function `Scopes` lowers, the global its calls lower to, and what replaces a `HERE` while its arguments lower.
-/// `outer` and `claim` replace each `HERE` in their own arguments. `reach` replaces every `HERE` of its file, even one
-/// outside its call, and `inner` replaces none. `peek` lowers its arguments and then leaves the call to the compiler.
-const SCOPED: &[(&str, &str, &str)] = &[
-    ("outer", "out", "REPLACED"),
-    ("claim", "claimed", "CLAIMED"),
-    ("reach", "reached", "REACHED"),
-    ("inner", "inside", ""),
-    ("peek", "peek", ""),
-];
-
+/// Replaces every `HERE` of a file with `"REPLACED"`, and lowers each call to `outer` to a call to the global `out`.
+/// `peek` lowers its arguments and then leaves the call to the compiler.
 #[derive(Default)]
-struct Scopes {
-    /// Each call to a scoped function, as the global it lowers to, the replacement and the `HERE`s it replaces.
-    calls: HashMap<SiteId, (&'static str, &'static str, Vec<Node>)>,
+struct Heres {
+    heres: Vec<SiteId>,
+    calls: HashMap<SiteId, &'static str>,
 }
 
-impl Scopes {
+impl Heres {
     fn named(cx: &mut ExtractCx<'_>, n: Node) -> Option<&'static str> {
         if n.kind() != Kind::Identifier {
             return None;
@@ -297,77 +287,262 @@ impl Scopes {
     }
 }
 
-impl Extension for Scopes {
+impl Extension for Heres {
     fn name(&self) -> &'static str {
-        "scopes"
+        "heres"
     }
 
     fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
-        let heres: Vec<Node> =
-            descendants(file.root()).into_iter().filter(|&n| Scopes::named(cx, n) == Some("HERE")).collect();
         for n in descendants(file.root()) {
-            if n.kind() != Kind::CallExpression {
-                continue;
-            }
-            let Some(callee) = Scopes::named(cx, n.expression()) else { continue };
-            let Some(&(function, global, replacement)) = SCOPED.iter().find(|(name, ..)| *name == callee) else {
-                continue;
-            };
-            let replaced = match function {
-                "inner" | "peek" => Vec::new(),
-                "reach" => heres.clone(),
-                _ => {
-                    let inside = n.arguments().iter().flat_map(descendants).collect::<Vec<_>>();
-                    heres.iter().copied().filter(|h| inside.contains(h)).collect()
+            match Heres::named(cx, n) {
+                Some("HERE") => self.heres.push(cx.site(n)),
+                Some(callee @ ("outer" | "peek")) if n.parent().is_some_and(|p| p.kind() == Kind::CallExpression) => {
+                    let call = n.parent().unwrap();
+                    if call.expression() == n {
+                        self.calls.insert(cx.site(call), callee);
+                    }
                 }
-            };
-            self.calls.insert(cx.site(n), (global, replacement, replaced));
+                _ => {}
+            }
         }
     }
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {
-        let (global, replacement, replaced) = self.calls.get(&cx.site(call))?;
-        let replacements = replaced.iter().map(|&n| (n, Expr::string(*replacement))).collect();
-        let arguments = cx.arguments(call, replacements);
-        if *global == "peek" {
-            return None;
-        }
-        Some(Expr::global(global).call(arguments))
+        let callee = *self.calls.get(&cx.site(call))?;
+        let arguments = cx.arguments(call);
+        (callee == "outer").then(|| Expr::global("out").call(arguments))
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        self.heres.contains(&cx.site(n)).then(|| Expr::string("REPLACED"))
     }
 }
 
-fn compile_scopes(main: &str) -> String {
+fn compile_heres(main: &str) -> String {
     let game = Game::new();
     game.main(&format!(
-        "{}declare const HERE: string;\nexport {{}};\n{main}",
-        SCOPED
-            .iter()
-            .map(|(name, ..)| format!("declare function {name}(...values: unknown[]): unknown;\n"))
-            .collect::<String>()
+        "declare function outer(...values: unknown[]): unknown;\n\
+         declare function peek(...values: unknown[]): unknown;\n\
+         declare const maybe: ((...values: unknown[]) => unknown) | undefined;\n\
+         declare const HERE: string;\nexport {{}};\n{main}"
     ));
-    let (project, include) = in_place(&game);
-    let mut scopes = Scopes::default();
-    let modules = compile(&game, &mut scopes, Target::Game { project: &project, include: &include })
+    let (instances, include) = in_place(&game);
+    let mut heres = Heres::default();
+    let modules = compile(&game, &mut heres, Target::Game { instances: &instances, include: &include, modules: &[] })
         .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
     module(&modules, "server/main.luau").to_owned()
 }
 
 #[test]
-fn a_call_in_the_arguments_of_another_keeps_its_replacements_and_its_own_win() {
-    let main = compile_scopes("outer(inner(HERE));\nouter(claim(HERE), HERE);\n");
-    has(&main, "out((inside(\"REPLACED\")))");
-    has(&main, "out(claimed(\"CLAIMED\"), \"REPLACED\")");
+fn an_expression_an_extension_lowers_lowers_in_place_on_every_path() {
+    let main = compile_heres(
+        "outer(HERE);\nprint(HERE);\nmaybe?.(HERE);\nexport const values = [HERE, { at: HERE }];\nouter(print(HERE));\n",
+    );
+    has(&main, "\nout(\"REPLACED\")\n");
+    has(&main, "\nprint(\"REPLACED\")\n");
+    has(&main, "_0(\"REPLACED\")");
+    has(&main, "{ \"REPLACED\", {\n\tat = \"REPLACED\",\n} }");
+    has(&main, "out((print(\"REPLACED\")))");
+    assert!(!main.contains("HERE"), "every HERE lowered in place:\n{main}");
 }
 
 #[test]
-fn replacements_end_with_the_call_that_supplies_them() {
-    let main = compile_scopes("outer(reach(), inner(HERE));\nreach();\ninner(HERE);\n");
-    has(&main, "out(reached(), (inside(\"REPLACED\")))");
-    has(&main, "\nreached()\ninside(HERE)\n");
-}
-
-#[test]
-#[should_panic(expected = "extension `scopes` lowered the arguments of a call and then left the call to the compiler")]
+#[should_panic(expected = "extension `heres` lowered the parts of a node and then left the node to the compiler")]
 fn declining_a_call_after_lowering_its_arguments_panics() {
-    compile_scopes("outer(peek(HERE), HERE);\n");
+    compile_heres("outer(peek(HERE), HERE);\n");
+}
+
+/// Replaces each property access named `hook` with the global `hooked`, each call to `tupleHook` with the global
+/// `hookedTuple`, and each expression written as one of `texts` with the global `replaced`.
+#[derive(Default)]
+struct Hooks {
+    texts: &'static [&'static str],
+    sites: HashMap<SiteId, &'static str>,
+}
+
+impl Extension for Hooks {
+    fn name(&self) -> &'static str {
+        "hooks"
+    }
+
+    fn extract_file(&mut self, cx: &mut ExtractCx<'_>, file: File) {
+        for n in descendants(file.root()) {
+            let global = match n.kind() {
+                Kind::PropertyAccessExpression if n.name().is_some_and(|name| name.text() == "hook") => "hooked",
+                Kind::CallExpression if n.expression().source_text() == "tupleHook" => "hookedTuple",
+                _ if self.texts.contains(&n.source_text()) => "replaced",
+                _ => continue,
+            };
+            self.sites.insert(cx.site(n), global);
+        }
+    }
+
+    fn lower_expression(&self, cx: &mut LowerCx<'_, '_>, n: Node) -> Option<Expr> {
+        self.sites.get(&cx.site(n)).map(|&global| Expr::global(global))
+    }
+}
+
+const HOOKED: &str = "declare const obj: { hook: (n: number) => number; value: { hook: { value: number } } } | undefined;\n\
+                      declare const thing: { hook: (n: number) => number };\n\
+                      declare function make(): { hook(n: number): number };\n\
+                      declare function tupleHook(): LuaTuple<[number, string]>;\n\
+                      declare function take(...values: unknown[]): void;\n";
+
+fn compile_hooks(texts: &'static [&'static str], main: &str) -> String {
+    let game = Game::new();
+    game.main(&format!("{HOOKED}export {{}};\n{main}"));
+    let (instances, include) = in_place(&game);
+    let mut hooks = Hooks { texts, ..Hooks::default() };
+    let modules = compile(&game, &mut hooks, Target::Game { instances: &instances, include: &include, modules: &[] })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    module(&modules, "server/main.luau").to_owned()
+}
+
+#[test]
+fn an_optional_chain_link_an_extension_lowers_starts_the_rest_of_the_chain() {
+    let main = compile_hooks(
+        &[],
+        "export const deep = obj?.value.hook.value;\nexport const further = obj?.value.hook?.value;\n",
+    );
+    assert!(!main.contains(".hook"), "no link reads `hook`:\n{main}");
+    has(&main, "local _0 = hooked\n_0 = _0.value\nlocal deep = _0\n");
+    has(&main, "local _1 = hooked\nif _1 ~= nil then\n\t_1 = _1.value\nend\nlocal further = _1\n");
+}
+
+#[test]
+fn a_callee_an_extension_lowers_is_called_and_a_method_keeps_its_receiver_once() {
+    let main = compile_hooks(&[], "export const called = thing.hook(1);\nexport const method = make().hook(2);\n");
+    has(&main, "local called = hooked(1)\n");
+    has(&main, "local method = hooked(make(), 2)\n");
+}
+
+#[test]
+fn a_lua_tuple_call_an_extension_lowers_is_the_tuple_s_array_wherever_it_sits() {
+    let main = compile_hooks(
+        &[],
+        "export const spread = [...tupleHook()];\n\
+         take(...tupleHook());\n\
+         export const first = tupleHook()[0];\n\
+         export const [x, y] = tupleHook();\n\
+         let p: number, q: string;\n\
+         [p, q] = tupleHook();\n\
+         export function f(): LuaTuple<[number, string]> {\n\treturn tupleHook();\n}\n",
+    );
+    assert!(!main.contains("tupleHook("), "every call of tupleHook was replaced:\n{main}");
+    has(&main, "local _0 = {}\ntable.move(hookedTuple, 1, #hookedTuple, #_0 + 1, _0)\nlocal spread = _0\n");
+    has(&main, "take(table.unpack(hookedTuple))\n");
+    has(&main, "local first = hookedTuple[1]\n");
+    has(&main, "local x = hookedTuple[1]\nlocal y = hookedTuple[2]\n");
+    has(&main, "p = hookedTuple[1]\nq = hookedTuple[2]\n");
+    has(&main, "return table.unpack(hookedTuple)\n");
+}
+
+#[test]
+fn an_unreplaced_lua_tuple_call_keeps_its_several_values() {
+    let main = compile_hooks(
+        &[],
+        "declare function pair(): LuaTuple<[number, string]>;\n\
+         export const spread = [...pair()];\n\
+         take(...pair());\n\
+         export const [x, y] = pair();\n",
+    );
+    has(&main, "local spread = { pair() }\n");
+    has(&main, "take(pair())\n");
+    has(&main, "local x, y = pair()\n");
+}
+
+#[test]
+fn an_expression_the_compiler_takes_apart_is_asked_before_its_parts() {
+    let main = compile_hooks(
+        &[
+            "!ready",
+            "ready && open",
+            "(ready || open)",
+            "first ?? second",
+            "[1, 2]",
+            "[[\"a\", 1]]",
+            "[\"b\", 2]",
+            "shorthand",
+            "[3, 4]",
+            "$tuple(5, 6)",
+        ],
+        "declare const ready: boolean;\ndeclare const open: boolean;\n\
+         declare const first: number | undefined;\ndeclare const second: number | undefined;\n\
+         declare const third: number;\ndeclare const shorthand: number;\n\
+         if (!ready) print(1);\n\
+         if (ready && open) print(2);\n\
+         if ((ready || open) && ready) print(3);\n\
+         export const chosen = first ?? second ?? third;\n\
+         export const set = new Set([1, 2]);\n\
+         export const map = new Map([[\"a\", 1]]);\n\
+         export const entries = new Map([[\"b\", 2], [\"c\", 3]]);\n\
+         export const object = { shorthand };\n\
+         export function g(): LuaTuple<[number, number]> {\n\treturn [3, 4] as LuaTuple<[number, number]>;\n}\n\
+         export function h(): LuaTuple<[number, number]> {\n\treturn $tuple(5, 6);\n}\n",
+    );
+    has(&main, "if replaced then\n\tprint(1)\nend\n");
+    has(&main, "if replaced then\n\tprint(2)\nend\n");
+    has(&main, "if replaced and ready then\n\tprint(3)\nend\n");
+    has(&main, "local chosen = replaced or third\n");
+    has(&main, "for _1, _2 in replaced do\n\t_0[_2] = true\nend\nlocal set = _0\n");
+    has(&main, "for _4, _5 in replaced do\n\t_3[_5[1]] = _5[2]\nend\nlocal map = _3\n");
+    has(&main, "local _6 = replaced\nlocal entries = {\n\t[_6[1]] = _6[2],\n\tc = 3,\n}\n");
+    has(&main, "shorthand = replaced,\n");
+    assert_eq!(main.matches("return table.unpack(replaced)\n").count(), 2, "both tuples are replaced:\n{main}");
+}
+
+#[test]
+fn a_constant_enum_member_holds_the_checker_s_value_without_asking_the_hook() {
+    let main = compile_hooks(
+        &["123", "code()"],
+        "declare function code(): number;\n\
+         enum Codes {\n\tA = 123,\n\tB = A + 1,\n\tC = code(),\n}\n\
+         const enum Inlined {\n\tA = 123,\n}\n\
+         export const read = Inlined.A;\n\
+         export const literal = 123;\n\
+         export const codes = Codes;\n",
+    );
+    has(&main, "Codes.A = 123\n");
+    has(&main, "Codes.B = 124\n");
+    has(&main, "Codes.C = replaced\n");
+    has(&main, "local read = 123\n");
+    has(&main, "local literal = replaced\n");
+}
+
+#[test]
+fn a_jsx_string_attribute_an_extension_lowers_lowers_in_place() {
+    let game = Game::new();
+    game.config(|config| config["compilerOptions"]["jsx"] = json!("react"));
+    game.write(
+        "src/server/main.tsx",
+        "/** @jsx h */\n\
+         declare function h(tag: unknown, props: unknown, ...children: unknown[]): unknown;\n\
+         declare namespace h {\n\tnamespace JSX {\n\t\ttype Element = unknown;\n\t\t\
+         interface IntrinsicElements {\n\t\t\tframe: { Name?: string };\n\t\t}\n\t}\n}\n\
+         export const frame = <frame Name=\"Hooked\" />;\n",
+    );
+    let (instances, include) = in_place(&game);
+    let mut hooks = Hooks { texts: &["\"Hooked\""], ..Hooks::default() };
+    let modules = compile(&game, &mut hooks, Target::Game { instances: &instances, include: &include, modules: &[] })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    has(module(&modules, "server/main.luau"), "Name = replaced,\n");
+}
+
+#[test]
+fn a_replacement_stays_inside_its_probe_and_the_innermost_probe_wins() {
+    let game = probe_game();
+    game.main(
+        "import { HERE, probe } from \"@rbxts/probe\";\n\
+         export const outer = probe({ at: HERE, inner:\n\
+         \tprobe({ at: HERE }) });\n\
+         print(HERE);\n",
+    );
+    let (instances, include) = in_place(&game);
+    let mut probe = Probe::default();
+    let modules = compile(&game, &mut probe, Target::Game { instances: &instances, include: &include, modules: &[] })
+        .unwrap_or_else(|f| panic!("the game compiles:\n{f}"));
+    let main = module(&modules, "server/main.luau");
+    assert_eq!(main.matches("at = \"main.ts:2\"").count(), 1, "the outer HERE is the outer probe's:\n{main}");
+    assert_eq!(main.matches("at = \"main.ts:3\"").count(), 1, "the inner HERE is the inner probe's:\n{main}");
+    has(main, "\nprint(HERE)\n");
 }

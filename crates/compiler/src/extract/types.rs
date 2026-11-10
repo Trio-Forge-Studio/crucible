@@ -63,7 +63,6 @@ impl Globals {
                         globals.methods.insert(member, m);
                     }
                 }
-                MacroKind::Crucible => {}
             }
         }
         let mut all = |names: &[&str]| names.iter().filter_map(|n| resolve(n, SymbolFlags::All)).collect::<Vec<_>>();

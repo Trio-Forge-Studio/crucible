@@ -4,14 +4,11 @@
 //! not sites yet.
 
 mod collisions;
-mod crucible;
-mod data;
 pub(crate) mod extension;
-mod network;
+mod packages;
+mod report;
 mod typed_lint;
 mod types;
-
-pub(crate) use crucible::PACKAGE;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -31,8 +28,8 @@ use crate::macros::Macro;
 use crate::program::Checked;
 use crate::project::{Game, absolute, installed_module};
 use crate::tree::File;
-use crucible::Code;
 use extension::{ExtractCx, ProgramCx};
+use report::Code;
 
 pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Facts {
     let root = checked.source_root();
@@ -42,12 +39,19 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
     let resolver = checker.new_emit_resolver(tsrs_printer::new_emit_context());
     let options = program.options();
     let globals = types::Globals::new(&mut checker);
-    let crucible = crucible::Api::new(program, &mut checker, host);
+    let packages = packages::Packages::new(program, host);
     let mut facts = Facts::default();
     let game = match target {
         crate::Target::Package => None,
-        crate::Target::Game { project, include } => {
-            match Game::load(project, include, Path::new(&dir), Path::new(&root), out_dir.as_deref().map(Path::new)) {
+        crate::Target::Game { instances, include, modules } => {
+            match Game::load(
+                instances,
+                include,
+                modules,
+                Path::new(&dir),
+                Path::new(&root),
+                out_dir.as_deref().map(Path::new),
+            ) {
                 Ok(game) => Some(game),
                 Err(message) => {
                     facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code: 0, message });
@@ -72,10 +76,9 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         checker,
         resolver,
         globals,
-        crucible,
+        packages,
         game,
         config_dir: PathBuf::from(&dir),
-        network: network::Program::default(),
         facts,
         text: "",
         path: String::new(),
@@ -86,7 +89,6 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         options,
         jsx: None,
     };
-    x.declare_helper(&crate::lower::CRUCIBLE_EMIT);
     for extension in extensions.iter_mut() {
         extension.begin_program(&mut ProgramCx { x: &mut x });
     }
@@ -96,8 +98,9 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         }
         let id = x.facts.files.len() as u32;
         x.source_file(file);
-        for extension in extensions.iter_mut() {
-            extension.extract_file(&mut ExtractCx { x: &mut x, file: id }, File::new(file));
+        for (index, extension) in extensions.iter_mut().enumerate() {
+            let mut cx = ExtractCx { program: ProgramCx { x: &mut x }, file: id, extension: index };
+            extension.extract_file(&mut cx, File::new(file));
         }
     }
     for extension in extensions.iter_mut() {
@@ -190,17 +193,16 @@ struct Extractor {
     checker: CheckerHandle,
     resolver: P<EmitResolver>,
     globals: types::Globals,
-    crucible: crucible::Api,
+    packages: packages::Packages,
     game: Option<Game>,
     config_dir: PathBuf,
-    network: network::Program,
     facts: Facts,
     text: &'static str,
     path: String,
     table: Table,
     pending: Vec<ConstEnumImport>,
     modules: Vec<ModuleUse>,
-    reported: HashSet<(String, u32, Code)>,
+    reported: HashSet<report::Reported>,
     options: P<CompilerOptions>,
     jsx: Option<Jsx>,
 }
@@ -213,7 +215,7 @@ impl Extractor {
         }
         let path = match &self.game {
             Some(game) => self
-                .crucible
+                .packages
                 .entry_declaration(module.package, module.entry)
                 .and_then(|declaration| game.module(&declaration))
                 .and_then(|r| absolute(&r)),
@@ -247,7 +249,6 @@ impl Extractor {
                 self.module_path(module.specifier);
             }
         }
-        self.crucible_file(file);
         let table = std::mem::take(&mut self.table);
         for (span, site) in table.conflicts {
             self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
@@ -401,48 +402,38 @@ impl Extractor {
         }
         self.site();
         let span = self.span(callee);
-        if let Some(m) = self.crucible.macro_at(&mut self.checker, n) {
-            self.table.store(span, Site::CallCallee, |f| &mut f.callee, Callee::Macro(m));
-            if m == Macro::Inject {
-                self.site();
-                let inject = Box::new(self.crucible_inject(n));
-                let call = self.span(n);
-                self.table.store(call, Site::Crucible, |f| &mut f.crucible, inject);
-            }
+        let t = self.type_of(callee);
+        let t = self.checker.get_non_optional_type(t);
+        if object.is_some() && types::is_any(t) {
+            self.unanswered(callee, Site::CallCallee, Reason::Any);
         } else {
-            let t = self.type_of(callee);
-            let t = self.checker.get_non_optional_type(t);
-            if object.is_some() && types::is_any(t) {
-                self.unanswered(callee, Site::CallCallee, Reason::Any);
-            } else {
-                let symbol = self.first_defined_symbol(t);
-                let found = match symbol {
-                    Some(s) if object.is_some() => self.globals.method_macro(s),
-                    Some(s) => self.globals.call_macro(s),
-                    None => None,
-                };
-                let resolved = match found {
-                    Some(m) => Callee::Macro(m),
-                    None if object.is_some() => self.callee_kind(callee, Site::CallCallee, t),
-                    None => Callee::Function,
-                };
-                self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
-                let arguments = n.arguments();
-                if resolved == Callee::Macro(Macro::Assert)
-                    && let Some(&first) = arguments.first()
+            let symbol = self.first_defined_symbol(t);
+            let found = match symbol {
+                Some(s) if object.is_some() => self.globals.method_macro(s),
+                Some(s) => self.globals.call_macro(s),
+                None => None,
+            };
+            let resolved = match found {
+                Some(m) => Callee::Macro(m),
+                None if object.is_some() => self.callee_kind(callee, Site::CallCallee, t),
+                None => Callee::Function,
+            };
+            self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
+            let arguments = n.arguments();
+            if resolved == Callee::Macro(Macro::Assert)
+                && let Some(&first) = arguments.first()
+            {
+                self.truthy(first);
+            }
+            if let Callee::Macro(_) = resolved {
+                if let Some(&last) = arguments.last()
+                    && last.kind() == Kind::SpreadElement
                 {
-                    self.truthy(first);
+                    self.unanswered(last, Site::Spread, Reason::MacroSpread);
                 }
-                if let Callee::Macro(_) = resolved {
-                    if let Some(&last) = arguments.last()
-                        && last.kind() == Kind::SpreadElement
-                    {
-                        self.unanswered(last, Site::Spread, Reason::MacroSpread);
-                    }
-                } else if arguments.iter().any(|&a| returns_values(a)) {
-                    let roblox = self.possibly_roblox(t);
-                    self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
-                }
+            } else if arguments.iter().any(|&a| returns_values(a)) {
+                let roblox = self.possibly_roblox(t);
+                self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
             }
         }
         if let Some(object) = object {
@@ -949,9 +940,8 @@ impl Extractor {
             return;
         }
         self.site();
-        let target = self
-            .checker
-            .get_symbol_at_location_exported(specifier)
+        let symbol = self.checker.get_symbol_at_location_exported(specifier);
+        let target = symbol
             .and_then(|s| s.declarations().first().copied())
             .and_then(tsrs_ast::get_source_file_of_node)
             .map(|f| f.file_name().replace('\\', "/"));
@@ -962,19 +952,36 @@ impl Extractor {
             }
             return;
         };
-        let Some(target) = target else {
-            return self.report(specifier, Code::Place, "the module this names has no source file");
-        };
-        if target.ends_with(".server.ts") || target.ends_with(".client.ts") {
-            return self.report(specifier, Code::Place, "a script is not a module and cannot be imported");
+        let virtual_out = game.virtual_module(specifier.text());
+        if virtual_out.is_some()
+            && symbol.is_some_and(|s| s.declarations().iter().any(|d| d.kind() == Kind::SourceFile))
+        {
+            return self.report(
+                specifier,
+                Code::Place,
+                "a virtual module has this specifier, which also names a file of the program",
+            );
+        }
+        if virtual_out.is_none() {
+            match target.as_deref() {
+                None => return self.report(specifier, Code::Place, "the module this names has no source file"),
+                Some(t) if t.ends_with(".server.ts") || t.ends_with(".client.ts") => {
+                    return self.report(specifier, Code::Place, "a script is not a module and cannot be imported");
+                }
+                Some(_) => {}
+            }
         }
         let Some(script) = game.module(Path::new(&self.path)) else {
             return self.report(specifier, Code::Place, "the Rojo project maps no instance for this file's output");
         };
-        let Some(module) = game.module(Path::new(&target)) else {
+        let module = match virtual_out {
+            Some(out) => game.instances.rbx_path(out),
+            None => target.as_deref().and_then(|t| game.module(Path::new(t))),
+        };
+        let Some(module) = module else {
             return self.report(specifier, Code::Place, "the Rojo project maps no instance for this module");
         };
-        match game.rojo.import(&script, &module) {
+        match game.instances.import(&script, &module) {
             Ok(path) => {
                 let span = self.span(specifier);
                 self.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));

@@ -89,10 +89,10 @@ jobs:
       - name: Compare the build output with the golden baseline
         if: runner.os != 'macOS'
         run: cargo xtask golden check
-      - name: Install Lune
+      - name: Install Lune and Rojo
         if: runner.os == 'Linux'
         uses: Trio-Forge-Studio/tooling/.github/actions/setup@main
-      - name: Run the compiler's emitted Luau, JSX and network declarations in Lune
+      - name: Run the compiler's emitted Luau, JSX, network declarations and a virtual module's place in Lune
         if: runner.os == 'Linux'
-        run: cargo test --locked -p crucible-compiler -- --ignored
+        run: cargo test --locked -p crucible-compiler -p crucible-transform -- --ignored
       - run: node --test crates/cli/npm/package.test.mjs

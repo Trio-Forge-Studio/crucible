@@ -729,6 +729,7 @@ name = "crucible-project"
 version = "0.4.0"
 dependencies = [
  "serde",
+ "serde_json",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
 ]
@@ -739,6 +740,9 @@ version = "0.4.0"
 dependencies = [
  "crucible-abi",
  "crucible-compiler",
+ "crucible-luau",
+ "crucible-project",
+ "crucible-transform",
  "serde_json",
 ]
 

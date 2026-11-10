@@ -1,18 +1,10 @@
 use std::borrow::Cow;
 
 use super::{Breakable, Exit, ImportBase, Lower, is_hole, skip_parens_and_assertions};
-use crate::facts::{Callee, Constant, HelperModule, Import, Receiver, RuntimeLib};
+use crate::facts::{Callee, Constant, Import, Receiver, RuntimeLib};
 use crate::macros::Macro;
 use crate::tree::{Kind, Node, Nodes, Op, UnaryOp};
 use crucible_luau::{BinOp, Block, Expr, Field, Function, Name, Stmt, UnOp};
-
-/// `@trioforge/crucible/emit`, which registration and Crucible's macros call.
-pub(crate) const CRUCIBLE_EMIT: HelperModule = HelperModule {
-    package: crate::extract::PACKAGE,
-    entry: "./emit",
-    local: "__crucible",
-    missing: "Crucible's macros and registration need a game that maps @trioforge/crucible/emit",
-};
 
 impl Lower<'_> {
     pub(super) fn module(&mut self, statements: Nodes) -> Block {
@@ -234,24 +226,31 @@ impl Lower<'_> {
     /// The values a `return` or an arrow body returns. A `LuaTuple` returns its members as several values.
     pub(super) fn return_values(&mut self, e: Node) -> Vec<Expr> {
         let inner = skip_parens_and_assertions(e);
-        if inner.kind() == Kind::CallExpression
-            && self.fact(inner.expression()).and_then(|f| f.callee) == Some(Callee::Macro(Macro::Tuple))
-        {
-            return self.ordered(inner.arguments().iter(), |l, a| l.expr(a));
-        }
-        match self.fact(e).and_then(|f| f.receiver) {
-            Some(Receiver::LuaTuple) => {}
-            Some(_) => return vec![self.expr(e)],
-            None => {
-                self.error(e, "the type facts do not say whether this returns a LuaTuple");
-                return vec![self.expr(e)];
+        let tuple_macro = inner.kind() == Kind::CallExpression
+            && self.fact(inner.expression()).and_then(|f| f.callee) == Some(Callee::Macro(Macro::Tuple));
+        if !tuple_macro {
+            match self.fact(e).and_then(|f| f.receiver) {
+                Some(Receiver::LuaTuple) => {}
+                Some(_) => return vec![self.expr(e)],
+                None => {
+                    self.error(e, "the type facts do not say whether this returns a LuaTuple");
+                    return vec![self.expr(e)];
+                }
             }
+        }
+        let members = inner.kind() == Kind::ArrayLiteralExpression
+            && !inner.elements().iter().any(|e| e.kind() == Kind::SpreadElement);
+        if (members || inner.kind() == Kind::CallExpression)
+            && let Some(value) = self.extension_value(e)
+        {
+            return vec![Expr::global("table.unpack").call(vec![value])];
+        }
+        if tuple_macro {
+            return self.ordered(inner.arguments().iter(), |l, a| l.expr(a));
         }
         match inner.kind() {
             Kind::CallExpression => vec![self.call(inner)],
-            Kind::ArrayLiteralExpression if !inner.elements().iter().any(|e| e.kind() == Kind::SpreadElement) => {
-                self.ordered(inner.elements().iter(), |l, a| l.expr(a))
-            }
+            Kind::ArrayLiteralExpression if members => self.ordered(inner.elements().iter(), |l, a| l.expr(a)),
             _ => {
                 let value = self.expr(e);
                 vec![Expr::global("table.unpack").call(vec![value])]

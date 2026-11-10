@@ -1,4 +1,3 @@
-mod declarations;
 mod entities;
 pub mod extension;
 mod extract;
@@ -19,12 +18,9 @@ use extension::Extension;
 
 // The fact table is internal. Tests read it through `analyze`, which the `test-support` feature exports.
 #[cfg(feature = "test-support")]
-pub use declarations::DeclarationKind;
-#[cfg(feature = "test-support")]
 pub use facts::{
-    Attribute, Callee, Check, Class, ClassKind, Constant, Crucible, Declaration, Dependency, Fact, Facts, Falsy, Field,
-    FileFacts, Import, Jsx, KeyLiteral, Literal, MapKey, ModulePath, Place, Reason, Receiver, RuntimeLib, Schema, Site,
-    Span, Tail, Unanswered,
+    Callee, Constant, Fact, Facts, Falsy, FileFacts, Import, Jsx, ModulePath, Place, Reason, Receiver, RuntimeLib,
+    Site, Span, Unanswered,
 };
 #[cfg(not(feature = "test-support"))]
 use facts::{FileFacts, Unanswered};
@@ -33,6 +29,7 @@ pub use lower::Error;
 use lower::ImportBase;
 #[cfg(feature = "test-support")]
 pub use macros::{Macro, MacroKind};
+pub use project::InstanceMap;
 use write::HEADER;
 pub use write::{Written, write};
 
@@ -67,9 +64,20 @@ impl fmt::Display for Diagnostic {
 pub enum Target<'a> {
     /// A library. Its modules reach each other relatively and take the runtime library from `_G[script]`.
     Package,
-    /// A place. `project` is a Rojo project with a `DataModel` root that maps the output, and `include` is the folder
-    /// it maps for the runtime library, which `write_include` fills.
-    Game { project: &'a Path, include: &'a Path },
+    /// A place. `instances` maps the output and `include`, the folder for the runtime library, which `write_include`
+    /// fills. The place also holds `modules`, which the caller supplies.
+    Game { instances: &'a InstanceMap, include: &'a Path, modules: &'a [VirtualModule<'a>] },
+}
+
+/// A module that game code imports by a specifier with no file behind it, such as one a build generates. The program
+/// declares its types with `declare module`, as for any ambient module, and the compiler emits `source` at `path`.
+#[derive(Clone, Copy, Debug)]
+pub struct VirtualModule<'a> {
+    /// The exact specifier imports name, such as `crucible:experience`.
+    pub specifier: &'a str,
+    /// The output path relative to the output directory, with forward slashes, such as `shared/experience.luau`.
+    pub path: &'a str,
+    pub source: &'a str,
 }
 
 /// Builds the program for `tsconfig`, checks every file with one checker, and returns the fact table of every source
@@ -200,5 +208,21 @@ fn compile_on_thread(
             Err(e) => errors.extend(e),
         }
     }
-    if errors.is_empty() { Ok(Compiled { out_dir, modules }) } else { Err(Failure::Lower(errors)) }
+    if !errors.is_empty() {
+        return Err(Failure::Lower(errors));
+    }
+    if let Target::Game { modules: virtual_modules, .. } = target {
+        let compiled = modules.len();
+        for module in virtual_modules {
+            if let Some(other) = modules[..compiled].iter().find(|m| project::same_file(&m.path, module.path)) {
+                let message = format!(
+                    "the virtual module `{}` has the output path {}, which collides with the compiled module {}",
+                    module.specifier, module.path, other.path
+                );
+                return Err(Failure::Crucible(vec![Diagnostic { path: None, line: 0, column: 0, code: 0, message }]));
+            }
+            modules.push(Module { path: module.path.to_owned(), source: format!("{HEADER}{}", module.source) });
+        }
+    }
+    Ok(Compiled { out_dir, modules })
 }

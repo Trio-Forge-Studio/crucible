@@ -108,6 +108,9 @@ impl Lower<'_> {
         if let Callee::Macro(m) = kind {
             return self.macro_call(m, n, usage);
         }
+        if let Some(function) = self.extension_value(callee) {
+            return Some(self.call_lowered_callee(n, target, kind, function));
+        }
         match target.kind() {
             Kind::PropertyAccessExpression => {
                 let object = target.expression();
@@ -155,6 +158,22 @@ impl Lower<'_> {
         }
     }
 
+    fn call_lowered_callee(&mut self, n: Node, target: Node, kind: Callee, function: Expr) -> Expr {
+        let mut callee = vec![(function, Vec::new())];
+        if kind == Callee::Method
+            && matches!(target.kind(), Kind::PropertyAccessExpression | Kind::ElementAccessExpression)
+        {
+            callee.push(self.capture(|l| l.expr(target.expression())));
+        }
+        let callee = self.order_values(callee);
+        let (args, block) = self.capture(|l| l.arguments(n));
+        let mut all: Vec<Expr> = callee.into_iter().map(|e| self.store_before(e, &block, &[])).collect();
+        self.current_block.extend(block);
+        let function = all.remove(0);
+        all.extend(args);
+        function.call(all)
+    }
+
     pub(super) fn method_call(&mut self, base: Expr, name: Name, args: Vec<Expr>) -> Expr {
         if is_name(&name) {
             return base.method(name, args);
@@ -196,7 +215,10 @@ impl Lower<'_> {
         let receiver = self.receiver(source);
         let inner = skip_parens_and_assertions(source);
         match receiver {
-            Some(Receiver::LuaTuple) if inner.kind() == Kind::CallExpression => self.call(inner),
+            Some(Receiver::LuaTuple) if inner.kind() == Kind::CallExpression => match self.extension_value(source) {
+                Some(value) => Expr::global("table.unpack").call(vec![value]),
+                None => self.call(inner),
+            },
             Some(Receiver::Array | Receiver::LuaTuple) => {
                 let value = self.expr(source);
                 Expr::global("table.unpack").call(vec![value])
@@ -248,13 +270,19 @@ impl Lower<'_> {
     fn new_set(&mut self, source: Option<Node>) -> Expr {
         let Some(source) = source else { return Expr::Table(Vec::new()) };
         let inner = skip_parens_and_assertions(source);
-        if inner.kind() == Kind::ArrayLiteralExpression
+        let value = if inner.kind() == Kind::ArrayLiteralExpression
             && !inner.elements().iter().any(|e| e.kind() == Kind::SpreadElement)
         {
-            let values = self.ordered(inner.elements().iter(), |l, e| l.expr(e));
-            return Expr::Table(values.into_iter().map(|v| Field::Keyed(v, Expr::Bool(true))).collect());
-        }
-        let value = self.expr(source);
+            match self.extension_value(source) {
+                Some(value) => value,
+                None => {
+                    let values = self.ordered(inner.elements().iter(), |l, e| l.expr(e));
+                    return Expr::Table(values.into_iter().map(|v| Field::Keyed(v, Expr::Bool(true))).collect());
+                }
+            }
+        } else {
+            self.expr(source)
+        };
         let set = self.push_temp(Expr::Table(Vec::new()));
         let (k, v) = (self.temp(), self.temp());
         let body = vec![Stmt::Assign(vec![set.clone().index(Expr::Name(v.clone()))], vec![Expr::Bool(true)])];
@@ -265,21 +293,19 @@ impl Lower<'_> {
     fn new_map(&mut self, source: Option<Node>) -> Expr {
         let Some(source) = source else { return Expr::Table(Vec::new()) };
         let inner = skip_parens_and_assertions(source);
-        let mut nodes = Vec::new();
         let pairs = inner.kind() == Kind::ArrayLiteralExpression
             && inner.elements().iter().all(|e| {
                 let e = skip_parens_and_assertions(e);
-                let pair = e.kind() == Kind::ArrayLiteralExpression && e.elements().len() == 2;
-                if pair {
-                    nodes.extend(e.elements().iter());
-                }
-                pair
+                e.kind() == Kind::ArrayLiteralExpression && e.elements().len() == 2
             });
-        if pairs {
-            let values = self.ordered(nodes, |l, e| l.expr(e));
-            return Expr::Table(keyed_fields(values));
-        }
-        let value = self.expr(source);
+        let value = if pairs {
+            match self.extension_value(source) {
+                Some(value) => value,
+                None => return self.map_of_pairs(inner),
+            }
+        } else {
+            self.expr(source)
+        };
         let map = self.push_temp(Expr::Table(Vec::new()));
         let (k, v) = (self.temp(), self.temp());
         let entry = Expr::Name(v.clone());
@@ -289,6 +315,25 @@ impl Lower<'_> {
         )];
         self.current_block.push(Stmt::GenericFor(vec![k, v], vec![value], body));
         map
+    }
+
+    fn map_of_pairs(&mut self, pairs: Node) -> Expr {
+        let mut lowered = Vec::new();
+        for pair in pairs.elements().iter() {
+            let (entry, setup) = self.capture(|l| l.extension_value(pair).map(|entry| l.push_temp(entry)));
+            match entry {
+                Some(entry) => {
+                    lowered.push((entry.clone().index(Expr::Number(1.0)), setup));
+                    lowered.push((entry.index(Expr::Number(2.0)), Vec::new()));
+                }
+                None => {
+                    for e in skip_parens_and_assertions(pair).elements().iter() {
+                        lowered.push(self.capture(|l| l.expr(e)));
+                    }
+                }
+            }
+        }
+        Expr::Table(keyed_fields(self.order_values(lowered)))
     }
 
     fn macro_call(&mut self, m: Macro, n: Node, usage: Usage) -> Option<Expr> {
@@ -302,7 +347,6 @@ impl Lower<'_> {
                 let object = self.expr(target.expression());
                 self.expand_method_macro(m, n, object, usage)
             }
-            MacroKind::Crucible => Some(self.crucible_macro(m, n)),
             MacroKind::Constructor | MacroKind::Identifier => Some(self.unsupported(n, "this macro call")),
         }
     }

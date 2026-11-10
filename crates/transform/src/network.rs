@@ -2,31 +2,29 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use tsrs_ast::{Kind, ModifierFlags, Node, NodeFlags, SourceFile, Symbol, SymbolFlags};
-use tsrs_checker::{ElementFlags, SignatureKind, Type, TypeFlags};
-use tsrs_core::{P, jsnum};
+use crucible_compiler::extension::{
+    ElementFlags, File, Kind, ModifierFlags, Node, NodeFlags, ObjectFlags, SignatureKind, Symbol, SymbolFlags, Type,
+    TypeFlags, is_numeric_name, js_number,
+};
 
-use super::Extractor;
-use super::crucible::{Code, is_global, is_reference, unalias};
-use super::types;
+use crate::Code;
+use crate::api::{Macro, normalize};
 use crate::declarations::{
     DeclarationKind, MAX_ASK_TIMEOUT_SECONDS, MAX_SCHEMA_NODES, MAX_UNION_BRANCHES, Position, RESERVED_HANDLE_NAMES,
     Side, Spec, TypeArguments, VIEW_NAME_MAX_BYTES, VIEW_NAME_PREFIX,
 };
-use crate::facts::{ClassKind, Crucible, Declaration, Field, KeyLiteral, Literal, MapKey, Schema, Site, Tail};
-use crate::macros::Macro;
-use crate::project::normalize;
-use crate::tree::File;
+use crate::facts::{ClassKind, Declaration, Fact, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
+use crate::registration::{Walk, is_global, is_reference};
 
 #[derive(Default)]
-pub(super) struct Program {
+pub(crate) struct Network {
     declarations: Option<Vec<Indexed>>,
-    reached: Option<HashSet<P<Symbol>>>,
-    pub granted: Option<bool>,
+    reached: Option<HashSet<Symbol>>,
+    pub(crate) granted: Option<bool>,
 }
 
 struct Indexed {
-    call: P<Node>,
+    call: Node,
     kind: DeclarationKind,
     name: Option<&'static str>,
 }
@@ -42,17 +40,17 @@ struct Context {
 }
 
 struct Lowering {
-    call: P<Node>,
+    call: Node,
     spec: Spec,
     name: &'static str,
     report: bool,
-    reached: HashSet<P<Symbol>>,
-    active: HashSet<P<Type>>,
-    inherited: HashSet<P<Symbol>>,
-    referenced: HashSet<P<Node>>,
+    reached: HashSet<Symbol>,
+    active: HashSet<Type>,
+    inherited: HashSet<Symbol>,
+    referenced: HashSet<Node>,
     /// The `extends` clauses of reached classes and interfaces, walked after the value so that a deep heritage chain
     /// does not nest calls.
-    bases: Vec<(P<Node>, String)>,
+    bases: Vec<(Node, String)>,
 }
 
 enum Engine {
@@ -87,12 +85,12 @@ enum Width {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Standard {
+pub(crate) enum Standard {
     Types,
     CompilerTypes,
 }
 
-fn node_text(n: P<Node>) -> Option<&'static str> {
+fn node_text(n: Node) -> Option<&'static str> {
     matches!(
         n.kind(),
         Kind::Identifier
@@ -114,24 +112,19 @@ fn valid_name(name: &str, max_bytes: usize) -> bool {
     name.len() <= max_bytes && name.split('.').all(segment) && name.split('.').next() != Some("Crucible")
 }
 
-/// A name that TypeScript treats as a number, because it is the text of the number it parses as.
-fn is_numeric_name(name: &str) -> bool {
-    jsnum::from_string(name).to_string() == name
-}
-
 /// A unique symbol's property name.
 fn is_symbol_name(name: &str) -> bool {
     name.starts_with("\u{7f}@")
 }
 
-fn literal(t: P<Type>) -> Option<Literal> {
-    if let Some(s) = types::literal_string(t) {
+fn literal(t: Type) -> Option<Literal> {
+    if let Some(s) = t.literal_string() {
         return Some(Literal::String(s.into()));
     }
-    if let Some(n) = types::literal_number(t) {
+    if let Some(n) = t.literal_number() {
         return Some(Literal::Number(n));
     }
-    types::literal_bool(t).map(Literal::Boolean)
+    t.literal_bool().map(Literal::Boolean)
 }
 
 fn compare(a: &Literal, b: &Literal) -> Ordering {
@@ -157,13 +150,13 @@ fn literal_key(l: &Literal) -> (u8, String) {
     }
 }
 
-fn members(t: P<Type>) -> Vec<P<Type>> {
-    if t.flags().intersects(TypeFlags::Union) { t.types().to_vec() } else { vec![t] }
+fn members(t: Type) -> Vec<Type> {
+    if t.flags().intersects(TypeFlags::Union) { t.types() } else { vec![t] }
 }
 
-fn absent(t: P<Type>) -> bool {
+fn absent(t: Type) -> bool {
     t.flags().intersects(TypeFlags::Undefined)
-        || (t.flags().intersects(TypeFlags::Union) && t.types().iter().any(|&m| absent(m)))
+        || (t.flags().intersects(TypeFlags::Union) && t.types().into_iter().any(absent))
 }
 
 fn json_string(text: &str) -> String {
@@ -226,23 +219,19 @@ fn view_name_problems(store: &str, node: &Schema) -> Vec<(String, String)> {
     problems
 }
 
-fn calls(n: P<Node>, out: &mut Vec<P<Node>>) {
+pub(crate) fn calls(n: Node, out: &mut Vec<Node>) {
     if n.kind() == Kind::CallExpression {
         out.push(n);
     }
-    n.for_each_child(&mut |child| {
-        calls(child, out);
-        false
-    });
+    n.for_each_child(&mut |child| calls(child, out));
 }
 
-fn added_declarations(body: Option<P<Node>>, out: &mut Vec<P<Node>>) {
+fn added_declarations(body: Option<Node>, out: &mut Vec<Node>) {
     let Some(body) = body else { return };
-    let statements = if body.kind() == Kind::ModuleBlock { body.statements().to_vec() } else { vec![body] };
+    let statements = if body.kind() == Kind::ModuleBlock { body.statements().iter().collect() } else { vec![body] };
     for statement in statements {
         if statement.kind() == Kind::VariableStatement {
-            let list = statement.as_variable_statement().declaration_list;
-            out.extend(list.as_variable_declaration_list().declarations.nodes().iter().copied());
+            out.extend(statement.declarations().iter());
         } else {
             out.push(statement);
         }
@@ -252,15 +241,16 @@ fn added_declarations(body: Option<P<Node>>, out: &mut Vec<P<Node>>) {
     }
 }
 
-fn declaration_file(declaration: P<Node>) -> Option<PathBuf> {
-    tsrs_ast::get_source_file_of_node(declaration).map(|f| normalize(Path::new(f.file_name())))
+fn declaration_file(declaration: Node) -> PathBuf {
+    normalize(Path::new(&declaration.file().path()))
 }
 
-fn ask_timeout(options: P<Node>) -> Option<f64> {
+fn ask_timeout(options: Node) -> Option<f64> {
     if options.kind() != Kind::ObjectLiteralExpression {
         return None;
     }
-    let [property] = options.properties() else { return None };
+    let properties = options.properties();
+    let (1, Some(property)) = (properties.len(), properties.get(0)) else { return None };
     if property.kind() != Kind::PropertyAssignment {
         return None;
     }
@@ -269,21 +259,20 @@ fn ask_timeout(options: P<Node>) -> Option<f64> {
         return None;
     }
     let value = property.initializer().filter(|i| i.kind() == Kind::NumericLiteral)?;
-    let seconds = jsnum::from_string(value.text()).0;
+    let seconds = js_number(value.text());
     (seconds > 0.0 && seconds <= MAX_ASK_TIMEOUT_SECONDS).then_some(seconds)
 }
 
-impl Extractor {
-    pub(super) fn file_side(&mut self, file: P<SourceFile>) -> Option<Side> {
-        let path = Path::new(file.file_name());
-        self.crucible.side(path, path)
+impl Walk<'_, '_> {
+    pub(crate) fn file_side(&mut self, file: File) -> Option<Side> {
+        let path = PathBuf::from(file.path());
+        self.side(&path, &path)
     }
 
-    pub(super) fn standard(&mut self, symbol: P<Symbol>, which: Standard) -> bool {
-        symbol.declarations().iter().any(|&d| {
-            let Some(file) = tsrs_ast::get_source_file_of_node(d) else { return false };
-            let name = file.file_name().replace('\\', "/");
-            let package = self.crucible.package_name(Path::new(&name));
+    pub(crate) fn standard(&mut self, symbol: Symbol, which: Standard) -> bool {
+        symbol.declarations().into_iter().any(|d| {
+            let name = d.file().path();
+            let package = self.cx.package_name(Path::new(&name));
             match which {
                 Standard::Types => name.contains("/@rbxts/types/") || package.as_deref() == Some("@rbxts/types"),
                 Standard::CompilerTypes => {
@@ -294,47 +283,46 @@ impl Extractor {
         })
     }
 
-    fn signatures_of(&mut self, t: P<Type>) -> bool {
-        !self.checker.get_signatures_of_type_exported(t, SignatureKind::Call).is_empty()
-            || !self.checker.get_signatures_of_type_exported(t, SignatureKind::Construct).is_empty()
+    fn signatures_of(&mut self, t: Type) -> bool {
+        !self.cx.signatures_of_type(t, SignatureKind::Call).is_empty()
+            || !self.cx.signatures_of_type(t, SignatureKind::Construct).is_empty()
     }
 
-    fn shown(&mut self, t: P<Type>) -> String {
-        self.checker.type_to_string_exported(t)
+    fn shown(&mut self, t: Type) -> String {
+        self.cx.type_text(t)
     }
 
     fn declarations(&mut self) -> &[Indexed] {
-        if self.network.declarations.is_none() {
+        if self.state.network.declarations.is_none() {
             let mut found = Vec::new();
-            for &file in self.crucible.program.source_files() {
-                if file.is_declaration_file() || file.is_js() {
+            for file in self.cx.files() {
+                if file.is_declaration() || file.is_js() {
                     continue;
                 }
                 let mut all = Vec::new();
-                calls(file.as_node(), &mut all);
+                calls(file.root(), &mut all);
                 for call in all {
-                    let kind = self.crucible.macro_at(&mut self.checker, call).and_then(DeclarationKind::of);
-                    if let Some(kind) = kind {
+                    if let Some(Macro::Declaration(kind)) = self.macro_at(call) {
                         let name =
-                            call.arguments().first().filter(|a| a.kind() == Kind::StringLiteral).map(|a| a.text());
+                            call.arguments().get(0).filter(|a| a.kind() == Kind::StringLiteral).map(|a| a.text());
                         found.push(Indexed { call, kind, name });
                     }
                 }
             }
-            self.network.declarations = Some(found);
+            self.state.network.declarations = Some(found);
         }
-        self.network.declarations.as_deref().unwrap_or_default()
+        self.state.network.declarations.as_deref().unwrap_or_default()
     }
 
-    fn location(&self, n: P<Node>) -> String {
-        let Some(file) = tsrs_ast::get_source_file_of_node(n) else { return String::new() };
-        let line = File::new(file).position(crate::tree::span(n, file.text()).start).line;
-        let path = file.file_name().replace('\\', "/");
-        let dir = format!("{}/", self.config_dir.to_string_lossy().replace('\\', "/").trim_end_matches('/'));
+    fn location(&self, n: Node) -> String {
+        let file = n.file();
+        let line = file.position(n.span().start).line;
+        let path = file.path();
+        let dir = format!("{}/", self.cx.config_dir().to_string_lossy().replace('\\', "/").trim_end_matches('/'));
         format!("{}:{line}", path.strip_prefix(&dir).unwrap_or(&path))
     }
 
-    fn placed(call: P<Node>, file: P<SourceFile>) -> bool {
+    fn placed(call: Node, file: File) -> bool {
         let declaration = call.parent().filter(|d| {
             d.kind() == Kind::VariableDeclaration
                 && d.initializer() == Some(call)
@@ -345,13 +333,13 @@ impl Extractor {
             .filter(|l| l.kind() == Kind::VariableDeclarationList && l.flags().intersects(NodeFlags::Const));
         let statement = list.and_then(|l| l.parent()).filter(|s| s.kind() == Kind::VariableStatement);
         statement.is_some_and(|s| {
-            s.parent() == Some(file.as_node())
-                && tsrs_ast::get_combined_modifier_flags(s).intersects(ModifierFlags::Export)
-                && tsrs_ast::is_external_module(file)
+            s.parent() == Some(file.root())
+                && s.combined_modifier_flags().intersects(ModifierFlags::Export)
+                && file.is_module()
         })
     }
 
-    pub(super) fn declaration(&mut self, call: P<Node>, kind: DeclarationKind, file: P<SourceFile>) {
+    pub(crate) fn declaration(&mut self, call: Node, kind: DeclarationKind, file: File) {
         let spec = kind.spec();
         if !Self::placed(call, file) || self.file_side(file) != Some(spec.side) {
             let message =
@@ -374,7 +362,7 @@ impl Extractor {
         }
         let arguments = call.arguments();
         let name = arguments
-            .first()
+            .get(0)
             .filter(|n| n.kind() == Kind::StringLiteral)
             .map(|n| n.text())
             .filter(|text| valid_name(text, spec.max_bytes));
@@ -400,7 +388,7 @@ impl Extractor {
         }
         let mut tail = Tail::None;
         if kind == DeclarationKind::AskServer {
-            let timeout = arguments.get(1).and_then(|&options| {
+            let timeout = arguments.get(1).and_then(|options| {
                 let timeout = ask_timeout(options);
                 if timeout.is_none() {
                     self.report(
@@ -426,20 +414,12 @@ impl Extractor {
         {
             tail = Tail::ServerOnly(server_only_paths(value));
         }
-        self.site();
-        let span = self.span(call);
-        let fact = Box::new(Crucible::Declaration(Declaration { kind, schemas, tail }));
-        self.table.store(span, Site::Crucible, |f| &mut f.crucible, fact);
+        self.store(call, Fact::Declaration(Declaration { kind, schemas, tail }));
     }
 
-    fn lower_declaration(
-        &mut self,
-        call: P<Node>,
-        kind: DeclarationKind,
-        report: bool,
-    ) -> (Vec<Schema>, HashSet<P<Symbol>>) {
+    fn lower_declaration(&mut self, call: Node, kind: DeclarationKind, report: bool) -> (Vec<Schema>, HashSet<Symbol>) {
         let spec = kind.spec();
-        let first = call.arguments().first().copied();
+        let first = call.arguments().get(0);
         let mut l = Lowering {
             call,
             spec,
@@ -453,13 +433,13 @@ impl Extractor {
         };
         let state = spec.position != Position::Payload;
         let root = if state { "value" } else { "payload" };
-        for &argument in call.type_arguments() {
+        for argument in call.type_arguments().iter() {
             self.references(&mut l, Some(argument), root);
         }
         let mut result = Vec::new();
         if !state {
-            for (i, &argument) in call.type_arguments().iter().enumerate() {
-                let t = self.checker.get_type_from_type_node_exported(argument);
+            for (i, argument) in call.type_arguments().iter().enumerate() {
+                let t = self.cx.type_from_type_node(argument);
                 let location = match i {
                     1 => "response",
                     _ if kind == DeclarationKind::AskServer => "request",
@@ -486,7 +466,7 @@ impl Extractor {
         }
         while let Some((base, location)) = l.bases.pop() {
             self.references(&mut l, Some(base), &location);
-            let t = self.checker.get_type_at_location(base);
+            let t = self.cx.type_at(base);
             self.mention(&mut l, t, &location);
         }
         if result.is_empty() {
@@ -521,24 +501,24 @@ impl Extractor {
         Schema::Nil
     }
 
-    fn target_of(&mut self, call: P<Node>) -> Option<P<Type>> {
-        if let Some(&argument) = call.type_arguments().first() {
-            return Some(self.checker.get_type_from_type_node_exported(argument));
+    fn target_of(&mut self, call: Node) -> Option<Type> {
+        if let Some(argument) = call.type_arguments().get(0) {
+            return Some(self.cx.type_from_type_node(argument));
         }
-        let signature = self.checker.get_resolved_signature_exported(call);
-        let returned = self.checker.get_return_type_of_signature_exported(signature);
+        let signature = self.cx.signature_at(call);
+        let returned = self.cx.return_type(signature);
         if !is_reference(returned) {
             return None;
         }
-        self.checker.get_type_arguments_exported(returned).first().copied()
+        self.cx.type_arguments(returned).first().copied()
     }
 
-    fn check_symbols(&mut self, l: &mut Lowering, symbols: [Option<P<Symbol>>; 2], location: &str) {
+    fn check_symbols(&mut self, l: &mut Lowering, symbols: [Option<Symbol>; 2], location: &str) {
         for symbol in symbols.into_iter().flatten() {
             l.reached.insert(symbol);
-            let declarations: Vec<P<Node>> =
+            let declarations: Vec<Node> =
                 symbol.declarations().iter().copied().filter(|&d| !self.is_library_declaration(d)).collect();
-            let files: HashSet<PathBuf> = declarations.iter().filter_map(|&d| declaration_file(d)).collect();
+            let files: HashSet<PathBuf> = declarations.iter().map(|&d| declaration_file(d)).collect();
             if declarations.iter().any(|&d| is_global(d)) || files.len() > 1 {
                 let reason = format!(
                     "{} must be declared in one imported module; incremental builds cannot see global declarations or merges.",
@@ -550,17 +530,14 @@ impl Extractor {
                 continue;
             }
             for declaration in declarations {
-                let clauses = match declaration.kind() {
-                    Kind::InterfaceDeclaration => declaration.as_interface_declaration().heritage_clauses(),
-                    Kind::ClassDeclaration => declaration.as_class_declaration().heritage_clauses(),
-                    _ => None,
-                };
-                for &clause in clauses.map_or(&[][..], |c| c.nodes()) {
-                    let clause = clause.as_heritage_clause();
-                    if clause.token != Kind::ExtendsKeyword {
+                if !matches!(declaration.kind(), Kind::InterfaceDeclaration | Kind::ClassDeclaration) {
+                    continue;
+                }
+                for clause in declaration.heritage_clauses().iter() {
+                    if clause.token() != Kind::ExtendsKeyword {
                         continue;
                     }
-                    for &base in clause.types.get().nodes().iter().rev() {
+                    for base in clause.types().iter().rev() {
                         l.bases.push((base, location.to_owned()));
                     }
                 }
@@ -568,72 +545,64 @@ impl Extractor {
         }
     }
 
-    fn mention(&mut self, l: &mut Lowering, t: P<Type>, location: &str) {
-        self.check_symbols(l, [t.alias().and_then(|a| a.symbol()), t.symbol()], location);
+    fn mention(&mut self, l: &mut Lowering, t: Type, location: &str) {
+        self.check_symbols(l, [t.alias_symbol(), t.symbol()], location);
         if t.flags().intersects(TypeFlags::Intersection) {
-            for &part in t.types() {
+            for part in t.types() {
                 self.mention(l, part, location);
             }
         }
     }
 
-    fn declared(&mut self, l: &mut Lowering, t: P<Type>, location: &str) {
-        self.check_symbols(l, [t.alias().and_then(|a| a.symbol()), t.symbol()], location);
+    fn declared(&mut self, l: &mut Lowering, t: Type, location: &str) {
+        self.check_symbols(l, [t.alias_symbol(), t.symbol()], location);
     }
 
-    fn references(&mut self, l: &mut Lowering, syntax: Option<P<Node>>, location: &str) {
+    fn references(&mut self, l: &mut Lowering, syntax: Option<Node>, location: &str) {
         let Some(syntax) = syntax else { return };
         if !l.referenced.insert(syntax) {
             return;
         }
         match syntax.kind() {
             Kind::TypeReference | Kind::ExpressionWithTypeArguments => {
-                let name = if syntax.kind() == Kind::TypeReference {
-                    syntax.as_type_reference_node().type_name
-                } else {
-                    syntax.as_expression_with_type_arguments().expression
-                };
-                let symbol = self.checker.get_symbol_at_location_exported(name).map(|s| unalias(&mut self.checker, s));
+                let name = if syntax.kind() == Kind::TypeReference { syntax.type_name() } else { syntax.expression() };
+                let symbol = self.cx.symbol_at(name).map(|s| self.cx.aliased(s));
                 self.check_symbols(l, [symbol, None], location);
-                for &declaration in symbol.map_or(&[][..], |s| s.declarations()) {
+                for declaration in symbol.map_or_else(Vec::new, |s| s.declarations()) {
                     if declaration.kind() == Kind::TypeAliasDeclaration && !self.is_library_declaration(declaration) {
                         self.references(l, declaration.type_node(), location);
                     }
                 }
             }
             Kind::TypeQuery => {
-                let name = syntax.as_type_query_node().expr_name;
-                let symbol = self.checker.get_symbol_at_location_exported(name).map(|s| unalias(&mut self.checker, s));
+                let name = syntax.expr_name();
+                let symbol = self.cx.symbol_at(name).map(|s| self.cx.aliased(s));
                 self.check_symbols(l, [symbol, None], location);
-                let queried = self.checker.get_type_at_location(name);
-                let mut signatures =
-                    self.checker.get_signatures_of_type_exported(queried, SignatureKind::Call).to_vec();
-                signatures.extend(self.checker.get_signatures_of_type_exported(queried, SignatureKind::Construct));
+                let queried = self.cx.type_at(name);
+                let mut signatures = self.cx.signatures_of_type(queried, SignatureKind::Call);
+                signatures.extend(self.cx.signatures_of_type(queried, SignatureKind::Construct));
                 for signature in signatures {
-                    let returned = self.checker.get_return_type_of_signature_exported(signature);
+                    let returned = self.cx.return_type(signature);
                     self.mention(l, returned, location);
                 }
             }
             _ => {}
         }
         let mut children = Vec::new();
-        syntax.for_each_child(&mut |child| {
-            children.push(child);
-            false
-        });
+        syntax.for_each_child(&mut |child| children.push(child));
         for child in children {
             self.references(l, Some(child), location);
         }
     }
 
-    fn lower(&mut self, l: &mut Lowering, t: P<Type>, location: &str, context: Context, depth: u32) -> Schema {
+    fn lower(&mut self, l: &mut Lowering, t: Type, location: &str, context: Context, depth: u32) -> Schema {
         self.lower_marked(l, t, location, context, depth).0
     }
 
     fn lower_marked(
         &mut self,
         l: &mut Lowering,
-        t: P<Type>,
+        t: Type,
         location: &str,
         context: Context,
         depth: u32,
@@ -645,7 +614,7 @@ impl Extractor {
         }
         let state = l.spec.position != Position::Payload;
         if state && t.flags().intersects(TypeFlags::Union) {
-            let present: Vec<P<Type>> =
+            let present: Vec<Type> =
                 t.types().iter().copied().filter(|m| !m.flags().intersects(TypeFlags::Undefined)).collect();
             if present.len() == 1 && present.len() < t.types().len() && self.is_server_only(present[0]) {
                 let (inner, marked) = self.lower_marked(l, present[0], location, context, depth);
@@ -673,8 +642,7 @@ impl Extractor {
                 let reason = "serverOnly marks a field on an object path from the template root, never an array element, a map value or a union member";
                 return (self.fail(l, location, reason), false);
             }
-            let inner =
-                if is_reference(t) { self.checker.get_type_arguments_exported(t).first().copied() } else { None };
+            let inner = if is_reference(t) { self.cx.type_arguments(t).first().copied() } else { None };
             let Some(inner) = inner else { return (self.fail(l, location, "cannot encode a serverOnly mark"), false) };
             let (schema, _) = self.lower_marked(l, inner, location, Context { marked: true, ..context }, depth);
             return (schema, true);
@@ -687,7 +655,7 @@ impl Extractor {
         (schema, false)
     }
 
-    fn lower_type(&mut self, l: &mut Lowering, t: P<Type>, location: &str, context: Context, depth: u32) -> Schema {
+    fn lower_type(&mut self, l: &mut Lowering, t: Type, location: &str, context: Context, depth: u32) -> Schema {
         let state = l.spec.position != Position::Payload;
         let persist = l.spec.position == Position::Persist;
         let flags = t.flags();
@@ -768,12 +736,11 @@ impl Extractor {
             None => {}
         }
         let collection = self.collection(t);
-        let arguments = if is_reference(t) { self.checker.get_type_arguments_exported(t).to_vec() } else { Vec::new() };
+        let arguments = if is_reference(t) { self.cx.type_arguments(t) } else { Vec::new() };
         match collection {
             Some(Collection::Tuple) => {
                 let variable = t.target().is_some_and(|target| {
                     target
-                        .as_tuple_type()
                         .element_flags()
                         .iter()
                         .any(|f| f.intersects(ElementFlags::Optional | ElementFlags::Rest | ElementFlags::Variadic))
@@ -805,12 +772,12 @@ impl Extractor {
             None => {}
         }
         if flags.intersects(TypeFlags::Object) || flat {
-            let indices = self.checker.get_index_infos_of_type_exported(t);
-            if let [index] = indices
-                && index.key_type().flags().intersects(TypeFlags::String)
-                && self.checker.get_properties_of_type_exported(t).is_empty()
+            let indices = self.cx.index_infos_of_type(t);
+            if let [index] = indices[..]
+                && index.key.flags().intersects(TypeFlags::String)
+                && self.cx.properties_of_type(t).is_empty()
             {
-                let value = index.value_type();
+                let value = index.value;
                 let value = self.element(l, value, &format!("{location}.value"), context, depth, true);
                 return Schema::Map(MapKey::String, Box::new(value));
             }
@@ -827,7 +794,7 @@ impl Extractor {
     fn element(
         &mut self,
         l: &mut Lowering,
-        t: P<Type>,
+        t: Type,
         location: &str,
         context: Context,
         depth: u32,
@@ -835,7 +802,7 @@ impl Extractor {
     ) -> Schema {
         let state = l.spec.position != Position::Payload;
         let t = if state && value {
-            self.checker.get_non_nullable_type(t)
+            self.cx.non_nullable_type(t)
         } else {
             if absent(t) {
                 self.fail(l, location, "collection elements and map values cannot admit undefined");
@@ -877,7 +844,7 @@ impl Extractor {
     fn fields(
         &mut self,
         l: &mut Lowering,
-        t: P<Type>,
+        t: Type,
         location: &str,
         context: Context,
         depth: u32,
@@ -886,13 +853,8 @@ impl Extractor {
         if self.signatures_of(t) {
             return self.fail(l, location, "functions cannot cross the network");
         }
-        let mut properties: Vec<P<Symbol>> = self
-            .checker
-            .get_properties_of_type_exported(t)
-            .iter()
-            .copied()
-            .filter(|p| Some(p.name()) != omit)
-            .collect();
+        let mut properties: Vec<Symbol> =
+            self.cx.properties_of_type(t).into_iter().filter(|p| Some(p.name()) != omit).collect();
         properties.sort_by(|a, b| a.name().as_bytes().cmp(b.name().as_bytes()));
         if properties.is_empty() && omit.is_none() {
             let reason = if l.spec.handles {
@@ -907,9 +869,9 @@ impl Extractor {
             let name = property.name();
             let at = format!("{location}.{name}");
             let declaration = property.value_declaration().or_else(|| property.declarations().first().copied());
-            for &d in property.declarations() {
+            for d in property.declarations() {
                 if let Some(parent) = d.parent().filter(|p| p.kind() == Kind::InterfaceDeclaration)
-                    && let Some(symbol) = parent.name().and_then(|n| self.checker.get_symbol_at_location_exported(n))
+                    && let Some(symbol) = parent.name().and_then(|n| self.cx.symbol_at(n))
                 {
                     l.reached.insert(symbol);
                 }
@@ -933,7 +895,7 @@ impl Extractor {
                     format!("`{name}` is a handle method name (set, update, insert, remove); rename the field");
                 self.fail_with(l, &at, &reason, 26);
             }
-            let value = self.checker.get_non_missing_type_of_symbol_exported(property);
+            let value = self.cx.non_missing_type_of_symbol(property);
             if value.flags().intersects(TypeFlags::Undefined) {
                 let reason = if l.spec.handles {
                     "a position that is always undefined; annotate it: undefined as string | undefined"
@@ -957,13 +919,13 @@ impl Extractor {
         Schema::Object(fields)
     }
 
-    fn key(&mut self, l: &mut Lowering, t: P<Type>, location: &str) -> MapKey {
+    fn key(&mut self, l: &mut Lowering, t: Type, location: &str) -> MapKey {
         self.declared(l, t, location);
         if t.flags().intersects(TypeFlags::String) {
             return MapKey::String;
         }
         let parts = members(t);
-        if l.spec.position != Position::Payload && !parts.iter().all(|&p| types::literal_string(p).is_some()) {
+        if l.spec.position != Position::Payload && !parts.iter().all(|&p| p.literal_string().is_some()) {
             self.fail(
                 l,
                 location,
@@ -1008,9 +970,9 @@ impl Extractor {
         )
     }
 
-    fn union(&mut self, l: &mut Lowering, t: P<Type>, location: &str, context: Context, depth: u32) -> Schema {
+    fn union(&mut self, l: &mut Lowering, t: Type, location: &str, context: Context, depth: u32) -> Schema {
         let state = l.spec.position != Position::Payload;
-        let parts = t.types().to_vec();
+        let parts = t.types();
         let missing = parts.iter().any(|p| p.flags().intersects(TypeFlags::Undefined));
         let context = Context { nilable: context.nilable || missing, path: false, ..context };
         let mut branches = if missing { vec![Schema::Nil] } else { Vec::new() };
@@ -1041,7 +1003,7 @@ impl Extractor {
             let object = (part.flags().intersects(TypeFlags::Object) || (state && self.plain_intersection(part)))
                 && engine.is_none()
                 && self.collection(part).is_none()
-                && self.checker.get_index_infos_of_type_exported(part).is_empty()
+                && self.cx.index_infos_of_type(part).is_empty()
                 && !self.signatures_of(part);
             if object {
                 objects.push(part);
@@ -1072,7 +1034,7 @@ impl Extractor {
         let mut variants: Vec<(Literal, Schema)> = Vec::new();
         if objects.len() > 1 {
             let mut candidates: Vec<&'static str> =
-                self.checker.get_properties_of_type_exported(objects[0]).iter().map(|p| p.name()).collect();
+                self.cx.properties_of_type(objects[0]).iter().map(|p| p.name()).collect();
             candidates.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
             let mut found = None;
             for name in candidates {
@@ -1133,18 +1095,18 @@ impl Extractor {
     fn discriminant_values(
         &mut self,
         l: &mut Lowering,
-        object: P<Type>,
+        object: Type,
         name: &str,
         location: &str,
         seen: &mut HashSet<(u8, String)>,
     ) -> Option<Vec<Literal>> {
-        let property = self.checker.get_property_of_type_exported(object, name)?;
+        let property = self.cx.property_of_type(object, name)?;
         if property.flags().intersects(SymbolFlags::Optional) {
             return None;
         }
         let declaration = property.value_declaration().or_else(|| property.declarations().first().copied());
         self.references(l, declaration.and_then(|d| d.type_node()), &format!("{location}.{name}"));
-        let t = self.checker.get_non_missing_type_of_symbol_exported(property);
+        let t = self.cx.non_missing_type_of_symbol(property);
         let values: Vec<Option<Literal>> = members(t).into_iter().map(literal).collect();
         if values.iter().any(|v| v.as_ref().is_none_or(|v| seen.contains(&literal_key(v)))) {
             return None;
@@ -1184,11 +1146,11 @@ impl Extractor {
         1 + children.into_iter().map(|child| self.cost(l, child, depth + 1)).sum::<usize>()
     }
 
-    fn is_server_only(&mut self, t: P<Type>) -> bool {
+    fn is_server_only(&mut self, t: Type) -> bool {
         self.api(t.symbol()) == Some("ServerOnly")
     }
 
-    fn plain_intersection(&mut self, t: P<Type>) -> bool {
+    fn plain_intersection(&mut self, t: Type) -> bool {
         t.flags().intersects(TypeFlags::Intersection)
             && t.types()
                 .to_vec()
@@ -1196,7 +1158,7 @@ impl Extractor {
                 .all(|part| part.flags().intersects(TypeFlags::Object) && !self.signatures_of(part))
     }
 
-    fn engine(&mut self, t: P<Type>) -> Option<Engine> {
+    fn engine(&mut self, t: Type) -> Option<Engine> {
         let symbol = t.symbol()?;
         if !self.standard(symbol, Standard::Types) {
             return None;
@@ -1208,21 +1170,21 @@ impl Extractor {
             "CFrame" => Engine::CFrame,
             _ => {
                 let at = symbol.declarations().first().copied();
-                let instances = self.checker.resolve_name_exported("Instances", at, SymbolFlags::Type, false);
+                let instances = self.cx.resolve_name("Instances", at, SymbolFlags::Type);
                 let known = instances.is_some_and(|i| {
-                    let declared = self.checker.get_declared_type_of_symbol_exported(i);
-                    self.checker.get_property_of_type_exported(declared, name).is_some()
+                    let declared = self.cx.declared_type_of_symbol(i);
+                    self.cx.property_of_type(declared, name).is_some()
                 });
                 if known { Engine::Instance(name) } else { Engine::Unsupported }
             }
         })
     }
 
-    fn collection(&mut self, t: P<Type>) -> Option<Collection> {
+    fn collection(&mut self, t: Type) -> Option<Collection> {
         if t.is_tuple_type() {
             return Some(Collection::Tuple);
         }
-        if self.checker.is_array_type_exported(t) {
+        if self.cx.is_array_type(t) {
             return Some(Collection::Array);
         }
         let symbol = t.symbol()?;
@@ -1230,32 +1192,30 @@ impl Extractor {
             .then_some(Collection::Map)
     }
 
-    fn width(&mut self, t: P<Type>) -> Option<Width> {
+    fn width(&mut self, t: Type) -> Option<Width> {
         if !t.flags().intersects(TypeFlags::Intersection)
             || !t.types().iter().any(|p| p.flags().intersects(TypeFlags::Number))
         {
             return None;
         }
         let mut found: Vec<&'static str> = Vec::new();
-        for &part in t.types() {
+        for part in t.types() {
             if part.flags().intersects(TypeFlags::Number) {
                 continue;
             }
-            let [property] = self.checker.get_properties_of_type_exported(part) else { return None };
-            let property = *property;
+            let [property] = self.cx.properties_of_type(part)[..] else { return None };
             let name = property.declarations().first().and_then(|d| d.name())?;
             if name.kind() != Kind::ComputedPropertyName {
                 return None;
             }
-            let expression = name.expression()?;
-            let symbol =
-                self.checker.get_symbol_at_location_exported(expression).map(|s| unalias(&mut self.checker, s));
-            if !symbol.is_some_and(|s| self.crucible.widths.contains(&s)) {
+            let expression = name.expression();
+            let symbol = self.cx.symbol_at(expression).map(|s| self.cx.aliased(s));
+            if !symbol.is_some_and(|s| self.api.width_keys.contains(&s)) {
                 return None;
             }
-            let value = self.checker.get_non_missing_type_of_symbol_exported(property);
+            let value = self.cx.non_missing_type_of_symbol(property);
             for member in members(value) {
-                if let Some(width) = types::literal_string(member)
+                if let Some(width) = member.literal_string()
                     && !found.contains(&width)
                 {
                     found.push(width);
@@ -1265,9 +1225,9 @@ impl Extractor {
         Some(if let [width] = found[..] { Width::Brand(width) } else { Width::Conflicting })
     }
 
-    pub(super) fn receive(&mut self, call: P<Node>, file: P<SourceFile>) {
+    pub(crate) fn receive(&mut self, call: Node, file: File) {
         let field = call.parent().filter(|p| {
-            let flags = tsrs_ast::get_combined_modifier_flags(*p);
+            let flags = p.combined_modifier_flags();
             p.kind() == Kind::PropertyDeclaration
                 && p.initializer() == Some(call)
                 && flags.intersects(ModifierFlags::Readonly)
@@ -1279,7 +1239,7 @@ impl Extractor {
             self.report(call, Code::Rule(21), "receive() must initialize a readonly instance field of a Subsystem.");
             return;
         };
-        let name = field.name().and_then(|n| self.checker.get_symbol_at_location_exported(n)).map(|s| s.name());
+        let name = field.name().and_then(|n| self.cx.symbol_at(n)).map(|s| s.name());
         if let Some(name) = name {
             let mut seen = HashSet::new();
             let shadows = self.class_bases(instance).into_iter().any(|base| self.shadows(base, name, &mut seen));
@@ -1287,7 +1247,7 @@ impl Extractor {
                 self.report(call, Code::Rule(21), "A receiver field cannot shadow an inherited receiver.");
             }
         }
-        let target = call.arguments().first().map(|&a| self.checker.get_type_at_location(a));
+        let target = call.arguments().get(0).map(|a| self.cx.type_at(a));
         let token = target
             .filter(|t| !t.flags().intersects(TypeFlags::UnionOrIntersection))
             .and_then(|t| self.api(t.symbol()))
@@ -1302,24 +1262,21 @@ impl Extractor {
                     let message = format!("{token} must be received by a {} Subsystem.", required.folder());
                     self.report(call, Code::Rule(22), &message);
                 }
-                if let Some(callback) = self.callback(call.arguments().get(1).copied()) {
+                if let Some(callback) = self.callback(call.arguments().get(1)) {
                     self.callback_returns(call, callback, token);
                 }
             }
         }
         if let Some(name) = name {
-            self.site();
-            let span = self.span(call);
-            let fact = Box::new(Crucible::Receive { field: name.into() });
-            self.table.store(span, Site::Crucible, |f| &mut f.crucible, fact);
+            self.store(call, Fact::Receive { field: name.into() });
         }
     }
 
-    fn callback_returns(&mut self, call: P<Node>, callback: P<Node>, token: &str) {
-        let signature = self.checker.get_signature_from_declaration_exported(callback);
-        let returned = self.checker.get_return_type_of_signature_exported(signature);
+    fn callback_returns(&mut self, call: Node, callback: Node, token: &str) {
+        let signature = self.cx.signature_from_declaration(callback);
+        let returned = self.cx.return_type(signature);
         let parts = members(returned);
-        let asynchronous = tsrs_ast::get_combined_modifier_flags(callback).intersects(ModifierFlags::Async);
+        let asynchronous = callback.combined_modifier_flags().intersects(ModifierFlags::Async);
         let promise = parts
             .iter()
             .any(|&t| t.symbol().is_some_and(|s| s.name() == "Promise" && self.standard(s, Standard::CompilerTypes)));
@@ -1336,8 +1293,7 @@ impl Extractor {
         }
         let returns = parts.iter().any(|&t| {
             !t.flags().intersects(TypeFlags::Void | TypeFlags::Undefined | TypeFlags::Never)
-                && !(token == "ClientReady"
-                    && !self.checker.get_signatures_of_type_exported(t, SignatureKind::Call).is_empty())
+                && !(token == "ClientReady" && !self.cx.signatures_of_type(t, SignatureKind::Call).is_empty())
         });
         if returns {
             let allowed = if token == "ClientReady" { " or a cleanup function" } else { "; use a block body" };
@@ -1347,47 +1303,35 @@ impl Extractor {
         }
     }
 
-    fn class_bases(&mut self, t: P<Type>) -> Vec<P<Type>> {
-        if t.object_flags().intersects(tsrs_checker::ObjectFlags::ClassOrInterface) {
-            self.checker.get_base_types_exported(t).to_vec()
-        } else {
-            Vec::new()
-        }
+    fn class_bases(&mut self, t: Type) -> Vec<Type> {
+        if t.object_flags().intersects(ObjectFlags::ClassOrInterface) { self.cx.base_types(t) } else { Vec::new() }
     }
 
-    fn shadows(&mut self, t: P<Type>, name: &str, seen: &mut HashSet<P<Type>>) -> bool {
+    fn shadows(&mut self, t: Type, name: &str, seen: &mut HashSet<Type>) -> bool {
         if !seen.insert(t) {
             return false;
         }
-        let property = self.checker.get_property_of_type_exported(t, name);
+        let property = self.cx.property_of_type(t, name);
         let receiver = property.is_some_and(|p| {
             p.declarations().iter().any(|&d| {
                 d.kind() == Kind::PropertyDeclaration
-                    && d.initializer().is_some_and(|i| self.is_crucible_call(i, Macro::Receive))
+                    && d.initializer().is_some_and(|i| self.is_macro_call(i, Macro::Receive))
             })
         });
         receiver || self.class_bases(t).into_iter().any(|base| self.shadows(base, name, seen))
     }
 
-    fn callback(&mut self, argument: Option<P<Node>>) -> Option<P<Node>> {
+    fn callback(&mut self, argument: Option<Node>) -> Option<Node> {
         let argument = argument?;
         match argument.kind() {
             Kind::FunctionExpression | Kind::ArrowFunction => Some(argument),
             Kind::Identifier | Kind::PropertyAccessExpression => {
-                let name = if argument.kind() == Kind::PropertyAccessExpression {
-                    argument.as_property_access_expression().name
-                } else {
-                    argument
-                };
-                let symbol =
-                    self.checker.get_symbol_at_location_exported(name).map(|s| unalias(&mut self.checker, s))?;
-                let [declaration] = symbol.declarations() else { return None };
-                let declaration = *declaration;
+                let name = if argument.kind() == Kind::PropertyAccessExpression { argument.name()? } else { argument };
+                let symbol = self.cx.symbol_at(name).map(|s| self.cx.aliased(s))?;
+                let [declaration] = symbol.declarations()[..] else { return None };
                 match declaration.kind() {
                     Kind::FunctionDeclaration | Kind::MethodDeclaration => Some(declaration),
-                    Kind::VariableDeclaration
-                        if tsrs_ast::get_combined_node_flags(declaration).intersects(NodeFlags::Const) =>
-                    {
+                    Kind::VariableDeclaration if declaration.combined_node_flags().intersects(NodeFlags::Const) => {
                         declaration
                             .initializer()
                             .filter(|i| matches!(i.kind(), Kind::ArrowFunction | Kind::FunctionExpression))
@@ -1399,29 +1343,29 @@ impl Extractor {
         }
     }
 
-    pub(super) fn side_entry_specifier(&mut self, literal: P<Node>, file: P<SourceFile>) {
-        if self.crucible.entries.is_empty() {
+    pub(crate) fn side_entry_specifier(&mut self, literal: Node, file: File) {
+        if self.api.side_entries.is_empty() {
             return;
         }
         let Some(parent) = literal.parent() else { return };
         let specifier = match parent.kind() {
             Kind::ImportDeclaration | Kind::ExportDeclaration => true,
             Kind::LiteralType => parent.parent().is_some_and(|p| p.kind() == Kind::ImportType),
-            Kind::CallExpression => parent.as_call_expression().expression.kind() == Kind::ImportKeyword,
+            Kind::CallExpression => parent.expression().kind() == Kind::ImportKeyword,
             _ => false,
         };
         if !specifier {
             return;
         }
-        let module = self.checker.resolve_external_module_name_exported(literal, None);
-        let Some(path) = module.and_then(|m| m.declarations().first().copied()).and_then(declaration_file) else {
+        let module = self.cx.resolve_external_module(literal);
+        let Some(path) = module.and_then(|m| m.declarations().first().copied()).map(declaration_file) else {
             return;
         };
         self.wrong_side(literal, &path, file);
     }
 
-    fn wrong_side(&mut self, at: P<Node>, path: &Path, file: P<SourceFile>) -> bool {
-        let Some(&side) = self.crucible.entries.get(path) else { return false };
+    fn wrong_side(&mut self, at: Node, path: &Path, file: File) -> bool {
+        let Some(&side) = self.api.side_entries.get(path) else { return false };
         if self.file_side(file) != Some(side) {
             let folder = side.folder();
             let message =
@@ -1431,30 +1375,28 @@ impl Extractor {
         true
     }
 
-    pub(super) fn side_entry_reference(&mut self, n: P<Node>, file: P<SourceFile>) {
-        if self.crucible.entries.is_empty() {
+    pub(crate) fn side_entry_reference(&mut self, n: Node, file: File) {
+        if self.api.side_entries.is_empty() {
             return;
         }
-        let Some(symbol) = self.checker.get_symbol_at_location_exported(n).map(|s| unalias(&mut self.checker, s))
-        else {
+        let Some(symbol) = self.cx.symbol_at(n).map(|s| self.cx.aliased(s)) else {
             return;
         };
         let mut in_entry = false;
-        for &declaration in symbol.declarations() {
-            if let Some(path) = declaration_file(declaration) {
-                in_entry |= self.wrong_side(n, &path, file);
-            }
+        for declaration in symbol.declarations() {
+            let path = declaration_file(declaration);
+            in_entry |= self.wrong_side(n, &path, file);
         }
         if in_entry {
             return;
         }
-        let owner = match self.crucible.entry_exports.get(&symbol) {
+        let owner = match self.api.entry_exports.get(&symbol) {
             Some(&side) => Some(side),
             None if symbol.flags().intersects(SymbolFlags::Variable | SymbolFlags::Property) => {
-                let t = self.checker.get_type_at_location(n);
-                let alias = t.alias().and_then(|a| a.symbol()).map(|s| unalias(&mut self.checker, s));
-                let by_alias = alias.and_then(|a| self.crucible.entry_exports.get(&a).copied());
-                by_alias.or_else(|| t.symbol().and_then(|s| self.crucible.entry_exports.get(&s).copied()))
+                let t = self.cx.type_at(n);
+                let alias = t.alias_symbol().map(|s| self.cx.aliased(s));
+                let by_alias = alias.and_then(|a| self.api.entry_exports.get(&a).copied());
+                by_alias.or_else(|| t.symbol().and_then(|s| self.api.entry_exports.get(&s).copied()))
             }
             None => None,
         };
@@ -1470,31 +1412,28 @@ impl Extractor {
         }
     }
 
-    fn reached(&mut self) -> &HashSet<P<Symbol>> {
-        if self.network.reached.is_none() {
-            let declarations: Vec<(P<Node>, DeclarationKind)> =
+    fn reached(&mut self) -> &HashSet<Symbol> {
+        if self.state.network.reached.is_none() {
+            let declarations: Vec<(Node, DeclarationKind)> =
                 self.declarations().iter().map(|d| (d.call, d.kind)).collect();
             let mut reached = HashSet::new();
             for (call, kind) in declarations {
                 reached.extend(self.lower_declaration(call, kind, false).1);
             }
-            self.network.reached = Some(reached);
+            self.state.network.reached = Some(reached);
         }
-        self.network.reached.get_or_insert_default()
+        self.state.network.reached.get_or_insert_default()
     }
 
-    pub(super) fn augmentation(&mut self, n: P<Node>) {
+    pub(crate) fn augmentation(&mut self, n: Node) {
         let named = n.name().is_some_and(|name| name.kind() == Kind::StringLiteral);
-        if !named && !tsrs_ast::is_global_scope_augmentation(n) {
+        if !named && !n.is_global_scope_augmentation() {
             return;
         }
         let mut added = Vec::new();
         added_declarations(n.body(), &mut added);
-        let symbols: Vec<P<Symbol>> = added
-            .into_iter()
-            .filter_map(|d| d.name())
-            .filter_map(|name| self.checker.get_symbol_at_location_exported(name))
-            .collect();
+        let symbols: Vec<Symbol> =
+            added.into_iter().filter_map(|d| d.name()).filter_map(|name| self.cx.symbol_at(name)).collect();
         if symbols.is_empty() {
             return;
         }

@@ -9,8 +9,8 @@ roblox.implementMethod("Instance", "WaitForChild", function(instance, name: stri
 	return assert(instance:FindFirstChild(name), `{instance:GetFullName()} has no child {name}`)
 end)
 
-return function(client: boolean?)
-	local place = roblox.deserializePlace(fs.readFile("build/sample-game.rbxl"))
+return function(client: boolean?, path: string?)
+	local place = roblox.deserializePlace(fs.readFile(path or "build/sample-game.rbxl"))
 	local e = engine.new()
 	local messages = {}
 	local closers = {}

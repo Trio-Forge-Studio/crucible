@@ -1,6 +1,5 @@
-use super::{Extractor, crucible::Code, types};
-use crate::facts::ClassKind;
-use tsrs_ast::{Kind, Node, SymbolFlags};
+use super::{Extractor, report::Code, types};
+use tsrs_ast::{Kind, Node};
 use tsrs_checker::{Type, TypeFlags};
 use tsrs_core::P;
 
@@ -9,8 +8,6 @@ enum Rule {
     Truthiness = 32,
     LuaTuple = 33,
     ArrayPairs = 34,
-    FrameHooks = 35,
-    SessionLifetime = 36,
 }
 impl Rule {
     fn legacy(self) -> &'static str {
@@ -18,8 +15,6 @@ impl Rule {
             Self::Truthiness => "roblox-ts/lua-truthiness",
             Self::LuaTuple => "roblox-ts/misleading-lua-tuple-checks",
             Self::ArrayPairs => "roblox-ts/no-array-pairs",
-            Self::FrameHooks => "fragile-delivery/frame-hooks",
-            Self::SessionLifetime => "fragile-delivery/session-lifetime",
         }
     }
 }
@@ -216,7 +211,6 @@ impl Extractor {
                 }
             }
             Kind::CallExpression => {
-                self.lint_frame(n);
                 let c = n.as_call_expression();
                 if c.expression.kind() == Kind::Identifier
                     && matches!(self.lint_text(c.expression), "pairs" | "ipairs")
@@ -228,7 +222,6 @@ impl Extractor {
                     }
                 }
             }
-            Kind::ClassDeclaration => self.lint_session(n),
             _ => {}
         }
     }
@@ -246,132 +239,5 @@ impl Extractor {
             used
         }
         walk(self, root, name, symbol)
-    }
-    fn lint_lineage(&mut self, n: P<Node>, seen: &mut Vec<P<Node>>) -> Option<ClassKind> {
-        if seen.contains(&n) {
-            return None;
-        }
-        seen.push(n);
-        for &h in n.as_class_declaration().heritage_clauses().map_or(&[][..], |l| l.nodes()) {
-            if h.as_heritage_clause().token != Kind::ExtendsKeyword {
-                continue;
-            }
-            let e = h.as_heritage_clause().types.get().nodes().first()?.expression()?;
-            let mut s = self.checker.get_symbol_at_location_exported(e)?;
-            if s.flags().intersects(SymbolFlags::Alias) {
-                s = self.checker.get_aliased_symbol(s);
-            }
-            for &d in s.declarations() {
-                if d.kind() != Kind::ClassDeclaration {
-                    continue;
-                }
-                let file = tsrs_ast::get_source_file_of_node(d)?.file_name().replace('\\', "/");
-                if file.contains("/node_modules/@trioforge/crucible/") {
-                    match d.name().map(|n| n.as_identifier().text()) {
-                        Some("Subsystem") => return Some(ClassKind::Subsystem),
-                        Some("CrucibleBehaviour") => return Some(ClassKind::Behaviour),
-                        _ => {}
-                    }
-                }
-                if let Some(k) = self.lint_lineage(d, seen) {
-                    return Some(k);
-                }
-            }
-        }
-        None
-    }
-    fn lint_frame(&mut self, n: P<Node>) {
-        let e = n.expression().unwrap();
-        if e.kind() != Kind::PropertyAccessExpression
-            || !matches!(self.lint_text(e.name().unwrap()), "Connect" | "Once" | "ConnectParallel")
-        {
-            return;
-        }
-        let signal = e.expression().unwrap();
-        if signal.kind() != Kind::PropertyAccessExpression
-            || signal.expression().unwrap().kind() != Kind::Identifier
-            || self.lint_text(signal.expression().unwrap()) != "RunService"
-        {
-            return;
-        }
-        let name = self.lint_text(signal.name().unwrap()).to_owned();
-        if !matches!(
-            name.as_str(),
-            "Heartbeat"
-                | "PostSimulation"
-                | "Stepped"
-                | "PreSimulation"
-                | "RenderStepped"
-                | "PreRender"
-                | "PreAnimation"
-        ) {
-            return;
-        }
-        let mut p = n.parent();
-        while p.is_some_and(|p| !tsrs_ast::is_function_like(p)) {
-            p = p.unwrap().parent();
-        }
-        let Some(method) = p else {
-            return;
-        };
-        if method.kind() != Kind::Constructor
-            && (method.kind() != Kind::MethodDeclaration
-                || !matches!(self.lint_text(method.name().unwrap()), "awake" | "start"))
-        {
-            return;
-        }
-        let Some(owner) = method.parent().filter(|p| p.kind() == Kind::ClassDeclaration) else {
-            return;
-        };
-        let mut chain = Vec::new();
-        let Some(kind) = self.lint_lineage(owner, &mut chain) else {
-            return;
-        };
-        if kind == ClassKind::Behaviour
-            && let Some(p) = parent(n).filter(|p| p.kind() == Kind::BinaryExpression)
-        {
-            let b = p.as_binary_expression();
-            let target = b.left;
-            if b.operator_token.kind() == Kind::EqualsToken
-                && unwrap(b.right()) == n
-                && target.kind() == Kind::PropertyAccessExpression
-                && target.expression().unwrap().kind() == Kind::ThisKeyword
-            {
-                let field = self.lint_text(target.name().unwrap());
-                if chain.iter().flat_map(|c| c.members()).any(|m| {
-                    m.kind() == Kind::MethodDeclaration && self.lint_text(m.name().unwrap()) == "onDestroy" && {
-                        let text = self.lint_text(*m);
-                        text.contains(&format!("this.{field}.Disconnect()"))
-                            || text.contains(&format!("this.{field}?.Disconnect()"))
-                    }
-                }) {
-                    return;
-                }
-            }
-        }
-        self.lint_report(n, Rule::FrameHooks, &format!("This {name} connection lasts the object's whole life. Implement Crucible's update, fixedUpdate, lateUpdate or preRender instead."));
-    }
-    fn lint_session(&mut self, n: P<Node>) {
-        if self.lint_lineage(n, &mut Vec::new()) != Some(ClassKind::Subsystem) {
-            return;
-        }
-        for &m in n.members() {
-            if m.kind() == Kind::MethodDeclaration && self.lint_text(m.name().unwrap()) == "destroy" {
-                self.lint_report(m, Rule::SessionLifetime, "Crucible never destroys a subsystem. Do last writes in onShutdown, and give other lifetimes their own owner.");
-            }
-            if m.kind() == Kind::PropertyDeclaration
-                && let Some(v) = m.initializer().map(unwrap)
-                && matches!(v.kind(), Kind::NewExpression | Kind::CallExpression)
-                && let Some(e) = v.expression()
-                && e.kind() == Kind::Identifier
-                && self.lint_text(e) == "Janitor"
-            {
-                self.lint_report(
-                    m,
-                    Rule::SessionLifetime,
-                    "A subsystem lives for the whole session. Put the Janitor on the lifetime that ends.",
-                );
-            }
-        }
     }
 }
