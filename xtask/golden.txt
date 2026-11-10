@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-e668bb8343dcbf5d217b4002baff0d7ba03cbd3156e681fc48848d8351d0d287  build/sample-game.rbxl
+98e6004881ce381cf1048531bfed3527d8a179c6b6bae568a4322917ad57c037  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -260,7 +260,7 @@ a4e7135fd7ce815d4e671bd610fdf5f9a44eb6329eed72184258cb95a6867c8a  packages/cruci
 5b09b2d987657648b36fb6ea1d976a3f6a83cc69eedb07014df05b809d23679e  packages/crucible/out/ui/use-text-field.d.ts
 788f4732e3c01b921053d47d6634f23833752bfe79641a23d7fe6625e03187af  packages/crucible/out/ui/use-text-field.luau
 9efc5372a7e2ae3598094fee92546264806b97d923a1f5563b743c78f6b1275a  packages/crucible/out/ui/use-toast-viewport.d.ts
-b36278644560b5add277b95e31d1d3daa59b8a475961c69143c98f06436ef5b7  packages/crucible/out/ui/use-toast-viewport.luau
+3486e9a0c49750379ab932ca64e8a512004f96a405883dee3bd4c54fac6b65e5  packages/crucible/out/ui/use-toast-viewport.luau
 c67b10e6ffb3d73b5d9e28b7c283b5267b620033d8ac900d9712c70cbbd925b5  packages/crucible/out/ui/use-toggle.d.ts
 af042bdba32c081e144323503af26af7fbbe32bf9d77decad1c882fded857e70  packages/crucible/out/ui/use-toggle.luau
 ca5de2b2b1a7cda9215513c50254d385e97805c86dafd8f1d61aaba79a67a8ef  packages/crucible/out/ui/use-topbar-icon.d.ts
