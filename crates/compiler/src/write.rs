@@ -72,13 +72,16 @@ pub fn temporary_path(destination: &Path, extension: &str) -> PathBuf {
 /// module or runtime library file does and Rojo reads in no folder. A second build that writes `path` at the same
 /// time fails instead of writing the same temporary file.
 ///
-/// A `path` the rename cannot replace is written in place, as builds made before temporary files wrote it, so a
-/// failure during that write can leave `path` partly written.
+/// A link or a read-only file at `path`, and a `path` the rename cannot replace, are written in place, as builds made
+/// before temporary files wrote them, so a failure during that write can leave `path` partly written.
 pub(crate) fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
     replace_on(&mut Os, path, bytes)
 }
 
 fn replace_on(disk: &mut impl Disk, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if disk.in_place(path) {
+        return disk.write(path, bytes);
+    }
     let temporary = temporary_path(path, "tmp");
     let mut file = disk.open_temporary(&temporary)?;
     let replaced = match disk.write_temporary(&mut file, bytes) {
@@ -99,15 +102,15 @@ fn replace_on(disk: &mut impl Disk, path: &Path, bytes: &[u8]) -> io::Result<()>
     replaced
 }
 
-/// Puts the file at `temporary` in `destination`'s place with a rename. A `destination` the rename cannot replace
-/// gets `temporary`'s bytes written in place, as builds made before temporary files wrote it, after `temporary` is
-/// removed so that the write has the space it had then.
+/// Puts the file at `temporary` in `destination`'s place with a rename. A link or a read-only file at `destination`,
+/// and a `destination` the rename cannot replace, get `temporary`'s bytes written in place, as builds made before
+/// temporary files wrote them, after `temporary` is removed so that the write has the space it had then.
 pub fn publish(temporary: &Path, destination: &Path) -> io::Result<()> {
     publish_on(&mut Os, temporary, destination)
 }
 
 fn publish_on(disk: &mut impl Disk, temporary: &Path, destination: &Path) -> io::Result<()> {
-    if disk.rename(temporary, destination).is_ok() {
+    if !disk.in_place(destination) && disk.rename(temporary, destination).is_ok() {
         return Ok(());
     }
     let bytes = disk.read(temporary)?;
@@ -120,6 +123,9 @@ trait Disk {
     type Temporary;
     fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
     fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool>;
+    /// Whether `path` is a link, whose target a write in place updates and a rename would not, or a read-only file,
+    /// which a write in place fails on and a rename may still replace.
+    fn in_place(&self, path: &Path) -> bool;
     /// Writes `path` in place.
     fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
     /// Opens `path`, creating it, and fails with `ResourceBusy` while another build has it open.
@@ -159,6 +165,11 @@ impl Disk for Os {
         let mut head = Vec::with_capacity(prefix.len());
         File::open(path)?.take(prefix.len() as u64).read_to_end(&mut head)?;
         Ok(head == prefix)
+    }
+
+    fn in_place(&self, path: &Path) -> bool {
+        std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink() || metadata.permissions().readonly())
     }
 
     fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -343,7 +354,7 @@ fn is_temporary(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::io;
     use std::path::{Path, PathBuf};
 
@@ -365,6 +376,11 @@ mod tests {
         busy: bool,
         /// The most bytes all files hold together. A write past it keeps the bytes that fit and fails.
         capacity: Option<usize>,
+        /// Links, keyed by the lowercase path, to the path they point to. Reads and writes in place go to the target,
+        /// and a rename replaces the link.
+        links: BTreeMap<String, String>,
+        /// Lowercase paths of read-only files. A write in place fails, and a rename replaces them, as on Unix.
+        read_only: BTreeSet<String>,
     }
 
     fn key(path: &Path) -> String {
@@ -378,6 +394,10 @@ mod tests {
     impl Folding {
         fn names(&self, dir: &str) -> Vec<String> {
             self.entries(Path::new(dir)).unwrap().into_iter().map(|e| e.name).collect()
+        }
+
+        fn target(&self, path: &Path) -> PathBuf {
+            self.links.get(&key(path)).map_or_else(|| path.to_owned(), PathBuf::from)
         }
 
         fn put(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -394,7 +414,7 @@ mod tests {
         type Temporary = PathBuf;
 
         fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-            match self.entries.get(&key(path)) {
+            match self.entries.get(&key(&self.target(path))) {
                 Some((_, Some(bytes))) => Ok(bytes.clone()),
                 _ => Err(not_found()),
             }
@@ -404,12 +424,17 @@ mod tests {
             Ok(self.read(path)?.starts_with(prefix))
         }
 
+        fn in_place(&self, path: &Path) -> bool {
+            self.links.contains_key(&key(path)) || self.read_only.contains(&key(path))
+        }
+
         fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+            let path = self.target(path);
             let stored = path.to_string_lossy().replace('\\', "/");
-            if self.held.as_ref() == Some(&stored) {
+            if self.held.as_ref() == Some(&stored) || self.read_only.contains(&key(&path)) {
                 return Err(io::Error::from(io::ErrorKind::PermissionDenied));
             }
-            self.put(path, bytes)
+            self.put(&path, bytes)
         }
 
         fn open_temporary(&mut self, path: &Path) -> io::Result<PathBuf> {
@@ -464,6 +489,8 @@ mod tests {
             if moved.is_empty() {
                 return Err(not_found());
             }
+            self.links.remove(&key(to));
+            self.read_only.remove(&key(to));
             for k in moved {
                 let (stored, contents) = self.entries.remove(&k).unwrap();
                 let renamed = format!("{to_stored}{}", &stored[from_key.len()..]);
@@ -658,6 +685,42 @@ mod tests {
     }
 
     #[test]
+    fn a_link_or_a_read_only_file_is_written_in_place() {
+        let mut disk = Folding::default();
+        let old = [module("foo.luau", "return 1\n"), module("bar.luau", "return 2\n")];
+        write_to(&mut disk, Path::new("out"), &old).unwrap();
+        disk.remove_file(Path::new("out/foo.luau")).unwrap();
+        disk.put(Path::new("elsewhere/foo.luau"), old[0].source.as_bytes()).unwrap();
+        disk.links.insert(key(Path::new("out/foo.luau")), "elsewhere/foo.luau".to_owned());
+        disk.read_only.insert(key(Path::new("out/bar.luau")));
+        let new = [module("foo.luau", "return 3\n"), module("bar.luau", "return 4\n")];
+        let error = write_to(&mut disk, Path::new("out"), &new).unwrap_err();
+        assert_eq!(
+            (error.path.as_path(), error.error.kind()),
+            (Path::new("out/bar.luau"), io::ErrorKind::PermissionDenied)
+        );
+        assert_eq!(disk.read(Path::new("elsewhere/foo.luau")).unwrap(), new[0].source.as_bytes(), "the target changes");
+        assert!(disk.links.contains_key("out/foo.luau"), "the link stays");
+        assert_eq!(disk.read(Path::new("out/bar.luau")).unwrap(), old[1].source.as_bytes());
+        assert_eq!(disk.names("out"), ["bar.luau"], "no temporary file is made");
+
+        let temporary = |place: &str| temporary_path(Path::new(place), "rbxl");
+        disk.put(Path::new("elsewhere/start.rbxl"), b"old").unwrap();
+        disk.links.insert(key(Path::new("build/start.rbxl")), "elsewhere/start.rbxl".to_owned());
+        disk.put(&temporary("build/start.rbxl"), b"new").unwrap();
+        publish_on(&mut disk, &temporary("build/start.rbxl"), Path::new("build/start.rbxl")).unwrap();
+        assert_eq!(disk.read(Path::new("elsewhere/start.rbxl")).unwrap(), b"new", "the target changes");
+        assert!(disk.links.contains_key("build/start.rbxl"), "the link stays");
+        disk.put(Path::new("build/arena.rbxl"), b"old").unwrap();
+        disk.read_only.insert(key(Path::new("build/arena.rbxl")));
+        disk.put(&temporary("build/arena.rbxl"), b"new").unwrap();
+        let error = publish_on(&mut disk, &temporary("build/arena.rbxl"), Path::new("build/arena.rbxl")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(disk.read(Path::new("build/arena.rbxl")).unwrap(), b"old");
+        assert_eq!(disk.names("build"), ["arena.rbxl"], "no temporary file stays");
+    }
+
+    #[test]
     fn the_temporary_file_is_named_by_its_destination_alone_and_is_short() {
         let long = "m".repeat(250) + ".luau";
         let cases = [
@@ -764,23 +827,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&out);
     }
 
-    #[cfg(windows)]
+    /// Makes `path` read-only, and is false when this process can still write it, as root can on Unix.
+    fn read_only(path: &Path) -> bool {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(path, permissions).unwrap();
+        let writable = std::fs::OpenOptions::new().write(true).open(path).is_ok();
+        if writable {
+            eprintln!("skipped: this process can write read-only files");
+        }
+        !writable
+    }
+
+    fn writable(path: &Path) {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    /// Links `link` to `target`, and is false on Windows when this process may not make links.
+    fn link(target: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(target, link);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(target, link);
+        match made {
+            Ok(()) => true,
+            // ERROR_PRIVILEGE_NOT_HELD: Windows lets only administrators and Developer Mode make links.
+            Err(error) if cfg!(windows) && error.raw_os_error() == Some(1314) => {
+                eprintln!("skipped: this process may not make links");
+                false
+            }
+            Err(error) => panic!("cannot link {}: {error}", link.display()),
+        }
+    }
+
     #[test]
     fn a_read_only_module_keeps_its_bytes() {
         let out = scratch("read-only");
         let path = out.join("foo.luau");
         std::fs::write(&path, "old").unwrap();
-        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
-        permissions.set_readonly(true);
-        std::fs::set_permissions(&path, permissions.clone()).unwrap();
-        let error = super::write(&out, &[module("foo.luau", "return 1\n")]).unwrap_err();
-        assert_eq!(error.error.kind(), io::ErrorKind::PermissionDenied, "{error}");
-        assert_eq!(error.path, path, "the error names the module");
-        assert_eq!(std::fs::read(&path).unwrap(), b"old");
-        assert_eq!(listed(&out), ["foo.luau"], "the temporary file goes");
-        #[allow(clippy::permissions_set_readonly_false)]
-        permissions.set_readonly(false);
-        std::fs::set_permissions(&path, permissions).unwrap();
+        if read_only(&path) {
+            let error = super::write(&out, &[module("foo.luau", "return 1\n")]).unwrap_err();
+            assert_eq!(error.error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+            assert_eq!(error.path, path, "the error names the module");
+            assert_eq!(std::fs::read(&path).unwrap(), b"old");
+            assert_eq!(listed(&out), ["foo.luau"], "no temporary file stays");
+        }
+        writable(&path);
         let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_module_that_is_a_link_writes_its_target_and_stays_a_link() {
+        let dir = scratch("link");
+        let (out, target) = (dir.join("out"), dir.join("elsewhere.luau"));
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(&target, "old").unwrap();
+        if link(&target, &out.join("foo.luau")) {
+            let modules = [module("foo.luau", "return 1\n")];
+            assert_eq!(super::write(&out, &modules).unwrap().written, 1);
+            assert_eq!(std::fs::read(&target).unwrap(), modules[0].source.as_bytes(), "the target holds the module");
+            assert!(
+                std::fs::symlink_metadata(out.join("foo.luau")).unwrap().file_type().is_symlink(),
+                "the link stays"
+            );
+            assert_eq!(listed(&out), ["foo.luau"]);
+            assert_eq!(super::write(&out, &modules).unwrap().written, 0, "the module is read through the link");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

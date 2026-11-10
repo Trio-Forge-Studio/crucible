@@ -664,28 +664,95 @@ fn a_folder_where_a_module_or_library_file_goes_fails_the_build_naming_it_and_st
     }
 }
 
-#[cfg(windows)]
-#[test]
-fn a_read_only_place_fails_the_build_naming_it_and_keeps_its_bytes() {
-    let game = Game::template_layout();
-    assert_eq!(code(&game.build(&[])), 0);
-    let path = game.path("build/start.rbxl");
-    let place = fs::read(&path).unwrap();
-    let mut permissions = fs::metadata(&path).unwrap().permissions();
+/// Makes `path` read-only, and is false when this process can still write it, as root can on Unix.
+fn read_only(path: &Path) -> bool {
+    let mut permissions = fs::metadata(path).unwrap().permissions();
     permissions.set_readonly(true);
-    fs::set_permissions(&path, permissions.clone()).unwrap();
-    let out = game.build(&[]);
-    assert_eq!(code(&out), 1);
-    assert!(
-        text(&out.stderr).contains("cannot write") && text(&out.stderr).contains("start.rbxl"),
-        "{}",
-        text(&out.stderr)
-    );
-    assert_eq!(fs::read(&path).unwrap(), place);
-    assert_eq!(listed(&game.path("build")), ["start.rbxl"], "the temporary file goes");
+    fs::set_permissions(path, permissions).unwrap();
+    let writable = fs::OpenOptions::new().write(true).open(path).is_ok();
+    if writable {
+        eprintln!("skipped: this process can write read-only files");
+    }
+    !writable
+}
+
+fn writable(path: &Path) {
+    let mut permissions = fs::metadata(path).unwrap().permissions();
     #[allow(clippy::permissions_set_readonly_false)]
     permissions.set_readonly(false);
-    fs::set_permissions(&path, permissions).unwrap();
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+/// Links `link` to `target`, and is false on Windows when this process may not make links.
+fn link(target: &Path, link: &Path) -> bool {
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_file(target, link);
+    match made {
+        Ok(()) => true,
+        // ERROR_PRIVILEGE_NOT_HELD: Windows lets only administrators and Developer Mode make links.
+        Err(error) if cfg!(windows) && error.raw_os_error() == Some(1314) => {
+            eprintln!("skipped: this process may not make links");
+            false
+        }
+        Err(error) => panic!("cannot link {}: {error}", link.display()),
+    }
+}
+
+const CHANGED_FILES: [&str; 3] = ["out/shared/greeting.luau", "include/Promise.lua", "build/start.rbxl"];
+
+fn change_a_module_and_a_library_file(game: &Game) {
+    game.write("src/shared/greeting.ts", "export const greet = (name: string) => `hi from ${name}`;\n");
+    game.write("include/Promise.lua", "edited");
+}
+
+#[test]
+fn a_read_only_place_module_or_library_file_fails_the_build_naming_it_and_keeps_its_bytes() {
+    for file in CHANGED_FILES {
+        let game = Game::template_layout();
+        assert_eq!(code(&game.build(&[])), 0);
+        change_a_module_and_a_library_file(&game);
+        let path = game.path(file);
+        let bytes = fs::read(&path).unwrap();
+        if read_only(&path) {
+            let out = game.build(&[]);
+            let stderr = text(&out.stderr).replace('\\', "/");
+            assert_eq!(code(&out), 1, "{file}: {stderr}");
+            assert!(stderr.contains("cannot write") && stderr.contains(&format!("{file}: ")), "{file}: {stderr}");
+            assert_eq!(fs::read(&path).unwrap(), bytes, "{file} keeps its bytes");
+            let names = listed(path.parent().unwrap());
+            assert!(!names.iter().any(|name| name.starts_with(".crucible")), "{file}: {names:?}");
+        }
+        writable(&path);
+    }
+}
+
+#[test]
+fn a_place_module_or_library_file_that_is_a_link_writes_its_target_and_stays_a_link() {
+    let game = Game::template_layout();
+    assert_eq!(code(&game.build(&[])), 0);
+    let place = fs::read(game.path("build/start.rbxl")).unwrap();
+    fs::create_dir(game.path("elsewhere")).unwrap();
+    let target = |file: &str| game.path("elsewhere").join(Path::new(file).file_name().unwrap());
+    for file in CHANGED_FILES {
+        fs::rename(game.path(file), target(file)).unwrap();
+        if !link(&target(file), &game.path(file)) {
+            return;
+        }
+    }
+    change_a_module_and_a_library_file(&game);
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    for file in CHANGED_FILES {
+        assert!(fs::symlink_metadata(game.path(file)).unwrap().file_type().is_symlink(), "{file} stays a link");
+        let names = listed(game.path(file).parent().unwrap());
+        assert!(!names.iter().any(|name| name.starts_with(".crucible")), "{file}: {names:?}");
+    }
+    assert!(fs::read_to_string(target("out/shared/greeting.luau")).unwrap().contains("hi from"));
+    assert_eq!(fs::read(target("include/Promise.lua")).unwrap(), vendored("Promise.lua"));
+    assert_place(&target("build/start.rbxl"));
+    assert_ne!(fs::read(target("build/start.rbxl")).unwrap(), place, "the linked place holds the new module");
 }
 
 #[cfg(windows)]
