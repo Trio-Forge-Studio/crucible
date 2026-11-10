@@ -60,6 +60,8 @@ const triggerZoomPerSecond = 2;
 const zoomKeys = new Set<Enum.KeyCode>([Enum.KeyCode.ButtonL2, Enum.KeyCode.ButtonR2]);
 
 function reaches(viewport: GuiObject, content: GuiObject | undefined, point: Vector2): boolean {
+	// A hidden viewport is in no hit list, so the empty list below would let it through.
+	if (!alive(viewport)) return false;
 	const position = viewport.AbsolutePosition;
 	const corner = position.add(viewport.AbsoluteSize);
 	if (point.X < position.X || point.Y < position.Y || point.X > corner.X || point.Y > corner.Y) return false;
@@ -173,6 +175,7 @@ export function usePanZoom(options: PanZoomOptions): PanZoomBinding {
 		}
 		if (gesture?.kind !== "Drag") return;
 		if (gesture.mouse ? input.UserInputType !== Enum.UserInputType.MouseMovement : input !== gesture.input) return;
+		if (!viewport || !alive(viewport)) return endGesture();
 		const delta = input.Position.sub(gesture.from);
 		glide(undefined);
 		commit(gesture.pan.add(new Vector2(delta.X, delta.Y).div(ratio * scale())), view().zoom);
@@ -185,7 +188,7 @@ export function usePanZoom(options: PanZoomOptions): PanZoomBinding {
 			dragging(false);
 			glide(undefined);
 		} else if (gesture?.kind !== "Pinch") return;
-		else if (state !== Enum.UserInputState.Change) endGesture();
+		else if (state !== Enum.UserInputState.Change || !viewport || !alive(viewport)) endGesture();
 		else if (middle) zoomAt(gesture.zoom * factor, fromCentre(middle));
 	};
 
