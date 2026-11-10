@@ -5,38 +5,61 @@ pub const DEFAULT_ATTEMPTS: u8 = 3;
 
 pub const UNKNOWN_HINT: &str = "Check the resource in Creations before repeating this request.";
 
-#[derive(Default)]
-pub struct Acceptance {
-    accepted: bool,
-    resume: Option<String>,
+/// What a command's requests have done on Roblox so far, which decides what a failure that ends the command means.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Acceptance {
+    /// Roblox has accepted no unsafe write of this command, so a failure keeps its code.
+    #[default]
+    Open,
+    /// `resume` repeats this command's GET requests, which read work an earlier command started. Roblox has accepted
+    /// no unsafe write of this command, so a failure keeps its code and carries `resume`.
+    Resuming { resume: String },
+    /// Roblox accepted an unsafe write and nothing names its resource, so a later failure leaves the outcome unknown.
+    Accepted,
+    /// Roblox accepted an unsafe write and `resume` reads its resource with GET requests only, so a later failure is
+    /// pending.
+    Identified { resume: String },
 }
 impl Acceptance {
+    /// Roblox answered an unsafe write with success. A resume command set before it reads other work, so it cannot
+    /// recover this write.
     pub fn record(&mut self) {
-        self.accepted = true;
+        if matches!(self, Self::Open | Self::Resuming { .. }) {
+            *self = Self::Accepted;
+        }
     }
+    /// Sets the GET-only command that picks the work up, replacing an earlier one.
     pub fn resume(&mut self, command: String) {
-        self.resume = Some(command);
+        *self = match self {
+            Self::Open | Self::Resuming { .. } => Self::Resuming { resume: command },
+            Self::Accepted | Self::Identified { .. } => Self::Identified { resume: command },
+        };
     }
+    /// A remote failure reports that the work reached a terminal state, so it keeps its code in every state.
     pub fn finish<T>(&self, result: Result<T, Failure>) -> Result<T, Failure> {
         result.map_err(|mut failure| {
-            if let Some(resume) = &self.resume {
+            if let Self::Resuming { resume } | Self::Identified { resume } = self {
                 failure.error["resume"] = json!(resume);
             }
-            if !self.accepted || failure.code == 6 {
+            if failure.code == 6 {
                 return failure;
             }
-            if self.resume.is_some() {
-                failure.code = 8;
-                failure.error["kind"] = json!("pending");
-            } else {
-                failure.code = 5;
-                failure.error["kind"] = json!("outcome_unknown");
-                failure
-                    .error
-                    .as_object_mut()
-                    .expect("a failure is an object")
-                    .entry("hint")
-                    .or_insert(json!(UNKNOWN_HINT));
+            match self {
+                Self::Open | Self::Resuming { .. } => {}
+                Self::Accepted => {
+                    failure.code = 5;
+                    failure.error["kind"] = json!("outcome_unknown");
+                    failure
+                        .error
+                        .as_object_mut()
+                        .expect("a failure is an object")
+                        .entry("hint")
+                        .or_insert(json!(UNKNOWN_HINT));
+                }
+                Self::Identified { .. } => {
+                    failure.code = 8;
+                    failure.error["kind"] = json!("pending");
+                }
             }
             failure
         })
@@ -188,6 +211,132 @@ mod tests {
         let failure = acceptance.finish::<()>(Err(Failure::unavailable("poll failed"))).unwrap_err();
         assert_eq!(failure.code, 8);
         assert_eq!(failure.error["resume"], "new command", "recovery has one explicit owner");
+    }
+    fn finished(acceptance: &Acceptance, failure: Failure) -> Failure {
+        acceptance.finish::<()>(Err(failure)).unwrap_err()
+    }
+    #[test]
+    fn each_state_maps_a_later_failure_as_the_contract_says() {
+        let resumed = |state: fn(String) -> Acceptance| state("crucible oc asset upload --resume x".into());
+        for (state, code, kind, resume) in [
+            (Acceptance::Open, 7, "unavailable", None),
+            (
+                resumed(|resume| Acceptance::Resuming { resume }),
+                7,
+                "unavailable",
+                Some("crucible oc asset upload --resume x"),
+            ),
+            (Acceptance::Accepted, 5, "outcome_unknown", None),
+            (
+                resumed(|resume| Acceptance::Identified { resume }),
+                8,
+                "pending",
+                Some("crucible oc asset upload --resume x"),
+            ),
+        ] {
+            let failure = finished(&state, Failure::unavailable("poll failed"));
+            assert_eq!((failure.code, failure.error["kind"].as_str()), (code, Some(kind)), "{state:?}");
+            assert_eq!(failure.error["resume"].as_str(), resume, "{state:?}");
+            assert_eq!(failure.error.get("hint").is_some(), code == 5, "{state:?}");
+            let remote = finished(&state, Failure::remote("task FAILED", json!({})));
+            assert_eq!((remote.code, remote.error["resume"].as_str()), (6, resume), "a remote failure is terminal");
+        }
+    }
+    #[test]
+    fn acceptance_and_resume_reach_the_states_in_either_order() {
+        let mut state = Acceptance::default();
+        state.record();
+        assert_eq!(state, Acceptance::Accepted);
+        state.resume("poll".into());
+        assert_eq!(state, Acceptance::Identified { resume: "poll".into() });
+        state.record();
+        assert_eq!(state, Acceptance::Identified { resume: "poll".into() }, "a second acceptance keeps the resource");
+        let mut state = Acceptance::default();
+        state.resume("read".into());
+        assert_eq!(state, Acceptance::Resuming { resume: "read".into() });
+    }
+    #[test]
+    fn a_resume_set_before_a_write_is_accepted_cannot_recover_that_write() {
+        let mut state = Acceptance::default();
+        state.resume("crucible oc asset upload --resume earlier".into());
+        state.record();
+        assert_eq!(state, Acceptance::Accepted, "the flags gave this write the earlier work's resume command");
+        let failure = finished(&state, Failure::unavailable("lost"));
+        assert_eq!((failure.code, failure.error.get("resume")), (5, None));
+    }
+    #[test]
+    fn the_enum_writes_what_the_flags_wrote_for_every_history_they_both_allow() {
+        #[derive(Clone, Copy)]
+        enum Step {
+            Record,
+            Resume(&'static str),
+        }
+        fn flags(history: &[Step], mut failure: Failure) -> Failure {
+            let accepted = history.iter().any(|s| matches!(s, Step::Record));
+            let resume = history.iter().rev().find_map(|s| if let Step::Resume(r) = s { Some(*r) } else { None });
+            if let Some(resume) = resume {
+                failure.error["resume"] = json!(resume);
+            }
+            if !accepted || failure.code == 6 {
+                return failure;
+            }
+            if resume.is_some() {
+                failure.code = 8;
+                failure.error["kind"] = json!("pending");
+            } else {
+                failure.code = 5;
+                failure.error["kind"] = json!("outcome_unknown");
+                failure.error.as_object_mut().unwrap().entry("hint").or_insert(json!(UNKNOWN_HINT));
+            }
+            failure
+        }
+        let failures = || {
+            [
+                Failure::usage("bad"),
+                Failure::new(3, "auth", "HTTP 403"),
+                Failure::new(4, "rejected", "HTTP 404"),
+                Failure::unknown("reset"),
+                Failure::remote("task FAILED", json!({"state": "FAILED"})),
+                Failure::unavailable("HTTP 503").with("status", json!(503)),
+                Failure::new(8, "pending", "deadline"),
+            ]
+        };
+        let steps = [Step::Record, Step::Resume("a"), Step::Resume("b")];
+        let mut histories: Vec<Vec<Step>> = vec![Vec::new()];
+        for length in 1..=4 {
+            let longer: Vec<Vec<Step>> = histories
+                .iter()
+                .filter(|h| h.len() == length - 1)
+                .flat_map(|h| steps.iter().map(move |&s| [h.as_slice(), &[s]].concat()))
+                .collect();
+            histories.extend(longer);
+        }
+        assert_eq!(histories.len(), 121);
+        for history in &histories {
+            let mut state = Acceptance::default();
+            for step in history {
+                match *step {
+                    Step::Record => state.record(),
+                    Step::Resume(command) => state.resume(command.into()),
+                }
+            }
+            let first_record = history.iter().position(|s| matches!(s, Step::Record));
+            let last_resume = history.iter().rposition(|s| matches!(s, Step::Resume(_)));
+            let forbidden = matches!((first_record, last_resume), (Some(r), Some(c)) if c < r);
+            for (old, new) in failures().into_iter().zip(failures()) {
+                let new = finished(&state, new);
+                if forbidden {
+                    assert!(new.error.get("resume").is_none() && matches!(new.code, 5 | 6), "{state:?}");
+                } else {
+                    let old = flags(history, old);
+                    assert_eq!(
+                        (old.code, old.document().to_string()),
+                        (new.code, new.document().to_string()),
+                        "{state:?}"
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn success_row() {
