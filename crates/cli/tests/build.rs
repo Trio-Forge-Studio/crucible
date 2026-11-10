@@ -501,6 +501,26 @@ fn rojo_failure_exits_1_with_rojo_diagnostics() {
 }
 
 #[test]
+fn a_failed_rojo_build_keeps_the_last_place_whole_and_a_killed_builds_folder_goes() {
+    let game = Game::template_layout();
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("Built project to start.rbxl"), "Rojo names the place file");
+    let place = fs::read(game.path("build/start.rbxl")).unwrap();
+    game.write("build/.crucible-build-41-1/start.rbxl", "half a place");
+    game.write("build/.crucible-build-mine/notes.txt", "kept");
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["Workspace"] = json!({ "$className": "Workspace", "Map": { "$path": "missing-map" } });
+    game.json("default.project.json", &project);
+    assert_eq!(code(&game.build(&[])), 1);
+    assert_eq!(fs::read(game.path("build/start.rbxl")).unwrap(), place, "the last place stays whole");
+    let mut names: Vec<String> =
+        fs::read_dir(game.path("build")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    names.sort();
+    assert_eq!(names, [".crucible-build-mine", "start.rbxl"]);
+}
+
+#[test]
 fn unreadable_manifest_exits_1() {
     let game = Game::template_layout();
     fs::create_dir(game.path("crucible.toml")).unwrap();

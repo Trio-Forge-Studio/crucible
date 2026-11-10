@@ -282,18 +282,57 @@ fn relative_to_cwd(text: &str) -> String {
     text.replace(&(cwd.replace('\\', "/") + "/"), "").replace(&(cwd + "\\"), "")
 }
 
+// Rojo writes the place file where it is told, so it builds into a new folder beside the place and a rename puts the
+// file over the place: a failed or killed build leaves the last place whole. The file keeps the place's name, because
+// Rojo picks the format from its extension and prints the name.
+fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
+    let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    let staging = staging_folder(parent).map_err(|error| format!("cannot write into {}: {error}", parent.display()))?;
+    let staged = staging.join(output.file_name().unwrap_or(output.as_os_str()));
+    let built = rojo_child(project, &staged).and_then(|()| {
+        std::fs::rename(&staged, output).map_err(|error| format!("cannot write {}: {error}", output.display()))
+    });
+    let _ = std::fs::remove_dir_all(&staging);
+    built
+}
+
 // Rojo prints progress with println!, so it runs in a child whose stdout is our
 // stderr, which keeps our stdout for place paths.
-fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
-    if let Some(parent) = output.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-    }
+fn rojo_child(project: &Path, output: &Path) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
     let status =
         child::spawn_tied(Command::new(exe).arg(ROJO_BUILD).arg(project).arg(output).stdout(std::io::stderr()))
             .and_then(|mut tied| tied.child.wait())
             .map_err(|error| format!("cannot start Rojo: {error}"))?;
     if status.success() { Ok(()) } else { Err(format!("Rojo could not build {}", project.display())) }
+}
+
+const STAGING: &str = ".crucible-build-";
+
+// A killed build leaves its folder behind, so each build first deletes the ones it finds.
+fn staging_folder(parent: &Path) -> std::io::Result<PathBuf> {
+    for entry in std::fs::read_dir(parent)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let stale = name.to_str().and_then(|name| name.strip_prefix(STAGING)).is_some_and(|rest| {
+            rest.split_once('-').is_some_and(|(process, n)| {
+                [process, n].iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+            })
+        });
+        if stale && entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        }
+    }
+    let mut n = 1;
+    loop {
+        let folder = parent.join(format!("{STAGING}{}-{n}", std::process::id()));
+        match std::fs::create_dir(&folder) {
+            Ok(()) => return Ok(folder),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub const ROJO_BUILD: &str = "__rojo-build";

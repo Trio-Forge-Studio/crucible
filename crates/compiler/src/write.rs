@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 use crate::Module;
@@ -16,21 +16,50 @@ pub struct Written {
     pub removed: usize,
 }
 
-/// Writes each module under `out`, skipping files whose bytes already match, and counts the files it wrote. Then it
-/// deletes every `.luau` file under `out` that starts with the compiler's header and is not one of `modules`, the
-/// temporary files of a case-only rename that failed, and any folder that deletion leaves empty, and counts the
-/// files it deleted. Files the compiler did not emit, such as `rbxtsc` output and declarations, stay.
+/// Writes each module under `out` through `replace`, skipping files whose bytes already match, and counts the files
+/// it wrote. Then it deletes every `.luau` file under `out` that starts with the compiler's header and is not one of
+/// `modules`, the temporary files of a write or a case-only rename that did not finish, and any folder that deletion
+/// leaves empty, and counts the files it deleted. Files the compiler did not emit, such as `rbxtsc` output and
+/// declarations, stay.
 ///
-/// On a case-insensitive file system, a module whose source changed only in case is written into the existing file
-/// under its old name. That file is renamed to the module's path, because Rojo names the instance after the file.
+/// On a case-insensitive file system, a module whose path changed only in case can keep the old name of its file.
+/// That file is renamed to the module's path, because Rojo names the instance after the file.
 pub fn write(out: &Path, modules: &[Module]) -> io::Result<Written> {
     write_to(&mut Os, out, modules)
 }
 
+/// Writes `bytes` to a new file beside `path`, then renames it over `path`, so `path` holds its old bytes or all of
+/// the new ones even when the write fails or the process dies. The new file's name ends in no extension Rojo reads,
+/// and holds the process id, so a concurrent build never writes the same one.
+pub(crate) fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace_on(&mut Os, path, bytes)
+}
+
+fn replace_on(disk: &mut impl Disk, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut n = 1;
+    let temporary = loop {
+        let temporary = path.with_file_name(format!("{name}{WRITING}-{}-{n}", std::process::id()));
+        match disk.create(&temporary, bytes) {
+            Ok(()) => break temporary,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => n += 1,
+            Err(error) => {
+                let _ = disk.remove_file(&temporary);
+                return Err(error);
+            }
+        }
+    };
+    disk.rename(&temporary, path).inspect_err(|_| {
+        let _ = disk.remove_file(&temporary);
+    })
+}
+
 trait Disk {
     fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
-    fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool>;
-    fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+    /// The first `len` bytes, or the whole file when it is shorter.
+    fn head(&self, path: &Path, len: usize) -> io::Result<Vec<u8>>;
+    /// Writes a file that must not exist yet.
+    fn create(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
     fn create_dir_all(&mut self, path: &Path) -> io::Result<()>;
     /// Empty when `dir` does not exist.
     fn entries(&self, dir: &Path) -> io::Result<Vec<Entry>>;
@@ -58,14 +87,14 @@ impl Disk for Os {
         std::fs::read(path)
     }
 
-    fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool> {
-        let mut head = Vec::with_capacity(prefix.len());
-        std::fs::File::open(path)?.take(prefix.len() as u64).read_to_end(&mut head)?;
-        Ok(head == prefix)
+    fn head(&self, path: &Path, len: usize) -> io::Result<Vec<u8>> {
+        let mut head = Vec::with_capacity(len);
+        std::fs::File::open(path)?.take(len as u64).read_to_end(&mut head)?;
+        Ok(head)
     }
 
-    fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-        std::fs::write(path, bytes)
+    fn create(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        std::fs::OpenOptions::new().write(true).create_new(true).open(path)?.write_all(bytes)
     }
 
     fn create_dir_all(&mut self, path: &Path) -> io::Result<()> {
@@ -122,7 +151,7 @@ fn write_to(disk: &mut impl Disk, out: &Path, modules: &[Module]) -> io::Result<
         if let Some(dir) = path.parent() {
             disk.create_dir_all(dir)?;
         }
-        disk.write(&path, module.source.as_bytes())?;
+        replace_on(disk, &path, module.source.as_bytes())?;
         changes.written += 1;
     }
     let mut expected: Expected = HashMap::new();
@@ -168,9 +197,16 @@ fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, ch
                     disk.remove_dir(&path)?;
                 }
             }
+            EntryKind::File if partial_write_of(name).is_some_and(|file| file.ends_with(".luau")) => {
+                // A write that did not finish stopped somewhere in the module, which starts with the header.
+                if HEADER.as_bytes().starts_with(&disk.head(&path, HEADER.len())?) {
+                    disk.remove_file(&path)?;
+                    changes.removed += 1;
+                }
+            }
             EntryKind::File
                 if (is_temporary(name) || name.ends_with(".luau") && !wanted.is_some_and(|w| w.contains(name)))
-                    && disk.starts_with(&path, HEADER.as_bytes())? =>
+                    && disk.head(&path, HEADER.len())? == HEADER.as_bytes() =>
             {
                 disk.remove_file(&path)?;
                 changes.removed += 1;
@@ -212,6 +248,16 @@ fn temporary_name(name: &str, n: u32) -> String {
     if n == 1 { format!("{name}{TEMPORARY}") } else { format!("{name}{TEMPORARY}-{n}") }
 }
 
+const WRITING: &str = ".crucible-write";
+
+/// The name of the file `replace` was writing when it gave a temporary file this name.
+pub(crate) fn partial_write_of(name: &str) -> Option<&str> {
+    let (file, rest) = name.rsplit_once(WRITING)?;
+    let (process, n) = rest.strip_prefix('-')?.split_once('-')?;
+    let number = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    (!file.is_empty() && number(process) && number(n)).then_some(file)
+}
+
 /// Whether `rename_case` could have given a module file this name.
 fn is_temporary(name: &str) -> bool {
     let Some((module, suffix)) = name.rsplit_once(TEMPORARY) else { return false };
@@ -235,6 +281,8 @@ mod tests {
         entries: BTreeMap<String, (String, Option<Vec<u8>>)>,
         /// A rename to exactly this path fails.
         refused: Option<String>,
+        /// Each new file gets half its bytes, and then the write fails.
+        full: bool,
     }
 
     fn key(path: &Path) -> String {
@@ -259,15 +307,20 @@ mod tests {
             }
         }
 
-        fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool> {
-            Ok(self.read(path)?.starts_with(prefix))
+        fn head(&self, path: &Path, len: usize) -> io::Result<Vec<u8>> {
+            let mut bytes = self.read(path)?;
+            bytes.truncate(len);
+            Ok(bytes)
         }
 
-        fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        fn create(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+            if self.entries.contains_key(&key(path)) {
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
             let stored = path.to_string_lossy().replace('\\', "/");
-            let entry = self.entries.entry(key(path)).or_insert((stored, None));
-            entry.1 = Some(bytes.to_vec());
-            Ok(())
+            let written = if self.full { &bytes[..bytes.len() / 2] } else { bytes };
+            self.entries.insert(key(path), (stored, Some(written.to_vec())));
+            if self.full { Err(io::Error::from(io::ErrorKind::StorageFull)) } else { Ok(()) }
         }
 
         fn create_dir_all(&mut self, path: &Path) -> io::Result<()> {
@@ -342,7 +395,7 @@ mod tests {
 
         let new_bytes = [module("FOO.luau", "return 3\n"), module("Systems/bar.luau", "return 2\n")];
         let changes = write_to(&mut disk, Path::new("out"), &new_bytes).unwrap();
-        assert_eq!(changes, Written { written: 1, renamed: 1, removed: 0 });
+        assert_eq!(changes, Written { written: 1, renamed: 0, removed: 0 }, "the write's rename names the file");
         assert_eq!(disk.names("out"), ["FOO.luau", "Systems"]);
         assert_eq!(disk.read(Path::new("out/FOO.luau")).unwrap(), new_bytes[0].source.as_bytes());
     }
@@ -351,7 +404,7 @@ mod tests {
     fn a_case_only_rename_never_replaces_a_file_beside_it() {
         let mut disk = Folding::default();
         write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 1\n")]).unwrap();
-        disk.write(Path::new("out/foo.luau.crucible-rename"), b"mine").unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-rename"), b"mine").unwrap();
 
         let changes = write_to(&mut disk, Path::new("out"), &[module("Foo.luau", "return 1\n")]).unwrap();
         assert_eq!(changes, Written { written: 0, renamed: 1, removed: 0 });
@@ -379,17 +432,69 @@ mod tests {
         let mut disk = Folding::default();
         let header = |body: &str| format!("{HEADER}{body}").into_bytes();
         disk.create_dir_all(Path::new("out")).unwrap();
-        disk.write(Path::new("out/foo.luau.crucible-rename"), &header("return 1\n")).unwrap();
-        disk.write(Path::new("out/foo.luau.crucible-rename-2"), &header("return 1\n")).unwrap();
-        disk.write(Path::new("out/bar.luau.crucible-rename"), b"mine").unwrap();
-        disk.write(Path::new("out/notes.crucible-rename"), &header("")).unwrap();
-        disk.write(Path::new("out/foo.luau.crucible-rename-x"), &header("")).unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-rename"), &header("return 1\n")).unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-rename-2"), &header("return 1\n")).unwrap();
+        disk.create(Path::new("out/bar.luau.crucible-rename"), b"mine").unwrap();
+        disk.create(Path::new("out/notes.crucible-rename"), &header("")).unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-rename-x"), &header("")).unwrap();
 
         let changes = write_to(&mut disk, Path::new("out"), &[module("Foo.luau", "return 1\n")]).unwrap();
         assert_eq!(changes, Written { written: 1, renamed: 0, removed: 2 });
         assert_eq!(
             disk.names("out"),
             ["bar.luau.crucible-rename", "Foo.luau", "foo.luau.crucible-rename-x", "notes.crucible-rename"]
+        );
+    }
+
+    #[test]
+    fn a_failed_write_leaves_each_module_whole_and_a_rerun_converges() {
+        let mut disk = Folding::default();
+        let old = [module("foo.luau", "return 1\n"), module("bar.luau", "return 2\n")];
+        write_to(&mut disk, Path::new("out"), &old).unwrap();
+
+        let new = [module("foo.luau", "return 3\n"), module("bar.luau", "return 4\n")];
+        disk.full = true;
+        assert!(write_to(&mut disk, Path::new("out"), &new).is_err());
+        assert_eq!(disk.names("out"), ["bar.luau", "foo.luau"], "no temporary file stays");
+        assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), old[0].source.as_bytes());
+        assert_eq!(disk.read(Path::new("out/bar.luau")).unwrap(), old[1].source.as_bytes());
+
+        disk.refused = Some("out/bar.luau".to_owned());
+        disk.full = false;
+        assert!(write_to(&mut disk, Path::new("out"), &new).is_err());
+        assert_eq!(disk.names("out"), ["bar.luau", "foo.luau"], "a refused rename removes its temporary file");
+        assert_eq!(disk.read(Path::new("out/bar.luau")).unwrap(), old[1].source.as_bytes());
+
+        disk.refused = None;
+        assert_eq!(
+            write_to(&mut disk, Path::new("out"), &new).unwrap(),
+            Written { written: 1, renamed: 0, removed: 0 }
+        );
+        assert_eq!(write_to(&mut disk, Path::new("out"), &new).unwrap(), Written::default());
+    }
+
+    #[test]
+    fn the_sweep_removes_what_a_killed_write_left_and_never_takes_it_for_a_module() {
+        let mut disk = Folding::default();
+        let header = HEADER.as_bytes();
+        disk.create_dir_all(Path::new("out/systems")).unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-write-41-1"), b"").unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-write-41-2"), &header[..9]).unwrap();
+        disk.create(Path::new("out/systems/bar.luau.crucible-write-7-1"), &[header, b"return"].concat()).unwrap();
+        disk.create(Path::new("out/notes.luau.crucible-write-41-1"), b"mine").unwrap();
+        disk.create(Path::new("out/foo.luau.crucible-write-41"), header).unwrap();
+        disk.create(Path::new("out/data.json.crucible-write-41-1"), header).unwrap();
+
+        let changes = write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 1\n")]).unwrap();
+        assert_eq!(changes, Written { written: 1, renamed: 0, removed: 3 });
+        assert_eq!(
+            disk.names("out"),
+            [
+                "data.json.crucible-write-41-1",
+                "foo.luau",
+                "foo.luau.crucible-write-41",
+                "notes.luau.crucible-write-41-1"
+            ]
         );
     }
 }
