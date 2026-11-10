@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crucible_compiler::extension::{
@@ -6,7 +6,7 @@ use crucible_compiler::extension::{
     TypeFlags,
 };
 
-use crate::api::{Api, Macro, Made, OWN_CLASSES, is_declaration_macro};
+use crate::api::{Api, Macro, OWN_CLASSES, is_declaration_macro};
 use crate::declarations::Side;
 use crate::facts::{Attribute, Check, Class, ClassKind, Dependency, Fact, Literal};
 use crate::{Code, State};
@@ -553,15 +553,10 @@ impl Walk<'_, '_> {
             if class.tag.is_none() {
                 self.report(node, Code::Rule(2), "A concrete behaviour tag must be exactly one string literal.");
             }
-            let mut parts = match member(self, "instance") {
+            let parts = match member(self, "instance") {
                 Some(t) if t.flags().intersects(TypeFlags::Union) => t.types().into_iter().map(Some).collect(),
                 t => vec![t],
             };
-            if parts.len() > 1
-                && let Some(made) = self.made()
-            {
-                parts.sort_by_key(|p| p.and_then(|t| made.get(&t.symbol()?)).map_or(usize::MAX, |m| m.turn));
-            }
             let allowed = self
                 .cx
                 .resolve_name("Instances", Some(node), SymbolFlags::Type)
@@ -598,88 +593,6 @@ impl Walk<'_, '_> {
             }
         }
         Some(class)
-    }
-
-    /// TypeScript 5 orders a union by when its checker made each member type, and the transformer lists a behaviour's
-    /// instance classes in that order. The checker makes a type at the first reference in the transformer's walk of
-    /// the program, and makes an interface's bases as it makes the interface. TypeScript 7 orders a union by name.
-    fn made(&mut self) -> Option<&HashMap<Symbol, Made>> {
-        if self.api.made.is_none() {
-            let mut made = HashMap::new();
-            let mut aliases = HashSet::new();
-            for file in self.cx.files() {
-                if !file.is_declaration() && !file.is_js() {
-                    self.make_referenced(file.root(), &mut made, &mut aliases);
-                }
-            }
-            self.api.made = Some(made);
-        }
-        self.api.made.as_ref()
-    }
-
-    fn make_referenced(&mut self, n: Node, made: &mut HashMap<Symbol, Made>, aliases: &mut HashSet<Symbol>) {
-        let name = match n.parent() {
-            // The transformer's walk makes a class's base at the class, and an interface's bases only when it makes
-            // the interface.
-            Some(clause) if clause.kind() == Kind::HeritageClause => {
-                let class =
-                    clause.parent().is_some_and(|c| matches!(c.kind(), Kind::ClassDeclaration | Kind::ClassExpression));
-                (class && clause.token() == Kind::ExtendsKeyword).then(|| n.heritage_element_name())
-            }
-            _ => (n.kind() == Kind::TypeReference).then(|| n.type_name()),
-        };
-        if let Some(symbol) = name.and_then(|name| self.cx.symbol_at(name)) {
-            let symbol = self.cx.aliased(symbol);
-            if symbol.flags().intersects(SymbolFlags::Class | SymbolFlags::Interface) {
-                self.make(symbol, made);
-            } else if symbol.flags().intersects(SymbolFlags::TypeAlias) && aliases.insert(symbol) {
-                for declaration in symbol.declarations() {
-                    if let Some(aliased) = declaration.type_node() {
-                        self.make_referenced(aliased, made, aliases);
-                    }
-                }
-            }
-        }
-        n.for_each_child(&mut |child| self.make_referenced(child, made, aliases));
-    }
-
-    /// Makes a class or interface type as TypeScript 5's `getDeclaredTypeOfClassOrInterface` does, and returns whether
-    /// the type has a `this` type.
-    fn make(&mut self, symbol: Symbol, made: &mut HashMap<Symbol, Made>) -> bool {
-        if let Some(m) = made.get(&symbol) {
-            return m.this_type;
-        }
-        made.insert(symbol, Made { turn: made.len(), this_type: false });
-        let generic = symbol.declarations().into_iter().any(|d| {
-            matches!(d.kind(), Kind::ClassDeclaration | Kind::ClassExpression | Kind::InterfaceDeclaration)
-                && !d.type_parameters().is_empty()
-        });
-        let this_type = symbol.flags().intersects(SymbolFlags::Class) || generic || !self.thisless(symbol, made);
-        if let Some(m) = made.get_mut(&symbol) {
-            m.this_type = this_type;
-        }
-        this_type
-    }
-
-    /// TypeScript 5's `isThislessInterface`, which makes each base interface it reaches.
-    fn thisless(&mut self, symbol: Symbol, made: &mut HashMap<Symbol, Made>) -> bool {
-        for declaration in symbol.declarations() {
-            if declaration.kind() != Kind::InterfaceDeclaration {
-                continue;
-            }
-            if declaration.flags().intersects(NodeFlags::ContainsThis) {
-                return false;
-            }
-            for base in declaration.extends_elements().iter() {
-                let name = base.heritage_element_name();
-                let symbol = self.cx.symbol_at(name).map(|s| self.cx.aliased(s));
-                let Some(base) = symbol.filter(|s| s.flags().intersects(SymbolFlags::Interface)) else { return false };
-                if self.make(base, made) {
-                    return false;
-                }
-            }
-        }
-        true
     }
 
     /// Whether `t` instantiates a generic parameter that its kind of use forbids.
