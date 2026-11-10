@@ -198,8 +198,8 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
     for shared in compiles {
         let out = shared.compiled.out_dir.as_path();
         if !written.contains(&case_folded_canonical(out)) {
-            let changes =
-                crucible_compiler::write(out, &shared.compiled.modules).map_err(|error| failed(out, error))?;
+            let changes = crucible_compiler::write(out, &shared.compiled.modules)
+                .map_err(|error| failed(&error.path, error.error))?;
             eprintln!(
                 "crucible build: wrote {} of {} modules to {}",
                 changes.written,
@@ -209,7 +209,7 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
             written.push(case_folded_canonical(out));
         }
         let include = root.join(&shared.place.include);
-        crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;
+        crucible_compiler::write_include(&include).map_err(|error| failed(&error.path, error.error))?;
     }
     Ok(())
 }

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -24,8 +25,31 @@ pub struct Written {
 ///
 /// On a case-insensitive file system, a module whose path changed only in case can keep the old name of its file.
 /// That file is renamed to the module's path, because Rojo names the instance after the file.
-pub fn write(out: &Path, modules: &[Module]) -> io::Result<Written> {
+pub fn write(out: &Path, modules: &[Module]) -> Result<Written, WriteError> {
     write_to(&mut Os, out, modules)
+}
+
+/// A failed `write` or `write_include`, with the file or folder it failed on.
+#[derive(Debug)]
+pub struct WriteError {
+    pub path: PathBuf,
+    pub error: io::Error,
+}
+
+impl fmt::Display for WriteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.error)
+    }
+}
+
+impl std::error::Error for WriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+pub(crate) fn at(path: &Path) -> impl FnOnce(io::Error) -> WriteError + '_ {
+    move |error| WriteError { path: path.to_owned(), error }
 }
 
 /// The one file that a build writes `destination`'s new bytes into before it renames that file over `destination`.
@@ -177,7 +201,7 @@ impl Disk for Os {
 /// slashes, `""` for the output itself.
 type Expected<'m> = HashMap<&'m str, HashSet<&'m str>>;
 
-fn write_to(disk: &mut impl Disk, out: &Path, modules: &[Module]) -> io::Result<Written> {
+fn write_to(disk: &mut impl Disk, out: &Path, modules: &[Module]) -> Result<Written, WriteError> {
     let mut changes = Written::default();
     for module in modules {
         let path = out.join(&module.path);
@@ -185,9 +209,9 @@ fn write_to(disk: &mut impl Disk, out: &Path, modules: &[Module]) -> io::Result<
             continue;
         }
         if let Some(dir) = path.parent() {
-            disk.create_dir_all(dir)?;
+            disk.create_dir_all(dir).map_err(at(dir))?;
         }
-        replace_on(disk, &path, module.source.as_bytes())?;
+        replace_on(disk, &path, module.source.as_bytes()).map_err(at(&path))?;
         changes.written += 1;
     }
     let mut expected: Expected = HashMap::new();
@@ -205,9 +229,15 @@ fn write_to(disk: &mut impl Disk, out: &Path, modules: &[Module]) -> io::Result<
     Ok(changes)
 }
 
-fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, changes: &mut Written) -> io::Result<()> {
+fn sweep(
+    disk: &mut impl Disk,
+    dir: &Path,
+    folder: &str,
+    expected: &Expected,
+    changes: &mut Written,
+) -> Result<(), WriteError> {
     let wanted = expected.get(folder);
-    let entries = disk.entries(dir)?;
+    let entries = disk.entries(dir).map_err(at(dir))?;
     let present: HashSet<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     for entry in &entries {
         let mut name = entry.name.as_str();
@@ -219,7 +249,7 @@ fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, ch
         {
             // The exact name is absent from the listing although `write` just wrote it, so the file system
             // resolved that name to this entry and ignores case.
-            rename_case(disk, dir, &present, name, target)?;
+            rename_case(disk, dir, &present, name, target).map_err(at(&dir.join(target)))?;
             changes.renamed += 1;
             name = target;
         }
@@ -229,15 +259,15 @@ fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, ch
                 let inner = if folder.is_empty() { name.to_owned() } else { format!("{folder}/{name}") };
                 let removed = changes.removed;
                 sweep(disk, &path, &inner, expected, changes)?;
-                if changes.removed > removed && disk.entries(&path)?.is_empty() {
-                    disk.remove_dir(&path)?;
+                if changes.removed > removed && disk.entries(&path).map_err(at(&path))?.is_empty() {
+                    disk.remove_dir(&path).map_err(at(&path))?;
                 }
             }
             EntryKind::File
                 if (is_temporary(name) || name.ends_with(".luau") && !wanted.is_some_and(|w| w.contains(name)))
-                    && disk.starts_with(&path, HEADER.as_bytes())? =>
+                    && disk.starts_with(&path, HEADER.as_bytes()).map_err(at(&path))? =>
             {
-                disk.remove_file(&path)?;
+                disk.remove_file(&path).map_err(at(&path))?;
                 changes.removed += 1;
             }
             _ => {}
@@ -556,7 +586,8 @@ mod tests {
         write_to(&mut disk, Path::new("out"), &old).unwrap();
         disk.busy = true;
         let error = write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 2\n")]).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::ResourceBusy);
+        assert_eq!(error.error.kind(), io::ErrorKind::ResourceBusy);
+        assert_eq!(error.path, Path::new("out/foo.luau"));
         assert_eq!(disk.names("out"), ["foo.luau"]);
         assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), old[0].source.as_bytes());
     }
@@ -625,7 +656,7 @@ mod tests {
         Os.write_temporary(&mut other, b"half a mod").unwrap();
         let modules = [module("foo.luau", "return 1\n")];
         let error = super::write(&out, &modules).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::ResourceBusy, "{error}");
+        assert_eq!(error.error.kind(), io::ErrorKind::ResourceBusy, "{error}");
         assert_eq!(std::fs::read(out.join("foo.luau")).unwrap(), b"old");
         drop(other);
         assert_eq!(std::fs::read(&temporary).unwrap(), b"half a mod", "the other build's file stays as it was");
@@ -640,7 +671,8 @@ mod tests {
         let out = scratch("folder");
         std::fs::create_dir_all(out.join("foo.luau")).unwrap();
         std::fs::write(out.join("foo.luau/notes.txt"), "mine").unwrap();
-        assert!(super::write(&out, &[module("foo.luau", "return 1\n")]).is_err());
+        let error = super::write(&out, &[module("foo.luau", "return 1\n")]).unwrap_err();
+        assert_eq!(error.path, out.join("foo.luau"), "the error names the module");
         assert_eq!(std::fs::read(out.join("foo.luau/notes.txt")).unwrap(), b"mine");
         assert_eq!(listed(&out), ["foo.luau"], "the temporary file goes");
         let _ = std::fs::remove_dir_all(&out);
@@ -677,7 +709,8 @@ mod tests {
         permissions.set_readonly(true);
         std::fs::set_permissions(&path, permissions.clone()).unwrap();
         let error = super::write(&out, &[module("foo.luau", "return 1\n")]).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        assert_eq!(error.error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        assert_eq!(error.path, path, "the error names the module");
         assert_eq!(std::fs::read(&path).unwrap(), b"old");
         assert_eq!(listed(&out), ["foo.luau"], "the temporary file goes");
         #[allow(clippy::permissions_set_readonly_false)]

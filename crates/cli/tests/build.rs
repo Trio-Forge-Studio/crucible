@@ -630,6 +630,18 @@ fn a_folder_where_the_place_goes_fails_the_build_naming_it_and_stays() {
     assert_eq!(listed(&game.path("build")), ["start.rbxl"], "the temporary file goes");
 }
 
+#[test]
+fn a_folder_where_a_module_or_library_file_goes_fails_the_build_naming_it_and_stays() {
+    for file in ["out/shared/greeting.luau", "include/Promise.lua"] {
+        let game = Game::template_layout();
+        game.write(&format!("{file}/notes.txt"), "mine");
+        let out = game.build(&[]);
+        assert_eq!(code(&out), 1);
+        assert!(text(&out.stderr).contains(&format!("cannot write {file}: ")), "{}", text(&out.stderr));
+        assert_eq!(game.read(&format!("{file}/notes.txt")), "mine");
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn a_read_only_place_fails_the_build_naming_it_and_keeps_its_bytes() {
