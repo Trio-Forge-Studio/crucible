@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-4938ea1e3d08ed365bd6f6868f5d299046f27b32000a37b5d2f1cf3a7e13ff4c  build/sample-game.rbxl
+e668bb8343dcbf5d217b4002baff0d7ba03cbd3156e681fc48848d8351d0d287  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -258,7 +258,7 @@ a4e7135fd7ce815d4e671bd610fdf5f9a44eb6329eed72184258cb95a6867c8a  packages/cruci
 72f869cb7c4d11a9aed52db16113370e66ba822942f56ed740c30ed9b8c9a1c0  packages/crucible/out/ui/use-tabs.d.ts
 10af3a67788390694d4e7ffccc10d8eef75ef959601273542daa032978225fbe  packages/crucible/out/ui/use-tabs.luau
 5b09b2d987657648b36fb6ea1d976a3f6a83cc69eedb07014df05b809d23679e  packages/crucible/out/ui/use-text-field.d.ts
-3fbc86c6bc6ad326e8540687db5ba595970eb1d886beea9cdb0621b4f9d951e2  packages/crucible/out/ui/use-text-field.luau
+788f4732e3c01b921053d47d6634f23833752bfe79641a23d7fe6625e03187af  packages/crucible/out/ui/use-text-field.luau
 9efc5372a7e2ae3598094fee92546264806b97d923a1f5563b743c78f6b1275a  packages/crucible/out/ui/use-toast-viewport.d.ts
 b36278644560b5add277b95e31d1d3daa59b8a475961c69143c98f06436ef5b7  packages/crucible/out/ui/use-toast-viewport.luau
 c67b10e6ffb3d73b5d9e28b7c283b5267b620033d8ac900d9712c70cbbd925b5  packages/crucible/out/ui/use-toggle.d.ts

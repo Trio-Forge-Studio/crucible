@@ -161,6 +161,52 @@ return {
 		assert(box.Text == "hell" and #changes == 2, "disabled edits restore controlled text")
 		h.stop()
 	end,
+	["a text field that a modal covers while editing gives up focus and takes no text"] = function()
+		local h = harness()
+		local field = h.instance("TextButton", "Base")
+		local box = h.instance("TextBox", "Base")
+		local changes, commits = 0, {}
+		local binding = h.mount("Base", function()
+			local created = h.require("use-text-field").useTextField({
+				onValueChange = function()
+					changes += 1
+				end,
+				onValueCommit = function(value)
+					table.insert(commits, value)
+				end,
+			})
+			created.control(field)
+			created.box(box)
+			return created
+		end)
+		field.Activated:Fire()
+		h.flush()
+		assert(box:IsFocused() and h.runtime.textEditing(), "a press focuses the box")
+		box.Text = "draft"
+		assert(binding.value() == "draft" and changes == 1, "typing while active changes the value")
+		local closes = 0
+		local id, root = h.root(10, "Native", function()
+			closes += 1
+		end)
+		h.control(id, "Close", nil, true)
+		h.flush()
+		assert(not box:IsFocused() and not h.runtime.textEditing(), "the modal takes native focus from the field")
+		assert(not binding.editing() and commits[1] == "draft", "losing focus ends editing and commits the draft")
+		assert(box.TextEditable == false, "the covered box is not editable")
+		box.Text = "typed behind the modal"
+		assert(binding.value() == "draft" and changes == 1, "text behind the modal changes nothing")
+		assert(box.Text == "draft", "and the box shows the value again")
+		h.finish(h.begin(h.enum.KeyCode.ButtonB))
+		assert(closes == 1, "the modal receives its close input")
+		h.runtime.closeScope(id)
+		root.Parent = nil
+		h.flush()
+		assert(box.TextEditable == true, "the field is editable once the modal closes")
+		field.Activated:Fire()
+		h.flush()
+		assert(box:IsFocused(), "and focuses again on a press")
+		h.stop()
+	end,
 	["text field defers autofocus and cancels it after disposal or disabling"] = function()
 		local h = harness()
 		local disabled = h.vide.source(false)

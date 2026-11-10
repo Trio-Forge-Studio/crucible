@@ -485,7 +485,7 @@ export function Volume(props: { onValueCommit: (volume: number) => void }) {
 
 ## Text field hook
 
-Attach `control` to your `GuiButton` and `box` to its `TextBox`. A press on the control gives the box focus, and the control writes `Editing` and `Invalid` as well as the press attributes. Gamepad selection can't reach the box, and while it has focus, the entry releases the menu input.
+Attach `control` to your `GuiButton` and `box` to its `TextBox`. A press on the control gives the box focus, and the control writes `Editing` and `Invalid` as well as the press attributes. Gamepad selection can't reach the box, and while it has focus, the entry releases the menu input. While a modal covers the field, the box is not editable, and a modal that opens during editing takes focus from it, which commits the text.
 
 The text is controllable through `value`, `defaultValue` and `onValueChange`, and writing a controlled `value` never calls `onValueChange`. `completionText` keeps what the player typed and adds the rest of the completion after it. Enter accepts the completion before `onSubmit` and `onValueCommit` run. Losing focus always calls `onValueCommit`. `maxLength` limits input and submitted completions in bytes, the way Luau string slicing counts. `autoFocus` waits until just after the field mounts, and gives the box focus only if the field still exists, is enabled and is in the scope on top.
 
