@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-38197b906faea2dfa107bf5de366113204a6a99d1ca150b0c50f7a175e0eb867  build/sample-game.rbxl
+4fa909a5ba6b898e888faf3a65a0687a0e388c3132abbba87278dff8eb6ff66b  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -140,7 +140,7 @@ bb3c03f0050997556231ff3768a2613c58a2a9793d24ce19906933809b72570e  packages/cruci
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/reactive/limits.d.ts
 17b855d88f4b83733349523a978ec7059b9cec558d554b21b3fd9150d898d242  packages/crucible/out/internal/reactive/limits.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/reactive/ownership.d.ts
-4d8550aa8477e133bfad265d6c482d7ed823e304afce4325df372f3581d8d5de  packages/crucible/out/internal/reactive/ownership.luau
+186800e800fb057b753d5ded7f173918a51e232a98538870d228ebba1e8b98cb  packages/crucible/out/internal/reactive/ownership.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/reactive/store.d.ts
 0aa0ef0f3d9e0fa1c6eea94a0c8a1a663951ae6a254e804626d75e6babf22054  packages/crucible/out/internal/reactive/store.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/registry.d.ts

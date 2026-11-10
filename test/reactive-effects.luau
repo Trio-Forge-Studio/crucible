@@ -354,6 +354,75 @@ return {
 			"E cleanup",
 		}, "the scope ended inside dispose(); the returned cleanup ran at once")
 	end,
+	["rule 25 an effect that disposes its own scope, then reads a computed, keeps no subscription"] = function()
+		local function count(link)
+			local total = 0
+			while link do
+				total += 1
+				link = link.nextSub
+			end
+			return total
+		end
+		for _, strict in { false, true } do
+			local r = realm(nil, nil, strict)
+			local trigger = r.charm.atom(0)
+			local source = r.charm.atom(1)
+			local derived = r.charm.computed(function()
+				return source() * 2
+			end)
+			local derivedNode
+			r.charm.effect(function()
+				derived()
+				derivedNode = r.charm.getActiveSub().deps.dep
+			end)()
+			spec.eq(derivedNode.subs, nil, `strict {strict}: nothing reads the computed`)
+			local nodes = {}
+			local function finishing(stopScope)
+				return function()
+					if trigger() == 0 then
+						return
+					end
+					table.insert(nodes, r.charm.getActiveSub())
+					stopScope()
+					derived()
+				end
+			end
+			local stopRoot
+			stopRoot = r.root(function()
+				r.api.effect(finishing(function()
+					stopRoot()
+				end))
+			end)
+			local stopNested
+			stopNested = r.root(function()
+				r.api.effect(function()
+					r.api.effect(finishing(function()
+						stopNested()
+					end))
+				end)
+			end)
+			local stopFirst
+			stopFirst = r.root(function()
+				r.api.effect(function()
+					if trigger() == 0 then
+						return
+					end
+					r.api.effect(finishing(function()
+						stopFirst()
+					end))
+				end)
+			end)
+			trigger(1)
+			spec.eq(#nodes, 3, `strict {strict}: each effect disposed its scope`)
+			for i, node in nodes do
+				spec.eq(node.deps, nil, `strict {strict}: disposed effect {i} holds no dependency`)
+			end
+			spec.eq(count(derivedNode.subs), 0, `strict {strict}: no disposed effect is subscribed to the computed`)
+			spec.eq(derivedNode.deps, nil, `strict {strict}: the unread computed released its source`)
+			source(2)
+			spec.eq(#nodes, 3, `strict {strict}: a later write reaches no disposed effect`)
+		end
+	end,
 	["rule 33 T7 a diamond reaches an effect once, with only new values"] = function()
 		local r = realm()
 		local a = r.charm.atom(1)
