@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-4fa909a5ba6b898e888faf3a65a0687a0e388c3132abbba87278dff8eb6ff66b  build/sample-game.rbxl
+4938ea1e3d08ed365bd6f6868f5d299046f27b32000a37b5d2f1cf3a7e13ff4c  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -254,7 +254,7 @@ ed8033db7ce5b95509d6b091c7f59bee62918002d88f6132dd2e7536e5a9a067  packages/cruci
 a54f62951cd76b47ec476d80735afb807ba853a06c9653b7248bd881eb6d194d  packages/crucible/out/ui/use-radio-group.d.ts
 efb3359f90623cb2d77e39f13894a63a889f9435a059ffe60ca66c59e31a45d7  packages/crucible/out/ui/use-radio-group.luau
 c709ed83453c8eec6fcf9359ff1315ca3994232ccf0a06349f750f1c960882c7  packages/crucible/out/ui/use-slider.d.ts
-653daa6fc21a3f5be907fe1222bcad398f99a5e135bfcd1ab23fb5158de453ec  packages/crucible/out/ui/use-slider.luau
+a4e7135fd7ce815d4e671bd610fdf5f9a44eb6329eed72184258cb95a6867c8a  packages/crucible/out/ui/use-slider.luau
 72f869cb7c4d11a9aed52db16113370e66ba822942f56ed740c30ed9b8c9a1c0  packages/crucible/out/ui/use-tabs.d.ts
 10af3a67788390694d4e7ffccc10d8eef75ef959601273542daa032978225fbe  packages/crucible/out/ui/use-tabs.luau
 5b09b2d987657648b36fb6ea1d976a3f6a83cc69eedb07014df05b809d23679e  packages/crucible/out/ui/use-text-field.d.ts
