@@ -2,8 +2,10 @@ use crate::child;
 use crucible_compiler::{Compiled, InstanceMap, Module, Target};
 use crucible_project::{Manifest, ManifestError, Place};
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::fmt;
-use std::io::Read;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
@@ -282,57 +284,77 @@ fn relative_to_cwd(text: &str) -> String {
     text.replace(&(cwd.replace('\\', "/") + "/"), "").replace(&(cwd + "\\"), "")
 }
 
-// Rojo writes the place file where it is told, so it builds into a new folder beside the place and a rename puts the
-// file over the place: a failed or killed build leaves the last place whole. The file keeps the place's name, because
-// Rojo picks the format from its extension and prints the name.
+// Rojo truncates the place file it is told to write, so it builds into the place's temporary file and a rename puts
+// that file over the place: a failed or killed build leaves the last place whole. The temporary file keeps the place's
+// extension, from which Rojo picks the format, and Rojo reads no `.rbxl` or `.rbxlx` file in its project, so a file a
+// killed build left never becomes an instance.
 fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
     let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-    let staging = staging_folder(parent).map_err(|error| format!("cannot write into {}: {error}", parent.display()))?;
-    let staged = staging.join(output.file_name().unwrap_or(output.as_os_str()));
-    let built = rojo_child(project, &staged).and_then(|()| {
-        std::fs::rename(&staged, output).map_err(|error| format!("cannot write {}: {error}", output.display()))
+    let cannot = |error: std::io::Error| format!("cannot write {}: {error}", output.display());
+    let temporary = crucible_compiler::temporary_path(output, output.extension().and_then(OsStr::to_str).unwrap_or(""));
+    let mut file =
+        OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&temporary).map_err(cannot)?;
+    if !lock(&file) {
+        return Err(cannot(std::io::Error::new(std::io::ErrorKind::ResourceBusy, "another build is writing it")));
+    }
+    let built = rojo_child(project, &temporary, output).and_then(|()| match std::fs::rename(&temporary, output) {
+        Ok(()) => Ok(true),
+        // Windows refuses to rename over a file that another program holds open without delete sharing, which a write
+        // in place, as Rojo made before temporary files, may still get past.
+        Err(_) => {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).and_then(|_| std::fs::write(output, bytes)).map(|()| false).map_err(cannot)
+        }
     });
-    let _ = std::fs::remove_dir_all(&staging);
-    built
+    if built != Ok(true) {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    drop(file);
+    built.map(drop)
 }
 
-// Rojo prints progress with println!, so it runs in a child whose stdout is our
-// stderr, which keeps our stdout for place paths.
-fn rojo_child(project: &Path, output: &Path) -> Result<(), String> {
+/// Takes the lock that keeps a second build of the same place out of its temporary file, and is false when another
+/// build holds it. A file system without locks lets a concurrent build through, as builds made before temporary files
+/// did.
+#[cfg(not(windows))]
+fn lock(file: &File) -> bool {
+    !matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+}
+
+/// Rojo writes the temporary file through its own handle, and Windows blocks other handles from a locked range, so the
+/// lock covers one byte past any place's end instead of the whole file.
+#[cfg(windows)]
+fn lock(file: &File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
+    use windows_sys::Win32::Storage::FileSystem::{LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx};
+    use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0};
+    let mut at = OVERLAPPED {
+        Anonymous: OVERLAPPED_0 { Anonymous: OVERLAPPED_0_0 { Offset: u32::MAX - 1, OffsetHigh: u32::MAX } },
+        ..OVERLAPPED::default()
+    };
+    let flags = LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY;
+    let locked = unsafe { LockFileEx(file.as_raw_handle(), flags, 0, 1, 0, &mut at) } != 0;
+    locked || std::io::Error::last_os_error().raw_os_error() != Some(ERROR_LOCK_VIOLATION as i32)
+}
+
+// Rojo prints progress with println!, so it runs in a child whose stdout comes back here and goes to stderr, which
+// keeps our stdout for place paths. Rojo names the file it wrote, so its lines name the place instead of the temporary
+// file.
+fn rojo_child(project: &Path, temporary: &Path, output: &Path) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
-    let status =
-        child::spawn_tied(Command::new(exe).arg(ROJO_BUILD).arg(project).arg(output).stdout(std::io::stderr()))
-            .and_then(|mut tied| tied.child.wait())
+    let mut tied =
+        child::spawn_tied(Command::new(exe).arg(ROJO_BUILD).arg(project).arg(temporary).stdout(Stdio::piped()))
             .map_err(|error| format!("cannot start Rojo: {error}"))?;
+    let name = |path: &Path| path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let (from, to) = (name(temporary), name(output));
+    for line in BufReader::new(tied.child.stdout.take().expect("stdout is piped")).split(b'\n') {
+        let Ok(line) = line else { break };
+        eprintln!("{}", String::from_utf8_lossy(&line).replace(&from, &to));
+    }
+    let status = tied.child.wait().map_err(|error| format!("cannot start Rojo: {error}"))?;
     if status.success() { Ok(()) } else { Err(format!("Rojo could not build {}", project.display())) }
-}
-
-const STAGING: &str = ".crucible-build-";
-
-// A killed build leaves its folder behind, so each build first deletes the ones it finds.
-fn staging_folder(parent: &Path) -> std::io::Result<PathBuf> {
-    for entry in std::fs::read_dir(parent)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let stale = name.to_str().and_then(|name| name.strip_prefix(STAGING)).is_some_and(|rest| {
-            rest.split_once('-').is_some_and(|(process, n)| {
-                [process, n].iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
-            })
-        });
-        if stale && entry.file_type()?.is_dir() {
-            std::fs::remove_dir_all(entry.path())?;
-        }
-    }
-    let mut n = 1;
-    loop {
-        let folder = parent.join(format!("{STAGING}{}-{n}", std::process::id()));
-        match std::fs::create_dir(&folder) {
-            Ok(()) => return Ok(folder),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 pub const ROJO_BUILD: &str = "__rojo-build";

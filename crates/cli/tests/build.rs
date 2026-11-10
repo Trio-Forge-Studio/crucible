@@ -501,23 +501,191 @@ fn rojo_failure_exits_1_with_rojo_diagnostics() {
 }
 
 #[test]
-fn a_failed_rojo_build_keeps_the_last_place_whole_and_a_killed_builds_folder_goes() {
+fn a_failed_rojo_build_keeps_the_last_place_whole() {
     let game = Game::template_layout();
     let out = game.build(&[]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    assert!(text(&out.stderr).contains("Built project to start.rbxl"), "Rojo names the place file");
+    assert!(text(&out.stderr).contains("Built project to start.rbxl"), "Rojo's line names the place file");
     let place = fs::read(game.path("build/start.rbxl")).unwrap();
-    game.write("build/.crucible-build-41-1/start.rbxl", "half a place");
-    game.write("build/.crucible-build-mine/notes.txt", "kept");
+    fs::write(crucible_compiler::temporary_path(&game.path("build/start.rbxl"), "rbxl"), "half a place").unwrap();
     let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
     project["tree"]["Workspace"] = json!({ "$className": "Workspace", "Map": { "$path": "missing-map" } });
     game.json("default.project.json", &project);
     assert_eq!(code(&game.build(&[])), 1);
     assert_eq!(fs::read(game.path("build/start.rbxl")).unwrap(), place, "the last place stays whole");
+    assert_eq!(listed(&game.path("build")), ["start.rbxl"], "the failed build removes its temporary file");
+}
+
+fn listed(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> =
-        fs::read_dir(game.path("build")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     names.sort();
-    assert_eq!(names, [".crucible-build-mine", "start.rbxl"]);
+    names
+}
+
+#[test]
+fn a_build_removes_no_file_or_folder_named_like_its_own() {
+    let game = Game::template_layout();
+    assert_eq!(code(&game.build(&[])), 0);
+    let mine = [
+        "build/.crucible-build-41-1/start.rbxl",
+        "build/.crucible-build-0-0/notes.txt",
+        "build/.crucible-build-00001-00001/notes.txt",
+        "build/.crucible-0000000000000000.rbxl",
+        "include/Promise.lua.crucible-write-41-1",
+        "include/RuntimeLib.lua.crucible-write-0-0",
+        "include/.crucible-0000000000000000.tmp",
+        "out/shared/greeting.luau.crucible-write-41-1",
+        "out/shared/.crucible-0000000000000000.tmp",
+    ];
+    for path in mine {
+        game.write(path, "mine");
+    }
+    game.write("src/shared/greeting.ts", "export const greet = (name: string) => `hi from ${name}`;\n");
+    game.write("include/Promise.lua", "edited");
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.read("out/shared/greeting.luau").contains("hi from"), "the module is written again");
+    assert_eq!(fs::read(game.path("include/Promise.lua")).unwrap(), vendored("Promise.lua"));
+    for path in mine {
+        assert_eq!(game.read(path), "mine", "{path} stays");
+    }
+}
+
+/// The name of every instance in a binary place file, sorted.
+fn instances(place: &Path) -> Vec<String> {
+    let dom = rbx_binary::from_reader(fs::read(place).unwrap().as_slice()).unwrap();
+    let mut names: Vec<String> = dom.descendants().map(|instance| instance.name.clone()).collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_place_built_inside_a_folder_its_project_reads_holds_no_instance_of_the_builds_files() {
+    let game = Game::template_layout();
+    assert_eq!(code(&game.build(&[])), 0);
+    let expected = instances(&game.path("build/start.rbxl"));
+    let inside = game.path("out/shared/inside.rbxl");
+    let killed = [
+        (crucible_compiler::temporary_path(&inside, "rbxl"), fs::read(game.path("build/start.rbxl")).unwrap()),
+        (crucible_compiler::temporary_path(&game.path("out/shared/greeting.luau"), "tmp"), b"return 1".to_vec()),
+    ];
+    for (path, bytes) in &killed {
+        fs::write(path, bytes).unwrap();
+    }
+    for _ in 0..2 {
+        let out = game.build(&["--output", "out/shared/inside.rbxl"]);
+        assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+        assert!(text(&out.stderr).contains("Built project to inside.rbxl"), "{}", text(&out.stderr));
+        assert_eq!(instances(&inside), expected, "the place holds the same instances as one built outside");
+    }
+}
+
+#[test]
+fn a_second_build_of_a_place_fails_while_the_first_writes_it_and_the_place_stays_whole() {
+    use std::io::BufRead;
+    let game = Game::template_layout();
+    assert_eq!(code(&game.build(&[])), 0);
+    let place = fs::read(game.path("build/start.rbxl")).unwrap();
+    let mut first = Command::new(env!("CARGO_BIN_EXE_crucible"))
+        .arg("build")
+        .current_dir(game.dir.path())
+        .env("CRUCIBLE_TEST_HOLD_ROJO", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = std::io::BufReader::new(first.stderr.take().unwrap());
+    let mut line = String::new();
+    while !line.contains("holding") {
+        line.clear();
+        assert_ne!(stderr.read_line(&mut line).unwrap(), 0, "the first build exited before Rojo started");
+    }
+
+    let second = game.build(&[]);
+    let _ = first.kill();
+    let _ = first.wait();
+    assert_eq!(code(&second), 1, "{}", text(&second.stderr));
+    assert!(text(&second.stderr).contains("another build is writing it"), "{}", text(&second.stderr));
+    assert_eq!(fs::read(game.path("build/start.rbxl")).unwrap(), place, "the place stays whole");
+
+    let third = game.build(&[]);
+    assert_eq!(code(&third), 0, "{}", text(&third.stderr));
+    assert_eq!(fs::read(game.path("build/start.rbxl")).unwrap(), place);
+    assert_eq!(listed(&game.path("build")), ["start.rbxl"], "the next build writes the killed one's file again");
+}
+
+#[test]
+fn a_folder_where_the_place_goes_fails_the_build_naming_it_and_stays() {
+    let game = Game::template_layout();
+    game.write("build/start.rbxl/notes.txt", "mine");
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 1);
+    assert!(
+        text(&out.stderr).contains("cannot write") && text(&out.stderr).contains("start.rbxl"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(game.read("build/start.rbxl/notes.txt"), "mine");
+    assert_eq!(listed(&game.path("build")), ["start.rbxl"], "the temporary file goes");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_read_only_place_fails_the_build_naming_it_and_keeps_its_bytes() {
+    let game = Game::template_layout();
+    assert_eq!(code(&game.build(&[])), 0);
+    let path = game.path("build/start.rbxl");
+    let place = fs::read(&path).unwrap();
+    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions.clone()).unwrap();
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 1);
+    assert!(
+        text(&out.stderr).contains("cannot write") && text(&out.stderr).contains("start.rbxl"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(fs::read(&path).unwrap(), place);
+    assert_eq!(listed(&game.path("build")), ["start.rbxl"], "the temporary file goes");
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    fs::set_permissions(&path, permissions).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn files_another_program_holds_without_delete_sharing_are_written_in_place() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 1;
+    const FILE_SHARE_WRITE: u32 = 2;
+    let game = Game::template_layout();
+    assert_eq!(code(&game.build(&[])), 0);
+    let place = fs::read(game.path("build/start.rbxl")).unwrap();
+    let held: Vec<fs::File> = ["build/start.rbxl", "out/shared/greeting.luau", "include/Promise.lua"]
+        .iter()
+        .map(|path| {
+            fs::OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(game.path(path))
+                .unwrap()
+        })
+        .collect();
+    game.write("src/shared/greeting.ts", "export const greet = (name: string) => `hi from ${name}`;\n");
+    game.write("include/Promise.lua", "edited");
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.read("out/shared/greeting.luau").contains("hi from"));
+    assert_eq!(fs::read(game.path("include/Promise.lua")).unwrap(), vendored("Promise.lua"));
+    assert_place(&game.path("build/start.rbxl"));
+    assert_ne!(fs::read(game.path("build/start.rbxl")).unwrap(), place, "the place holds the new module");
+    for dir in ["build", "include", "out/shared"] {
+        let names = listed(&game.path(dir));
+        assert!(!names.iter().any(|name| name.starts_with(".crucible")), "{dir}: {names:?}");
+    }
+    drop(held);
 }
 
 #[test]
