@@ -37,6 +37,52 @@ return {
 		assert(items[3].NextSelectionUp == nil, "the cross axis stays with Roblox navigation")
 		h.stop()
 	end,
+	["changing orientation moves an item's links to the new axis and clears the ones it wrote"] = function()
+		local h = harness()
+		local orientation = h.vide.source("Horizontal")
+		local group = h.require("group").createGroup({ orientation = orientation })
+		local items = {}
+		h.mount("Base", function()
+			for index = 1, 3 do
+				local object = h.instance("TextButton", "Base")
+				h.runtime.useSelection({}).action(object)
+				group.item(object)
+				items[index] = object
+			end
+		end)
+		h.select(items[2])
+		h.select(items[1])
+		orientation("Vertical")
+		assert(
+			items[1].NextSelectionUp == items[1] and items[1].NextSelectionDown == items[2],
+			"the selected item links along the new axis"
+		)
+		assert(
+			items[1].NextSelectionLeft == nil and items[1].NextSelectionRight == nil,
+			"and no longer along the old one"
+		)
+		h.select(items[2])
+		assert(
+			items[2].NextSelectionUp == items[1] and items[2].NextSelectionDown == items[3],
+			"an item selected before the change links vertically when it is selected again"
+		)
+		assert(
+			items[2].NextSelectionLeft == nil and items[2].NextSelectionRight == nil,
+			"and drops its old horizontal links"
+		)
+		orientation("Horizontal")
+		assert(
+			items[2].NextSelectionLeft == items[1] and items[2].NextSelectionRight == items[3],
+			"back to horizontal links left and right"
+		)
+		assert(items[2].NextSelectionUp == nil and items[2].NextSelectionDown == nil, "and clears up and down")
+		local elsewhere = h.instance("TextButton", "Base")
+		items[2].NextSelectionRight = elsewhere
+		orientation("Vertical")
+		assert(items[2].NextSelectionRight == elsewhere, "a link the game set instead is not the group's to clear")
+		assert(items[2].NextSelectionLeft == nil, "the group's own link is")
+		h.stop()
+	end,
 	["loop wraps at both ends"] = function()
 		local h, items = setup({ loop = true })
 		h.select(items[4])
