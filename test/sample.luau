@@ -384,6 +384,50 @@ return {
 		w.place:Destroy()
 	end,
 
+	["compiled sample a respawn keeps the settings menu and its open dialog"] = function()
+		local w = newWorld()
+		local ann = connect(w, "Ann", ANN)
+		local playerGui = ann.player.PlayerGui
+		local function press(button)
+			ui.fire(button, "Activated")
+			w.link:flush()
+		end
+		local function lastModal(): string?
+			local last
+			for _, message in ann.messages do
+				if string.find(message, "Sample menu modal", 1, true) then
+					last = message
+				end
+			end
+			return last
+		end
+		w:press(ann, M)
+		local screen = assert(playerGui:FindFirstChild("SettingsMenu"), "M mounts the menu")
+		press(assert(screen:FindFirstChild("Help", true), "the dialog trigger mounts"))
+		ui.ancestryChanged(screen)
+		assert(lastModal() == "Sample menu modal true", "the dialog is open")
+		-- A respawn destroys every ScreenGui in PlayerGui whose ResetOnSpawn is true.
+		for _, child in playerGui:GetChildren() do
+			if child:IsA("ScreenGui") and child.ResetOnSpawn then
+				child:Destroy()
+			end
+		end
+		w.link:flush()
+		assert(
+			playerGui:FindFirstChild("SettingsMenu") == screen,
+			"the menu outlives the respawn, as its Subsystem does"
+		)
+		press(assert(screen:FindFirstChild("Done", true), "with its dialog still open"))
+		assert(lastModal() == "Sample menu modal false", "Done closes the dialog and its modal")
+		w:press(ann, M)
+		assert(playerGui:FindFirstChild("SettingsMenu") == nil, "M unmounts the menu")
+		w:press(ann, M)
+		assert(playerGui:FindFirstChild("SettingsMenu") ~= nil, "and mounts it again")
+		w:press(ann, M)
+		assert(lastModal() == "Sample menu modal false", "no modal is left open")
+		w.place:Destroy()
+	end,
+
 	["compiled sample ending the Menu releases its input connections"] = function()
 		local w = newWorld()
 		local ann = connect(w, "Ann", ANN)

@@ -87,6 +87,8 @@ export class Menu extends Subsystem {
 			if (!shown) return;
 			const screen = own(new Instance("ScreenGui"));
 			screen.Name = "SettingsMenu";
+			// The Menu and its watch outlive the character, so a respawn must not destroy the dialog under them.
+			screen.ResetOnSpawn = false;
 			screen.Parent = Players.LocalPlayer.WaitForChild("PlayerGui");
 			own(mount(() => <Settings music={this.music()} onMusicChange={(on) => this.music(on)} />, screen));
 		});
