@@ -5,12 +5,12 @@ mod facts;
 mod include;
 mod lower;
 mod macros;
+mod phase;
 mod program;
 mod project;
 mod tree;
 mod write;
 
-use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -22,15 +22,11 @@ pub use facts::{
     Callee, Constant, Fact, Facts, Falsy, FileFacts, Import, Jsx, ModulePath, Place, Reason, Receiver, RuntimeLib,
     Site, Span, Unanswered,
 };
-#[cfg(not(feature = "test-support"))]
-use facts::{FileFacts, Unanswered};
 pub use include::write_include;
 pub use lower::Error;
-use lower::ImportBase;
 #[cfg(feature = "test-support")]
 pub use macros::{Macro, MacroKind};
 pub use project::InstanceMap;
-use write::HEADER;
 pub use write::{Written, write};
 
 /// A configuration, syntax, type or Crucible error.
@@ -96,7 +92,7 @@ pub fn analyze_with(
 ) -> Result<Facts, Vec<Diagnostic>> {
     on_compiler_thread(|| {
         let checked = program::check(tsconfig)?;
-        Ok(extract::extract(checked, target, extensions))
+        Ok(extract::extract(checked, target, extensions).into_facts())
     })
 }
 
@@ -173,56 +169,7 @@ fn compile_on_thread(
     extensions: &mut [&mut dyn Extension],
 ) -> Result<Compiled, Failure> {
     let checked = program::check(tsconfig).map_err(Failure::Check)?;
-    let files = checked.files();
-    let paths: Vec<String> = files.iter().map(|f| f.path()).collect();
-    let root = checked.source_root();
-    let out_dir = PathBuf::from(checked.out_dir().unwrap_or_else(|| root.clone()));
-    let facts = extract::extract(checked, target, extensions);
-    if !facts.diagnostics.is_empty() {
-        return Err(Failure::Crucible(facts.diagnostics));
-    }
+    let validated = extract::extract(checked, target, extensions).validate().map_err(Failure::Crucible)?;
     let extensions: Vec<&dyn Extension> = extensions.iter().map(|e| &**e).collect();
-    let facts_by_path: HashMap<&str, (u32, &FileFacts)> =
-        facts.files.iter().enumerate().map(|(id, f)| (f.path.as_str(), (id as u32, f))).collect();
-    let mut modules = Vec::with_capacity(files.len());
-    let mut errors = Vec::new();
-    for (file, path) in files.into_iter().zip(&paths) {
-        let Some(&(id, file_facts)) = facts_by_path.get(path.as_str()) else {
-            let message = "the fact table has no entry for this file".to_owned();
-            errors.push(Error { path: path.clone(), line: 1, column: 1, message });
-            continue;
-        };
-        let relative = path.strip_prefix(root.as_str()).unwrap_or(path).trim_start_matches('/');
-        let stem = relative.rsplit_once('.').map_or(relative, |(stem, _)| stem);
-        let (stem, import_base) = match stem.strip_suffix("index") {
-            Some(dir) if dir.is_empty() || dir.ends_with('/') => (format!("{dir}init"), ImportBase::Script),
-            _ => (stem.to_owned(), ImportBase::ScriptParent),
-        };
-        let unanswered: Vec<&Unanswered> = facts.unanswered.iter().filter(|u| u.path == *path).collect();
-        match lower::lower(file, file_facts, &unanswered, import_base, &facts.place, id, &extensions) {
-            Ok(chunk) => {
-                let mut source = crucible_luau::print(&chunk);
-                source.insert_str(0, HEADER);
-                modules.push(Module { path: format!("{stem}.luau"), source });
-            }
-            Err(e) => errors.extend(e),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(Failure::Lower(errors));
-    }
-    if let Target::Game { modules: virtual_modules, .. } = target {
-        let compiled = modules.len();
-        for module in virtual_modules {
-            if let Some(other) = modules[..compiled].iter().find(|m| project::same_file(&m.path, module.path)) {
-                let message = format!(
-                    "the virtual module `{}` has the output path {}, which collides with the compiled module {}",
-                    module.specifier, module.path, other.path
-                );
-                return Err(Failure::Crucible(vec![Diagnostic { path: None, line: 0, column: 0, code: 0, message }]));
-            }
-            modules.push(Module { path: module.path.to_owned(), source: format!("{HEADER}{}", module.source) });
-        }
-    }
-    Ok(Compiled { out_dir, modules })
+    validated.lower(&extensions).map_err(Failure::Lower)?.finish(target)
 }

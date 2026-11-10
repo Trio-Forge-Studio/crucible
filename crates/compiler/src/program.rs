@@ -19,15 +19,6 @@ pub(crate) struct Checked {
 }
 
 impl Checked {
-    pub fn files(&self) -> Vec<crate::tree::File> {
-        self.program
-            .source_files()
-            .iter()
-            .filter(|f| !f.is_declaration_file() && !f.is_js())
-            .map(|&f| crate::tree::File::new(f))
-            .collect()
-    }
-
     /// The folder the output layout mirrors: `rootDir`, or else the deepest folder that holds every source file and
     /// `rootDirs` entry.
     pub fn source_root(&self) -> String {

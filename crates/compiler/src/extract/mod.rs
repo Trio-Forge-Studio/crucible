@@ -25,13 +25,14 @@ use crate::facts::{
     Unanswered,
 };
 use crate::macros::Macro;
+use crate::phase::Extracted;
 use crate::program::Checked;
 use crate::project::{Game, absolute, installed_module};
 use crate::tree::File;
 use extension::{ExtractCx, ProgramCx};
 use report::Code;
 
-pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Facts {
+pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &mut [&mut dyn Extension]) -> Extracted {
     let root = checked.source_root();
     let out_dir = checked.out_dir();
     let dir = checked.config_dir();
@@ -80,24 +81,22 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         game,
         config_dir: PathBuf::from(&dir),
         facts,
-        text: "",
-        path: String::new(),
-        table: Table::default(),
-        pending: Vec::new(),
-        modules: Vec::new(),
+        file: FileScan::default(),
         reported: HashSet::new(),
         options,
-        jsx: None,
     };
     for extension in extensions.iter_mut() {
         extension.begin_program(&mut ProgramCx { x: &mut x });
     }
+    let mut sources = Vec::new();
     for &file in program.source_files() {
         if file.is_declaration_file() || file.is_js() {
             continue;
         }
-        let id = x.facts.files.len() as u32;
-        x.source_file(file);
+        let file_facts = x.source_file(file);
+        x.facts.files.push(file_facts);
+        sources.push(File::new(file));
+        let id = (x.facts.files.len() - 1) as u32;
         for (index, extension) in extensions.iter_mut().enumerate() {
             let mut cx = ExtractCx { program: ProgramCx { x: &mut x }, file: id, extension: index };
             extension.extract_file(&mut cx, File::new(file));
@@ -107,7 +106,8 @@ pub(crate) fn extract(checked: Checked, target: crate::Target<'_>, extensions: &
         extension.finish_program(&mut ProgramCx { x: &mut x });
     }
     x.facts.diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
-    x.facts
+    let out_dir = PathBuf::from(out_dir.unwrap_or_else(|| root.clone()));
+    Extracted::new(root, out_dir, sources, x.facts)
 }
 
 /// When an import's module must be reachable in the place.
@@ -197,13 +197,23 @@ struct Extractor {
     game: Option<Game>,
     config_dir: PathBuf,
     facts: Facts,
+    file: FileScan,
+    reported: HashSet<report::Reported>,
+    options: P<CompilerOptions>,
+}
+
+/// What extraction keeps while it walks one source file. `source_file` starts each file with a new one and consumes
+/// it at the end, so nothing carries over to the next file.
+#[derive(Default)]
+struct FileScan {
     text: &'static str,
     path: String,
     table: Table,
+    unanswered: Vec<Unanswered>,
+    /// Decided once the walk has seen every reference in the file.
     pending: Vec<ConstEnumImport>,
+    /// Placed once every import binding is decided.
     modules: Vec<ModuleUse>,
-    reported: HashSet<report::Reported>,
-    options: P<CompilerOptions>,
     jsx: Option<Jsx>,
 }
 
@@ -224,43 +234,44 @@ impl Extractor {
         self.facts.place.helpers.push(Helper { module: *module, path });
     }
 
-    fn source_file(&mut self, file: P<SourceFile>) {
-        self.text = file.text();
-        self.path = file.file_name().replace('\\', "/");
-        let first = self.facts.unanswered.len();
+    fn source_file(&mut self, file: P<SourceFile>) -> FileFacts {
+        self.file = FileScan { text: file.text(), path: file.file_name().replace('\\', "/"), ..FileScan::default() };
+        // Imports first, so a const enum import is pending before any reference to it, wherever the import sits.
         let statements = file.as_node().statements();
         let (imports, rest): (Vec<P<Node>>, Vec<P<Node>>) =
             statements.iter().copied().partition(|s| s.kind() == Kind::ImportDeclaration);
         for statement in imports.into_iter().chain(rest) {
             self.visit(statement);
         }
-        for pending in std::mem::take(&mut self.pending) {
+        for pending in std::mem::take(&mut self.file.pending) {
             let import = if pending.used { Import::Keep } else { Import::Elide };
-            self.table.store(pending.span, Site::Import, |f| &mut f.import, import);
+            self.file.table.store(pending.span, Site::Import, |f| &mut f.import, import);
         }
-        for module in std::mem::take(&mut self.modules) {
+        for module in std::mem::take(&mut self.file.modules) {
             let kept = match &module.kept {
                 Kept::Always => true,
-                Kept::AnyOf(bindings) => {
-                    bindings.iter().any(|b| self.table.facts.get(b).and_then(|f| f.import).is_some_and(Import::kept))
-                }
+                Kept::AnyOf(bindings) => bindings
+                    .iter()
+                    .any(|b| self.file.table.facts.get(b).and_then(|f| f.import).is_some_and(Import::kept)),
             };
             if kept {
                 self.module_path(module.specifier);
             }
         }
-        let table = std::mem::take(&mut self.table);
-        for (span, site) in table.conflicts {
-            self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason: Reason::Conflict });
-        }
-        self.facts.unanswered[first..].sort_by_key(|u| (u.span, u.site));
-        let mut facts: Vec<(Span, Fact)> = table.facts.into_iter().collect();
-        facts.sort_unstable_by_key(|(span, _)| *span);
-        self.facts.files.push(FileFacts { path: std::mem::take(&mut self.path), facts, jsx: self.jsx.take() });
+        let FileScan { path, table, mut unanswered, jsx, .. } = std::mem::take(&mut self.file);
+        unanswered.extend(table.conflicts.into_iter().map(|(span, site)| Unanswered {
+            path: path.clone(),
+            span,
+            site,
+            reason: Reason::Conflict,
+        }));
+        unanswered.sort_by_key(|u| (u.span, u.site));
+        self.facts.unanswered.extend(unanswered);
+        FileFacts::new(path, table.facts, jsx)
     }
 
     fn span(&self, n: P<Node>) -> Span {
-        crate::tree::span(n, self.text)
+        crate::tree::span(n, self.file.text)
     }
 
     fn site(&mut self) {
@@ -269,7 +280,7 @@ impl Extractor {
 
     fn unanswered(&mut self, n: P<Node>, site: Site, reason: Reason) {
         let span = self.span(n);
-        self.facts.unanswered.push(Unanswered { path: self.path.clone(), span, site, reason });
+        self.file.unanswered.push(Unanswered { path: self.file.path.clone(), span, site, reason });
     }
 
     fn type_of(&mut self, n: P<Node>) -> P<Type> {
@@ -337,8 +348,8 @@ impl Extractor {
             }
             Kind::JsxSpreadAttribute => self.object_spread(n.as_jsx_spread_attribute().expression),
             Kind::JsxElement | Kind::JsxSelfClosingElement | Kind::JsxFragment => {
-                if self.jsx.is_none() {
-                    self.jsx = Some(self.jsx_lowering(n));
+                if self.file.jsx.is_none() {
+                    self.file.jsx = Some(self.jsx_lowering(n));
                 }
             }
             Kind::ReturnStatement => {
@@ -369,7 +380,7 @@ impl Extractor {
                 self.site();
                 if let Some(value) = self.checker.get_constant_value(n).and_then(types::constant) {
                     let span = self.span(n);
-                    self.table.store(span, Site::Constant, |f| &mut f.constant, value);
+                    self.file.table.store(span, Site::Constant, |f| &mut f.constant, value);
                 }
             }
             Kind::Identifier => self.identifier(n),
@@ -418,7 +429,7 @@ impl Extractor {
                 None if object.is_some() => self.callee_kind(callee, Site::CallCallee, t),
                 None => Callee::Function,
             };
-            self.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
+            self.file.table.store(span, Site::CallCallee, |f| &mut f.callee, resolved);
             let arguments = n.arguments();
             if resolved == Callee::Macro(Macro::Assert)
                 && let Some(&first) = arguments.first()
@@ -433,7 +444,7 @@ impl Extractor {
                 }
             } else if arguments.iter().any(|&a| returns_values(a)) {
                 let roblox = self.possibly_roblox(t);
-                self.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
+                self.file.table.store(span, Site::CallCallee, |f| &mut f.roblox_api, roblox);
             }
         }
         if let Some(object) = object {
@@ -454,7 +465,7 @@ impl Extractor {
         } else {
             let callee = if property { self.callee_kind(tag, Site::CallCallee, t) } else { Callee::Function };
             let span = self.span(tag);
-            self.table.store(span, Site::CallCallee, |f| &mut f.callee, callee);
+            self.file.table.store(span, Site::CallCallee, |f| &mut f.callee, callee);
         }
         self.call_or_return(n);
     }
@@ -473,10 +484,10 @@ impl Extractor {
         let t = self.type_of(callee);
         let span = self.span(callee);
         if let Some(m) = t.symbol().and_then(|s| self.globals.constructor_macro(s)) {
-            self.table.store(span, Site::NewCallee, |f| &mut f.callee, Callee::Macro(m));
+            self.file.table.store(span, Site::NewCallee, |f| &mut f.callee, Callee::Macro(m));
         } else if n.arguments().iter().any(|&a| returns_values(a)) {
             let roblox = self.possibly_roblox(t);
-            self.table.store(span, Site::NewCallee, |f| &mut f.roblox_api, roblox);
+            self.file.table.store(span, Site::NewCallee, |f| &mut f.roblox_api, roblox);
         }
     }
 
@@ -489,7 +500,7 @@ impl Extractor {
         self.site();
         if let Some(value) = self.checker.get_constant_value(n).and_then(types::constant) {
             let span = self.span(n);
-            self.table.store(span, Site::Constant, |f| &mut f.constant, value);
+            self.file.table.store(span, Site::Constant, |f| &mut f.constant, value);
         }
     }
 
@@ -504,7 +515,7 @@ impl Extractor {
                 let class = t.symbol().is_some_and(|s| self.checker.get_symbol_flags(s).intersects(SymbolFlags::Class))
                     && !self.possibly_roblox(t);
                 let span = self.span(right);
-                self.table.store(span, Site::InstanceOfClass, |f| &mut f.class_constructor, class);
+                self.file.table.store(span, Site::InstanceOfClass, |f| &mut f.class_constructor, class);
             }
             Kind::PlusToken | Kind::PlusEqualsToken => self.plus(left, right),
             Kind::AmpersandAmpersandToken | Kind::BarBarToken => {
@@ -556,7 +567,7 @@ impl Extractor {
         self.site();
         let falsy = self.falsy_of(n);
         let span = self.span(n);
-        self.table.store(span, Site::Truthiness, |f| &mut f.falsy, falsy);
+        self.file.table.store(span, Site::Truthiness, |f| &mut f.falsy, falsy);
     }
 
     /// `&&`, `||` and parentheses answer from their operands. The checker types `a && b` with only `a`'s
@@ -588,7 +599,7 @@ impl Extractor {
         let t = self.type_of(n);
         let falsy = self.falsy(t);
         let span = self.span(n);
-        self.table.store(span, Site::Spread, |f| &mut f.falsy, falsy);
+        self.file.table.store(span, Site::Spread, |f| &mut f.falsy, falsy);
     }
 
     fn for_statement(&mut self, n: P<Node>) {
@@ -617,7 +628,7 @@ impl Extractor {
                 self.site();
                 let integer = jsnum::from_string(n.as_numeric_literal().text()).0.fract() == 0.0;
                 let span = self.span(n);
-                self.table.store(span, Site::Constant, |f| &mut f.integer, integer);
+                self.file.table.store(span, Site::Constant, |f| &mut f.integer, integer);
             }
             Kind::BinaryExpression => {
                 let binary = n.as_binary_expression();
@@ -642,7 +653,7 @@ impl Extractor {
                     self.definitely(t, types::is_integer_literal)
                 };
                 let span = self.span(n);
-                self.table.store(span, Site::Constant, |f| &mut f.integer, integer);
+                self.file.table.store(span, Site::Constant, |f| &mut f.integer, integer);
             }
         }
     }
@@ -664,7 +675,7 @@ impl Extractor {
             let t = self.type_of(for_of.expression);
             if let Some(length) = self.step_length(t) {
                 let span = self.span(for_of.expression);
-                self.table.store(span, Site::Iterable, |f| &mut f.step_length, length);
+                self.file.table.store(span, Site::Iterable, |f| &mut f.step_length, length);
             }
         }
         let pattern = for_of.initializer;
@@ -727,8 +738,8 @@ impl Extractor {
     fn receiver(&mut self, n: P<Node>, receiver: Receiver, t: P<Type>, site: Site) {
         let falsy = self.falsy(t);
         let span = self.span(n);
-        self.table.store(span, site, |f| &mut f.receiver, receiver);
-        self.table.store(span, site, |f| &mut f.falsy, falsy);
+        self.file.table.store(span, site, |f| &mut f.receiver, receiver);
+        self.file.table.store(span, site, |f| &mut f.falsy, falsy);
     }
 
     fn iterable(&mut self, n: P<Node>, site: Site) -> Option<Receiver> {
@@ -768,28 +779,28 @@ impl Extractor {
         let t = self.type_of(n);
         let callee = self.callee_kind(n, Site::Function, t);
         let span = self.span(n);
-        self.table.store(span, Site::Function, |f| &mut f.callee, callee);
+        self.file.table.store(span, Site::Function, |f| &mut f.callee, callee);
     }
 
     fn identifier(&mut self, n: P<Node>) {
         let text = n.as_identifier().text();
-        if let Some(i) = self.pending.iter().position(|p| p.name == text && !p.used)
+        if let Some(i) = self.file.pending.iter().position(|p| p.name == text && !p.used)
             && !n.parent().is_some_and(|p| {
                 matches!(
                     p.kind(),
                     Kind::ImportSpecifier | Kind::ImportClause | Kind::NamespaceImport | Kind::ExportSpecifier
                 )
             })
-            && self.checker.get_symbol_at_location_exported(n) == Some(self.pending[i].alias)
+            && self.checker.get_symbol_at_location_exported(n) == Some(self.file.pending[i].alias)
         {
-            self.pending[i].used = true;
+            self.file.pending[i].used = true;
         }
         if text == Macro::Promise.name() && self.globals.identifier_macro.is_some() {
             let symbol = self.checker.get_symbol_at_location_exported(n);
             if symbol.is_some() && symbol == self.globals.identifier_macro {
                 self.site();
                 let span = self.span(n);
-                self.table.store(span, Site::Identifier, |f| &mut f.callee, Callee::Macro(Macro::Promise));
+                self.file.table.store(span, Site::Identifier, |f| &mut f.callee, Callee::Macro(Macro::Promise));
             }
         }
     }
@@ -797,7 +808,7 @@ impl Extractor {
     fn import_declaration(&mut self, n: P<Node>) {
         let declaration = n.as_import_declaration();
         let Some(clause) = declaration.import_clause else {
-            self.modules.push(ModuleUse { specifier: declaration.module_specifier, kept: Kept::Always });
+            self.file.modules.push(ModuleUse { specifier: declaration.module_specifier, kept: Kept::Always });
             return;
         };
         if clause.is_type_only() {
@@ -821,14 +832,14 @@ impl Extractor {
             }
         }
         let spans = bindings.iter().map(|&(_, name)| self.span(name)).collect();
-        self.modules.push(ModuleUse { specifier: declaration.module_specifier, kept: Kept::AnyOf(spans) });
+        self.file.modules.push(ModuleUse { specifier: declaration.module_specifier, kept: Kept::AnyOf(spans) });
         for (declaration, name) in bindings {
             self.site();
             let span = self.span(name);
             if self.resolver.is_referenced_alias_declaration(&mut self.checker, declaration) {
                 let whole = declaration == clause && self.exports_equals(n.as_import_declaration().module_specifier);
                 let import = if whole { Import::KeepModule } else { Import::Keep };
-                self.table.store(span, Site::Import, |f| &mut f.import, import);
+                self.file.table.store(span, Site::Import, |f| &mut f.import, import);
                 continue;
             }
             let alias = self.checker.get_symbol_of_declaration_exported(declaration);
@@ -836,10 +847,13 @@ impl Extractor {
             let const_enum =
                 target.is_some_and(|t| t.flags().intersects(SymbolFlags::ConstEnum | SymbolFlags::ConstEnumOnlyModule));
             match alias {
-                Some(alias) if const_enum => {
-                    self.pending.push(ConstEnumImport { name: name.as_identifier().text(), alias, span, used: false })
-                }
-                _ => self.table.store(span, Site::Import, |f| &mut f.import, Import::Elide),
+                Some(alias) if const_enum => self.file.pending.push(ConstEnumImport {
+                    name: name.as_identifier().text(),
+                    alias,
+                    span,
+                    used: false,
+                }),
+                _ => self.file.table.store(span, Site::Import, |f| &mut f.import, Import::Elide),
             }
         }
     }
@@ -886,14 +900,14 @@ impl Extractor {
                     })
                 });
                 let span = self.span(specifier);
-                self.table.store(
+                self.file.table.store(
                     span,
                     Site::Import,
                     |f| &mut f.import,
                     if value { Import::Keep } else { Import::Elide },
                 );
                 if value {
-                    self.modules.push(ModuleUse { specifier, kept: Kept::Always });
+                    self.file.modules.push(ModuleUse { specifier, kept: Kept::Always });
                 }
             }
             return;
@@ -910,7 +924,7 @@ impl Extractor {
                 .filter(|s| !s.is_type_only())
                 .map(|s| self.span(s.name().unwrap()))
                 .collect();
-            self.modules.push(ModuleUse { specifier: module, kept: Kept::AnyOf(spans) });
+            self.file.modules.push(ModuleUse { specifier: module, kept: Kept::AnyOf(spans) });
         }
         for &specifier in clause.as_named_exports().elements.nodes() {
             if specifier.is_type_only() {
@@ -921,7 +935,7 @@ impl Extractor {
             if declaration.module_specifier.is_none()
                 && let Some(local) = alias.and_then(|a| self.checker.get_immediate_aliased_symbol_exported(a))
             {
-                for pending in self.pending.iter_mut().filter(|p| p.alias == local) {
+                for pending in self.file.pending.iter_mut().filter(|p| p.alias == local) {
                     pending.used = true;
                 }
             }
@@ -929,7 +943,7 @@ impl Extractor {
             let value = target.is_some_and(|t| self.checker.get_symbol_flags(t).intersects(SymbolFlags::Value));
             let span = self.span(specifier.name().unwrap());
             let import = if value { Import::Keep } else { Import::Elide };
-            self.table.store(span, Site::Import, |f| &mut f.import, import);
+            self.file.table.store(span, Site::Import, |f| &mut f.import, import);
         }
     }
 
@@ -948,7 +962,7 @@ impl Extractor {
         let Some(game) = &self.game else {
             if let Some(path) = target.as_deref().and_then(installed_module) {
                 let span = self.span(specifier);
-                self.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));
+                self.file.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));
             }
             return;
         };
@@ -971,7 +985,7 @@ impl Extractor {
                 Some(_) => {}
             }
         }
-        let Some(script) = game.module(Path::new(&self.path)) else {
+        let Some(script) = game.module(Path::new(&self.file.path)) else {
             return self.report(specifier, Code::Place, "the Rojo project maps no instance for this file's output");
         };
         let module = match virtual_out {
@@ -984,7 +998,7 @@ impl Extractor {
         match game.instances.import(&script, &module) {
             Ok(path) => {
                 let span = self.span(specifier);
-                self.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));
+                self.file.table.store(span, Site::Import, |f| &mut f.module, Box::new(path));
             }
             Err(message) => self.report(specifier, Code::Place, message),
         }
