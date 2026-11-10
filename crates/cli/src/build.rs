@@ -4,7 +4,7 @@ use crucible_project::{Manifest, ManifestError, Place};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::fs::{OpenOptions, TryLockError};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -287,50 +287,31 @@ fn relative_to_cwd(text: &str) -> String {
 // Rojo truncates the place file it is told to write, so it builds into the place's temporary file and
 // `crucible_compiler::publish` puts that file in the place's: a failed or killed build leaves the last place whole
 // unless the place must be written in place. The temporary file keeps the place's extension, from which Rojo picks
-// the format, and Rojo reads no `.rbxl` or `.rbxlx` file in its project, so a file a killed build left never becomes
-// an instance.
+// the format. Rojo reads `.rbxm` and `.rbxmx` files in its project as models, so the temporary file is absent while
+// Rojo reads the project: a killed build's is removed first, and Rojo makes it. The lock that keeps a second build of
+// the place out is on a `.tmp` file, which Rojo reads in no folder.
 fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
     let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     let cannot = |error: std::io::Error| format!("cannot write {}: {error}", output.display());
-    let temporary = crucible_compiler::temporary_path(output, output.extension().and_then(OsStr::to_str).unwrap_or(""));
-    let file =
-        OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&temporary).map_err(cannot)?;
-    if !lock(&file) {
+    let lock_path = crucible_compiler::temporary_path(output, "tmp");
+    let lock = OpenOptions::new().write(true).create(true).truncate(false).open(&lock_path).map_err(cannot)?;
+    // A file system without locks lets a concurrent build through, as builds made before temporary files did.
+    if let Err(TryLockError::WouldBlock) = lock.try_lock() {
         return Err(cannot(std::io::Error::new(std::io::ErrorKind::ResourceBusy, "another build is writing it")));
     }
-    let built = rojo_child(project, &temporary, output)
-        .and_then(|()| crucible_compiler::publish(&temporary, output).map_err(cannot));
+    let temporary = crucible_compiler::temporary_path(output, output.extension().and_then(OsStr::to_str).unwrap_or(""));
+    let built = match std::fs::remove_file(&temporary) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(cannot(error)),
+        _ => rojo_child(project, &temporary, output)
+            .and_then(|()| crucible_compiler::publish(&temporary, output).map_err(cannot)),
+    };
     if built.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
-    drop(file);
+    let _ = std::fs::remove_file(&lock_path);
+    drop(lock);
     built
-}
-
-/// Takes the lock that keeps a second build of the same place out of its temporary file, and is false when another
-/// build holds it. A file system without locks lets a concurrent build through, as builds made before temporary files
-/// did.
-#[cfg(not(windows))]
-fn lock(file: &File) -> bool {
-    !matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
-}
-
-/// Rojo writes the temporary file through its own handle, and Windows blocks other handles from a locked range, so the
-/// lock covers one byte past any place's end instead of the whole file.
-#[cfg(windows)]
-fn lock(file: &File) -> bool {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
-    use windows_sys::Win32::Storage::FileSystem::{LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx};
-    use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0};
-    let mut at = OVERLAPPED {
-        Anonymous: OVERLAPPED_0 { Anonymous: OVERLAPPED_0_0 { Offset: u32::MAX - 1, OffsetHigh: u32::MAX } },
-        ..OVERLAPPED::default()
-    };
-    let flags = LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY;
-    let locked = unsafe { LockFileEx(file.as_raw_handle(), flags, 0, 1, 0, &mut at) } != 0;
-    locked || std::io::Error::last_os_error().raw_os_error() != Some(ERROR_LOCK_VIOLATION as i32)
 }
 
 // Rojo prints progress with println!, so it runs in a child whose stdout comes back here and goes to stderr, which

@@ -552,32 +552,54 @@ fn a_build_removes_no_file_or_folder_named_like_its_own() {
     }
 }
 
-/// The name of every instance in a binary place file, sorted.
-fn instances(place: &Path) -> Vec<String> {
-    let dom = rbx_binary::from_reader(fs::read(place).unwrap().as_slice()).unwrap();
-    let mut names: Vec<String> = dom.descendants().map(|instance| instance.name.clone()).collect();
+/// The name of every instance in a binary or XML place or model file, sorted.
+fn instances(file: &Path) -> Vec<String> {
+    let bytes = fs::read(file).unwrap();
+    let mut names: Vec<String> = if bytes.starts_with(b"<roblox!") {
+        let dom = rbx_binary::from_reader(bytes.as_slice()).unwrap();
+        dom.descendants().map(|instance| instance.name.clone()).collect()
+    } else {
+        let xml = String::from_utf8(bytes).unwrap();
+        xml.split("<string name=\"Name\">")
+            .skip(1)
+            .map(|rest| rest.split_once("</string>").unwrap().0.to_owned())
+            .collect()
+    };
     names.sort();
     names
 }
 
 #[test]
-fn a_place_built_inside_a_folder_its_project_reads_holds_no_instance_of_the_builds_files() {
+fn every_place_and_model_format_builds_inside_and_outside_a_folder_its_project_reads() {
     let game = Game::template_layout();
     assert_eq!(code(&game.build(&[])), 0);
-    let expected = instances(&game.path("build/start.rbxl"));
-    let inside = game.path("out/shared/inside.rbxl");
-    let killed = [
-        (crucible_compiler::temporary_path(&inside, "rbxl"), fs::read(game.path("build/start.rbxl")).unwrap()),
-        (crucible_compiler::temporary_path(&game.path("out/shared/greeting.luau"), "tmp"), b"return 1".to_vec()),
-    ];
-    for (path, bytes) in &killed {
-        fs::write(path, bytes).unwrap();
-    }
-    for _ in 0..2 {
-        let out = game.build(&["--output", "out/shared/inside.rbxl"]);
-        assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-        assert!(text(&out.stderr).contains("Built project to inside.rbxl"), "{}", text(&out.stderr));
-        assert_eq!(instances(&inside), expected, "the place holds the same instances as one built outside");
+    fs::write(crucible_compiler::temporary_path(&game.path("out/shared/greeting.luau"), "tmp"), "return 1").unwrap();
+    for extension in ["rbxl", "rbxlx", "rbxm", "rbxmx"] {
+        let mut expected = None;
+        for output in [format!("build/start.{extension}"), format!("out/shared/inside.{extension}")] {
+            let path = game.path(&output);
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let (temporary, lock) =
+                (crucible_compiler::temporary_path(&path, extension), crucible_compiler::temporary_path(&path, "tmp"));
+            for run in ["first build", "rebuild", "build after a killed one"] {
+                if run == "build after a killed one" {
+                    fs::write(&temporary, "half a place").unwrap();
+                    fs::write(&lock, "").unwrap();
+                }
+                let out = game.build(&["--output", &output]);
+                let stderr = text(&out.stderr);
+                assert_eq!(code(&out), 0, "{output}, {run}: {stderr}");
+                assert!(stderr.contains(&format!("Built project to {name}\n")), "{output}, {run}: {stderr}");
+                assert!(!temporary.exists() && !lock.exists(), "{output}, {run}: the build's files go");
+                let names = instances(&path);
+                assert!(!names.iter().any(|name| name.starts_with(".crucible")), "{output}, {run}: {names:?}");
+                // Rojo reads the last build's model in its project, as it did before temporary files.
+                if run == "first build" || !(output.starts_with("out/") && extension.starts_with("rbxm")) {
+                    assert_eq!(&names, expected.get_or_insert_with(|| names.clone()), "{output}, {run}");
+                }
+            }
+            fs::remove_file(&path).unwrap();
+        }
     }
 }
 
