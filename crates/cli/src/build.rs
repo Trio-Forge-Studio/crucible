@@ -284,34 +284,28 @@ fn relative_to_cwd(text: &str) -> String {
     text.replace(&(cwd.replace('\\', "/") + "/"), "").replace(&(cwd + "\\"), "")
 }
 
-// Rojo truncates the place file it is told to write, so it builds into the place's temporary file and a rename puts
-// that file over the place: a failed or killed build leaves the last place whole. The temporary file keeps the place's
-// extension, from which Rojo picks the format, and Rojo reads no `.rbxl` or `.rbxlx` file in its project, so a file a
-// killed build left never becomes an instance.
+// Rojo truncates the place file it is told to write, so it builds into the place's temporary file and
+// `crucible_compiler::publish` puts that file in the place's: a failed or killed build leaves the last place whole
+// unless the place must be written in place. The temporary file keeps the place's extension, from which Rojo picks
+// the format, and Rojo reads no `.rbxl` or `.rbxlx` file in its project, so a file a killed build left never becomes
+// an instance.
 fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
     let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     let cannot = |error: std::io::Error| format!("cannot write {}: {error}", output.display());
     let temporary = crucible_compiler::temporary_path(output, output.extension().and_then(OsStr::to_str).unwrap_or(""));
-    let mut file =
+    let file =
         OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&temporary).map_err(cannot)?;
     if !lock(&file) {
         return Err(cannot(std::io::Error::new(std::io::ErrorKind::ResourceBusy, "another build is writing it")));
     }
-    let built = rojo_child(project, &temporary, output).and_then(|()| match std::fs::rename(&temporary, output) {
-        Ok(()) => Ok(true),
-        // Windows refuses to rename over a file that another program holds open without delete sharing, which a write
-        // in place, as Rojo made before temporary files, may still get past.
-        Err(_) => {
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).and_then(|_| std::fs::write(output, bytes)).map(|()| false).map_err(cannot)
-        }
-    });
-    if built != Ok(true) {
+    let built = rojo_child(project, &temporary, output)
+        .and_then(|()| crucible_compiler::publish(&temporary, output).map_err(cannot));
+    if built.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     drop(file);
-    built.map(drop)
+    built
 }
 
 /// Takes the lock that keeps a second build of the same place out of its temporary file, and is false when another

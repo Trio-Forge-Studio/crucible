@@ -71,6 +71,9 @@ pub fn temporary_path(destination: &Path, extension: &str) -> PathBuf {
 /// all of the new ones even when the write fails or the process dies. The temporary file ends in `.tmp`, which no
 /// module or runtime library file does and Rojo reads in no folder. A second build that writes `path` at the same
 /// time fails instead of writing the same temporary file.
+///
+/// A `path` the rename cannot replace is written in place, as builds made before temporary files wrote it, so a
+/// failure during that write can leave `path` partly written.
 pub(crate) fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
     replace_on(&mut Os, path, bytes)
 }
@@ -82,14 +85,34 @@ fn replace_on(disk: &mut impl Disk, path: &Path, bytes: &[u8]) -> io::Result<()>
         Ok(()) => match disk.rename(&temporary, path) {
             Ok(()) => return Ok(()),
             // Windows refuses to rename over a file that another program holds open without delete sharing, which a
-            // write in place, as builds made before temporary files, may still get past.
-            Err(_) => disk.write(path, bytes),
+            // write in place may still get past. Emptying the temporary file gives that write the space it had before
+            // temporary files, and the file keeps its name, so other builds stay out, until the write ends.
+            Err(_) => {
+                let _ = disk.write_temporary(&mut file, &[]);
+                disk.write(path, bytes)
+            }
         },
         Err(error) => Err(error),
     };
     let _ = disk.remove_file(&temporary);
     drop(file);
     replaced
+}
+
+/// Puts the file at `temporary` in `destination`'s place with a rename. A `destination` the rename cannot replace
+/// gets `temporary`'s bytes written in place, as builds made before temporary files wrote it, after `temporary` is
+/// removed so that the write has the space it had then.
+pub fn publish(temporary: &Path, destination: &Path) -> io::Result<()> {
+    publish_on(&mut Os, temporary, destination)
+}
+
+fn publish_on(disk: &mut impl Disk, temporary: &Path, destination: &Path) -> io::Result<()> {
+    if disk.rename(temporary, destination).is_ok() {
+        return Ok(());
+    }
+    let bytes = disk.read(temporary)?;
+    let _ = disk.remove_file(temporary);
+    disk.write(destination, &bytes)
 }
 
 trait Disk {
@@ -324,7 +347,7 @@ mod tests {
     use std::io;
     use std::path::{Path, PathBuf};
 
-    use super::{Disk, Entry, EntryKind, HEADER, Os, Written, temporary_path, write_to};
+    use super::{Disk, Entry, EntryKind, HEADER, Os, Written, publish_on, temporary_path, write_to};
     use crate::Module;
 
     /// A case-insensitive, case-preserving file system, as Windows and macOS have by default.
@@ -340,6 +363,8 @@ mod tests {
         full: bool,
         /// Another build has every temporary file open.
         busy: bool,
+        /// The most bytes all files hold together. A write past it keeps the bytes that fit and fails.
+        capacity: Option<usize>,
     }
 
     fn key(path: &Path) -> String {
@@ -353,6 +378,15 @@ mod tests {
     impl Folding {
         fn names(&self, dir: &str) -> Vec<String> {
             self.entries(Path::new(dir)).unwrap().into_iter().map(|e| e.name).collect()
+        }
+
+        fn put(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+            let stored = path.to_string_lossy().replace('\\', "/");
+            self.entries.entry(key(path)).or_insert((stored, None)).1 = Some(Vec::new());
+            let used: usize = self.entries.values().filter_map(|(_, contents)| contents.as_ref().map(Vec::len)).sum();
+            let fits = self.capacity.map_or(bytes.len(), |capacity| bytes.len().min(capacity.saturating_sub(used)));
+            self.entries.get_mut(&key(path)).unwrap().1 = Some(bytes[..fits].to_vec());
+            if fits == bytes.len() { Ok(()) } else { Err(io::Error::from(io::ErrorKind::StorageFull)) }
         }
     }
 
@@ -375,9 +409,7 @@ mod tests {
             if self.held.as_ref() == Some(&stored) {
                 return Err(io::Error::from(io::ErrorKind::PermissionDenied));
             }
-            let entry = self.entries.entry(key(path)).or_insert((stored, None));
-            entry.1 = Some(bytes.to_vec());
-            Ok(())
+            self.put(path, bytes)
         }
 
         fn open_temporary(&mut self, path: &Path) -> io::Result<PathBuf> {
@@ -391,7 +423,7 @@ mod tests {
 
         fn write_temporary(&mut self, file: &mut PathBuf, bytes: &[u8]) -> io::Result<()> {
             let written = if self.full { &bytes[..bytes.len() / 2] } else { bytes };
-            self.entries.get_mut(&key(file)).unwrap().1 = Some(written.to_vec());
+            self.put(file, written)?;
             if self.full { Err(io::Error::from(io::ErrorKind::StorageFull)) } else { Ok(()) }
         }
 
@@ -590,6 +622,39 @@ mod tests {
         assert_eq!(error.path, Path::new("out/foo.luau"));
         assert_eq!(disk.names("out"), ["foo.luau"]);
         assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), old[0].source.as_bytes());
+    }
+
+    #[test]
+    fn a_refused_rename_empties_the_temporary_file_before_the_module_is_written_in_place() {
+        let mut disk = Folding::default();
+        let old = module("foo.luau", "return 1\n");
+        write_to(&mut disk, Path::new("out"), std::slice::from_ref(&old)).unwrap();
+        let new = [module("foo.luau", &format!("return {}1\n", "1 + ".repeat(40)))];
+        disk.capacity = Some(old.source.len() + new[0].source.len());
+        disk.refused = Some("out/foo.luau".to_owned());
+        assert_eq!(
+            write_to(&mut disk, Path::new("out"), &new).unwrap(),
+            Written { written: 1, renamed: 0, removed: 0 }
+        );
+        assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), new[0].source.as_bytes());
+        assert_eq!(disk.names("out"), ["foo.luau"]);
+    }
+
+    #[test]
+    fn a_place_the_rename_cannot_replace_is_written_in_place_once_its_temporary_file_is_gone() {
+        let (place, temporary) = (Path::new("build/start.rbxl"), temporary_path(Path::new("build/start.rbxl"), "rbxl"));
+        let (old, new) = ([1; 10], [2; 30]);
+        let mut disk = Folding {
+            capacity: Some(old.len() + new.len()),
+            refused: Some("build/start.rbxl".to_owned()),
+            ..Folding::default()
+        };
+        disk.create_dir_all(Path::new("build")).unwrap();
+        disk.put(place, &old).unwrap();
+        disk.put(&temporary, &new).unwrap();
+        publish_on(&mut disk, &temporary, place).unwrap();
+        assert_eq!(disk.read(place).unwrap(), new);
+        assert_eq!(disk.names("build"), ["start.rbxl"]);
     }
 
     #[test]

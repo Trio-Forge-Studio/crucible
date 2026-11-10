@@ -27,7 +27,7 @@ pub use lower::Error;
 #[cfg(feature = "test-support")]
 pub use macros::{Macro, MacroKind};
 pub use project::InstanceMap;
-pub use write::{WriteError, Written, temporary_path, write};
+pub use write::{WriteError, Written, publish, temporary_path, write};
 
 /// A configuration, syntax, type or Crucible error.
 #[derive(Clone, Debug, PartialEq, Eq)]
