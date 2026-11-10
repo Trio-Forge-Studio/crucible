@@ -1,3 +1,4 @@
+import { computed } from "@rbxts/charm";
 import { assertDescriptor, n, type Node, type ObjectNode } from "../network/schema";
 import { MAX_REPLICATED_DECLARATIONS } from "../reactive/limits";
 import { declarationOf, declareFrameworkReplicated, replicatedCapacity, type Declaration } from "../sync/declarations";
@@ -139,9 +140,36 @@ function declareViews(name: string, replica: ObjectNode) {
 	return { live, fields };
 }
 
+/** The live root: `kept` while every field is rawequal to it, else a new frozen table of the fields. */
+function rootSnapshot(declaration: ProfileDeclaration, kept: Record<string, unknown> | undefined) {
+	let root: Record<string, unknown> | undefined;
+	for (const field of declaration.fields) {
+		const value = field.declaration.node();
+		if (root === undefined) {
+			if (kept !== undefined && rawequal(kept[field.name], value)) continue;
+			root = kept === undefined ? {} : table.clone(kept);
+		}
+		root[field.name] = value;
+	}
+	if (root === undefined) return kept ?? table.freeze({});
+	return table.freeze(root);
+}
+
 function clientSource(declaration: ProfileDeclaration): HandleSource {
 	const byName = new Map<string, ViewField>();
 	for (const field of declaration.fields) byName.set(field.name, field);
+	// 0 while the profile is not live, else a count that moves when a field may have changed, so an unchanged root is
+	// found without reading every field. Its links are bounded: one per store, made once, unlike a computed per handle.
+	let count = 0;
+	const revision = computed(() => {
+		if (declaration.liveDeclaration.node() !== true) return 0;
+		for (const field of declaration.fields) field.declaration.node();
+		count += 1;
+		return count;
+	});
+	// Weak, so a root keeps its identity while anything holds it, and one nothing holds keeps no old field alive.
+	const last = setmetatable({} as { root?: Record<string, unknown> }, { __mode: "v" });
+	let seen = 0;
 	return {
 		name: declaration.name,
 		client: true,
@@ -150,13 +178,18 @@ function clientSource(declaration: ProfileDeclaration): HandleSource {
 			error(`${declaration.name}() is read-only on the client`, 3);
 		},
 		read(path: readonly Segment[]) {
-			const live = declaration.liveDeclaration.node() === true;
 			if (path.size() === 0) {
-				if (!live) return declaration.clientTemplate;
-				const root: Record<string, unknown> = {};
-				for (const field of declaration.fields) root[field.name] = field.declaration.node();
-				return table.freeze(root);
+				const at = revision();
+				if (at === 0) return declaration.clientTemplate;
+				let root = last.root;
+				if (root !== undefined && at === seen) return root;
+				// A count that moved with no field changed, as after the computed lost its last reader, keeps the root.
+				root = rootSnapshot(declaration, root);
+				last.root = root;
+				seen = at;
+				return root;
 			}
+			const live = declaration.liveDeclaration.node() === true;
 			const field = byName.get(path[0] as string);
 			if (live && field !== undefined) return getPath(field.declaration.node(), path, 1);
 			return getPath(declaration.clientTemplate, path);
