@@ -173,13 +173,15 @@ fn load_key(root: &std::path::Path) -> Result<(auth::KeySource, auth::Secret), F
     auth::load(std::env::var_os(auth::KEY), || dot_env(root))
 }
 fn dot_env(root: &std::path::Path) -> Result<Option<String>, Failure> {
-    let entries = match dotenvy::from_path_iter(root.join(".env")) {
-        Ok(entries) => entries,
-        Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    let bytes = match std::fs::read(root.join(".env")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(Failure::usage("cannot read .env")),
     };
+    // dotenvy strips a UTF-8 BOM only when it loads the file into the environment, which the CLI never does.
+    let text = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
     let mut found = None;
-    for entry in entries {
+    for entry in dotenvy::from_read_iter(text) {
         let (name, value) = entry.map_err(|error| match error {
             dotenvy::Error::Io(_) => Failure::usage("cannot read .env"),
             _ => Failure::usage("cannot parse .env"),
