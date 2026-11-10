@@ -16,8 +16,7 @@ const FILES: [(&str, &[u8]); 2] = [
 ];
 
 /// Writes the runtime library into `dir` through `write::replace`, creating it, and skips each file whose bytes
-/// already match. It deletes the temporary files of its own writes that did not finish, and other files in `dir` stay.
-/// Returns how many files it wrote.
+/// already match. Other files in `dir` stay. Returns how many files it wrote.
 pub fn write_include(dir: &Path) -> io::Result<usize> {
     let mut written = 0;
     for (name, bytes) in FILES {
@@ -30,14 +29,6 @@ pub fn write_include(dir: &Path) -> io::Result<usize> {
         }
         write::replace(&path, bytes)?;
         written += 1;
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let name = entry?.file_name();
-        let ours =
-            name.to_str().and_then(write::partial_write_of).is_some_and(|of| FILES.iter().any(|(f, _)| *f == of));
-        if ours {
-            std::fs::remove_file(dir.join(name))?;
-        }
     }
     Ok(written)
 }
@@ -54,9 +45,12 @@ mod tests {
         assert_eq!(write_include(&include).unwrap(), 2, "creates the folder and both files");
         assert_eq!(write_include(&include).unwrap(), 0, "matching bytes are skipped");
         std::fs::write(include.join(RUNTIME_LIB), "edited").unwrap();
-        std::fs::write(include.join("Custom.lua"), "kept").unwrap();
-        std::fs::write(include.join("Promise.lua.crucible-write-41-1"), "local Pro").unwrap();
-        std::fs::write(include.join("Custom.lua.crucible-write-41-1"), "kept").unwrap();
+        std::fs::write(write::temporary_path(&include.join(RUNTIME_LIB), "tmp"), "local Pro").unwrap();
+        let mine =
+            ["Custom.lua", "Promise.lua.crucible-write-41-1", "RuntimeLib.lua.crucible-write-0-0", ".crucible-1.tmp"];
+        for name in mine {
+            std::fs::write(include.join(name), "kept").unwrap();
+        }
         assert_eq!(write_include(&include).unwrap(), 1, "only the edited file is written");
         for (name, bytes) in FILES {
             assert_eq!(std::fs::read(include.join(name)).unwrap(), bytes, "{name}");
@@ -64,11 +58,12 @@ mod tests {
         let mut names: Vec<String> =
             std::fs::read_dir(&include).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         names.sort();
-        assert_eq!(
-            names,
-            ["Custom.lua", "Custom.lua.crucible-write-41-1", "Promise.lua", RUNTIME_LIB],
-            "a killed write's file goes"
-        );
+        let mut expected = [&mine[..], &["Promise.lua", RUNTIME_LIB]].concat();
+        expected.sort();
+        assert_eq!(names, expected, "a killed write's file is written again, and every other file stays");
+        for name in mine {
+            assert_eq!(std::fs::read(include.join(name)).unwrap(), b"kept", "{name}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

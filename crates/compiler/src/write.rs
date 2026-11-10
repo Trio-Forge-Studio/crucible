@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Module;
 
@@ -18,9 +19,8 @@ pub struct Written {
 
 /// Writes each module under `out` through `replace`, skipping files whose bytes already match, and counts the files
 /// it wrote. Then it deletes every `.luau` file under `out` that starts with the compiler's header and is not one of
-/// `modules`, the temporary files of a write or a case-only rename that did not finish, and any folder that deletion
-/// leaves empty, and counts the files it deleted. Files the compiler did not emit, such as `rbxtsc` output and
-/// declarations, stay.
+/// `modules`, the temporary files of a case-only rename that failed, and any folder that deletion leaves empty, and
+/// counts the files it deleted. Files the compiler did not emit, such as `rbxtsc` output and declarations, stay.
 ///
 /// On a case-insensitive file system, a module whose path changed only in case can keep the old name of its file.
 /// That file is renamed to the module's path, because Rojo names the instance after the file.
@@ -28,38 +28,57 @@ pub fn write(out: &Path, modules: &[Module]) -> io::Result<Written> {
     write_to(&mut Os, out, modules)
 }
 
-/// Writes `bytes` to a new file beside `path`, then renames it over `path`, so `path` holds its old bytes or all of
-/// the new ones even when the write fails or the process dies. The new file's name ends in no extension Rojo reads,
-/// and holds the process id, so a concurrent build never writes the same one.
+/// The one file that a build writes `destination`'s new bytes into before it renames that file over `destination`.
+/// It sits beside `destination`, so the rename stays on one volume. Its name depends only on `destination`'s name, so
+/// what a killed build left is the file the next build of `destination` writes again, and a build never needs to
+/// remove a file it cannot tell is its own. The name is 26 characters and `extension`, whatever `destination`'s
+/// length, and starts with `.crucible-`.
+pub fn temporary_path(destination: &Path, extension: &str) -> PathBuf {
+    let name = destination.file_name().map_or(&[][..], |name| name.as_encoded_bytes());
+    // FNV-1a is fixed, so every build and every version of Crucible picks the same name.
+    let hash = name
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3));
+    let dot = if extension.is_empty() { "" } else { "." };
+    destination.with_file_name(format!(".crucible-{hash:016x}{dot}{extension}"))
+}
+
+/// Writes `bytes` to `path`'s temporary file, then renames that file over `path`, so `path` holds its old bytes or
+/// all of the new ones even when the write fails or the process dies. The temporary file ends in `.tmp`, which no
+/// module or runtime library file does and Rojo reads in no folder. A second build that writes `path` at the same
+/// time fails instead of writing the same temporary file.
 pub(crate) fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
     replace_on(&mut Os, path, bytes)
 }
 
 fn replace_on(disk: &mut impl Disk, path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut n = 1;
-    let temporary = loop {
-        let temporary = path.with_file_name(format!("{name}{WRITING}-{}-{n}", std::process::id()));
-        match disk.create(&temporary, bytes) {
-            Ok(()) => break temporary,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => n += 1,
-            Err(error) => {
-                let _ = disk.remove_file(&temporary);
-                return Err(error);
-            }
-        }
+    let temporary = temporary_path(path, "tmp");
+    let mut file = disk.open_temporary(&temporary)?;
+    let replaced = match disk.write_temporary(&mut file, bytes) {
+        Ok(()) => match disk.rename(&temporary, path) {
+            Ok(()) => return Ok(()),
+            // Windows refuses to rename over a file that another program holds open without delete sharing, which a
+            // write in place, as builds made before temporary files, may still get past.
+            Err(_) => disk.write(path, bytes),
+        },
+        Err(error) => Err(error),
     };
-    disk.rename(&temporary, path).inspect_err(|_| {
-        let _ = disk.remove_file(&temporary);
-    })
+    let _ = disk.remove_file(&temporary);
+    drop(file);
+    replaced
 }
 
 trait Disk {
+    /// An open temporary file, which keeps other builds out of it until it is dropped.
+    type Temporary;
     fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
-    /// The first `len` bytes, or the whole file when it is shorter.
-    fn head(&self, path: &Path, len: usize) -> io::Result<Vec<u8>>;
-    /// Writes a file that must not exist yet.
-    fn create(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+    fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool>;
+    /// Writes `path` in place.
+    fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+    /// Opens `path`, creating it, and fails with `ResourceBusy` while another build has it open.
+    fn open_temporary(&mut self, path: &Path) -> io::Result<Self::Temporary>;
+    /// Replaces the temporary file's bytes with `bytes`.
+    fn write_temporary(&mut self, file: &mut Self::Temporary, bytes: &[u8]) -> io::Result<()>;
     fn create_dir_all(&mut self, path: &Path) -> io::Result<()>;
     /// Empty when `dir` does not exist.
     fn entries(&self, dir: &Path) -> io::Result<Vec<Entry>>;
@@ -83,18 +102,35 @@ enum EntryKind {
 struct Os;
 
 impl Disk for Os {
+    type Temporary = File;
+
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         std::fs::read(path)
     }
 
-    fn head(&self, path: &Path, len: usize) -> io::Result<Vec<u8>> {
-        let mut head = Vec::with_capacity(len);
-        std::fs::File::open(path)?.take(len as u64).read_to_end(&mut head)?;
-        Ok(head)
+    fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool> {
+        let mut head = Vec::with_capacity(prefix.len());
+        File::open(path)?.take(prefix.len() as u64).read_to_end(&mut head)?;
+        Ok(head == prefix)
     }
 
-    fn create(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-        std::fs::OpenOptions::new().write(true).create_new(true).open(path)?.write_all(bytes)
+    fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        std::fs::write(path, bytes)
+    }
+
+    fn open_temporary(&mut self, path: &Path) -> io::Result<File> {
+        // It is emptied only once the lock is held, so the open cannot cut short another build's write.
+        let file = OpenOptions::new().write(true).create(true).truncate(false).open(path)?;
+        match file.try_lock() {
+            // A file system without locks lets a concurrent build through, as builds made before temporary files did.
+            Ok(()) | Err(TryLockError::Error(_)) => Ok(file),
+            Err(TryLockError::WouldBlock) => Err(busy()),
+        }
+    }
+
+    fn write_temporary(&mut self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        file.set_len(0)?;
+        file.write_all(bytes)
     }
 
     fn create_dir_all(&mut self, path: &Path) -> io::Result<()> {
@@ -197,16 +233,9 @@ fn sweep(disk: &mut impl Disk, dir: &Path, folder: &str, expected: &Expected, ch
                     disk.remove_dir(&path)?;
                 }
             }
-            EntryKind::File if partial_write_of(name).is_some_and(|file| file.ends_with(".luau")) => {
-                // A write that did not finish stopped somewhere in the module, which starts with the header.
-                if HEADER.as_bytes().starts_with(&disk.head(&path, HEADER.len())?) {
-                    disk.remove_file(&path)?;
-                    changes.removed += 1;
-                }
-            }
             EntryKind::File
                 if (is_temporary(name) || name.ends_with(".luau") && !wanted.is_some_and(|w| w.contains(name)))
-                    && disk.head(&path, HEADER.len())? == HEADER.as_bytes() =>
+                    && disk.starts_with(&path, HEADER.as_bytes())? =>
             {
                 disk.remove_file(&path)?;
                 changes.removed += 1;
@@ -248,14 +277,8 @@ fn temporary_name(name: &str, n: u32) -> String {
     if n == 1 { format!("{name}{TEMPORARY}") } else { format!("{name}{TEMPORARY}-{n}") }
 }
 
-const WRITING: &str = ".crucible-write";
-
-/// The name of the file `replace` was writing when it gave a temporary file this name.
-pub(crate) fn partial_write_of(name: &str) -> Option<&str> {
-    let (file, rest) = name.rsplit_once(WRITING)?;
-    let (process, n) = rest.strip_prefix('-')?.split_once('-')?;
-    let number = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-    (!file.is_empty() && number(process) && number(n)).then_some(file)
+fn busy() -> io::Error {
+    io::Error::new(io::ErrorKind::ResourceBusy, "another build is writing it")
 }
 
 /// Whether `rename_case` could have given a module file this name.
@@ -271,7 +294,7 @@ mod tests {
     use std::io;
     use std::path::{Path, PathBuf};
 
-    use super::{Disk, Entry, EntryKind, HEADER, Written, write_to};
+    use super::{Disk, Entry, EntryKind, HEADER, Os, Written, temporary_path, write_to};
     use crate::Module;
 
     /// A case-insensitive, case-preserving file system, as Windows and macOS have by default.
@@ -281,8 +304,12 @@ mod tests {
         entries: BTreeMap<String, (String, Option<Vec<u8>>)>,
         /// A rename to exactly this path fails.
         refused: Option<String>,
-        /// Each new file gets half its bytes, and then the write fails.
+        /// A write in place to exactly this path fails, as when another program holds the file.
+        held: Option<String>,
+        /// Each temporary file gets half its bytes, and then the write fails.
         full: bool,
+        /// Another build has every temporary file open.
+        busy: bool,
     }
 
     fn key(path: &Path) -> String {
@@ -300,6 +327,8 @@ mod tests {
     }
 
     impl Disk for Folding {
+        type Temporary = PathBuf;
+
         fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
             match self.entries.get(&key(path)) {
                 Some((_, Some(bytes))) => Ok(bytes.clone()),
@@ -307,19 +336,32 @@ mod tests {
             }
         }
 
-        fn head(&self, path: &Path, len: usize) -> io::Result<Vec<u8>> {
-            let mut bytes = self.read(path)?;
-            bytes.truncate(len);
-            Ok(bytes)
+        fn starts_with(&self, path: &Path, prefix: &[u8]) -> io::Result<bool> {
+            Ok(self.read(path)?.starts_with(prefix))
         }
 
-        fn create(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-            if self.entries.contains_key(&key(path)) {
-                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+        fn write(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+            let stored = path.to_string_lossy().replace('\\', "/");
+            if self.held.as_ref() == Some(&stored) {
+                return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+            }
+            let entry = self.entries.entry(key(path)).or_insert((stored, None));
+            entry.1 = Some(bytes.to_vec());
+            Ok(())
+        }
+
+        fn open_temporary(&mut self, path: &Path) -> io::Result<PathBuf> {
+            if self.busy {
+                return Err(super::busy());
             }
             let stored = path.to_string_lossy().replace('\\', "/");
+            self.entries.entry(key(path)).or_insert((stored, Some(Vec::new())));
+            Ok(path.to_owned())
+        }
+
+        fn write_temporary(&mut self, file: &mut PathBuf, bytes: &[u8]) -> io::Result<()> {
             let written = if self.full { &bytes[..bytes.len() / 2] } else { bytes };
-            self.entries.insert(key(path), (stored, Some(written.to_vec())));
+            self.entries.get_mut(&key(file)).unwrap().1 = Some(written.to_vec());
             if self.full { Err(io::Error::from(io::ErrorKind::StorageFull)) } else { Ok(()) }
         }
 
@@ -404,7 +446,7 @@ mod tests {
     fn a_case_only_rename_never_replaces_a_file_beside_it() {
         let mut disk = Folding::default();
         write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 1\n")]).unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-rename"), b"mine").unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename"), b"mine").unwrap();
 
         let changes = write_to(&mut disk, Path::new("out"), &[module("Foo.luau", "return 1\n")]).unwrap();
         assert_eq!(changes, Written { written: 0, renamed: 1, removed: 0 });
@@ -432,11 +474,11 @@ mod tests {
         let mut disk = Folding::default();
         let header = |body: &str| format!("{HEADER}{body}").into_bytes();
         disk.create_dir_all(Path::new("out")).unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-rename"), &header("return 1\n")).unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-rename-2"), &header("return 1\n")).unwrap();
-        disk.create(Path::new("out/bar.luau.crucible-rename"), b"mine").unwrap();
-        disk.create(Path::new("out/notes.crucible-rename"), &header("")).unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-rename-x"), &header("")).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename"), &header("return 1\n")).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename-2"), &header("return 1\n")).unwrap();
+        disk.write(Path::new("out/bar.luau.crucible-rename"), b"mine").unwrap();
+        disk.write(Path::new("out/notes.crucible-rename"), &header("")).unwrap();
+        disk.write(Path::new("out/foo.luau.crucible-rename-x"), &header("")).unwrap();
 
         let changes = write_to(&mut disk, Path::new("out"), &[module("Foo.luau", "return 1\n")]).unwrap();
         assert_eq!(changes, Written { written: 1, renamed: 0, removed: 2 });
@@ -459,42 +501,188 @@ mod tests {
         assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), old[0].source.as_bytes());
         assert_eq!(disk.read(Path::new("out/bar.luau")).unwrap(), old[1].source.as_bytes());
 
-        disk.refused = Some("out/bar.luau".to_owned());
         disk.full = false;
+        disk.refused = Some("out/bar.luau".to_owned());
+        disk.held = Some("out/bar.luau".to_owned());
         assert!(write_to(&mut disk, Path::new("out"), &new).is_err());
         assert_eq!(disk.names("out"), ["bar.luau", "foo.luau"], "a refused rename removes its temporary file");
         assert_eq!(disk.read(Path::new("out/bar.luau")).unwrap(), old[1].source.as_bytes());
 
-        disk.refused = None;
+        disk.held = None;
         assert_eq!(
             write_to(&mut disk, Path::new("out"), &new).unwrap(),
-            Written { written: 1, renamed: 0, removed: 0 }
+            Written { written: 1, renamed: 0, removed: 0 },
+            "a refused rename writes the file in place"
         );
+        assert_eq!(disk.names("out"), ["bar.luau", "foo.luau"]);
+        assert_eq!(disk.read(Path::new("out/bar.luau")).unwrap(), new[1].source.as_bytes());
         assert_eq!(write_to(&mut disk, Path::new("out"), &new).unwrap(), Written::default());
     }
 
     #[test]
-    fn the_sweep_removes_what_a_killed_write_left_and_never_takes_it_for_a_module() {
+    fn a_killed_writes_temporary_file_is_written_again_and_no_other_file_is_touched() {
         let mut disk = Folding::default();
         let header = HEADER.as_bytes();
+        let left = temporary_path(Path::new("out/foo.luau"), "tmp");
         disk.create_dir_all(Path::new("out/systems")).unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-write-41-1"), b"").unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-write-41-2"), &header[..9]).unwrap();
-        disk.create(Path::new("out/systems/bar.luau.crucible-write-7-1"), &[header, b"return"].concat()).unwrap();
-        disk.create(Path::new("out/notes.luau.crucible-write-41-1"), b"mine").unwrap();
-        disk.create(Path::new("out/foo.luau.crucible-write-41"), header).unwrap();
-        disk.create(Path::new("out/data.json.crucible-write-41-1"), header).unwrap();
+        disk.write(&left, &header[..9]).unwrap();
+        let started = [header, b"return"].concat();
+        let mine: [(&str, &[u8]); 6] = [
+            ("out/foo.luau.crucible-write-41-1", header),
+            ("out/systems/bar.luau.crucible-write-7-1", &started),
+            ("out/notes.luau.crucible-write-41-1", b"mine"),
+            ("out/data.json.crucible-write-41-1", header),
+            ("out/.crucible-0000000000000000.tmp", header),
+            ("out/.crucible-build-41-1", b"mine"),
+        ];
+        for (path, bytes) in mine {
+            disk.write(Path::new(path), bytes).unwrap();
+        }
 
-        let changes = write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 1\n")]).unwrap();
-        assert_eq!(changes, Written { written: 1, renamed: 0, removed: 3 });
-        assert_eq!(
-            disk.names("out"),
-            [
-                "data.json.crucible-write-41-1",
-                "foo.luau",
-                "foo.luau.crucible-write-41",
-                "notes.luau.crucible-write-41-1"
-            ]
-        );
+        let modules = [module("foo.luau", "return 1\n")];
+        let changes = write_to(&mut disk, Path::new("out"), &modules).unwrap();
+        assert_eq!(changes, Written { written: 1, renamed: 0, removed: 0 });
+        assert!(disk.read(&left).is_err(), "the write renamed its temporary file over the module");
+        assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), modules[0].source.as_bytes());
+        for (path, bytes) in mine {
+            assert_eq!(disk.read(Path::new(path)).unwrap(), bytes, "{path} stays");
+        }
+    }
+
+    #[test]
+    fn a_second_build_writing_a_module_fails_and_touches_nothing() {
+        let mut disk = Folding::default();
+        let old = [module("foo.luau", "return 1\n")];
+        write_to(&mut disk, Path::new("out"), &old).unwrap();
+        disk.busy = true;
+        let error = write_to(&mut disk, Path::new("out"), &[module("foo.luau", "return 2\n")]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ResourceBusy);
+        assert_eq!(disk.names("out"), ["foo.luau"]);
+        assert_eq!(disk.read(Path::new("out/foo.luau")).unwrap(), old[0].source.as_bytes());
+    }
+
+    #[test]
+    fn the_temporary_file_is_named_by_its_destination_alone_and_is_short() {
+        let long = "m".repeat(250) + ".luau";
+        let cases = [
+            ("out/foo.luau", "tmp"),
+            ("other/foo.luau", "tmp"),
+            ("out/Foo.luau", "tmp"),
+            ("out/foo.luau", "rbxl"),
+            ("out/start.rbxl", "rbxl"),
+            (long.as_str(), "tmp"),
+            ("out/x", ""),
+        ];
+        let mut names = Vec::new();
+        for (path, extension) in cases {
+            let temporary = temporary_path(Path::new(path), extension);
+            assert_eq!(temporary.parent(), Path::new(path).parent(), "{path} keeps its folder");
+            let name = temporary.file_name().unwrap().to_str().unwrap().to_owned();
+            let dotted = if extension.is_empty() { 0 } else { extension.len() + 1 };
+            assert!(name.starts_with(".crucible-") && name.len() == 26 + dotted, "{name}");
+            assert_eq!(Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or(""), extension, "{name}");
+            names.push(name);
+        }
+        assert_eq!(names[0], names[1], "the folder does not change the name");
+        assert_ne!(names[0], names[2]);
+        assert_ne!(names[0], names[3]);
+    }
+
+    /// An empty folder in the system's temporary folder.
+    fn scratch(test: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("crucible-write-{test}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn listed(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_module_whose_name_is_as_long_as_a_file_name_can_be_is_written_and_replaced() {
+        let out = scratch("long");
+        let name = "m".repeat(250) + ".luau";
+        for body in ["return 1\n", "return 2\n"] {
+            let modules = [module(&name, body)];
+            assert_eq!(super::write(&out, &modules).unwrap().written, 1);
+            assert_eq!(std::fs::read(out.join(&name)).unwrap(), modules[0].source.as_bytes());
+        }
+        assert_eq!(listed(&out), [name]);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_module_another_build_is_writing_fails_until_that_build_lets_go() {
+        let out = scratch("busy");
+        std::fs::write(out.join("foo.luau"), "old").unwrap();
+        let temporary = temporary_path(&out.join("foo.luau"), "tmp");
+        let mut other = Os.open_temporary(&temporary).unwrap();
+        Os.write_temporary(&mut other, b"half a mod").unwrap();
+        let modules = [module("foo.luau", "return 1\n")];
+        let error = super::write(&out, &modules).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ResourceBusy, "{error}");
+        assert_eq!(std::fs::read(out.join("foo.luau")).unwrap(), b"old");
+        drop(other);
+        assert_eq!(std::fs::read(&temporary).unwrap(), b"half a mod", "the other build's file stays as it was");
+        assert_eq!(super::write(&out, &modules).unwrap().written, 1);
+        assert_eq!(std::fs::read(out.join("foo.luau")).unwrap(), modules[0].source.as_bytes());
+        assert_eq!(listed(&out), ["foo.luau"]);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_folder_where_a_module_goes_fails_the_write_and_stays() {
+        let out = scratch("folder");
+        std::fs::create_dir_all(out.join("foo.luau")).unwrap();
+        std::fs::write(out.join("foo.luau/notes.txt"), "mine").unwrap();
+        assert!(super::write(&out, &[module("foo.luau", "return 1\n")]).is_err());
+        assert_eq!(std::fs::read(out.join("foo.luau/notes.txt")).unwrap(), b"mine");
+        assert_eq!(listed(&out), ["foo.luau"], "the temporary file goes");
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_module_another_program_holds_without_delete_sharing_is_written_in_place() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        const FILE_SHARE_WRITE: u32 = 2;
+        let out = scratch("held");
+        std::fs::write(out.join("foo.luau"), "old").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(out.join("foo.luau"))
+            .unwrap();
+        let modules = [module("foo.luau", "return 1\n")];
+        assert_eq!(super::write(&out, &modules).unwrap().written, 1);
+        assert_eq!(std::fs::read(out.join("foo.luau")).unwrap(), modules[0].source.as_bytes());
+        assert_eq!(listed(&out), ["foo.luau"], "the temporary file goes");
+        drop(held);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_read_only_module_keeps_its_bytes() {
+        let out = scratch("read-only");
+        let path = out.join("foo.luau");
+        std::fs::write(&path, "old").unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions.clone()).unwrap();
+        let error = super::write(&out, &[module("foo.luau", "return 1\n")]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        assert_eq!(listed(&out), ["foo.luau"], "the temporary file goes");
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        let _ = std::fs::remove_dir_all(&out);
     }
 }
