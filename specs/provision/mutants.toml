@@ -148,3 +148,14 @@ find = '''
 '''
 replace = '''
 '''
+
+[[mutant]]
+name = "refuse-every-run"
+why = "The plan refuses every run, so nothing is ever provisioned. Converges still holds, because a refused run is a stuck one."
+breaks = "FaultFreeBinds"
+find = '''
+Refused == \E k, j \in Keys : k # j /\ lock[j] = 0 /\ journal[j] = want[k]
+'''
+replace = '''
+Refused == TRUE
+'''

@@ -347,4 +347,13 @@ Stuck == Refused \/ \E k \in Keys : lock[k] = 0 /\ Cardinality(Candidates(k)) > 
 \* left. Or the runs keep stopping on a state only the developer can resolve.
 Converges == <>[](\A k \in Keys : Settled(k)) \/ <>[]Stuck
 
+\* With no fault, no rename and no two resources under one declared name, the
+\* runs bind every key to a resource under its declared name. It reads only
+\* the variables, never the protocol's own operators, so a protocol that stops
+\* or refuses when nothing is wrong fails it.
+FaultFreeBinds ==
+    (/\ \A k \in Keys : Cardinality({i \in DOMAIN remote : remote[i].name = want[k]}) <= 1
+     /\ [](faults = 0 /\ renames = 0))
+    => <>(\A k \in Keys : lock[k] \in DOMAIN remote /\ remote[lock[k]].name = want[k])
+
 =============================================================================
