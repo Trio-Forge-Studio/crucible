@@ -525,6 +525,19 @@ fn two_managed_keys_of_a_kind_may_not_share_a_display_name() {
 }
 
 #[test]
+fn two_environments_may_not_share_a_universe() {
+    let shared = Project::new(&CONFIG.replace("universe = 10769815992", "universe = 10772177432"));
+    let problems = shared.experience().unwrap_err();
+    assert_eq!((problems[0].file.as_str(), problems[0].line), ("crucible.toml", None));
+    assert_eq!(
+        messages(problems),
+        ["crucible.toml: env.staging.universe: env.production and env.staging both name universe 10772177432. \
+          Provision adopts a resource by its name inside a universe, so each environment would bind the other's \
+          resources, and its overlays would overwrite the other's values. Give each environment its own universe"]
+    );
+}
+
+#[test]
 fn a_badge_overlay_changes_only_its_environment() {
     let config = CONFIG.to_owned() + "[env.staging.badges.first-delivery]\nenabled = false\n";
     let project = Project::new(&config);

@@ -222,6 +222,18 @@ fn two_keys_of_a_kind_with_one_display_name_exit_2() {
 }
 
 #[test]
+fn two_environments_with_one_universe_exit_2() {
+    let dir = project(&CONFIG.replace("universe = 10769815992", "universe = 10772177432"));
+    let out = plan(dir.path(), &["production", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let problems = &document(&out)["error"]["problems"];
+    assert_eq!((&problems[0]["key"], &problems[0]["line"]), (&json!("env.staging.universe"), &Value::Null));
+    let out = plan(dir.path(), &["production"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("env.production and env.staging both name universe 10772177432"));
+}
+
+#[test]
 fn a_file_that_does_not_parse_names_its_line_as_the_guide_says() {
     let guide = include_str!("../../../docs/experience.md").replace("\r\n", "\n");
     let example = guide.split_once("A file that does not parse fails with the file and the line, such as `").unwrap().1;

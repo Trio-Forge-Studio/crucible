@@ -52,11 +52,13 @@ enabled = false
   - a `crucible` version newer than the one running;
   - two keys that become the same handle;
   - two managed keys of one kind with one display name;
+  - two environments with one universe;
   - a `moved_from` that names its own key, a key still declared, or a key another `moved_from` already names;
   - an overlay for a key that is not declared;
   - an environment that maps a place `[places]` does not declare, leaves one unmapped, or sets `place` when `start` is not the only place.
 - A key such as `coin-pack` uses lowercase letters, digits and `-`, and starts with a letter. Game code will reach it as `Products.CoinPack`, so two keys that become the same handle, such as `a-1b` and `a1b`, are an error.
 - Two products, two passes or two badges may not share a `name`, unless one of them is retired or untracked. Provision adopts an existing resource by its name, so it could not tell them apart. A product and a pass may share one.
+- Each environment needs its own universe. Provision adopts a resource by its name inside a universe, so two environments on one universe would bind each other's resources, and one environment's overlays would overwrite the other's values.
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.
 - `[env.<name>.products.<key>]` and `[env.<name>.passes.<key>]` may change only `price`, and `[env.<name>.badges.<key>]` only `enabled`. An overlay for a key that is not declared is an error, so a typo cannot create a resource.
 - Every table rejects keys it does not know. A file that does not parse fails with the file and the line, such as `crucible.toml:14: invalid type: string "49", expected u64`. A rule the tables break also names the key, such as `crucible.toml:24: products.coin-pack.price: a price of 0 does not take a product off sale. Set retired = true to take it off sale`.

@@ -277,6 +277,22 @@ impl Experience {
                 check(Kind::Badge, key, overlay.line, None);
             }
         }
+        let mut universes: BTreeMap<_, &String> = BTreeMap::new();
+        for (name, env) in &manifest.envs {
+            if let Some(first) = universes.insert(env.universe, name) {
+                problems.push(Problem {
+                    file: FILE.into(),
+                    line: None,
+                    key: format!("env.{name}.universe"),
+                    message: format!(
+                        "env.{first} and env.{name} both name universe {}. Provision adopts a resource by its name \
+                         inside a universe, so each environment would bind the other's resources, and its overlays \
+                         would overwrite the other's values. Give each environment its own universe",
+                        env.universe
+                    ),
+                });
+            }
+        }
         if !problems.is_empty() {
             return Err(problems);
         }

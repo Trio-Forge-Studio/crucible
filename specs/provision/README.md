@@ -15,7 +15,7 @@ Roblox knows a resource by its ID and its display name. It never sees the key, s
 - `Update(k)` writes the declared name to the resource the lock names.
 - `crucible adopt` reads the resource before it writes the ID. It must carry a name the key seeks, no other key may hold it, and no other key's intent may have sent its name.
 
-The lock records the universe each environment's entries belong to, and `crucible plan` refuses a lock or a journal for another universe than `crucible.toml` names. So the model's one `remote` is the universe both files describe.
+The lock records the universe each environment's entries belong to, and `crucible plan` refuses a lock or a journal for another universe than `crucible.toml` names, two environments with one universe, and a lock table or a journal for an environment `crucible.toml` no longer declares. So the model's one `remote` is the universe both files describe, and no other environment provisions it.
 
 ## What TLC checks
 
