@@ -1262,6 +1262,10 @@ fn busy(error: &io::Error) -> bool {
 
 // A pnpm, Yarn, or npm workspace keeps one lockfile at its root, above the game.
 fn detect_manager(root: &Path, agent: &str) -> Manager {
+    detect_manager_in(root.ancestors(), agent)
+}
+
+fn detect_manager_in<'a>(directories: impl IntoIterator<Item = &'a Path>, agent: &str) -> Manager {
     let locks = [
         ("pnpm-lock.yaml", Manager::Pnpm),
         ("yarn.lock", Manager::Yarn),
@@ -1269,7 +1273,7 @@ fn detect_manager(root: &Path, agent: &str) -> Manager {
         ("bun.lockb", Manager::Bun),
         ("package-lock.json", Manager::Npm),
     ];
-    for dir in root.ancestors() {
+    for dir in directories {
         if let Some(&(lock, manager)) = locks.iter().find(|(lock, _)| dir.join(lock).is_file()) {
             let berry = || fs::read_to_string(dir.join(lock)).is_ok_and(|text| text.contains("__metadata:"));
             return if manager == Manager::Yarn && berry() { Manager::YarnBerry } else { manager };
@@ -1732,26 +1736,31 @@ mod tests {
 
     #[test]
     fn lockfiles_pick_the_package_manager() {
-        let dir = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        fs::write(parent.path().join("pnpm-lock.yaml"), "").unwrap();
+        let dir = tempfile::tempdir_in(parent.path()).unwrap();
+        let detect = |root: &Path, agent: &str| {
+            detect_manager_in(root.ancestors().take_while(|path| path.starts_with(dir.path())), agent)
+        };
         let game = dir.path().join("games").join("one");
         fs::create_dir_all(&game).unwrap();
-        assert_eq!(detect_manager(&game, "pnpm/12.15.0 npm/? node/v24"), Manager::Pnpm);
-        assert_eq!(detect_manager(&game, "yarn/1.22.22 npm/? node/v24"), Manager::Yarn);
-        assert_eq!(detect_manager(&game, "yarn/4.5.0 npm/? node/v24"), Manager::YarnBerry);
+        assert_eq!(detect(&game, "pnpm/12.15.0 npm/? node/v24"), Manager::Pnpm);
+        assert_eq!(detect(&game, "yarn/1.22.22 npm/? node/v24"), Manager::Yarn);
+        assert_eq!(detect(&game, "yarn/4.5.0 npm/? node/v24"), Manager::YarnBerry);
         for (lock, manager) in
             [("package-lock.json", Manager::Npm), ("bun.lockb", Manager::Bun), ("yarn.lock", Manager::Yarn)]
         {
             fs::write(game.join(lock), "# yarn lockfile v1\n").unwrap();
-            assert_eq!(detect_manager(&game, ""), manager);
+            assert_eq!(detect(&game, ""), manager);
         }
         fs::write(game.join("yarn.lock"), "__metadata:\n  version: 8\n").unwrap();
-        assert_eq!(detect_manager(&game, ""), Manager::YarnBerry);
+        assert_eq!(detect(&game, ""), Manager::YarnBerry);
         fs::write(game.join("pnpm-lock.yaml"), "").unwrap();
-        assert_eq!(detect_manager(&game, ""), Manager::Pnpm);
+        assert_eq!(detect(&game, ""), Manager::Pnpm);
         let member = dir.path().join("games").join("two");
         fs::create_dir_all(&member).unwrap();
         fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
-        assert_eq!(detect_manager(&member, "npm/11.0.0"), Manager::Pnpm, "a workspace lockfile above the game wins");
+        assert_eq!(detect(&member, "npm/11.0.0"), Manager::Pnpm, "a workspace lockfile above the game wins");
     }
 
     #[test]
