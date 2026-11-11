@@ -15,13 +15,19 @@ pub struct Settings {
     pub voice_chat: Option<bool>,
 }
 
-/// A developer product or a game pass.
+/// A developer product or a game pass. One that is neither retired nor untracked needs a name and a price.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend(
+    "not" = { "required": ["retired", "untrack"], "properties": { "retired": { "const": true }, "untrack": { "const": true } } },
+    "if" = { "properties": { "retired": { "const": false }, "untrack": { "const": false } } },
+    "then" = { "required": ["name", "price"], "properties": { "name": { "minLength": 1 } } },
+))]
 pub struct Priced {
     pub name: Option<String>,
     pub description: Option<String>,
     /// The price in Robux. A price of 0 is not off sale: set `retired = true` instead.
+    #[schemars(range(min = 1))]
     pub price: Option<u64>,
     /// An image path relative to the project root.
     pub icon: Option<PathBuf>,
@@ -32,11 +38,18 @@ pub struct Priced {
     #[serde(default)]
     pub untrack: bool,
     /// The key it had before a rename, so it keeps its ID.
+    #[schemars(regex(pattern = r"^[a-z][a-z0-9-]*$"))]
     pub moved_from: Option<String>,
 }
 
+/// A badge. One that is neither retired nor untracked needs a name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend(
+    "not" = { "required": ["retired", "untrack"], "properties": { "retired": { "const": true }, "untrack": { "const": true } } },
+    "if" = { "properties": { "retired": { "const": false }, "untrack": { "const": false } } },
+    "then" = { "required": ["name"], "properties": { "name": { "minLength": 1 } } },
+))]
 pub struct Badge {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -51,6 +64,7 @@ pub struct Badge {
     #[serde(default)]
     pub untrack: bool,
     /// The key it had before a rename, so it keeps its ID.
+    #[schemars(regex(pattern = r"^[a-z][a-z0-9-]*$"))]
     pub moved_from: Option<String>,
 }
 
@@ -58,6 +72,7 @@ pub struct Badge {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PricedOverlay {
+    #[schemars(range(min = 1))]
     pub price: Option<u64>,
 }
 

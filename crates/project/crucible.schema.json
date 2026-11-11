@@ -9,16 +9,23 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Badge"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
       }
     },
     "crucible": {
       "description": "The oldest crucible that can read this file, such as \"0.6\".",
-      "type": "string"
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+){0,2}$"
     },
     "env": {
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Environment"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
       }
     },
     "experience": {
@@ -30,12 +37,19 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Priced"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
       }
     },
     "places": {
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Place"
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
       }
     },
     "products": {
@@ -43,12 +57,16 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Priced"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
       }
     }
   },
   "additionalProperties": false,
   "$defs": {
     "Badge": {
+      "description": "A badge. One that is neither retired nor untracked needs a name.",
       "type": "object",
       "properties": {
         "description": {
@@ -64,7 +82,8 @@
         },
         "moved_from": {
           "description": "The key it had before a rename, so it keeps its ID.",
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "name": {
           "type": "string"
@@ -80,7 +99,41 @@
           "default": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "retired": {
+            "const": false
+          },
+          "untrack": {
+            "const": false
+          }
+        }
+      },
+      "not": {
+        "properties": {
+          "retired": {
+            "const": true
+          },
+          "untrack": {
+            "const": true
+          }
+        },
+        "required": [
+          "retired",
+          "untrack"
+        ]
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
     },
     "BadgeOverlay": {
       "type": "object",
@@ -92,19 +145,25 @@
       "additionalProperties": false
     },
     "Environment": {
-      "description": "One Roblox universe the game deploys to.",
+      "description": "One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.",
       "type": "object",
       "properties": {
         "badges": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/BadgeOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
           }
         },
         "passes": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/PricedOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
           }
         },
         "place": {
@@ -120,6 +179,10 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 1
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
         "products": {
@@ -127,6 +190,9 @@
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/PricedOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
           }
         },
         "universe": {
@@ -139,6 +205,18 @@
         }
       },
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "place"
+          ]
+        },
+        {
+          "required": [
+            "places"
+          ]
+        }
+      ],
       "required": [
         "universe"
       ]
@@ -166,7 +244,7 @@
       ]
     },
     "Priced": {
-      "description": "A developer product or a game pass.",
+      "description": "A developer product or a game pass. One that is neither retired nor untracked needs a name and a price.",
       "type": "object",
       "properties": {
         "description": {
@@ -178,7 +256,8 @@
         },
         "moved_from": {
           "description": "The key it had before a rename, so it keeps its ID.",
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "name": {
           "type": "string"
@@ -187,7 +266,7 @@
           "description": "The price in Robux. A price of 0 is not off sale: set `retired = true` instead.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "retired": {
           "description": "Take it off sale. Roblox cannot delete it.",
@@ -200,7 +279,42 @@
           "default": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "retired": {
+            "const": false
+          },
+          "untrack": {
+            "const": false
+          }
+        }
+      },
+      "not": {
+        "properties": {
+          "retired": {
+            "const": true
+          },
+          "untrack": {
+            "const": true
+          }
+        },
+        "required": [
+          "retired",
+          "untrack"
+        ]
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "price"
+        ]
+      }
     },
     "PricedOverlay": {
       "description": "The fields an environment may override.",
@@ -209,7 +323,7 @@
         "price": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         }
       },
       "additionalProperties": false

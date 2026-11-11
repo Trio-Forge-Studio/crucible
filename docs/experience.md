@@ -48,7 +48,13 @@ enabled = false
 ```
 
 - `crucible = "0.6"` at the top names the oldest crucible that can read the file. An older crucible that knows the key stops with `this project needs crucible 0.6.0 or later` before it reads anything else, so a key a newer release added never reads as unknown. A release from before the key reports ``unknown field `crucible` `` instead.
-- The `#:schema` line gives Taplo and the Even Better TOML extension completion and checking from the schema the CLI package ships.
+- The `#:schema` line gives Taplo and the Even Better TOML extension completion and checking from the schema the CLI package ships. The schema checks what one table holds: unknown keys, types, key and name formats, prices of at least 1, a `name` and a `price` on what is neither retired nor untracked, and one of `place` or `places`. Only `crucible plan` and the other commands check the rules that span tables or need the running crucible:
+  - a `crucible` version newer than the one running;
+  - two keys that become the same handle;
+  - two managed keys of one kind with one display name;
+  - a `moved_from` that names its own key, a key still declared, or a key another `moved_from` already names;
+  - an overlay for a key that is not declared;
+  - an environment that maps a place `[places]` does not declare, leaves one unmapped, or sets `place` when `start` is not the only place.
 - A key such as `coin-pack` uses lowercase letters, digits and `-`, and starts with a letter. Game code will reach it as `Products.CoinPack`, so two keys that become the same handle, such as `a-1b` and `a1b`, are an error.
 - Two products, two passes or two badges may not share a `name`, unless one of them is retired or untracked. Provision adopts an existing resource by its name, so it could not tell them apart. A product and a pass may share one.
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.

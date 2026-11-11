@@ -109,32 +109,34 @@ impl fmt::Display for ManifestError {
 #[schemars(title = "crucible.toml")]
 struct RawManifest {
     /// The oldest crucible that can read this file, such as "0.6".
-    #[schemars(with = "Option<String>")]
+    #[schemars(with = "Option<String>", regex(pattern = r"^[0-9]+(\.[0-9]+){0,2}$"))]
     crucible: Option<Spanned<String>>,
+    #[schemars(extend("minProperties" = 1, "propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     places: Option<BTreeMap<String, Place>>,
     #[serde(default)]
+    #[schemars(extend("propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     env: BTreeMap<String, RawEnv>,
     /// Settings of the universe.
     #[schemars(with = "Option<Settings>")]
     experience: Option<Spanned<Settings>>,
     /// Developer products, by key. A key uses lowercase letters, digits and '-', and starts with a letter.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Priced>")]
+    #[schemars(with = "BTreeMap<String, Priced>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     products: BTreeMap<Spanned<String>, Priced>,
     /// Game passes, by key.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Priced>")]
+    #[schemars(with = "BTreeMap<String, Priced>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     passes: BTreeMap<Spanned<String>, Priced>,
     /// Badges, by key.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Badge>")]
+    #[schemars(with = "BTreeMap<String, Badge>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     badges: BTreeMap<Spanned<String>, Badge>,
 }
 
-/// One Roblox universe the game deploys to.
+/// One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "Environment")]
+#[schemars(rename = "Environment", extend("oneOf" = [{ "required": ["place"] }, { "required": ["places"] }]))]
 struct RawEnv {
     universe: NonZeroU64,
     #[serde(default)]
@@ -142,16 +144,17 @@ struct RawEnv {
     /// The place ID when `start` is the only place.
     place: Option<NonZeroU64>,
     /// Each place's ID, by place name.
+    #[schemars(extend("minProperties" = 1, "propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     places: Option<BTreeMap<String, NonZeroU64>>,
     /// This environment's changes to declared products.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, PricedOverlay>")]
+    #[schemars(with = "BTreeMap<String, PricedOverlay>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     products: BTreeMap<Spanned<String>, PricedOverlay>,
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, PricedOverlay>")]
+    #[schemars(with = "BTreeMap<String, PricedOverlay>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     passes: BTreeMap<Spanned<String>, PricedOverlay>,
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, BadgeOverlay>")]
+    #[schemars(with = "BTreeMap<String, BadgeOverlay>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     badges: BTreeMap<Spanned<String>, BadgeOverlay>,
 }
 
@@ -580,5 +583,36 @@ mod tests {
             assert!(properties.contains_key(key), "{key}");
         }
         assert_eq!(schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn the_schema_checks_the_rules_one_table_holds() {
+        let schema: serde_json::Value = serde_json::from_str(&schema()).unwrap();
+        let (properties, defs) = (&schema["properties"], &schema["$defs"]);
+        let key = serde_json::json!({ "pattern": "^[a-z][a-z0-9-]*$" });
+        let name = serde_json::json!({ "pattern": "^[A-Za-z0-9_-]+$" });
+        for table in ["products", "passes", "badges"] {
+            assert_eq!(properties[table]["propertyNames"], key, "{table}");
+            assert_eq!(defs["Environment"]["properties"][table]["propertyNames"], key, "env.<name>.{table}");
+        }
+        for (at, names) in [("places", &properties["places"]), ("env", &properties["env"])] {
+            assert_eq!(names["propertyNames"], name, "{at}");
+        }
+        assert_eq!(properties["places"]["minProperties"], 1);
+        assert_eq!(properties["crucible"]["pattern"], "^[0-9]+(\\.[0-9]+){0,2}$");
+        assert_eq!(
+            defs["Environment"]["oneOf"],
+            serde_json::json!([{ "required": ["place"] }, { "required": ["places"] }])
+        );
+        for (def, required) in
+            [("Priced", serde_json::json!(["name", "price"])), ("Badge", serde_json::json!(["name"]))]
+        {
+            assert_eq!(defs[def]["then"]["required"], required, "{def}");
+            assert_eq!(defs[def]["then"]["properties"]["name"]["minLength"], 1, "{def}");
+            assert_eq!(defs[def]["not"]["required"], serde_json::json!(["retired", "untrack"]), "{def}");
+            assert_eq!(defs[def]["properties"]["moved_from"]["pattern"], key["pattern"], "{def}");
+        }
+        assert_eq!(defs["Priced"]["properties"]["price"]["minimum"], 1);
+        assert_eq!(defs["PricedOverlay"]["properties"]["price"]["minimum"], 1);
     }
 }
