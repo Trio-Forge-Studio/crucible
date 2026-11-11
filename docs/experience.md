@@ -59,7 +59,7 @@ enabled = false
 - Two products, two passes or two badges may not share a `name`, unless one of them is retired or untracked. Provision adopts an existing resource by its name, so it could not tell them apart. A product and a pass may share one.
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.
 - `[env.<name>.products.<key>]` and `[env.<name>.passes.<key>]` may change only `price`, and `[env.<name>.badges.<key>]` only `enabled`. An overlay for a key that is not declared is an error, so a typo cannot create a resource.
-- Every table rejects keys it does not know. Errors name the file, the line and the key, such as `crucible.toml:24: products.coin-pack.price: a price of 0 does not take a product off sale. Set retired = true to take it off sale`.
+- Every table rejects keys it does not know. A file that does not parse fails with the file and the line, such as `crucible.toml:14: invalid type: string "49", expected u64`. A rule the tables break also names the key, such as `crucible.toml:24: products.coin-pack.price: a price of 0 does not take a product off sale. Set retired = true to take it off sale`.
 
 ## Retire, untrack and rename
 
@@ -107,7 +107,7 @@ staging (universe 10772177432)
 | --- | --- |
 | 0 | The plan printed. |
 | 1 | A file could not be read, or stdout could not be written. |
-| 2 | `crucible.toml`, `crucible.lock` or the journal is invalid, the environment is unknown, or the plan breaks a rule above. With `--json`, `error.problems` lists each problem with its `file`, `line` and `key`. |
+| 2 | `crucible.toml`, `crucible.lock` or the journal is invalid, the environment is unknown, or the plan breaks a rule above. With `--json`, `error.problems` lists each rule the files break with its `file`, its `key` and, when one table holds the cause, its `line`. A file that does not parse, a newer format or an unknown environment leaves `problems` empty, and `error.message` says what failed. |
 
 ## The lock
 

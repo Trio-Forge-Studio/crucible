@@ -197,6 +197,18 @@ fn two_keys_of_a_kind_with_one_display_name_exit_2() {
 }
 
 #[test]
+fn a_file_that_does_not_parse_names_its_line_as_the_guide_says() {
+    let guide = include_str!("../../../docs/experience.md").replace("\r\n", "\n");
+    let example = guide.split_once("A file that does not parse fails with the file and the line, such as `").unwrap().1;
+    let example = example.split_once('`').unwrap().0;
+    let dir = project(&CONFIG.replace("price = 49", "price = \"49\""));
+    let out = plan(dir.path(), &["staging"]);
+    assert_eq!((out.status.code(), text(&out.stderr)), (Some(2), format!("{example}\n")));
+    let out = plan(dir.path(), &["staging", "--json"]);
+    assert_eq!(document(&out)["error"], json!({"kind": "usage", "message": example, "problems": []}));
+}
+
+#[test]
 fn an_unknown_environment_a_bad_lock_or_no_config_exits_2() {
     let dir = project(CONFIG);
     let out = plan(dir.path(), &["qa"]);
