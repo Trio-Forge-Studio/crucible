@@ -166,17 +166,23 @@ pub fn package_manager(agent: &str) -> &'static str {
 pub fn peer_versions() -> Vec<(&'static str, String)> {
     let runtime: serde_json::Value = serde_json::from_str(include_str!("../../../packages/crucible/package.json"))
         .expect("runtime manifest is valid");
+    peer_versions_from(&runtime["peerDependencies"])
+}
+
+pub fn peer_versions_from(peers: &serde_json::Value) -> Vec<(&'static str, String)> {
     let sample: serde_json::Value = serde_json::from_str(include_str!("../../../examples/sample-game/package.json"))
         .expect("sample manifest is valid");
-    ["@rbxts/charm", "@rbxts/charm-sync", "@rbxts/vide", "@rbxts/vide-charm"]
+    let mut versions: Vec<_> = ["@rbxts/charm", "@rbxts/charm-sync", "@rbxts/vide"]
         .into_iter()
-        .map(|package| {
-            let spec = runtime["peerDependencies"][package]
-                .as_str()
-                .unwrap_or_else(|| sample["dependencies"][package].as_str().expect("bridge version is pinned"));
-            (package, spec.to_owned())
-        })
-        .collect()
+        .filter_map(|package| peers[package].as_str().map(|spec| (package, spec.to_owned())))
+        .collect();
+    if peers.get("@rbxts/vide").is_some() {
+        versions.push((
+            "@rbxts/vide-charm",
+            sample["dependencies"]["@rbxts/vide-charm"].as_str().expect("bridge version is pinned").to_owned(),
+        ));
+    }
+    versions
 }
 
 pub fn tokens(name: &str) -> Vec<(&'static str, String)> {

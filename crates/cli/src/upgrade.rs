@@ -233,6 +233,7 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     }
     let old = serde_json::to_string(&snapshot(&name)).expect("snapshots serialize");
     let bumped = bump(&manifest_text, &target.to_string())?;
+    let bumped = peer_manifest_with(root, &bumped, target_peers(root, &target)?)?;
     write_atomic(&manifest_path, &bumped)
         .map_err(|error| Error::Failed(format!("cannot write {}: {error}", manifest_path.display())))?;
     eprintln!(
@@ -745,11 +746,15 @@ fn peer_bounds(requirement: &VersionReq) -> Option<(PeerBound, Option<PeerBound>
 }
 
 fn peer_manifest(root: &Path, text: &str) -> Result<String, Error> {
+    peer_manifest_with(root, text, crate::create::peer_versions())
+}
+
+fn peer_manifest_with(root: &Path, text: &str, versions: Vec<(&str, String)>) -> Result<String, Error> {
     let mut manifest: serde_json::Value = serde_json::from_str(text).expect("manifest was parsed");
     let listed = |package: &str| GROUPS.iter().any(|group| manifest[group].get(package).is_some());
     let ui = listed("@rbxts/vide") || listed("@rbxts/vide-charm") || uses_ui(root);
     let mut result = text.to_owned();
-    for (package, required) in crate::create::peer_versions() {
+    for (package, required) in versions {
         if !ui && matches!(package, "@rbxts/vide" | "@rbxts/vide-charm") {
             continue;
         }
@@ -1332,6 +1337,31 @@ fn latest(root: &Path) -> Result<Version, Error> {
     text.trim().parse().map_err(|_| Error::Failed(format!("npm view returned {:?}, not a version", text.trim())))
 }
 
+fn target_peers(root: &Path, target: &Version) -> Result<Vec<(&'static str, String)>, Error> {
+    let package = format!("{RUNTIME}@{target}");
+    eprintln!("crucible upgrade: finding {package}'s peers with npm view");
+    let output = package_manager_command("npm")
+        .args(["view", &package, "peerDependencies", "--json"])
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|error| Error::Failed(format!("cannot run npm view: {error}")))?;
+    if !output.status.success() {
+        return Err(Error::Failed(format!("npm view {package} peerDependencies failed; package.json is unchanged")));
+    }
+    let peers = if output.stdout.iter().all(u8::is_ascii_whitespace) {
+        serde_json::json!({})
+    } else {
+        serde_json::from_slice(&output.stdout)
+            .map_err(|error| Error::Failed(format!("npm view {package} returned invalid peerDependencies: {error}")))?
+    };
+    if !peers.is_object() {
+        return Err(Error::Failed(format!("npm view {package} returned invalid peerDependencies")));
+    }
+    Ok(crate::create::peer_versions_from(&peers))
+}
+
 fn run_install(root: &Path, manager: Manager) -> Result<(), String> {
     let line = manager.install_line();
     let status = package_manager_command(manager.program())
@@ -1462,6 +1492,22 @@ mod tests {
         assert!(text[range.clone()].ends_with("end"), "{:?}", &text[range]);
         let empty = "## Crucible\nbody\n##\nafter\n";
         assert_eq!(&empty[section(empty, "## Crucible").unwrap()], "## Crucible\nbody");
+    }
+
+    #[test]
+    fn first_install_uses_the_target_runtimes_peers() {
+        let dir = tempfile::tempdir().unwrap();
+        let peers = serde_json::json!({"@rbxts/charm": "0.12.0", "@rbxts/charm-sync": "0.5.0"});
+        let text = r#"{"dependencies":{"@trioforge/crucible":"0.6.0","@rbxts/charm":"0.10.0"}}"#;
+        let updated = peer_manifest_with(dir.path(), text, crate::create::peer_versions_from(&peers)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(value["dependencies"]["@rbxts/charm"], "0.12.0");
+        assert_eq!(value["dependencies"]["@rbxts/charm-sync"], "0.5.0");
+        assert!(value["dependencies"].get("@rbxts/vide").is_none());
+        assert_eq!(
+            peer_manifest_with(dir.path(), text, crate::create::peer_versions_from(&serde_json::json!({}))).unwrap(),
+            text
+        );
     }
 
     #[test]

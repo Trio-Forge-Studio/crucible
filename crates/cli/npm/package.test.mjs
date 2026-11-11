@@ -340,6 +340,7 @@ function launchUpgradeRegistry() {
 			manifest.version = version;
 			if (name === "@trioforge/crucible" && version === cliVersion()) {
 				delete manifest.peerDependencies["@rbxts/charm-sync"];
+				delete manifest.peerDependencies["@rbxts/charm"];
 			}
 			if (name === "@trioforge/crucible-cli") {
 				manifest.optionalDependencies = { [platformName]: version };
@@ -487,6 +488,7 @@ test("upgrade restores Charm Sync to a previous template and the built sync load
 	const file = join(game, "package.json");
 	const manifest = JSON.parse(readFileSync(file, "utf8"));
 	delete manifest.dependencies["@rbxts/charm-sync"];
+	manifest.dependencies["@rbxts/charm"] = "0.10.0";
 	writeFileSync(file, JSON.stringify(manifest, null, "\t") + "\n");
 	mkdirSync(join(game, "src/shared"));
 	writeFileSync(
@@ -499,6 +501,7 @@ test("upgrade restores Charm Sync to a previous template and the built sync load
 	const upgraded = run("npx", ["crucible", "upgrade", setup.next], game);
 	assert.equal(upgraded.status, 0, upgraded.stdout + upgraded.stderr);
 	assert.equal(JSON.parse(readFileSync(file, "utf8")).dependencies["@rbxts/charm-sync"], "0.4.1");
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).dependencies["@rbxts/charm"], "0.11.1");
 	const built = run("npx", ["crucible", "build"], game);
 	assert.equal(built.status, 0, built.stdout + built.stderr);
 	const loaded = run(
