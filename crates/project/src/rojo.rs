@@ -61,7 +61,8 @@ impl Ignore {
 
 /// Reads the project at `project` as Rojo builds it into a place at `instance`, under the `ignore` rules of the projects
 /// around it, and returns every folder its tree maps. Unlike [`place`], it follows a `$path` that names a
-/// `*.project.json` file, and it keeps each project's `globIgnorePaths`.
+/// `*.project.json` file, and it keeps each project's `globIgnorePaths`. It does not look inside the folders, so one that
+/// holds a `default.project.json`, which Rojo reads in its place, comes back as a folder.
 pub fn folders(project: &Path, instance: &[String], ignore: &Ignore) -> Result<Vec<Folder>, String> {
     let file = std::path::absolute(project).map(|p| normalize(&p)).map_err(|e| e.to_string())?;
     let mut reader = Reader { walk: Some(Walk { ignore: ignore.clone(), folders: Vec::new() }), ..Reader::default() };
@@ -152,13 +153,12 @@ impl Reader {
             self.config(&item, instance)?;
         } else if matches!(item.extension().and_then(|e| e.to_str()), Some("lua" | "luau" | "json" | "toml")) {
             self.mappings.files.push((item, instance.clone()));
+        } else if let Some(reader) = &mut self.walk {
+            // The caller lists the folder anyway, so it finds a default.project.json there without a check per folder.
+            reader.folders.push(Folder { path: item, instance: instance.clone(), ignore: reader.ignore.clone() });
         } else if item.join(DEFAULT_PROJECT).is_file() {
             self.config(&item.join(DEFAULT_PROJECT), instance)?;
         } else {
-            if let Some(reader) = &mut self.walk {
-                let folder = Folder { path: item.clone(), instance: instance.clone(), ignore: reader.ignore.clone() };
-                reader.folders.push(folder);
-            }
             self.mappings.folders.push((item, instance.clone()));
         }
         Ok(())

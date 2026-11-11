@@ -1125,6 +1125,11 @@ fn reactive_package_project_excludes_unmapped_nested_copy() {
     game.write("node_modules/@rbxts/holder/src/init.luau", "return {}\n");
     let output = game.build(&[]);
     assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+    // Mapped directly, the folder is still read through its project.
+    map(&game, "Holder", json!("node_modules/@rbxts/holder"));
+    assert_eq!(modules_in_place(&game, "charm"), 1);
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
 }
 
 #[test]
