@@ -105,6 +105,10 @@ npx crucible oc place publish build/game.rbxl --universe 13058 --place 1818
 
 Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc --help` prints a short form.
 
+## crucible plan
+
+`npx crucible plan [<env>]` prints what `crucible provision` would do to the products, passes and badges `crucible.toml` declares, in one environment or in all of them. It reads `crucible.toml`, `crucible.lock` and `.crucible/journal/<env>.json`, makes no network call and writes nothing. `--json` prints one document instead of text. It exits 0 when the plan prints, 2 when a file is invalid or the plan breaks a provisioning rule, and 1 when a file cannot be read. Run `npx crucible docs experience` for the declarations, the actions and the rules.
+
 ## crucible publish
 
 `npx crucible publish production` builds the game, then uploads every place to the ids in `[env.production]` in `crucible.toml`. `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. Credentials load before building. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.

@@ -647,6 +647,7 @@ dependencies = [
  "clap 4.6.7",
  "crucible-compiler",
  "crucible-docs",
+ "crucible-iac",
  "crucible-oc",
  "crucible-project",
  "crucible-transform",
@@ -707,6 +708,17 @@ dependencies = [
  "mermaid-text",
  "nucleo-matcher",
  "pulldown-cmark",
+]
+
+[[package]]
+name = "crucible-iac"
+version = "0.4.0"
+dependencies = [
+ "crucible-project",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]

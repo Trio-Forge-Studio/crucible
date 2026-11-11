@@ -30,6 +30,7 @@ pub static TOPICS: &[Topic] = topics![
     "configs.md",
     "data-stores.md",
     "diagnostics.md",
+    "experience.md",
     "lifecycle.md",
     "logging.md",
     "networking.md",
