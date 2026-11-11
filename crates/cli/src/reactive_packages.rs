@@ -163,7 +163,14 @@ impl Problem<'_> {
                 }
                 let parents: BTreeSet<_> = copies.iter().filter_map(|c| c.parent.as_ref()?.name.as_deref()).collect();
                 let parents: Vec<_> = parents.into_iter().collect();
+                let agree = copies.windows(2).all(|pair| pair[0].manifest.version == pair[1].manifest.version);
                 text += &match parents.as_slice() {
+                    // A linked workspace package brings its own install, so installing again changes nothing.
+                    [_, ..] if agree => format!(
+                        "\nThe versions already agree, so keep the node_modules of {} out of the place: map only its \
+                         built folder, such as `out`, or list that node_modules under `globIgnorePaths` in the Rojo project.",
+                        parents.join(" and ")
+                    ),
                     [] => format!(
                         "\nKeep one of these folders in the place: remove the other's mapping from the Rojo project, or \
                          the dependency that installs it and run `{manager} install`."

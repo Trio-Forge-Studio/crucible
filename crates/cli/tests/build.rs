@@ -903,6 +903,31 @@ fn reactive_nested_copy_fails_before_writes() {
 }
 
 #[test]
+fn reactive_nested_copy_of_the_same_version_names_a_fix_that_is_not_an_install() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    package(&game, "node_modules/@rbxts/shared", "@rbxts/shared", "1.0.0");
+    package(&game, "node_modules/@rbxts/shared/node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    game.write("pnpm-lock.yaml", "");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr);
+    assert!(
+        message.contains(
+            "The versions already agree, so keep the node_modules of @rbxts/shared out of the place: map only its built folder, such as `out`, or list that node_modules under `globIgnorePaths` in the Rojo project."
+        ),
+        "{message}"
+    );
+    assert!(!message.contains("install`"), "{message}");
+
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["globIgnorePaths"] = json!(["**/node_modules/@rbxts/shared/node_modules/**"]);
+    game.json("default.project.json", &project);
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+}
+
+#[test]
 fn reactive_fixes_name_the_package_manager_and_paths_from_the_game() {
     let game = reactive_game();
     package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
