@@ -13,7 +13,7 @@
 (* a create was for, so the properties can say what the protocol cannot   *)
 (* see.                                                                    *)
 (*                                                                         *)
-(* Four assumptions bound what TLC proves. specs/provision/README.md       *)
+(* Five assumptions bound what TLC proves. specs/provision/README.md       *)
 (* states them and what breaks without them.                              *)
 (*   A1. A create either lands before its outcome reaches the client, or   *)
 (*       never lands, and the list endpoint shows every landed create.     *)
@@ -22,6 +22,8 @@
 (*       and that key keeps its name until provision adopts it again.      *)
 (*   A4. After a run stops on two matches, the developer adopts the one    *)
 (*       provision created for the key, if it created one.                 *)
+(*   A5. Nobody renames a resource of the kind in the universe on Roblox   *)
+(*       while an intent is unresolved.                                    *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, Sequences
 
@@ -30,7 +32,7 @@ CONSTANTS
     Names,      \* the display names a key may have
     MaxHand,    \* resources someone made by hand before the first run
     MaxFaults,  \* crashes, lost responses and dropped lock edits, in total
-    MaxRenames  \* display name edits in crucible.toml, in total
+    MaxRenames  \* display name edits in crucible.toml or on Roblox, in total
 
 VARIABLES
     remote,     \* Roblox: remote[i] is the resource with ID i, its name and ghost owner
@@ -42,7 +44,7 @@ VARIABLES
     blocked,    \* keys this run has sent a create for (rule 1)
     reply,      \* the key and ID of a create the run has an answer for
     faults,     \* faults used so far
-    renames,    \* renames used so far
+    renames,    \* renames used so far, in crucible.toml or on Roblox
     unknown,    \* ghost: keys created with no ID in the lock and no list since
     dropped     \* ghost: keys whose lock entry was lost and not yet restored (A3)
 
@@ -80,6 +82,23 @@ Rename(k, n) ==
     /\ Distinct(want')
     /\ renames' = renames + 1
     /\ UNCHANGED <<remote, lock, journal, pc, seen, blocked, reply, faults, unknown, dropped>>
+
+\* An intent whose create may have landed: the lock holds no ID for its key.
+Unresolved == \E k \in Keys : lock[k] = 0 /\ journal[k] # None
+
+\* Anyone with access renames a resource on Roblox between runs. A5: not
+\* while an intent is unresolved, since the adopt check after a lost create
+\* finds the resource only by a name it sent or declares. A3: not a resource
+\* whose lock entry is lost, which carries its key's declared name.
+RenameOnRoblox(i, n) ==
+    /\ pc \in {"down", "done"}
+    /\ renames < MaxRenames
+    /\ ~Unresolved
+    /\ \A k \in dropped : remote[i].name # want[k]
+    /\ remote[i].name # n
+    /\ remote' = [remote EXCEPT ![i].name = n]
+    /\ renames' = renames + 1
+    /\ UNCHANGED <<want, lock, journal, pc, seen, blocked, reply, faults, unknown, dropped>>
 
 \* Resources someone made by hand before the first run. Two may share a name.
 HandMade == UNION {[1..n -> [name : Names, owner : {Hand}]] : n \in 0..MaxHand}
@@ -217,14 +236,15 @@ Finish ==
     /\ UNCHANGED <<remote, want, lock, journal, seen, blocked, reply, faults, renames, unknown, dropped>>
 
 \* `crucible adopt <kind> <key> <id>` reads the resource before writing its ID:
-\* it must carry a name the key seeks, no other key may hold it, and no other
-\* key's intent may have sent its name. A4 says which of two matches the
-\* developer picks.
+\* it must carry a name the key seeks, no other key may hold it, no other
+\* key's intent may have sent its name, and no other key without a lock entry
+\* may declare its name. A4 says which of two matches the developer picks.
 AdoptById(k, i) ==
     /\ pc \in {"down", "done"}
     /\ lock[k] = 0
     /\ i \in Candidates(k)
     /\ \A j \in Keys \ {k} : i \notin Match(journal[j])
+    /\ \A j \in Keys \ {k} : lock[j] = 0 => i \notin Match(want[j])
     /\ Owned(k) # {} => i \in Owned(k)
     /\ lock' = [lock EXCEPT ![k] = i]
     /\ journal' = [journal EXCEPT ![k] = None]
@@ -259,6 +279,7 @@ Next ==
     \/ Clear
     \/ Finish
     \/ Crash
+    \/ \E i \in Ids, n \in Names : RenameOnRoblox(i, n)
     \/ \E k \in Keys :
         \/ Adopt(k) \/ Ambiguous(k) \/ Intend(k) \/ Create(k) \/ Update(k) \/ Forget(k)
         \/ DropLockEntry(k)

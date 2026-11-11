@@ -138,3 +138,13 @@ find = '''
 '''
 replace = '''
 '''
+
+[[mutant]]
+name = "rename-on-roblox-while-an-intent-is-unresolved"
+why = "Assumption A5 fails: someone renames, on Roblox, the resource a create made before its answer was lost, so the next run finds nothing under the names it seeks and creates a second one."
+breaks = "AtMostOne"
+find = '''
+    /\ ~Unresolved
+'''
+replace = '''
+'''
