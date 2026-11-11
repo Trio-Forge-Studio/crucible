@@ -656,6 +656,7 @@ mod tests {
             assert_eq!(defs[def]["then"]["required"], required, "{def}");
             assert_eq!(defs[def]["then"]["properties"]["name"]["minLength"], 1, "{def}");
             assert_eq!(defs[def]["not"]["required"], serde_json::json!(["retired", "untrack"]), "{def}");
+            assert_eq!(defs[def]["allOf"][0]["then"]["required"], serde_json::json!(["name"]), "{def}");
             assert_eq!(defs[def]["properties"]["moved_from"]["pattern"], key["pattern"], "{def}");
         }
         assert_eq!(defs["Priced"]["properties"]["price"]["minimum"], 1);

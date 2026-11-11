@@ -504,21 +504,37 @@ fn keys_overlays_and_lifecycles_are_checked_across_tables() {
 }
 
 #[test]
-fn two_managed_keys_of_a_kind_may_not_share_a_display_name() {
+fn two_declared_keys_of_a_kind_may_not_share_a_display_name_whatever_their_status() {
     let shared = CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\nprice = 1\n";
     let line = shared.lines().position(|line| line == "[passes.vip]").unwrap() + 1;
     assert_eq!(
         messages(Project::new(&shared).experience().unwrap_err()),
         [format!(
-            "crucible.toml:{line}: passes.vip.name: passes.gold and passes.vip both have the display name \"VIP\". \
-             Provision adopts an existing resource by its name, so it could not tell them apart. Give one of them \
-             another name"
+            "crucible.toml:{line}: passes.vip.name: passes.gold and passes.vip both have the display name \"VIP\". A \
+             declared key's name is taken whatever its status, because provision adopts an existing resource by its \
+             name and could not tell them apart. Give one of them another name"
+        )]
+    );
+    for (status, hint) in [("retired = true\n", ", or remove the name of the retired one"), ("untrack = true\n", "")] {
+        let config = CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\n" + status;
+        let problems = messages(Project::new(&config).experience().unwrap_err());
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with(&format!("Give one of them another name{hint}")), "{problems:?}");
+    }
+    let untracked = CONFIG.to_owned() + "[passes.gold]\nuntrack = true\n";
+    let line = untracked.lines().position(|line| line == "[passes.gold]").unwrap() + 1;
+    assert_eq!(
+        messages(Project::new(&untracked).experience().unwrap_err()),
+        [format!(
+            "crucible.toml:{line}: passes.gold.name: an untracked pass keeps its name while it is declared, so no \
+             other key adopts its resource. Give it the name it has on Roblox"
         )]
     );
     for allowed in [
         CONFIG.to_owned() + "[products.vip]\nname = \"VIP\"\nprice = 1\n",
-        CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\nretired = true\n",
-        CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\nuntrack = true\n",
+        CONFIG.to_owned() + "[passes.gold]\nretired = true\n",
+        CONFIG.to_owned() + "[passes.gold]\nname = \"\"\nretired = true\n",
+        CONFIG.to_owned() + "[passes.gold]\nname = \"Gold\"\nuntrack = true\n",
     ] {
         assert!(Project::new(&allowed).experience().is_ok(), "{allowed}");
     }

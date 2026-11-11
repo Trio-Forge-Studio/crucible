@@ -163,7 +163,7 @@ impl Experience {
             let mut handles: BTreeMap<String, &str> = BTreeMap::new();
             let mut moves: BTreeMap<&str, &str> = BTreeMap::new();
             // No overlay sets a name, so two names that differ here differ in every environment.
-            let mut names: BTreeMap<&str, &str> = BTreeMap::new();
+            let mut names: BTreeMap<&str, (&String, Lifecycle)> = BTreeMap::new();
             for (key, line, table) in &tables {
                 let at = |field: &str| format!("{}.{key}{field}", kind.table());
                 if !is_key(key) {
@@ -218,33 +218,47 @@ impl Experience {
                 if price == Some(0) {
                     problems.push(Problem::at(*line, at(".price"), zero_price(kind)));
                 }
-                if lifecycle == Lifecycle::Managed {
-                    match table.name().filter(|name| !name.is_empty()) {
-                        None => {
-                            problems.push(Problem::at(*line, at(".name"), format!("a {} needs a name", kind.noun())))
-                        }
-                        Some(name) => {
-                            if let Some(other) = names.insert(name, key) {
-                                problems.push(Problem::at(
-                                    *line,
-                                    at(".name"),
-                                    format!(
-                                        "{table}.{other} and {table}.{key} both have the display name {name:?}. \
-                                         Provision adopts an existing resource by its name, so it could not tell \
-                                         them apart. Give one of them another name",
-                                        table = kind.table()
-                                    ),
-                                ));
-                            }
+                match (table.name().filter(|name| !name.is_empty()), lifecycle) {
+                    (None, Lifecycle::Managed) => {
+                        problems.push(Problem::at(*line, at(".name"), format!("a {} needs a name", kind.noun())))
+                    }
+                    (None, Lifecycle::Untrack) => problems.push(Problem::at(
+                        *line,
+                        at(".name"),
+                        format!(
+                            "an untracked {} keeps its name while it is declared, so no other key adopts its \
+                             resource. Give it the name it has on Roblox",
+                            kind.noun()
+                        ),
+                    )),
+                    (None, Lifecycle::Retired) => {}
+                    (Some(name), _) => {
+                        if let Some((other, was)) = names.insert(name, (key, lifecycle)) {
+                            let retired = if [was, lifecycle].contains(&Lifecycle::Retired) {
+                                ", or remove the name of the retired one"
+                            } else {
+                                ""
+                            };
+                            problems.push(Problem::at(
+                                *line,
+                                at(".name"),
+                                format!(
+                                    "{table}.{other} and {table}.{key} both have the display name {name:?}. A \
+                                     declared key's name is taken whatever its status, because provision adopts an \
+                                     existing resource by its name and could not tell them apart. Give one of them \
+                                     another name{retired}",
+                                    table = kind.table()
+                                ),
+                            ));
                         }
                     }
-                    if kind != Kind::Badge && price.is_none() {
-                        problems.push(Problem::at(
-                            *line,
-                            at(".price"),
-                            format!("a {} needs a price in Robux", kind.noun()),
-                        ));
-                    }
+                }
+                if lifecycle == Lifecycle::Managed && kind != Kind::Badge && price.is_none() {
+                    problems.push(Problem::at(
+                        *line,
+                        at(".price"),
+                        format!("a {} needs a price in Robux", kind.noun()),
+                    ));
                 }
                 let resource = Resource {
                     kind,

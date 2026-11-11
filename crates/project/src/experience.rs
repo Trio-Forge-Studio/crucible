@@ -15,13 +15,18 @@ pub struct Settings {
     pub voice_chat: Option<bool>,
 }
 
-/// A developer product or a game pass. One that is neither retired nor untracked needs a name and a price.
+/// A developer product or a game pass. One that is not retired needs a name, and one that is neither retired nor
+/// untracked a price too.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(extend(
     "not" = { "required": ["retired", "untrack"], "properties": { "retired": { "const": true }, "untrack": { "const": true } } },
     "if" = { "properties": { "retired": { "const": false }, "untrack": { "const": false } } },
     "then" = { "required": ["name", "price"], "properties": { "name": { "minLength": 1 } } },
+    "allOf" = [{
+        "if": { "required": ["untrack"], "properties": { "untrack": { "const": true } } },
+        "then": { "required": ["name"], "properties": { "name": { "minLength": 1 } } },
+    }],
 ))]
 pub struct Priced {
     pub name: Option<String>,
@@ -34,7 +39,7 @@ pub struct Priced {
     /// Take it off sale. Roblox cannot delete it.
     #[serde(default)]
     pub retired: bool,
-    /// Remove it from `crucible.lock` and leave it unchanged on Roblox.
+    /// Remove it from `crucible.lock` and leave it unchanged on Roblox. It keeps its name while declared.
     #[serde(default)]
     pub untrack: bool,
     /// The key it had before a rename, so it keeps its ID.
@@ -42,13 +47,17 @@ pub struct Priced {
     pub moved_from: Option<String>,
 }
 
-/// A badge. One that is neither retired nor untracked needs a name.
+/// A badge. One that is not retired needs a name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(extend(
     "not" = { "required": ["retired", "untrack"], "properties": { "retired": { "const": true }, "untrack": { "const": true } } },
     "if" = { "properties": { "retired": { "const": false }, "untrack": { "const": false } } },
     "then" = { "required": ["name"], "properties": { "name": { "minLength": 1 } } },
+    "allOf" = [{
+        "if": { "required": ["untrack"], "properties": { "untrack": { "const": true } } },
+        "then": { "required": ["name"], "properties": { "name": { "minLength": 1 } } },
+    }],
 ))]
 pub struct Badge {
     pub name: Option<String>,
@@ -60,7 +69,7 @@ pub struct Badge {
     /// Disable it. Roblox cannot delete it.
     #[serde(default)]
     pub retired: bool,
-    /// Remove it from `crucible.lock` and leave it unchanged on Roblox.
+    /// Remove it from `crucible.lock` and leave it unchanged on Roblox. It keeps its name while declared.
     #[serde(default)]
     pub untrack: bool,
     /// The key it had before a rename, so it keeps its ID.

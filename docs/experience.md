@@ -48,16 +48,16 @@ enabled = false
 ```
 
 - `crucible = "0.6"` at the top names the oldest crucible that can read the file. An older crucible that knows the key stops with `this project needs crucible 0.6.0 or later` before it reads anything else, so a key a newer release added never reads as unknown. A release from before the key reports ``unknown field `crucible` `` instead.
-- The `#:schema` line gives Taplo and the Even Better TOML extension completion and checking from the schema the CLI package ships. The schema checks what one table holds: unknown keys, types, key and name formats, prices of at least 1, a `name` and a `price` on what is neither retired nor untracked, and one of `place` or `places`. Only `crucible plan` and the other commands check the rules that span tables or need the running crucible:
+- The `#:schema` line gives Taplo and the Even Better TOML extension completion and checking from the schema the CLI package ships. The schema checks what one table holds: unknown keys, types, key and name formats, prices of at least 1, a `name` on what is not retired and a `price` on a product or a pass that is neither retired nor untracked, and one of `place` or `places`. Only `crucible plan` and the other commands check the rules that span tables or need the running crucible:
   - a `crucible` version newer than the one running;
   - two keys that become the same handle;
-  - two managed keys of one kind with one display name;
+  - two declared keys of one kind with one display name;
   - two environments with one universe;
   - a `moved_from` that names its own key, a key still declared, or a key another `moved_from` already names;
   - an overlay for a key that is not declared;
   - an environment that maps a place `[places]` does not declare, leaves one unmapped, or sets `place` when `start` is not the only place.
 - A key such as `coin-pack` uses lowercase letters, digits and `-`, and starts with a letter. Game code will reach it as `Products.CoinPack`, so two keys that become the same handle, such as `a-1b` and `a1b`, are an error.
-- Two products, two passes or two badges may not share a `name`, unless one of them is retired or untracked. Provision adopts an existing resource by its name, so it could not tell them apart. A product and a pass may share one.
+- Two products, two passes or two badges may not share a `name`. A declared key's name is taken whatever its status, retired and untracked included, because provision adopts an existing resource by its name and could not tell them apart. Only a retired key may leave out its `name`. A product and a pass may share one.
 - Each environment needs its own universe. Provision adopts a resource by its name inside a universe, so two environments on one universe would bind each other's resources, and one environment's overlays would overwrite the other's values.
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.
 - `[env.<name>.products.<key>]` and `[env.<name>.passes.<key>]` may change only `price`, and `[env.<name>.badges.<key>]` only `enabled`. An overlay for a key that is not declared is an error, so a typo cannot create a resource.
@@ -68,7 +68,7 @@ enabled = false
 Roblox cannot delete a product, a pass or a badge, so removing a table that the lock holds an ID for is an error until you say what should happen to the resource.
 
 - `retired = true` takes a product or a pass off sale and disables a badge. A price of 0 is not off sale. Once the lock records the resource as retired, you can delete its table, and the lock keeps the ID.
-- `untrack = true` removes the resource from the lock and leaves it unchanged on Roblox.
+- `untrack = true` removes the resource from the lock and leaves it unchanged on Roblox. The key keeps its `name` while it is declared, so no other key adopts the resource. Once you remove the key from the file, the resource is like one made by hand: a new key with its name adopts it.
 - `moved_from = "<old key>"` renames a key and keeps its ID. Without it, a rename reads as a removal and a create, and `crucible plan` names the keys that could be the new one.
 
 ## Read the plan
