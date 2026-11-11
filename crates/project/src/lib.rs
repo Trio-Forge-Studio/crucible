@@ -291,24 +291,64 @@ impl Manifest {
     }
 }
 
-/// The value of a `crucible = "<version>"` line before the first table header, read without parsing the file, so a
-/// file whose syntax this crucible cannot parse still names the version it needs.
+/// The value of a top-level `crucible = "<version>"` before the first table header, read without parsing the file, so a
+/// file whose syntax this crucible cannot parse still names the version it needs. A line inside a multi-line string is
+/// text, never a key.
 fn minimum_line(text: &str) -> Option<String> {
-    for line in text.lines().map(str::trim) {
-        if line.starts_with('[') {
-            return None;
+    let mut open = None;
+    for line in text.strip_prefix('\u{feff}').unwrap_or(text).lines() {
+        if open.is_none() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                return None;
+            }
+            let key = ["crucible", "\"crucible\"", "'crucible'"].into_iter().find_map(|key| line.strip_prefix(key));
+            if let Some(value) = key.and_then(|rest| rest.trim_start().strip_prefix('=')).map(str::trim_start) {
+                let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+                let (value, rest) = value[1..].split_once(quote)?;
+                let rest = rest.trim_start();
+                return (rest.is_empty() || rest.starts_with('#')).then(|| value.to_owned());
+            }
         }
-        let Some(value) =
-            line.strip_prefix("crucible").and_then(|rest| rest.trim_start().strip_prefix('=')).map(str::trim_start)
-        else {
-            continue;
-        };
-        let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
-        let (value, rest) = value[1..].split_once(quote)?;
-        let rest = rest.trim_start();
-        return (rest.is_empty() || rest.starts_with('#')).then(|| value.to_owned());
+        open = string_left_open(line, open);
     }
     None
+}
+
+/// A multi-line string, opened by `"""` or `'''`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Multiline {
+    Basic,
+    Literal,
+}
+
+/// The multi-line string still open after `line`, which starts inside `open`. Comments and one-line strings are
+/// skipped, so a delimiter inside them opens nothing.
+fn string_left_open(line: &str, mut open: Option<Multiline>) -> Option<Multiline> {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        let rest = &bytes[at..];
+        match open {
+            Some(Multiline::Basic) if rest[0] == b'\\' => at += 2,
+            Some(Multiline::Basic) if rest.starts_with(b"\"\"\"") => (open, at) = (None, at + 3),
+            Some(Multiline::Literal) if rest.starts_with(b"'''") => (open, at) = (None, at + 3),
+            Some(_) => at += 1,
+            None if rest[0] == b'#' => break,
+            None if rest.starts_with(b"\"\"\"") => (open, at) = (Some(Multiline::Basic), at + 3),
+            None if rest.starts_with(b"'''") => (open, at) = (Some(Multiline::Literal), at + 3),
+            None if rest[0] == b'"' || rest[0] == b'\'' => {
+                let quote = rest[0];
+                at += 1;
+                while at < bytes.len() && bytes[at] != quote {
+                    at += if quote == b'"' && bytes[at] == b'\\' { 2 } else { 1 };
+                }
+                at += 1;
+            }
+            None => at += 1,
+        }
+    }
+    open
 }
 
 /// "0.6" means 0.6.0. A pre-release or build suffix is not a minimum anyone writes, so it is refused.
@@ -575,6 +615,34 @@ mod tests {
                 matches!(failure, ManifestError::Parse { line: Some(found), .. } if found == line),
                 "{text}: {failure}"
             );
+        }
+    }
+
+    #[test]
+    fn a_crucible_line_inside_a_multi_line_string_is_not_the_minimum() {
+        let needs = |text: &str| match Manifest::parse_for(text, &version("0.6.2")) {
+            Err(ManifestError::NeedsVersion { needed, .. }) => Some(needed.to_string()),
+            Ok(_) => None,
+            Err(other) => panic!("{text}: {other}"),
+        };
+        for quote in ["\"\"\"", "'''"] {
+            let holds =
+                |version: &str| format!("products.gem.description = {quote}\ncrucible = \"{version}\"\n{quote}\n");
+            let before = holds("0.1") + "crucible = \"9.0\"\n";
+            assert_eq!(needs(&before), Some("9.0.0".into()), "{before}");
+            assert_eq!(needs(&(before.clone() + "[storefront\n")), Some("9.0.0".into()), "{before}");
+            assert_eq!(needs(&holds("9.0")), None, "only in a string");
+            assert_eq!(needs(&(holds("9.0") + "crucible = \"0.1\"\n")), None, "a lower minimum after the string");
+        }
+        for text in [
+            "products.gem.description = \"\"\"\n\\\"\"\" still open\ncrucible = \"0.1\"\n\"\"\"\ncrucible = \"9.0\"\n[storefront\n",
+            "products.gem.description = \"a \\\" '''\"\ncrucible = \"9.0\"\n[storefront\n",
+            "# a comment holds \"\"\"\ncrucible = \"9.0\"\n[storefront\n",
+            "products.gem.description = '''one line'''\ncrucible = \"9.0\"\n[storefront\n",
+            "\u{feff}crucible = \"9.0\"\n[storefront\n",
+            "\"crucible\" = \"9.0\"\n[storefront\n",
+        ] {
+            assert_eq!(needs(text), Some("9.0.0".into()), "{text}");
         }
     }
 
