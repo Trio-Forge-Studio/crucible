@@ -21,10 +21,10 @@ Create(k) ==
 
 [[mutant]]
 name = "adopt-trusts-the-typed-id"
-why = "`crucible adopt` writes the ID it is given without reading it."
+why = "`crucible adopt` writes the ID it is given without reading the resource."
 breaks = "LockNamesExisting"
 find = '''
-    /\ i \in Named(k)
+    /\ i \in Candidates(k)
 '''
 replace = '''
 '''
@@ -42,12 +42,23 @@ replace = '''
 '''
 
 [[mutant]]
+name = "list-result-ignored"
+why = "A list runs, and the run creates without looking at what it found."
+breaks = "NoBlindCreate"
+find = '''
+    /\ seen' = [k \in Keys |-> IF lock[k] = 0 THEN Candidates(k) ELSE {}]
+'''
+replace = '''
+    /\ seen' = [k \in Keys |-> {}]
+'''
+
+[[mutant]]
 name = "create-before-intent"
 why = "The create is sent before its intent reaches the journal."
 breaks = "JournalCoversUnknown"
 find = '''
     /\ seen[k] = {}
-    /\ k \in journal
+    /\ journal[k] = want[k]
 '''
 replace = '''
     /\ seen[k] = {}
@@ -69,8 +80,61 @@ name = "list-misses-recent-creates"
 why = "Assumption A1 fails: the list can miss a resource that exists, so the adopt check finds nothing."
 breaks = "AtMostOne"
 find = '''
-    /\ seen' = [k \in Keys |-> Named(k)]
+    /\ seen' = [k \in Keys |-> IF lock[k] = 0 THEN Candidates(k) ELSE {}]
 '''
 replace = '''
-    /\ seen' \in [Keys -> SUBSET Ids] /\ \A k \in Keys : seen'[k] \subseteq Named(k)
+    /\ seen' \in [Keys -> SUBSET Ids] /\ \A k \in Keys : seen'[k] \subseteq IF lock[k] = 0 THEN Candidates(k) ELSE {}
+'''
+
+[[mutant]]
+name = "two-keys-one-name"
+why = "crucible.toml lets two keys of one kind share a display name, so one key adopts the other's resource."
+breaks = "LockNamesExisting"
+find = '''
+Distinct(w) == \A k, j \in Keys : k # j => w[k] # w[j]
+'''
+replace = '''
+Distinct(w) == TRUE
+'''
+
+[[mutant]]
+name = "adopt-check-ignores-the-sent-name"
+why = "The intent does not record the name it sent, so a rename after a lost create hides the resource and a second one is created."
+breaks = "AtMostOne"
+find = '''
+Sought(k) == {want[k]} \cup (IF journal[k] = None THEN {} ELSE {journal[k]})
+'''
+replace = '''
+Sought(k) == {want[k]}
+'''
+
+[[mutant]]
+name = "adopt-with-two-candidates"
+why = "The adopt check takes one of two matches instead of stopping the run."
+breaks = "LockNamesExisting"
+find = '''
+    /\ Cardinality(seen[k]) = 1
+'''
+replace = '''
+    /\ Cardinality(seen[k]) >= 1
+'''
+
+[[mutant]]
+name = "plan-allows-a-sent-name"
+why = "The plan lets a key take the name another key's intent sent, so that key adopts the other's resource."
+breaks = "LockNamesExisting"
+find = '''
+    /\ ~Refused
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "adopt-ignores-other-intents"
+why = "`crucible adopt` accepts a resource whose name another key's intent sent."
+breaks = "LockNamesExisting"
+find = '''
+    /\ \A j \in Keys \ {k} : i \notin Match(journal[j])
+'''
+replace = '''
 '''
