@@ -736,6 +736,7 @@ dependencies = [
 name = "crucible-project"
 version = "0.4.0"
 dependencies = [
+ "globset",
  "serde",
  "serde_json",
  "tempfile",
