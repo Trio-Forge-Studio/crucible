@@ -1,0 +1,76 @@
+# Each mutant changes one line of Provision.tla. `cargo xtask tla` checks that TLC finds a counterexample to the
+# property each one names, so every property is shown to catch the bug it is there for.
+
+[[mutant]]
+name = "create-ignores-the-list"
+why = "A create runs although the list found the key's resource."
+breaks = "AtMostOne"
+find = '''
+Create(k) ==
+    /\ pc = "ready"
+    /\ lock[k] = 0
+    /\ k \notin blocked
+    /\ seen[k] = {}
+'''
+replace = '''
+Create(k) ==
+    /\ pc = "ready"
+    /\ lock[k] = 0
+    /\ k \notin blocked
+'''
+
+[[mutant]]
+name = "adopt-trusts-the-typed-id"
+why = "`crucible adopt` writes the ID it is given without reading it."
+breaks = "LockNamesExisting"
+find = '''
+    /\ i \in Named(k)
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "create-again-after-unknown"
+why = "A run sends a second create for a key after the first one's answer was lost."
+breaks = "NoBlindCreate"
+find = '''
+    /\ k \notin blocked
+    /\ seen[k] = {}
+'''
+replace = '''
+    /\ seen[k] = {}
+'''
+
+[[mutant]]
+name = "create-before-intent"
+why = "The create is sent before its intent reaches the journal."
+breaks = "JournalCoversUnknown"
+find = '''
+    /\ seen[k] = {}
+    /\ k \in journal
+'''
+replace = '''
+    /\ seen[k] = {}
+'''
+
+[[mutant]]
+name = "blocked-for-good"
+why = "Rule 1 holds per environment instead of per run, so a key whose create was lost before it landed is never created."
+breaks = "Converges"
+find = '''
+    /\ blocked' = {}
+'''
+replace = '''
+    /\ blocked' = blocked
+'''
+
+[[mutant]]
+name = "list-misses-recent-creates"
+why = "Assumption A1 fails: the list can miss a resource that exists, so the adopt check finds nothing."
+breaks = "AtMostOne"
+find = '''
+    /\ seen' = [k \in Keys |-> Named(k)]
+'''
+replace = '''
+    /\ seen' \in [Keys -> SUBSET Ids] /\ \A k \in Keys : seen'[k] \subseteq Named(k)
+'''

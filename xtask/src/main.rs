@@ -9,6 +9,7 @@ mod proof;
 mod run;
 #[cfg(test)]
 mod tests;
+mod tla;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ use sha2::{Digest, Sha256};
 const SPEC_REPOSITORY: &str = "Roblox/creator-docs";
 const SPEC_PATH: &str = "content/en-us/reference/cloud/openapi.json";
 
-const USAGE: &str = "usage: cargo xtask <spec|golden|arch|abi|proof> ...";
+const USAGE: &str = "usage: cargo xtask <spec|golden|arch|abi|proof|tla> ...";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
         Some("arch") => arch::main(&args[1..]),
         Some("abi") => abi::main(&args[1..]),
         Some("proof") => proof::main(&args[1..]),
+        Some("tla") => tla::main(&args[1..]),
         _ => Err(USAGE.into()),
     };
     match result {
