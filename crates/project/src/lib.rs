@@ -223,14 +223,17 @@ impl Manifest {
     }
 
     /// Parses the file for crucible `running`. A file that needs a newer crucible fails with that version before the
-    /// strict parse, so a key that version added never reads as unknown.
+    /// strict parse, so a key or a syntax that version added never reads as an error.
     pub fn parse_for(text: &str, running: &semver::Version) -> Result<Self, ManifestError> {
         #[derive(Deserialize)]
         struct Minimum {
             crucible: Option<toml::Value>,
         }
-        if let Ok(Minimum { crucible: Some(toml::Value::String(value)) }) = toml::from_str(text)
-            && let Some(needed) = minimum(&value)
+        let lenient = || match toml::from_str(text) {
+            Ok(Minimum { crucible: Some(toml::Value::String(value)) }) => Some(value),
+            _ => None,
+        };
+        if let Some(needed) = minimum_line(text).or_else(lenient).as_deref().and_then(minimum)
             && needed > *running
         {
             return Err(ManifestError::NeedsVersion { needed, running: running.clone() });
@@ -286,6 +289,26 @@ impl Manifest {
         };
         Ok(Self { places, envs, experience })
     }
+}
+
+/// The value of a `crucible = "<version>"` line before the first table header, read without parsing the file, so a
+/// file whose syntax this crucible cannot parse still names the version it needs.
+fn minimum_line(text: &str) -> Option<String> {
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            return None;
+        }
+        let Some(value) =
+            line.strip_prefix("crucible").and_then(|rest| rest.trim_start().strip_prefix('=')).map(str::trim_start)
+        else {
+            continue;
+        };
+        let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        let (value, rest) = value[1..].split_once(quote)?;
+        let rest = rest.trim_start();
+        return (rest.is_empty() || rest.starts_with('#')).then(|| value.to_owned());
+    }
+    None
 }
 
 /// "0.6" means 0.6.0. A pre-release or build suffix is not a minimum anyone writes, so it is refused.
@@ -530,6 +553,29 @@ mod tests {
         assert!(Manifest::parse_for("crucible = \"0.6.3\"\n", &version("0.6.2")).is_err());
         let failure = Manifest::parse_for(text, &version("0.7.0")).unwrap_err().to_string();
         assert!(failure.starts_with("crucible.toml:2: unknown field `storefronts`"), "{failure}");
+    }
+
+    #[test]
+    fn a_newer_minimum_is_reported_before_a_syntax_this_crucible_cannot_parse() {
+        for text in [
+            "crucible = \"0.7\"\n[storefront\n",
+            "# needs storefronts\ncrucible = '0.7' # the first release with them\n[places.start]\nproject = \"a\"\nproject = \"b\"\n",
+            "crucible = \"0.7\"\n[storefront]\ntheme = { dark = true, }\n",
+        ] {
+            let failure = Manifest::parse_for(text, &version("0.6.2")).unwrap_err();
+            assert!(matches!(failure, ManifestError::NeedsVersion { .. }), "{text}: {failure}");
+        }
+        for (text, line) in [
+            ("crucible = \"0.6\"\n[storefront\n", 2),
+            ("[places.start]\ncrucible = \"0.7\"\n[storefront\n", 3),
+            ("crucible_min = \"0.7\"\n[storefront\n", 2),
+        ] {
+            let failure = Manifest::parse_for(text, &version("0.6.2")).unwrap_err();
+            assert!(
+                matches!(failure, ManifestError::Parse { line: Some(found), .. } if found == line),
+                "{text}: {failure}"
+            );
+        }
     }
 
     #[test]
