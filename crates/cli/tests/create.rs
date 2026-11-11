@@ -20,9 +20,12 @@ fn creates_default_and_explicit_targets_without_installing() {
         assert_eq!(package["dependencies"]["@trioforge/crucible"], env!("CARGO_PKG_VERSION"));
         let sample: serde_json::Value =
             serde_json::from_str(include_str!("../../../examples/sample-game/package.json")).unwrap();
-        for stack in ["@rbxts/charm", "@rbxts/charm-sync", "@rbxts/vide", "@rbxts/vide-charm"] {
-            assert_eq!(package["dependencies"][stack], sample["dependencies"][stack], "{stack}");
+        let runtime: serde_json::Value =
+            serde_json::from_str(include_str!("../../../packages/crucible/package.json")).unwrap();
+        for stack in ["@rbxts/charm", "@rbxts/charm-sync", "@rbxts/vide"] {
+            assert_eq!(package["dependencies"][stack], runtime["peerDependencies"][stack], "{stack}");
         }
+        assert_eq!(package["dependencies"]["@rbxts/vide-charm"], sample["dependencies"]["@rbxts/vide-charm"]);
         assert_eq!(package["devDependencies"]["@trioforge/crucible-cli"], env!("CARGO_PKG_VERSION"));
         for file in [
             "tsconfig.json",

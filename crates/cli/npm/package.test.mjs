@@ -338,6 +338,9 @@ function launchUpgradeRegistry() {
 			cpSync(source, directory, { recursive: true });
 			const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
 			manifest.version = version;
+			if (name === "@trioforge/crucible" && version === cliVersion()) {
+				delete manifest.peerDependencies["@rbxts/charm-sync"];
+			}
 			if (name === "@trioforge/crucible-cli") {
 				manifest.optionalDependencies = { [platformName]: version };
 				if (version === next) {
@@ -477,6 +480,35 @@ test(
 		assertPinned(game, cliVersion());
 	},
 );
+
+test("upgrade restores Charm Sync to a previous template and the built sync loads", { skip: !supported }, async () => {
+	const setup = await startUpgradeRegistry();
+	const game = createGame("upgrade-sync-game", setup);
+	const file = join(game, "package.json");
+	const manifest = JSON.parse(readFileSync(file, "utf8"));
+	delete manifest.dependencies["@rbxts/charm-sync"];
+	writeFileSync(file, JSON.stringify(manifest, null, "\t") + "\n");
+	mkdirSync(join(game, "src/shared"));
+	writeFileSync(
+		join(game, "src/shared/state.ts"),
+		'import { replicated } from "@trioforge/crucible";\nexport const value = replicated<number>("Upgrade.Value", 7);\n',
+	);
+	const installed = run("npm", ["install", "--no-audit", "--no-fund"], game);
+	assert.equal(installed.status, 0, installed.stderr);
+	assert.ok(!existsSync(join(game, "node_modules/@rbxts/charm-sync")), "previous template has no sync package");
+	const upgraded = run("npx", ["crucible", "upgrade", setup.next], game);
+	assert.equal(upgraded.status, 0, upgraded.stdout + upgraded.stderr);
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).dependencies["@rbxts/charm-sync"], "0.4.1");
+	const built = run("npx", ["crucible", "build"], game);
+	assert.equal(built.status, 0, built.stdout + built.stderr);
+	const loaded = run(
+		"lune",
+		["run", "test/fixtures/upgrade-sync.luau", join(game, "build/start.rbxl")],
+		resolve(cli, "../.."),
+	);
+	assert.equal(loaded.status, 0, loaded.stdout + loaded.stderr);
+	assert.match(loaded.stdout, /upgraded game loads sync/);
+});
 
 const LAST_ROBLOX_TS_RELEASE = "0.3.0";
 const LAST_ROBLOX_TS_HOSTS = ["linux-x64", "win32-x64"];

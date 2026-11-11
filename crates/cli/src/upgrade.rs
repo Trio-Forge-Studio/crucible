@@ -204,12 +204,25 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     match plan(&pins, &installed, &target, args.version.is_some(), args.allow_downgrade)? {
         Plan::Current if on_roblox_ts(&manifest) => {
             let mut report = format!("crucible is already at {target}.\n");
+            let peers = reconcile_peers(root, manager)?;
+            if !peers.is_empty() {
+                report += "\nUpdated runtime peers:\n";
+                report.extend(peers.iter().map(|line| format!("  {line}\n")));
+            }
             let migration = move_off_roblox_ts(root, &target, manager);
             migration.report(&mut report);
             return Report::new(report, migration, manager).print();
         }
         Plan::Current => {
+            let peers = reconcile_peers(root, manager)?;
             println!("crucible is already at {target}.");
+            if !peers.is_empty() {
+                println!("\nUpdated runtime peers:");
+                for line in peers {
+                    println!("  {line}");
+                }
+                println!("\nRun `{} run check` next.", manager.program());
+            }
             return Ok(());
         }
         Plan::NewerThanLatest(newest) => {
@@ -397,7 +410,16 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
         .map(|(topic, _)| topic.as_str())
         .collect();
     let manager = detect_manager(root, &std::env::var("npm_config_user_agent").unwrap_or_default());
-    let migration = move_off_roblox_ts(root, &to, manager);
+    let peers = if manifest["dependencies"].get(RUNTIME).is_some() || manifest["devDependencies"].get(RUNTIME).is_some()
+    {
+        reconcile_peers(root, manager)
+    } else {
+        Ok(Vec::new())
+    };
+    let (peers, migration) = match peers {
+        Ok(peers) => (peers, move_off_roblox_ts(root, &to, manager)),
+        Err(error) => (Vec::new(), Migration { failed: Some(error.to_string()), ..Migration::default() }),
+    };
 
     let mut report = if *from == to {
         format!("Reinstalled crucible and {RUNTIME} at {to}.\n")
@@ -410,6 +432,7 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
             report.extend(labels.iter().map(|label| format!("  {label}\n")));
         }
     };
+    list("Updated runtime peers:", &peers);
     list("Refreshed from the new template:", &written);
     list(
         if old.is_some() {
@@ -637,6 +660,224 @@ fn bump(text: &str, version: &str) -> Result<String, Error> {
         )));
     }
     Ok(result)
+}
+
+fn peer_satisfies(old: &str, required: &str) -> bool {
+    if old == required {
+        return true;
+    }
+    let parse = |spec: &str| {
+        let normalized = if spec.parse::<Version>().is_ok() { format!("={spec}") } else { spec.to_owned() };
+        VersionReq::parse(&normalized)
+    };
+    let Ok(wanted) = parse(required) else { return false };
+    old.split("||").all(|arm| {
+        let normalized = arm.split_whitespace().collect::<Vec<_>>().join(", ");
+        let Ok(existing) = parse(&normalized) else { return false };
+        let Some((lower, upper)) = peer_bounds(&existing) else { return false };
+        let Some((wanted_lower, wanted_upper)) = peer_bounds(&wanted) else { return false };
+        let above = lower.0 > wanted_lower.0 || (lower.0 == wanted_lower.0 && (!lower.1 || wanted_lower.1));
+        let below = match (upper, wanted_upper) {
+            (_, None) => true,
+            (None, Some(_)) => false,
+            (Some(end), Some(wanted)) => end.0 < wanted.0 || (end.0 == wanted.0 && (!end.1 || wanted.1)),
+        };
+        above && below
+    })
+}
+
+type PeerBound = (Version, bool);
+
+fn peer_bounds(requirement: &VersionReq) -> Option<(PeerBound, Option<PeerBound>)> {
+    use semver::Op;
+    let mut lower = (Version::new(0, 0, 0), true);
+    let mut upper: Option<PeerBound> = None;
+    for comparator in &requirement.comparators {
+        if !comparator.pre.is_empty() {
+            return None;
+        }
+        let minor = comparator.minor.unwrap_or(0);
+        let patch = comparator.patch.unwrap_or(0);
+        let version = Version::new(comparator.major, minor, patch);
+        let next_major = || comparator.major.checked_add(1).map(|major| Version::new(major, 0, 0));
+        let next_minor = || minor.checked_add(1).map(|minor| Version::new(comparator.major, minor, 0));
+        let next_patch = || patch.checked_add(1).map(|patch| Version::new(comparator.major, minor, patch));
+        let (start, end) = match comparator.op {
+            Op::GreaterEq => (Some((version, true)), None),
+            Op::Greater if comparator.patch.is_some() => (Some((version, false)), None),
+            Op::Less => (None, Some((version, false))),
+            Op::LessEq if comparator.patch.is_some() => (None, Some((version, true))),
+            Op::Exact | Op::Wildcard if comparator.minor.is_none() => {
+                (Some((version, true)), Some((next_major()?, false)))
+            }
+            Op::Exact | Op::Wildcard if comparator.patch.is_none() => {
+                (Some((version, true)), Some((next_minor()?, false)))
+            }
+            Op::Exact => (Some((version.clone(), true)), Some((version, true))),
+            Op::Tilde => (
+                Some((version, true)),
+                Some((if comparator.minor.is_some() { next_minor()? } else { next_major()? }, false)),
+            ),
+            Op::Caret => {
+                let end = if comparator.major > 0 || comparator.minor.is_none() {
+                    next_major()?
+                } else if minor > 0 || comparator.patch.is_none() {
+                    next_minor()?
+                } else {
+                    next_patch()?
+                };
+                (Some((version, true)), Some((end, false)))
+            }
+            _ => return None,
+        };
+        if let Some(start) = start
+            && (start.0 > lower.0 || (start.0 == lower.0 && !start.1))
+        {
+            lower = start;
+        }
+        if let Some(end) = end
+            && upper.as_ref().is_none_or(|current| end.0 < current.0 || (end.0 == current.0 && !end.1))
+        {
+            upper = Some(end);
+        }
+    }
+    Some((lower, upper))
+}
+
+fn peer_manifest(root: &Path, text: &str) -> Result<String, Error> {
+    let mut manifest: serde_json::Value = serde_json::from_str(text).expect("manifest was parsed");
+    let listed = |package: &str| GROUPS.iter().any(|group| manifest[group].get(package).is_some());
+    let ui = listed("@rbxts/vide") || listed("@rbxts/vide-charm") || uses_ui(root);
+    let mut result = text.to_owned();
+    for (package, required) in crate::create::peer_versions() {
+        if !ui && matches!(package, "@rbxts/vide" | "@rbxts/vide-charm") {
+            continue;
+        }
+        let mut found = false;
+        for group in GROUPS {
+            let Some(old) = manifest[group][package].as_str() else { continue };
+            found = true;
+            let compatible = peer_satisfies(old, &required);
+            if compatible {
+                continue;
+            }
+            for entry in entries(&result, package, old).into_iter().rev() {
+                result.replace_range(entry.value, &quoted(&required));
+            }
+            manifest[group][package] = required.clone().into();
+        }
+        if !found {
+            let group = GROUPS
+                .into_iter()
+                .find(|group| manifest[group].get(RUNTIME).is_some())
+                .ok_or_else(|| Error::Failed("package.json must list the runtime".into()))?;
+            let found = entries(&result, RUNTIME, manifest[group][RUNTIME].as_str().unwrap());
+            let [runtime] = found.as_slice() else {
+                return Err(Error::Failed("cannot edit runtime peers in package.json".into()));
+            };
+            let separator = &result[result[..runtime.start].trim_end().len()..runtime.start];
+            result.insert_str(runtime.value.end, &format!(",{separator}{}: {}", quoted(package), quoted(&required)));
+            manifest[group][package] = required.into();
+        }
+    }
+    if serde_json::from_str::<serde_json::Value>(&result).ok().as_ref() != Some(&manifest) {
+        return Err(Error::Failed("cannot edit runtime peers in package.json automatically".into()));
+    }
+    Ok(result)
+}
+
+fn imports_ui(source: &str) -> bool {
+    let entry = format!("{}/{}", crucible_abi::PACKAGE, crucible_abi::UI);
+    let bytes = source.as_bytes();
+    let mut at = 0;
+    let mut importing = false;
+    let mut exporting = false;
+    while at < bytes.len() {
+        if bytes[at..].starts_with(b"//") {
+            while at < bytes.len() && bytes[at] != b'\n' {
+                at += 1;
+            }
+        } else if bytes[at..].starts_with(b"/*") {
+            at += 2;
+            while at < bytes.len() && !bytes[at..].starts_with(b"*/") {
+                at += 1;
+            }
+            at = (at + 2).min(bytes.len());
+        } else if matches!(bytes[at], b'\'' | b'"' | b'`') {
+            let quote = bytes[at];
+            at += 1;
+            let start = at;
+            while at < bytes.len() && bytes[at] != quote {
+                if bytes[at] == b'\\' {
+                    at += 1;
+                }
+                at += 1;
+            }
+            if importing && source.get(start..at) == Some(entry.as_str()) {
+                return true;
+            }
+            at = (at + 1).min(bytes.len());
+            importing = false;
+        } else if bytes[at].is_ascii_alphabetic() || bytes[at] == b'_' {
+            let start = at;
+            while at < bytes.len() && (bytes[at].is_ascii_alphanumeric() || matches!(bytes[at], b'_' | b'$')) {
+                at += 1;
+            }
+            match &source[start..at] {
+                "import" | "require" => importing = true,
+                "export" => exporting = true,
+                "from" if exporting => importing = true,
+                "const" | "let" | "var" | "function" | "class" | "interface" => exporting = false,
+                _ => {}
+            }
+        } else {
+            if bytes[at] == b';' {
+                importing = false;
+                exporting = false;
+            }
+            at += 1;
+        }
+    }
+    false
+}
+
+fn uses_ui(root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(root) else { return false };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || matches!(name.as_ref(), "node_modules" | "out" | "build" | "target") {
+            return false;
+        }
+        if path.is_dir() && !entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            return uses_ui(&path);
+        }
+        matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx"))
+            && fs::read_to_string(path).is_ok_and(|source| imports_ui(&source))
+    })
+}
+
+fn reconcile_peers(root: &Path, manager: Manager) -> Result<Vec<String>, Error> {
+    let (text, _) = read_manifest(root)?;
+    let edited = peer_manifest(root, &text)?;
+    if edited == text {
+        return Ok(Vec::new());
+    }
+    let path = root.join("package.json");
+    write_atomic(&path, &edited).map_err(|error| Error::Failed(format!("cannot write {}: {error}", path.display())))?;
+    eprintln!("crucible upgrade: running `{}` for the runtime's peers", manager.install_line());
+    if let Err(error) = run_install(root, manager) {
+        let restored = match restore(&path, &text) {
+            Ok(()) => "package.json is restored".to_owned(),
+            Err(error) => format!("restoring package.json also failed: {error}"),
+        };
+        return Err(Error::Failed(format!(
+            "{error}. {restored}. Run `{}` and `npx crucible upgrade` again",
+            manager.install_line()
+        )));
+    }
+    Ok(vec!["package.json now lists the runtime's required peers".into(), format!("ran `{}`", manager.install_line())])
 }
 
 fn quoted(text: &str) -> String {
@@ -1217,6 +1458,76 @@ mod tests {
         assert!(text[range.clone()].ends_with("end"), "{:?}", &text[range]);
         let empty = "## Crucible\nbody\n##\nafter\n";
         assert_eq!(&empty[section(empty, "## Crucible").unwrap()], "## Crucible\nbody");
+    }
+
+    #[test]
+    fn ui_detection_ignores_comments_and_unrelated_strings() {
+        for source in [
+            "// import '@trioforge/crucible/ui';",
+            "/* import '@trioforge/crucible/ui'; */",
+            "const note = '@trioforge/crucible/ui';",
+        ] {
+            assert!(!imports_ui(source), "{source}");
+        }
+        for source in [
+            "import '@trioforge/crucible/ui';",
+            "import { Modal } from '@trioforge/crucible/ui';",
+            "export { Modal } from '@trioforge/crucible/ui';",
+            "const ui = require('@trioforge/crucible/ui');",
+        ] {
+            assert!(imports_ui(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn runtime_peer_ranges_keep_only_specs_inside_the_required_range() {
+        for old in ["0.6.1", "0.6.2", "^0.6.1", "^0.6.2", "~0.6.2", ">=0.6.1 <0.7.0", "^0.6.1 || ~0.6.2"] {
+            assert!(peer_satisfies(old, "^0.6.1"), "{old}");
+        }
+        for old in ["^0.5.0", "^0.7.0", "*", ">=0.6.1", "0.6.1-beta.1"] {
+            assert!(!peer_satisfies(old, "^0.6.1"), "{old}");
+        }
+        assert!(!peer_satisfies("^0.11.1", "0.11.1"));
+        assert!(peer_satisfies("0.11.1", "0.11.1"));
+    }
+
+    #[test]
+    fn upgrade_reconciles_runtime_peers_for_each_manager() {
+        for lock in ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"] {
+            let dir = tempfile::tempdir().unwrap();
+            fs::write(dir.path().join(lock), "").unwrap();
+            for old in [None, Some("0.3.0"), Some("0.4.1")] {
+                let mut manifest = serde_json::json!({"dependencies": {RUNTIME: "0.5.0", "@rbxts/charm": "^0.11.1"}});
+                if let Some(old) = old {
+                    manifest["dependencies"]["@rbxts/charm-sync"] = old.into();
+                }
+                let text = manifest.to_string();
+                let updated = peer_manifest(dir.path(), &text).unwrap();
+                let value: serde_json::Value = serde_json::from_str(&updated).unwrap();
+                assert_eq!(value["dependencies"]["@rbxts/charm-sync"], "0.4.1", "{lock}");
+                assert_eq!(value["dependencies"]["@rbxts/charm"], "0.11.1");
+                assert!(value["dependencies"].get("@rbxts/vide").is_none());
+                assert!(value["dependencies"].get("@rbxts/vide-charm").is_none());
+                assert_eq!(peer_manifest(dir.path(), &updated).unwrap(), updated);
+            }
+        }
+    }
+
+    #[test]
+    fn upgrade_preserves_compatible_ui_versions_and_adds_missing_peers() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/view.tsx"), "import {} from '@trioforge/crucible/ui';").unwrap();
+        let missing = r#"{"dependencies":{"@trioforge/crucible":"0.5.0"}}"#;
+        let added: serde_json::Value = serde_json::from_str(&peer_manifest(dir.path(), missing).unwrap()).unwrap();
+        assert_eq!(added["dependencies"]["@rbxts/vide"], "^0.6.1");
+        assert_eq!(added["dependencies"]["@rbxts/vide-charm"], "0.4.1");
+        let text = r#"{"dependencies":{"@trioforge/crucible":"0.5.0","@rbxts/vide":"0.6.2"}}"#;
+        let updated = peer_manifest(dir.path(), text).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(value["dependencies"]["@rbxts/vide"], "0.6.2");
+        assert_eq!(value["dependencies"]["@rbxts/vide-charm"], "0.4.1");
+        assert_eq!(peer_manifest(dir.path(), &updated).unwrap(), updated);
     }
 
     #[test]

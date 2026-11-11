@@ -1,10 +1,8 @@
 import { patch } from "@rbxts/charm-sync";
+import { applyPatch } from "./charm-sync";
 import { encodeDynamic, Writer } from "../network/codec";
 import { SYNC_FRAME_BYTES, SYNC_FRAME_COLLECTION_ENTRIES, SYNC_FRAME_VALUE_VISITS } from "../reactive/limits";
 import { costOf, spend, type Work } from "./values";
-
-// 0.4.1's declarations call this applyImmutable; its pinned Luau exports it as apply.
-const applyPatch = (patch as unknown as { readonly apply: (current: unknown, delta: unknown) => unknown }).apply;
 
 const encoded = setmetatable(new Map<object, object>(), { __mode: "k" });
 const decoded = setmetatable(new Map<object, object>(), { __mode: "kv" });
