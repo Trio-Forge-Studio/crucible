@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -9,7 +9,6 @@ use crucible_project::rojo::{self, Folder, Ignore};
 use serde_json::Value;
 
 const SINGLETONS: [&str; 3] = ["@rbxts/charm", "@rbxts/vide", "@rbxts/charm-sync"];
-const FIX: &str = "Align the declared ranges and use npm overrides or pnpm.overrides followed by reinstalling, then map only one package directory for each library.";
 const FIELDS: [&str; 2] = ["dependencies", "peerDependencies"];
 
 /// The version range a dependency entry for `name` declares, or None when the entry names another source, such as a
@@ -53,6 +52,8 @@ impl Manifest {
 struct Package {
     path: PathBuf,
     manifest: Arc<Manifest>,
+    /// The package whose node_modules holds this one in the place.
+    parent: Option<Arc<Manifest>>,
 }
 
 type Listing = Arc<[(String, fs::FileType)]>;
@@ -87,24 +88,18 @@ impl Checker {
         if copies.is_empty() {
             return Ok(());
         }
-        let mut errors = Vec::new();
+        let mut problems = Vec::new();
         for (name, at) in &copies {
             if at.len() > 1 {
-                let lines: Vec<_> = at
-                    .values()
-                    .map(|copy| {
-                        format!("{} at {}", copy.manifest.version.as_deref().unwrap_or("unknown"), copy.path.display())
-                    })
-                    .collect();
-                errors.push(format!("multiple copies of {name}:\n  {}", lines.join("\n  ")));
+                problems.push(Problem::Copies(name, at.values().copied().collect()));
             }
         }
-        // Each declared entry with the copy that the declaring package loads in the place.
-        let mut declared: Vec<(&Package, &Package, &str, &str, &str)> = Vec::new();
+        // Each declared entry with the copy that the declaring package, or the game when None, loads in the place.
+        let mut declared: Vec<(&Package, Option<&Package>, &str, &str, &str)> = Vec::new();
         for (instance, declarer) in &packages {
             for (field, name, spec) in &declarer.manifest.entries {
                 if let Some(copy) = copies.get(name).and_then(|at| loaded(at, instance, name)) {
-                    declared.push((copy, declarer, field, name, spec));
+                    declared.push((copy, Some(declarer), field, name, spec));
                 }
             }
         }
@@ -116,30 +111,109 @@ impl Checker {
                 let Some(real) = root.ancestors().find_map(resolve) else { continue };
                 let copies = copies.get(name).into_iter().flat_map(|at| at.values());
                 for copy in copies.filter(|copy| fs::canonicalize(&copy.path).is_ok_and(|path| path == real)) {
-                    declared.push((copy, game, field, name, spec));
+                    declared.push((copy, None, field, name, spec));
                 }
             }
         }
-        let mut mismatches = Vec::new();
+        let mut outside: BTreeMap<(&str, &Path), (&Package, Vec<String>)> = BTreeMap::new();
         for (copy, declarer, field, name, spec) in declared {
             let Some(range) = declared_range(name, spec) else { continue };
             let version = copy.manifest.version.as_deref().and_then(|v| node_semver::Version::parse(v).ok());
             if version.is_some_and(|version| !range.satisfies(&version)) {
-                mismatches.push((copy, declarer, field, spec));
+                let by = match declarer {
+                    Some(by) => {
+                        format!("{field} range {spec} of {} at {}", by.manifest.label(), shown(&root, &by.path))
+                    }
+                    None => format!("{field} range {spec} of the game's package.json"),
+                };
+                let (_, ranges) = outside.entry((name, &copy.path)).or_insert_with(|| (copy, Vec::new()));
+                if !ranges.contains(&by) {
+                    ranges.push(by);
+                }
             }
         }
-        for (copy, declarer, field, spec) in mismatches {
-            errors.push(format!(
-                "{} {} at {} does not satisfy {} at {}: {field} range {spec}",
-                copy.manifest.name.as_deref().unwrap_or("package"),
-                copy.manifest.version.as_deref().unwrap_or("unknown"),
-                copy.path.display(),
-                declarer.manifest.label(),
-                declarer.path.display(),
-            ));
+        problems.extend(outside.into_iter().map(|((name, _), (copy, ranges))| Problem::Outside(name, copy, ranges)));
+        if problems.is_empty() {
+            return Ok(());
         }
-        if errors.is_empty() { Ok(()) } else { Err(format!("{}\n{FIX}", errors.join("\n"))) }
+        let agent = std::env::var("npm_config_user_agent").unwrap_or_default();
+        let manager = crate::upgrade::detect_manager(&root, &agent).program();
+        Err(problems.iter().map(|problem| problem.describe(&root, manager)).collect::<Vec<_>>().join("\n"))
     }
+}
+
+enum Problem<'a> {
+    /// More than one copy of a library in the place.
+    Copies(&'a str, Vec<&'a Package>),
+    /// A copy outside ranges that packages loading it declare.
+    Outside(&'a str, &'a Package, Vec<String>),
+}
+
+impl Problem<'_> {
+    fn describe(&self, root: &Path, manager: &str) -> String {
+        let version = |copy: &Package| copy.manifest.version.clone().unwrap_or_else(|| "unknown version".to_owned());
+        match self {
+            Self::Copies(name, copies) => {
+                let mut text = format!("multiple copies of {name} in the place split its state:");
+                for copy in copies {
+                    text += &format!("\n  {} at {}", version(copy), shown(root, &copy.path));
+                    if let Some(parent) = &copy.parent {
+                        text += &format!(", installed for {}", parent.label());
+                    }
+                }
+                let parents: BTreeSet<_> = copies.iter().filter_map(|c| c.parent.as_ref()?.name.as_deref()).collect();
+                let parents: Vec<_> = parents.into_iter().collect();
+                text += &match parents.as_slice() {
+                    [] => format!(
+                        "\nKeep one of these folders in the place: remove the other's mapping from the Rojo project, or \
+                         the dependency that installs it and run `{manager} install`."
+                    ),
+                    [parent] => format!(
+                        "\nMake the versions agree so {manager} installs one copy: give {name} a version that {parent} \
+                         accepts, or upgrade {parent}, then run `{manager} install`."
+                    ),
+                    parents => format!(
+                        "\nMake the versions agree so {manager} installs one copy: give {name} a version that {} accept, \
+                         or upgrade them, then run `{manager} install`.",
+                        parents.join(" and ")
+                    ),
+                };
+                text
+            }
+            Self::Outside(name, copy, ranges) => {
+                let (range, packages) = match ranges.len() {
+                    1 => ("a range", "the package that declares it"),
+                    _ => ("ranges", "the packages that declare them"),
+                };
+                let mut text = format!(
+                    "{name} {} at {} does not satisfy {range} declared for it:",
+                    version(copy),
+                    shown(root, &copy.path)
+                );
+                for by in ranges {
+                    text += &format!("\n  {by}");
+                }
+                text + &format!(
+                    "\nChange the game's {name} to a version inside {}, or upgrade {packages}, then run `{manager} install`.",
+                    if ranges.len() == 1 { "it" } else { "them" },
+                )
+            }
+        }
+    }
+}
+
+/// `path` relative to the game, with forward slashes, as messages show it.
+fn shown(root: &Path, path: &Path) -> String {
+    let path = lexical(path);
+    let common = root.components().zip(path.components()).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    let up = root.components().count() - common;
+    let parts: Vec<String> = std::iter::repeat_n("..".to_owned(), up)
+        .chain(path.components().skip(common).map(|c| c.as_os_str().to_string_lossy().into_owned()))
+        .collect();
+    if parts.is_empty() { ".".to_owned() } else { parts.join("/") }
 }
 
 impl Disk {
@@ -175,16 +249,18 @@ impl Disk {
         Ok(packages)
     }
 
-    fn manifest(&self, file: &Path) -> Result<Arc<Manifest>, String> {
+    fn manifest(&self, root: &Path, file: &Path) -> Result<Arc<Manifest>, String> {
         if let Some(manifest) = self.manifests.lock().unwrap().get(file) {
             return Ok(manifest.clone());
         }
-        let text = fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+        let read = "The place contains this package, so the build reads its package.json to check its Charm, Vide and \
+                    Charm Sync";
+        let text = fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}. {read}", shown(root, file)))?;
         // npm accepts a byte order mark.
         let value: Value = serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
-            .map_err(|e| format!("{} is not valid JSON: {e}", file.display()))?;
+            .map_err(|e| format!("{} is not valid JSON: {e}. {read}", shown(root, file)))?;
         if !value.is_object() {
-            return Err(format!("{} is not a JSON object", file.display()));
+            return Err(format!("{} is not a JSON object. {read}", shown(root, file)));
         }
         let text = |key: &str| value[key].as_str().map(str::to_owned);
         let mut entries = Vec::new();
@@ -205,11 +281,11 @@ impl Disk {
         if !file.is_file() {
             return Ok(None);
         }
-        Ok(Some(Package { path: root.to_path_buf(), manifest: self.manifest(&file)? }))
+        Ok(Some(Package { path: root.to_path_buf(), manifest: self.manifest(root, &file)?, parent: None }))
     }
 
     /// The entries of a folder the place maps, or None when it is not a folder.
-    fn list(&self, dir: &Path) -> Result<Option<Listing>, String> {
+    fn list(&self, root: &Path, dir: &Path) -> Result<Option<Listing>, String> {
         if let Some(listing) = self.listings.lock().unwrap().get(dir) {
             return Ok(listing.clone());
         }
@@ -217,14 +293,15 @@ impl Disk {
             Ok(entries) => {
                 let mut children = Vec::new();
                 for entry in entries {
-                    let entry = entry.map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
-                    let kind = entry.file_type().map_err(|e| format!("cannot read {}: {e}", entry.path().display()))?;
+                    let entry = entry.map_err(|e| format!("cannot read {}: {e}", shown(root, dir)))?;
+                    let kind =
+                        entry.file_type().map_err(|e| format!("cannot read {}: {e}", shown(root, &entry.path())))?;
                     children.push((entry.file_name().to_string_lossy().into_owned(), kind));
                 }
                 Some(Arc::from(children))
             }
             Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => None,
-            Err(error) => return Err(format!("cannot read {}: {error}", dir.display())),
+            Err(error) => return Err(format!("cannot read {}: {error}", shown(root, dir))),
         };
         self.listings.lock().unwrap().insert(dir.to_path_buf(), listing.clone());
         Ok(listing)
@@ -277,28 +354,39 @@ struct Walk<'a> {
 impl Walk<'_> {
     fn folder(&mut self, folder: &Folder) -> Result<(), String> {
         let links = std::mem::take(&mut self.links);
-        let result = self.dir(&folder.path, &mut folder.instance.clone(), &folder.ignore, true);
+        let result = self.dir(&folder.path, &mut folder.instance.clone(), &folder.ignore, None, true);
         self.links = links;
         result
     }
 
-    fn dir(&mut self, dir: &Path, instance: &mut Vec<String>, ignore: &Ignore, top: bool) -> Result<(), String> {
-        let Some(children) = self.disk.list(dir)? else { return Ok(()) };
+    fn dir(
+        &mut self,
+        dir: &Path,
+        instance: &mut Vec<String>,
+        ignore: &Ignore,
+        parent: Option<&Arc<Manifest>>,
+        top: bool,
+    ) -> Result<(), String> {
+        let Some(children) = self.disk.list(self.root, dir)? else { return Ok(()) };
         if children.iter().any(|(name, _)| name == crucible_project::DEFAULT_PROJECT) {
             for folder in rojo::folders(&dir.join(crucible_project::DEFAULT_PROJECT), instance, ignore)? {
                 self.folder(&folder)?;
             }
             return Ok(());
         }
-        let package = children.iter().any(|(name, kind)| name == "package.json" && !kind.is_dir());
-        if package {
-            let manifest = self.disk.manifest(&dir.join("package.json"))?;
-            self.packages.push((instance.clone(), Package { path: dir.to_path_buf(), manifest }));
+        let mut package = None;
+        if children.iter().any(|(name, kind)| name == "package.json" && !kind.is_dir()) {
+            let manifest = self.disk.manifest(self.root, &dir.join("package.json"))?;
+            package = Some(manifest.clone());
+            let parent = parent.cloned();
+            self.packages.push((instance.clone(), Package { path: dir.to_path_buf(), manifest, parent }));
         } else if top && let Some(owner) = self.disk.owner(self.root, dir) {
             // A mapping of a package's `out` or `src` folder puts that package's code in the place.
-            let manifest = self.disk.manifest(&owner.join("package.json"))?;
-            self.packages.push((instance.clone(), Package { path: owner, manifest }));
+            let manifest = self.disk.manifest(self.root, &owner.join("package.json"))?;
+            self.packages.push((instance.clone(), Package { path: owner, manifest, parent: None }));
         }
+        let parent = package.as_ref().or(parent);
+        let package = package.is_some();
         for (name, kind) in children.iter() {
             // Below a package, only its node_modules can hold another package.
             if package && name != "node_modules" {
@@ -315,13 +403,13 @@ impl Walk<'_> {
                 }
                 self.links.push(target);
                 instance.push(name.clone());
-                let result = self.dir(&path, instance, ignore, false);
+                let result = self.dir(&path, instance, ignore, parent, false);
                 instance.pop();
                 self.links.pop();
                 result?;
             } else if kind.is_dir() {
                 instance.push(name.clone());
-                let result = self.dir(&path, instance, ignore, false);
+                let result = self.dir(&path, instance, ignore, parent, false);
                 instance.pop();
                 result?;
             } else if let Some(stem) = name.strip_suffix(".project.json").filter(|_| !package) {
@@ -349,4 +437,17 @@ fn lexical(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn messages_show_paths_from_the_game() {
+        let root = std::path::absolute("games/a").unwrap();
+        assert_eq!(shown(&root, &root.join("node_modules/@rbxts/charm")), "node_modules/@rbxts/charm");
+        assert_eq!(shown(&root, &root.join("../../vendor/@rbxts/vide")), "../../vendor/@rbxts/vide");
+        assert_eq!(shown(&root, &root), ".");
+    }
 }

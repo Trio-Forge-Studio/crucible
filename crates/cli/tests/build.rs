@@ -884,21 +884,54 @@ fn reactive_nested_copy_fails_before_writes() {
     package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
     package(&game, "node_modules/@rbxts/holder", "@rbxts/holder", "1.0.0");
     package(&game, "node_modules/@rbxts/holder/node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    game.write("package-lock.json", "{}");
     let output = game.build(&[]);
     assert_eq!(code(&output), 1);
-    let message = text(&output.stderr).replace('\\', "/");
+    let message = text(&output.stderr);
     for expected in [
-        "multiple copies",
-        "0.11.1",
-        "0.10.0",
-        "node_modules/@rbxts/charm",
-        "holder/node_modules/@rbxts/charm",
-        "pnpm.overrides",
+        "multiple copies of @rbxts/charm in the place",
+        "\n  0.11.1 at node_modules/@rbxts/charm\n",
+        "\n  0.10.0 at node_modules/@rbxts/holder/node_modules/@rbxts/charm, installed for @rbxts/holder 1.0.0\n",
+        "Make the versions agree so npm installs one copy: give @rbxts/charm a version that @rbxts/holder accepts, \
+         or upgrade @rbxts/holder, then run `npm install`.",
     ] {
         assert!(message.contains(expected), "{message}");
     }
+    assert!(!message.contains('\\') && !message.contains("overrides"), "{message}");
     assert!(!game.path("out").exists());
     assert!(!game.path("include").exists());
+}
+
+#[test]
+fn reactive_fixes_name_the_package_manager_and_paths_from_the_game() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    game.json(
+        "node_modules/@rbxts/vide-charm/package.json",
+        &json!({"name":"@rbxts/vide-charm", "version":"0.4.1", "dependencies":{"@rbxts/charm":"^0.11.1"}}),
+    );
+    game.json(
+        "package.json",
+        &json!({"name":"probe-game", "version":"0.0.0", "dependencies":{"@rbxts/charm":"0.11.0"}}),
+    );
+    for (lock, manager) in
+        [("package-lock.json", "npm"), ("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lock", "bun")]
+    {
+        game.write(lock, "");
+        let output = game.build(&[]);
+        assert_eq!(code(&output), 1);
+        let message = text(&output.stderr);
+        let expected = format!(
+            "@rbxts/charm 0.10.0 at node_modules/@rbxts/charm does not satisfy ranges declared for it:\n  \
+             dependencies range ^0.11.1 of @rbxts/vide-charm 0.4.1 at node_modules/@rbxts/vide-charm\n  \
+             dependencies range 0.11.0 of the game's package.json\n\
+             Change the game's @rbxts/charm to a version inside them, or upgrade the packages that declare them, then \
+             run `{manager} install`."
+        );
+        assert!(message.contains(&expected), "{lock}: {message}");
+        assert!(!message.contains('\\') && !message.contains("overrides"), "{message}");
+        fs::remove_file(game.path(lock)).unwrap();
+    }
 }
 
 #[test]
