@@ -390,6 +390,62 @@ fn a_journal_for_another_universe_is_refused() {
 }
 
 #[test]
+fn a_lock_table_or_journal_for_an_undeclared_environment_is_refused() {
+    use crucible_iac::plan::undeclared;
+    let project = Project::new(CONFIG);
+    let lock = Lock::parse(&(project.applied("staging") + &project.applied("production").replace("version = 1\n", "")))
+        .unwrap();
+    let vip = journal(&[("pass", "vip", "VIP")]).replace("10772177432", "10769815992");
+    let journals =
+        |text: &str| BTreeMap::from([("production".to_owned(), Journal::parse("production", text).unwrap())]);
+    assert_eq!(undeclared(&project.manifest.envs, Some(&lock), &journals(&vip)), [], "both are declared");
+
+    let gone = Project::new(&CONFIG.replace("[env.production]\nuniverse = 10769815992\nplace = 116566609396165\n", ""));
+    let envs = &gone.manifest.envs;
+    let line = project.applied("staging").lines().count() + 2;
+    assert_eq!(
+        messages(undeclared(envs, Some(&lock), &BTreeMap::new())),
+        [format!(
+            "crucible.lock:{line}: env.production: crucible.toml declares no environment production, and crucible.lock \
+             holds 3 resources of it in universe 10769815992. No plan reads them, so a renamed environment would \
+             create each resource again. Declare [env.production] with universe = 10769815992 in crucible.toml again. \
+             If it was renamed to an environment with universe 10769815992, rename [env.production] and every \
+             [env.production.*] table in crucible.lock to the new name. If production is gone for good, delete \
+             [env.production] and every [env.production.*] table from crucible.lock, and its resources stay on \
+             Roblox, unmanaged"
+        )]
+    );
+
+    let path = crucible_iac::journal::path("production").display().to_string();
+    let staging_only = Lock::parse(&project.applied("staging")).unwrap();
+    let problems = undeclared(envs, Some(&staging_only), &journals(&vip));
+    assert_eq!((problems[0].file.as_str(), problems[0].line), (path.as_str(), None));
+    assert_eq!(
+        messages(problems),
+        [format!(
+            "{path}: env.production: {path} holds an intent to create pass vip as \"VIP\" in universe 10769815992, and \
+             crucible.lock holds no ID for it, so the create may have landed. crucible.toml declares no environment \
+             production, and {path} holds 1 intent sent to universe 10769815992. No plan reads them, so a renamed \
+             environment would create each resource again. Declare [env.production] with universe = 10769815992 in \
+             crucible.toml again. If it was renamed to an environment with universe 10769815992, rename {path} to the \
+             new name. If production is gone for good, look in universe 10769815992 for the resources its intents \
+             name, then delete {path}, and its resources stay on Roblox, unmanaged"
+        )]
+    );
+
+    let resolved = messages(undeclared(envs, Some(&lock), &journals(&vip)));
+    assert!(
+        resolved[0].starts_with(&format!("crucible.lock:{line}: env.production: crucible.toml declares")),
+        "{resolved:?}"
+    );
+    assert!(resolved[0].contains("and delete"), "{resolved:?}");
+
+    let renamed = Project::new(&CONFIG.replace("[env.production]", "[env.live]"));
+    let problems = messages(undeclared(&renamed.manifest.envs, Some(&lock), &BTreeMap::new()));
+    assert!(problems[0].contains("with universe 10769815992, such as env.live, rename"), "{problems:?}");
+}
+
+#[test]
 fn a_price_of_zero_is_not_off_sale() {
     for (config, problem) in [
         (CONFIG.replace("price = 49", "price = 0"), "crucible.toml:19: products.coin-pack.price"),

@@ -167,6 +167,31 @@ fn an_intent_no_step_carries_exits_2() {
 }
 
 #[test]
+fn a_lock_table_or_journal_for_an_undeclared_environment_exits_2() {
+    let renamed = CONFIG.replace("[env.staging]", "[env.stage]");
+    let dir = project(&renamed);
+    std::fs::write(dir.path().join("crucible.lock"), STAGING_LOCK).unwrap();
+    for args in [&["stage"][..], &[]] {
+        let out = plan(dir.path(), args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", text(&out.stdout));
+        assert!(
+            text(&out.stderr).contains("crucible.lock:3: env.staging: crucible.toml declares no environment staging")
+        );
+    }
+    let dir = project(&CONFIG.replace("[env.production]\nuniverse = 10769815992\nplace = 116566609396165\n", ""));
+    std::fs::create_dir_all(dir.path().join(".crucible/journal")).unwrap();
+    let journal = intents(10769815992, json!([{"kind":"pass","key":"vip","name":"VIP"}]));
+    std::fs::write(dir.path().join(".crucible/journal/production.json"), journal.to_string()).unwrap();
+    std::fs::write(dir.path().join(".crucible/journal/notes.txt"), "not a journal").unwrap();
+    let problems = refused(dir.path());
+    assert_eq!(problems.as_array().unwrap().len(), 1, "{problems}");
+    assert_eq!((&problems[0]["key"], &problems[0]["line"]), (&json!("env.production"), &Value::Null));
+    assert!(problems[0]["file"].as_str().unwrap().ends_with("production.json"), "{problems}");
+    let message = problems[0]["message"].as_str().unwrap();
+    assert!(message.contains("holds an intent to create pass vip as \"VIP\" in universe 10769815992"), "{message}");
+}
+
+#[test]
 fn a_journal_for_another_universe_exits_2() {
     let dir = project(CONFIG);
     write_journal(dir.path(), &intents(99999999999, json!([])));

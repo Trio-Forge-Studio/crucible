@@ -107,6 +107,11 @@ impl Lock {
     pub fn env(&self, name: &str) -> Option<&EnvLock> {
         self.env.get(name)
     }
+
+    /// Every environment the lock records, declared in `crucible.toml` or not.
+    pub fn envs(&self) -> &BTreeMap<String, EnvLock> {
+        &self.env
+    }
 }
 
 impl EnvLock {
@@ -125,6 +130,11 @@ impl EnvLock {
             Kind::Pass => &self.passes,
             Kind::Badge => &self.badges,
         }
+    }
+
+    /// How many products, passes and badges the environment holds IDs for, retired ones included.
+    pub fn resources(&self) -> usize {
+        Kind::ALL.into_iter().map(|kind| self.entries(kind).len()).sum()
     }
 }
 

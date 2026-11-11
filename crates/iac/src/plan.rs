@@ -246,6 +246,103 @@ pub fn plan(
     })
 }
 
+/// The lock tables and journals of environments `crucible.toml` no longer declares. No plan reads them, so their IDs
+/// and intents would vanish, and an environment renamed in `crucible.toml` alone would create every resource it already
+/// holds again. `journals` holds every journal file, by the environment its name gives.
+pub fn undeclared(
+    envs: &BTreeMap<String, crucible_project::Env>,
+    lock: Option<&lock::Lock>,
+    journals: &BTreeMap<String, Journal>,
+) -> Vec<Problem> {
+    let locked = lock.map(|lock| lock.envs().keys()).into_iter().flatten();
+    let names: BTreeSet<&String> = locked.chain(journals.keys()).filter(|name| !envs.contains_key(*name)).collect();
+    names
+        .into_iter()
+        .map(|env| {
+            let env_lock = lock.and_then(|lock| lock.env(env));
+            let journal = journals.get(env);
+            let path = journal::path(env).display().to_string();
+            let unresolved: Vec<&Intent> = journal
+                .map_or(&[][..], |journal| &journal.intents)
+                .iter()
+                .filter(|intent| env_lock.is_none_or(|locked| !locked.entries(intent.kind).contains_key(&intent.key)))
+                .collect();
+            let mut message = String::new();
+            if let (Some(journal), false) = (journal, unresolved.is_empty()) {
+                let creates: Vec<String> = unresolved
+                    .iter()
+                    .map(|intent| format!("{} {} as {:?}", intent.kind.noun(), intent.key, intent.name))
+                    .collect();
+                let (noun, them, create) =
+                    if creates.len() == 1 { ("an intent", "it", "create") } else { ("intents", "them", "creates") };
+                message += &format!(
+                    "{path} holds {noun} to create {} in universe {}, and crucible.lock holds no ID for {them}, so the \
+                     {create} may have landed. ",
+                    creates.join(", "),
+                    journal.universe
+                );
+            }
+            message += &format!("crucible.toml declares no environment {env}");
+            if let Some(locked) = env_lock {
+                message += &format!(
+                    ", and crucible.lock holds {} of it in universe {}",
+                    count(locked.resources(), "resource"),
+                    locked.universe()
+                );
+            }
+            if let Some(journal) = journal {
+                message += &format!(
+                    ", and {path} holds {} sent to universe {}",
+                    count(journal.intents.len(), "intent"),
+                    journal.universe
+                );
+            }
+            let universe =
+                env_lock.map_or_else(|| journal.map(|journal| journal.universe), |locked| Some(locked.universe()));
+            let universe = universe.expect("an undeclared environment comes from the lock or a journal");
+            let same: Vec<String> = envs
+                .iter()
+                .filter(|(_, other)| other.universe == universe)
+                .map(|(name, _)| format!("env.{name}"))
+                .collect();
+            let such = if same.is_empty() { String::new() } else { format!(", such as {}", same.join(", ")) };
+            let (mut rename, mut gone) = (Vec::new(), Vec::new());
+            if env_lock.is_some() {
+                rename
+                    .push(format!("rename [env.{env}] and every [env.{env}.*] table in crucible.lock to the new name"));
+                gone.push(format!("delete [env.{env}] and every [env.{env}.*] table from crucible.lock"));
+            }
+            if let Some(journal) = journal {
+                rename.push(format!("rename {path} to the new name"));
+                gone.push(if unresolved.is_empty() {
+                    format!("delete {path}")
+                } else {
+                    format!(
+                        "look in universe {} for the resources its intents name, then delete {path}",
+                        journal.universe
+                    )
+                });
+            }
+            message += &format!(
+                ". No plan reads them, so a renamed environment would create each resource again. Declare [env.{env}] \
+                 with universe = {universe} in crucible.toml again. If it was renamed to an environment with universe \
+                 {universe}{such}, {}. If {env} is gone for good, {}, and its resources stay on Roblox, unmanaged",
+                rename.join(", and "),
+                gone.join(", and ")
+            );
+            let (file, line) = match env_lock {
+                Some(locked) if unresolved.is_empty() => (lock::FILE.to_owned(), Some(locked.universe_line())),
+                _ => (path, None),
+            };
+            Problem { file, line, key: format!("env.{env}"), message }
+        })
+        .collect()
+}
+
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 { format!("1 {noun}") } else { format!("{n} {noun}s") }
+}
+
 /// IDs from another universe would read as resources this one already has, so nothing would be created in it.
 fn another_universe(env: &str, lock: &EnvLock, universe: NonZeroU64) -> Problem {
     let locked = lock.universe();

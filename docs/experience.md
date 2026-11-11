@@ -76,7 +76,7 @@ npx crucible plan staging
 npx crucible plan --json
 ```
 
-Without an environment, `crucible plan` plans every environment in `crucible.toml`. Each step is one of these actions.
+Without an environment, `crucible plan` plans every environment in `crucible.toml`. Either way it reads every environment in `crucible.lock` and every journal, and stops on one that `crucible.toml` does not declare, as "Rename or remove an environment" says. Each step is one of these actions.
 
 | Action | When | What provision does |
 | --- | --- | --- |
@@ -132,6 +132,14 @@ status = "managed"
 ### Start an environment afresh
 
 An ID means nothing in another universe, so when `env.<name>.universe` in `crucible.toml` differs from the universe the lock records for that environment, the plan stops and names both. If the ID changed by mistake, set it back. If the environment now deploys to a new universe, start it afresh: delete `[env.<name>]` and every `[env.<name>.*]` table from `crucible.lock`. The next plan creates everything in the new universe, and the resources in the old one stay on Roblox, unmanaged.
+
+### Rename or remove an environment
+
+A plan reads only the lock tables and the journal of the environment it plans, so the IDs and intents of an environment `crucible.toml` no longer declares would vanish. Renaming `[env.staging]` to `[env.stage]` would then plan a create for every resource staging already holds. So the plan stops while `crucible.lock` holds an `[env.<name>]` or `.crucible/journal/<name>.json` exists for an environment `crucible.toml` does not declare. The message names the environment, its universe and how many resources and intents it holds, and starts with any intent the lock does not resolve. Then do one of these:
+
+- Declare the environment again.
+- If you renamed it and the universe is the same, rename `[env.<old>]` and every `[env.<old>.*]` table in `crucible.lock` to the new name, and rename its journal file to match.
+- If it is gone for good, delete `[env.<old>]` and every `[env.<old>.*]` table from `crucible.lock`, look in its universe for the resources any unresolved intent names, and delete its journal. Its resources stay on Roblox, unmanaged.
 
 ## The journal
 
