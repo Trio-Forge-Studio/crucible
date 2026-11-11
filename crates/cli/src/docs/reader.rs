@@ -762,16 +762,21 @@ mod tests {
     fn a_click_on_a_link_follows_it() {
         let mut reader = reader(HOME);
         let content = areas(reader.area).content;
+        let height = reader.height();
         let page = reader.page();
-        let (index, link) = page
+        let (index, link, name) = page
             .links
             .iter()
             .enumerate()
-            .find(|(_, link)| link.target == Target::Topic { name: "random".into(), anchor: None })
-            .unwrap();
+            .filter(|(_, link)| link.spans[0].line < height)
+            .find_map(|(index, link)| match &link.target {
+                Target::Topic { name, anchor: None } if name != HOME => Some((index, link, name.clone())),
+                _ => None,
+            })
+            .expect("the index shows a topic link on its first screen");
         let span = &link.spans[0];
         reader.update(click(content.x + span.columns.start, content.y + span.line as u16));
-        assert_eq!(reader.topic(), "random", "link {index}");
+        assert_eq!(reader.topic(), name, "link {index}");
     }
 
     #[test]
