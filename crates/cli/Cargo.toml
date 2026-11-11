@@ -24,6 +24,7 @@ tempfile = "3"
 rojo = "=7.7.1"
 sha2 = "0.10"
 semver = "1"
+node-semver = "2"
 env_logger = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }

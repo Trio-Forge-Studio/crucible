@@ -323,6 +323,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64fa3c856b712db6612c019f14756e64e4bcea13337a6b33b696333a9eaa2d06"
 
 [[package]]
+name = "bytecount"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -656,6 +662,7 @@ dependencies = [
  "jsonc-parser",
  "libc",
  "mermaid-text",
+ "node-semver",
  "oc-registry",
  "open",
  "percent-encoding",
@@ -672,7 +679,7 @@ dependencies = [
  "syntect",
  "tempfile",
  "two-face",
- "unicode-width",
+ "unicode-width 0.2.2",
  "ureq",
  "url",
  "vt100",
@@ -2075,7 +2082,29 @@ checksum = "90fa78f1bb32963ed114d9c318d880901ee4fa7103e133c3c3e530ebe5a09090"
 dependencies = [
  "ascii-dag",
  "chrono",
- "unicode-width",
+ "unicode-width 0.2.2",
+]
+
+[[package]]
+name = "miette"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
+dependencies = [
+ "cfg-if 1.0.5",
+ "miette-derive",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "miette-derive"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5b29714e950dbb20d5e6f74f9dcec4edbcc1067bb7f8ed198c097b8c1a818b"
+dependencies = [
+ "proc-macro2 1.0.107",
+ "quote 1.0.47",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2083,6 +2112,12 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
@@ -2176,6 +2211,29 @@ dependencies = [
  "cfg-if 1.0.5",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "node-semver"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b1a233ea5dc37d2cfba31cfc87a5a56cc2a9c04e3672c15d179ca118dae40a7"
+dependencies = [
+ "bytecount",
+ "miette",
+ "nom",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "nom"
+version = "7.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
+dependencies = [
+ "memchr",
+ "minimal-lexical",
 ]
 
 [[package]]
@@ -2642,7 +2700,7 @@ dependencies = [
  "thiserror 2.0.21",
  "unicode-segmentation",
  "unicode-truncate",
- "unicode-width",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -2674,7 +2732,7 @@ dependencies = [
  "strum 0.28.0",
  "time",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -3558,7 +3616,7 @@ version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fce91f2f0ec87dff7e6bcbbeb267439aa1188703003c6055193c821487400432"
 dependencies = [
- "unicode-width",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -4195,8 +4253,14 @@ checksum = "16b380a1238663e5f8a691f9039c73e1cdae598a30e9855f541d29b08b53e9a5"
 dependencies = [
  "itertools",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.2.2",
 ]
+
+[[package]]
+name = "unicode-width"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"
@@ -4342,7 +4406,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb05cdd19ae8707bf6a0a269972c07e6358103a7079faec749dec318a5b3dc23"
 dependencies = [
  "itoa",
- "unicode-width",
+ "unicode-width 0.2.2",
  "vte",
 ]
 

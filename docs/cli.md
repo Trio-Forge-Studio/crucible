@@ -55,6 +55,14 @@ places = { start = 4321, arena = 4322 }
 
 Every env must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
 
+### One reactive library copy per place
+
+Before compiling or writing, `crucible build` checks each selected place's Rojo mappings for multiple copies of `@rbxts/charm`, `@rbxts/vide`, or `@rbxts/charm-sync`. Charm and Vide keep reactive state at module scope; Charm Sync keeps client subscriptions and server tracking there. Separate copies split that state. `vide-charm` has no independent shared mutable state, so its copies are allowed, but its declared ranges are checked.
+
+Mapped package directories, their nested `node_modules`, and separately mapped folders count. A mapping into a package's `src` or `out` also identifies that package. Canonical paths collapse pnpm symlinks that reach the same installed directory; an unmapped copy on disk does not count. Installed packages' `dependencies` and `peerDependencies` supply version ranges for each present library, including Crucible and the bridges. Absent libraries are not required by this check, so games without Vide or `vide-charm` still build.
+
+A failure exits 1 and names the paths, versions, and incompatible declared ranges. Align those ranges, set npm `overrides` or `pnpm.overrides` to compatible versions, reinstall, and map only one directory for each library. Map Crucible's `out` folder rather than its entire package when its development dependencies would otherwise enter the place.
+
 ## crucible create
 
 Run `npx @trioforge/crucible-cli create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx @trioforge/crucible-cli create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files. Names and path components cannot end in a dot or space or use Windows device names, including names with extensions such as `con.txt`. A target below an existing file also exits 2.

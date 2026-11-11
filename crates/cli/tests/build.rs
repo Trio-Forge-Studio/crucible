@@ -856,3 +856,147 @@ fn version_reports_embedded_rojo() {
     let out = Command::new(env!("CARGO_BIN_EXE_crucible")).arg("--version").output().unwrap();
     assert_eq!(text(&out.stdout).trim(), format!("crucible {} (rojo 7.7.1)", env!("CARGO_PKG_VERSION")));
 }
+
+fn reactive_game() -> Game {
+    let game = Game::template_layout();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"]["Packages"] = json!({"$path": "node_modules/@rbxts"});
+    game.json("default.project.json", &project);
+    game
+}
+
+fn package(game: &Game, path: &str, name: &str, version: &str) {
+    game.json(&format!("{path}/package.json"), &json!({"name": name, "version": version}));
+    game.write(&format!("{path}/init.luau"), "return {}\n");
+}
+
+#[test]
+fn reactive_one_copy_and_minimal_games_build() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+}
+
+#[test]
+fn reactive_nested_copy_fails_before_writes() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    package(&game, "node_modules/@rbxts/holder", "@rbxts/holder", "1.0.0");
+    package(&game, "node_modules/@rbxts/holder/node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr).replace('\\', "/");
+    for expected in [
+        "multiple copies",
+        "0.11.1",
+        "0.10.0",
+        "node_modules/@rbxts/charm",
+        "holder/node_modules/@rbxts/charm",
+        "pnpm.overrides",
+    ] {
+        assert!(message.contains(expected), "{message}");
+    }
+    assert!(!game.path("out").exists());
+    assert!(!game.path("include").exists());
+}
+
+#[test]
+fn reactive_ranges_come_from_installed_packages() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    game.json(
+        "node_modules/@rbxts/vide-charm/package.json",
+        &json!({"name":"@rbxts/vide-charm", "version":"0.4.1", "dependencies":{"@rbxts/charm":"^0.11.1"}}),
+    );
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    for expected in ["@rbxts/vide-charm", "^0.11.1", "0.10.0", "does not satisfy"] {
+        assert!(text(&output.stderr).contains(expected), "{}", text(&output.stderr));
+    }
+}
+
+#[test]
+fn reactive_second_mapped_folder_fails_but_unmapped_copy_is_ignored() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/vide", "@rbxts/vide", "0.6.1");
+    package(&game, "other/@rbxts/vide", "@rbxts/vide", "0.6.0");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"]["Other"] = json!({"$path":"other/@rbxts"});
+    game.json("default.project.json", &project);
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr).replace('\\', "/");
+    for expected in ["@rbxts/vide", "0.6.1", "0.6.0", "other/@rbxts/vide", "node_modules/@rbxts/vide"] {
+        assert!(message.contains(expected), "{message}");
+    }
+}
+
+#[test]
+fn reactive_pnpm_symlinks_to_one_copy_pass() {
+    let game = reactive_game();
+    package(&game, "node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    fs::create_dir_all(game.path("node_modules/@rbxts")).unwrap();
+    fs::create_dir_all(game.path("second")).unwrap();
+    let real = game.path("node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts/charm");
+    for link in [game.path("node_modules/@rbxts/charm"), game.path("second/charm")] {
+        #[cfg(windows)]
+        {
+            let output = Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(link.to_string_lossy().replace('/', "\\"))
+                .arg(real.to_string_lossy().replace('/', "\\"))
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{}", text(&output.stderr));
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, link).unwrap();
+    }
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"]["Second"] = json!({"$path":"second"});
+    game.json("default.project.json", &project);
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+}
+
+#[test]
+fn reactive_package_project_excludes_unmapped_nested_copy() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    package(&game, "node_modules/@rbxts/holder", "@rbxts/holder", "1.0.0");
+    package(&game, "node_modules/@rbxts/holder/node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    game.json("node_modules/@rbxts/holder/default.project.json", &json!({"name":"holder", "tree":{"$path":"src"}}));
+    game.write("node_modules/@rbxts/holder/src/init.luau", "return {}\n");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+}
+
+#[test]
+fn reactive_charm_sync_copies_split_tracking() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm-sync", "@rbxts/charm-sync", "0.4.1");
+    package(&game, "node_modules/@rbxts/holder", "holder", "1.0.0");
+    package(&game, "node_modules/@rbxts/holder/node_modules/@rbxts/charm-sync", "@rbxts/charm-sync", "0.4.1");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    assert!(text(&output.stderr).contains("multiple copies of @rbxts/charm-sync"));
+}
+
+#[test]
+fn reactive_peer_ranges_accept_npm_unions_and_hyphens() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    game.json("node_modules/consumer/package.json", &json!({"name":"consumer", "version":"1.0.0", "peerDependencies":{"@rbxts/charm":"0.10.0 - 0.11.1 || >=1.0.0"}}));
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+    game.json(
+        "node_modules/consumer/package.json",
+        &json!({"name":"consumer", "version":"1.0.0", "peerDependencies":{"@rbxts/charm":"^0.12.0"}}),
+    );
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    assert!(text(&output.stderr).contains("peerDependencies range ^0.12.0"));
+}

@@ -9,6 +9,7 @@ mod exec;
 mod flows;
 mod output;
 mod publish;
+mod reactive_packages;
 mod upgrade;
 mod whoami;
 
