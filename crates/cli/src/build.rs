@@ -2,8 +2,10 @@ use crate::child;
 use crucible_compiler::{Compiled, InstanceMap, Module, Target};
 use crucible_project::{Manifest, ManifestError, Place};
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::fmt;
-use std::io::Read;
+use std::fs::{OpenOptions, TryLockError};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
@@ -196,8 +198,8 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
     for shared in compiles {
         let out = shared.compiled.out_dir.as_path();
         if !written.contains(&case_folded_canonical(out)) {
-            let changes =
-                crucible_compiler::write(out, &shared.compiled.modules).map_err(|error| failed(out, error))?;
+            let changes = crucible_compiler::write(out, &shared.compiled.modules)
+                .map_err(|error| failed(&error.path, error.error))?;
             eprintln!(
                 "crucible build: wrote {} of {} modules to {}",
                 changes.written,
@@ -207,7 +209,7 @@ fn write(root: &Path, compiles: &[SharedCompile<'_>]) -> Result<(), Error> {
             written.push(case_folded_canonical(out));
         }
         let include = root.join(&shared.place.include);
-        crucible_compiler::write_include(&include).map_err(|error| failed(&include, error))?;
+        crucible_compiler::write_include(&include).map_err(|error| failed(&error.path, error.error))?;
     }
     Ok(())
 }
@@ -282,17 +284,51 @@ fn relative_to_cwd(text: &str) -> String {
     text.replace(&(cwd.replace('\\', "/") + "/"), "").replace(&(cwd + "\\"), "")
 }
 
-// Rojo prints progress with println!, so it runs in a child whose stdout is our
-// stderr, which keeps our stdout for place paths.
+// Rojo truncates the place file it is told to write, so it builds into the place's temporary file and
+// `crucible_compiler::publish` puts that file in the place's: a failed or killed build leaves the last place whole
+// unless the place must be written in place. The temporary file keeps the place's extension, from which Rojo picks
+// the format. Rojo reads `.rbxm` and `.rbxmx` files in its project as models, so the temporary file is absent while
+// Rojo reads the project: a killed build's is removed first, and Rojo makes it. The lock that keeps a second build of
+// the place out is on a `.tmp` file, which Rojo reads in no folder.
 fn rojo_build(project: &Path, output: &Path) -> Result<(), String> {
-    if let Some(parent) = output.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    let cannot = |error: std::io::Error| format!("cannot write {}: {error}", output.display());
+    let lock_path = crucible_compiler::temporary_path(output, "tmp");
+    let lock = OpenOptions::new().write(true).create(true).truncate(false).open(&lock_path).map_err(cannot)?;
+    // A file system without locks lets a concurrent build through, as builds made before temporary files did.
+    if let Err(TryLockError::WouldBlock) = lock.try_lock() {
+        return Err(cannot(std::io::Error::new(std::io::ErrorKind::ResourceBusy, "another build is writing it")));
     }
+    let temporary = crucible_compiler::temporary_path(output, output.extension().and_then(OsStr::to_str).unwrap_or(""));
+    let built = match std::fs::remove_file(&temporary) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(cannot(error)),
+        _ => rojo_child(project, &temporary, output)
+            .and_then(|()| crucible_compiler::publish(&temporary, output).map_err(cannot)),
+    };
+    if built.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    let _ = std::fs::remove_file(&lock_path);
+    drop(lock);
+    built
+}
+
+// Rojo prints progress with println!, so it runs in a child whose stdout comes back here and goes to stderr, which
+// keeps our stdout for place paths. Rojo names the file it wrote, so its lines name the place instead of the temporary
+// file.
+fn rojo_child(project: &Path, temporary: &Path, output: &Path) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
-    let status =
-        child::spawn_tied(Command::new(exe).arg(ROJO_BUILD).arg(project).arg(output).stdout(std::io::stderr()))
-            .and_then(|mut tied| tied.child.wait())
+    let mut tied =
+        child::spawn_tied(Command::new(exe).arg(ROJO_BUILD).arg(project).arg(temporary).stdout(Stdio::piped()))
             .map_err(|error| format!("cannot start Rojo: {error}"))?;
+    let name = |path: &Path| path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let (from, to) = (name(temporary), name(output));
+    for line in BufReader::new(tied.child.stdout.take().expect("stdout is piped")).split(b'\n') {
+        let Ok(line) = line else { break };
+        eprintln!("{}", String::from_utf8_lossy(&line).replace(&from, &to));
+    }
+    let status = tied.child.wait().map_err(|error| format!("cannot start Rojo: {error}"))?;
     if status.success() { Ok(()) } else { Err(format!("Rojo could not build {}", project.display())) }
 }
 

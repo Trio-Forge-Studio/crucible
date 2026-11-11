@@ -51,21 +51,12 @@ fn width_keys(cx: &mut ProgramCx<'_>, n: Node, out: &mut HashSet<Symbol>) {
     n.for_each_child(&mut |child| width_keys(cx, child, out));
 }
 
-/// When TypeScript 5's checker made a class or interface type, and whether the type has a `this` type.
-#[derive(Clone, Copy)]
-pub(crate) struct Made {
-    pub(crate) turn: usize,
-    pub(crate) this_type: bool,
-}
-
 pub(crate) struct Api {
     exports: HashMap<Symbol, &'static str>,
     macros: HashMap<Symbol, Macro>,
     /// The protected instance methods Crucible's own classes declare, which are its lifecycle hooks.
     pub(crate) hooks: HashSet<&'static str>,
     pub(crate) kinds: HashMap<Type, Option<ClassKind>>,
-    /// When TypeScript 5 makes each class and interface type, computed when a union of instance classes needs it.
-    pub(crate) made: Option<HashMap<Symbol, Made>>,
     pub(crate) width_keys: HashSet<Symbol>,
     pub(crate) side_entries: HashMap<PathBuf, Side>,
     pub(crate) entry_exports: HashMap<Symbol, Side>,
@@ -78,7 +69,6 @@ impl Api {
             macros: HashMap::new(),
             hooks: HashSet::new(),
             kinds: HashMap::new(),
-            made: None,
             width_keys: HashSet::new(),
             side_entries: HashMap::new(),
             entry_exports: HashMap::new(),

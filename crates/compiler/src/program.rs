@@ -11,26 +11,47 @@ use tsrs_vfs::{FS, bundled::embed as bundled, osvfs};
 
 use crate::Diagnostic;
 
-/// Every fact query goes to the checker that ran the full check, so it reads the caches that check filled.
+/// Every fact query goes to the checker that ran the full check, so it reads the caches that check filled. Only `check`
+/// makes one.
 pub(crate) struct Checked {
-    pub program: &'static Program,
-    pub checker: CheckerHandle,
-    pub host: ConfigHost,
+    program: &'static Program,
+    checker: CheckerHandle,
+    host: ConfigHost,
+}
+
+/// Where a checked program's files are. Only `Checked::into_parts` makes one, and `Extracted` takes one, so only a
+/// checked program is extracted.
+pub(crate) struct Layout {
+    root: String,
+    out_dir: Option<String>,
+    config_dir: String,
+}
+
+impl Layout {
+    /// The folder the output layout mirrors: `rootDir`, or else the deepest folder that holds every source file and
+    /// `rootDirs` entry.
+    pub(crate) fn root(&self) -> &str {
+        &self.root
+    }
+
+    pub(crate) fn out_dir(&self) -> Option<&str> {
+        self.out_dir.as_deref()
+    }
+
+    /// The folder of the tsconfig, or the current folder.
+    pub(crate) fn config_dir(&self) -> &str {
+        &self.config_dir
+    }
 }
 
 impl Checked {
-    pub fn files(&self) -> Vec<crate::tree::File> {
-        self.program
-            .source_files()
-            .iter()
-            .filter(|f| !f.is_declaration_file() && !f.is_js())
-            .map(|&f| crate::tree::File::new(f))
-            .collect()
+    /// Takes the program apart for extraction, which keeps the checker.
+    pub(crate) fn into_parts(self) -> (&'static Program, CheckerHandle, ConfigHost, Layout) {
+        let layout = Layout { root: self.source_root(), out_dir: self.out_dir(), config_dir: self.config_dir() };
+        (self.program, self.checker, self.host, layout)
     }
 
-    /// The folder the output layout mirrors: `rootDir`, or else the deepest folder that holds every source file and
-    /// `rootDirs` entry.
-    pub fn source_root(&self) -> String {
+    fn source_root(&self) -> String {
         let options = self.program.options();
         if !options.root_dir.is_empty() {
             return options.root_dir.replace('\\', "/");
@@ -47,13 +68,12 @@ impl Checked {
         common_dir(&dirs)
     }
 
-    pub fn out_dir(&self) -> Option<String> {
+    fn out_dir(&self) -> Option<String> {
         let out = &self.program.options().out_dir;
         (!out.is_empty()).then(|| out.replace('\\', "/"))
     }
 
-    /// The folder of the tsconfig, or the current folder.
-    pub fn config_dir(&self) -> String {
+    fn config_dir(&self) -> String {
         let config = self.program.options().config_file_path.replace('\\', "/");
         match config.rsplit_once('/') {
             Some((dir, _)) => dir.to_owned(),

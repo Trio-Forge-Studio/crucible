@@ -47,9 +47,9 @@ impl Extractor {
     }
     fn lint_report(&mut self, n: P<Node>, rule: Rule, message: &str) {
         let start = self.span(n).start as usize;
-        let before = &self.text[..start];
+        let before = &self.file.text[..start];
         let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-        let previous = self.text[..line_start]
+        let previous = self.file.text[..line_start]
             .strip_suffix('\n')
             .unwrap_or("")
             .trim_end_matches('\r')

@@ -11,7 +11,8 @@ use std::collections::HashSet;
 use std::fmt;
 
 use crate::extension::Extension;
-use crate::facts::{Fact, FileFacts, HelperModule, ModulePath, Place, Unanswered};
+use crate::facts::{Fact, FileFacts, HelperModule, ModulePath, Place};
+use crate::phase::ValidFacts;
 use crate::tree::{File, Kind, Node, Nodes, Op, Position, UnaryOp};
 use crucible_luau::{Block, Expr, Name, Stmt};
 
@@ -37,15 +38,16 @@ pub(crate) enum ImportBase {
     ScriptParent,
 }
 
+/// Lowers the source file whose facts are `facts.files[file_id]`.
 pub(crate) fn lower(
     file: File,
-    facts: &FileFacts,
-    unanswered: &[&Unanswered],
-    import_base: ImportBase,
-    place: &Place,
     file_id: u32,
+    facts: ValidFacts<'_>,
+    import_base: ImportBase,
     extensions: &[&dyn Extension],
 ) -> Result<Block, Vec<Error>> {
+    let (place, unanswered) = (&facts.get().place, &facts.get().unanswered);
+    let facts = &facts.get().files[file_id as usize];
     let mut l = Lower {
         file,
         file_id,
@@ -69,7 +71,7 @@ pub(crate) fn lower(
         namespace: None,
         breakables: Vec::new(),
     };
-    for u in unanswered {
+    for u in unanswered.iter().filter(|u| u.path == facts.path) {
         let Position { line, column } = file.position(u.span.start);
         let message = format!("the type facts cannot answer this {:?} site ({:?})", u.site, u.reason);
         l.errors.push(Error { path: l.path.clone(), line, column, message });

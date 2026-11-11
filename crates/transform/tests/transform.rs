@@ -111,7 +111,7 @@ fn registration_payloads_inherited_deps_tags_attributes_provides_and_symbol_iden
     assert_eq!(class(&registered, "ConstTag").instance, ["Instance".into()]);
     let aliased = class(&registered, "AliasedTag");
     assert_eq!(aliased.tag.as_deref(), Some("AliasTag"));
-    assert_eq!(aliased.instance, ["Model".into(), "BasePart".into()], "the transformer lists them in this order");
+    assert_eq!(aliased.instance, ["BasePart".into(), "Model".into()], "the checker orders a union by name");
     assert_eq!(class(&registered, "ThroughAlias").tag.as_deref(), Some("Alias"));
     let attribute = |name: &str| door.attributes.iter().find(|a| &*a.field == name).unwrap_or_else(|| panic!("{name}"));
     assert_eq!((attribute("fleetId").check.clone(), attribute("fleetId").required), (Check::String, true));
@@ -1471,24 +1471,20 @@ fn attribute_inject_and_boot_used_as_values_compile_as_the_transformer_leaves_th
 }
 
 #[test]
-fn instance_classes_list_in_the_order_typescript_5_first_makes_their_types() {
+fn instance_classes_list_by_name_wherever_the_program_first_names_them() {
     let game = Game::new();
     game.write("src/shared/parts.ts", "export type Seated = Seat;\n");
-    game.main("import { CrucibleBehaviour } from \"@trioforge/crucible\";\nimport type { Seated } from \"../shared/parts\";\ninterface Gear extends Tool {}\nexport type S = Seated;\nexport class Mixed extends CrucibleBehaviour<\"Mixed\", Part | Model | Folder> {}\nexport class Later extends CrucibleBehaviour<\"Later\", BasePart | Model> {}\nexport class Shared extends CrucibleBehaviour<\"Shared\", Accessory | Seat> {}\nexport class Heard extends CrucibleBehaviour<\"Heard\", Sound | Tool> {}\nexport class Aliased extends CrucibleBehaviour<\"Aliased\", Pair> {}\nexport const fire: Fire | undefined = undefined;\ntype Pair = Sparkles | Fire;\n");
+    game.main("import { CrucibleBehaviour } from \"@trioforge/crucible\";\nimport type { Seated } from \"../shared/parts\";\ninterface Gear extends Tool {}\nexport type S = Seated;\nexport class Mixed extends CrucibleBehaviour<\"Mixed\", Part | Model | Folder> {}\nexport class Later extends CrucibleBehaviour<\"Later\", BasePart | Model> {}\nexport class Shared extends CrucibleBehaviour<\"Shared\", Accessory | Seat> {}\nexport class Heard extends CrucibleBehaviour<\"Heard\", Tool | Sound> {}\nexport class Aliased extends CrucibleBehaviour<\"Aliased\", Pair> {}\nexport const fire: Fire | undefined = undefined;\ntype Pair = Sparkles | Fire;\n");
     let facts = game.facts();
     assert_eq!(facts.diagnostics, []);
     let registered = classes(&facts, "src/server/main.ts");
     let instance =
         |name: &str| -> Vec<String> { class(&registered, name).instance.iter().map(|n| n.to_string()).collect() };
-    assert_eq!(instance("Mixed"), ["Part", "Model", "Folder"], "each member in the order the union names it");
-    assert_eq!(instance("Later"), ["BasePart", "Model"], "making Part made its base interfaces, BasePart among them");
-    assert_eq!(instance("Shared"), ["Seat", "Accessory"], "an earlier file made Seat");
-    assert_eq!(
-        instance("Heard"),
-        ["Sound", "Tool"],
-        "an interface's base is made with the interface, not where it is named"
-    );
-    assert_eq!(instance("Aliased"), ["Sparkles", "Fire"], "the alias made its members where the class used it");
+    assert_eq!(instance("Mixed"), ["Folder", "Model", "Part"]);
+    assert_eq!(instance("Later"), ["BasePart", "Model"]);
+    assert_eq!(instance("Shared"), ["Accessory", "Seat"], "an earlier file naming Seat changes nothing");
+    assert_eq!(instance("Heard"), ["Sound", "Tool"], "an interface extending Tool changes nothing");
+    assert_eq!(instance("Aliased"), ["Fire", "Sparkles"], "a use of Fire before the alias changes nothing");
 }
 
 #[test]

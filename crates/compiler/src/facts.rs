@@ -1,6 +1,7 @@
 //! The fact table. Each answer the lowering needs from the checker is stored ahead of time as plain data, keyed by the
 //! syntax node it is about, so the lowering never calls the checker. Nothing here refers to tsrs.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::BitOr;
 
@@ -202,17 +203,24 @@ pub struct Helper {
     pub path: Option<ModulePath>,
 }
 
-/// The facts of one source file, sorted by span.
+/// The facts of one source file.
 #[derive(Clone, Debug)]
 pub struct FileFacts {
     /// The absolute path with forward slashes.
     pub path: String,
-    pub facts: Vec<(Span, Fact)>,
+    /// Sorted by span, which `get` searches.
+    facts: Vec<(Span, Fact)>,
     /// `None` when the file has no JSX.
     pub jsx: Option<Jsx>,
 }
 
 impl FileFacts {
+    pub(crate) fn new(path: String, facts: HashMap<Span, Fact>, jsx: Option<Jsx>) -> FileFacts {
+        let mut facts: Vec<(Span, Fact)> = facts.into_iter().collect();
+        facts.sort_unstable_by_key(|(span, _)| *span);
+        FileFacts { path, facts, jsx }
+    }
+
     pub fn get(&self, span: Span) -> Option<&Fact> {
         self.facts.binary_search_by_key(&span, |(s, _)| *s).ok().map(|i| &self.facts[i].1)
     }
@@ -297,5 +305,24 @@ impl Facts {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{Fact, FileFacts, Span};
+
+    #[test]
+    fn a_file_finds_each_fact_whatever_order_extraction_stored_them_in() {
+        let spans: Vec<Span> = (0..64).rev().map(|i| Span { start: i * 3 % 50, end: 60 + i }).collect();
+        let table: HashMap<Span, Fact> =
+            spans.iter().map(|&span| (span, Fact { integer: Some(span.start % 2 == 0), ..Fact::default() })).collect();
+        let file = FileFacts::new("/src/a.ts".to_owned(), table, None);
+        for span in spans {
+            assert_eq!(file.get(span).and_then(|f| f.integer), Some(span.start % 2 == 0), "{span:?}");
+        }
+        assert!(file.get(Span { start: 0, end: 0 }).is_none());
     }
 }
