@@ -30,6 +30,8 @@ return {
 				{ "apply = apply,", "applyImmutable = apply," },
 				{ '__none = "__none"', '__none = "changed"' },
 				{ "local newState = table.clone(oldState)", "local newState = oldState" },
+				{ "local diffs = table.clone(newState)", "local diffs = newState" },
+				{ "if next(diffs) == nil then", "if false then" },
 			}
 		do
 			local changed = 0

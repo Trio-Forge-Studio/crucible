@@ -24,7 +24,9 @@ export function checkCharmSync() {
 		if (value === before || value.nested.keep !== 4 || (value.nested as { drop?: number }).drop !== undefined)
 			return false;
 		if (before.nested.keep !== 1 || before.nested.drop !== 2 || value.stable !== before.stable) return false;
+		if (after.stable !== before.stable || (after.nested as { drop?: number }).drop !== undefined) return false;
 		if (patch.diff(after, after) !== undefined || patch.diff(1, 2) !== 2) return false;
+		if (patch.diff({ keep: 4 }, { keep: 4 }) !== undefined) return false;
 		return applyPatch(undefined, 7) === 7;
 	});
 	if (!ok || result !== true)
