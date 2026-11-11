@@ -73,7 +73,7 @@ impl Project {
     /// The lock a provision of `env` would leave, with IDs counting up from 1000.
     fn applied(&self, env: &str) -> String {
         let experience = self.experience().unwrap();
-        let mut lock = String::from("version = 1\n");
+        let mut lock = format!("version = 1\n[env.{env}]\nuniverse = {}\n", self.manifest.envs[env].universe);
         if let Some(settings) = experience.settings() {
             lock += &format!("[env.{env}.experience]\nfingerprint = {:?}\n", settings.fingerprint());
         }
@@ -131,10 +131,31 @@ fn an_applied_environment_has_nothing_to_do() {
 }
 
 #[test]
+fn a_lock_for_another_universe_is_refused() {
+    let project = Project::new(CONFIG);
+    let lock = project.applied("staging");
+    let moved = Project::new(&CONFIG.replace("universe = 10772177432", "universe = 99999999999"));
+    assert_eq!(
+        messages(moved.plan("staging", Some(&lock), None).unwrap_err()),
+        ["crucible.lock:3: env.staging.universe: crucible.lock records staging's resources in universe 10772177432, \
+             and crucible.toml names universe 99999999999 for staging. If the universe ID changed by mistake, set \
+             env.staging.universe back to 10772177432 in crucible.toml. If staging now deploys to universe \
+             99999999999, start staging afresh: delete [env.staging] and every [env.staging.*] table from \
+             crucible.lock, and the resources in universe 10772177432 stay on Roblox, unmanaged"]
+    );
+    let afresh = Project::new(&CONFIG.replace("universe = 10772177432", "universe = 99999999999"));
+    let plan = afresh.plan("staging", Some(&lock.replace("[env.staging", "[env.qa")), None).unwrap();
+    assert_eq!(plan.summary, BTreeMap::from([(Action::Create, 3), (Action::Update, 1)]));
+}
+
+#[test]
 fn an_overlay_is_a_change_only_in_its_environment() {
     let project = Project::new(CONFIG);
     let staging = project.applied("staging");
-    let plan = project.plan("production", Some(&staging.replace("env.staging", "env.production")), None).unwrap();
+    let production = project.applied("production");
+    let universe = |lock: &str| lock.lines().nth(2).unwrap().to_owned();
+    let staging = staging.replace("env.staging", "env.production").replace(&universe(&staging), &universe(&production));
+    let plan = project.plan("production", Some(&staging), None).unwrap();
     assert_eq!(plan.steps[1].action, Action::Update, "staging sells coin-pack for 1 Robux, production for 49");
     assert_eq!(plan.steps[1].changes, [Change::Details]);
     assert!(plan.steps[2..].iter().all(|step| step.action == Action::NoOp));

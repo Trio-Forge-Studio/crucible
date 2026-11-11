@@ -3,10 +3,11 @@
 //! of the inputs the lock fingerprinted.
 
 use crate::journal::Journal;
-use crate::lock::{Entry, EnvLock, Status};
+use crate::lock::{self, Entry, EnvLock, Status};
 use crate::model::{Experience, Kind, Lifecycle, Problem, Resource, content_hash};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU64;
 use std::path::Path;
 
 /// Roblox makes this many badges a day free in each experience and charges 100 Robux for each one after that.
@@ -77,6 +78,11 @@ pub fn plan(
     inputs: &Inputs<'_>,
     read: &mut dyn FnMut(&Path) -> std::io::Result<Vec<u8>>,
 ) -> Result<Plan, Vec<Problem>> {
+    if let Some(lock) = inputs.lock
+        && lock.universe() != inputs.env.universe
+    {
+        return Err(vec![another_universe(inputs.env_name, lock, inputs.env.universe)]);
+    }
     let mut problems = Vec::new();
     let mut steps = Vec::new();
     if let Some(settings) = inputs.experience.settings() {
@@ -176,6 +182,23 @@ pub fn plan(
         summary,
         warnings,
     })
+}
+
+/// IDs from another universe would read as resources this one already has, so nothing would be created in it.
+fn another_universe(env: &str, lock: &EnvLock, universe: NonZeroU64) -> Problem {
+    let locked = lock.universe();
+    Problem {
+        file: lock::FILE,
+        line: Some(lock.universe_line()),
+        key: format!("env.{env}.universe"),
+        message: format!(
+            "crucible.lock records {env}'s resources in universe {locked}, and crucible.toml names universe \
+             {universe} for {env}. If the universe ID changed by mistake, set env.{env}.universe back to {locked} in \
+             crucible.toml. If {env} now deploys to universe {universe}, start {env} afresh: delete [env.{env}] and \
+             every [env.{env}.*] table from crucible.lock, and the resources in universe {locked} stay on Roblox, \
+             unmanaged"
+        ),
+    }
 }
 
 fn step(

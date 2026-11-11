@@ -104,10 +104,13 @@ staging (universe 10772177432)
 
 ## The lock
 
-`crucible.lock` is committed TOML, by environment, then kind, then key. A missing lock is a first provision. A lock that fails to parse, or has a newer `version` than this crucible reads, stops the plan. It never reads as empty, because an empty lock would mean creating everything again.
+`crucible.lock` is committed TOML, by environment, then kind, then key. Each environment records the universe its IDs belong to. A missing lock is a first provision. A lock that fails to parse, or has a newer `version` than this crucible reads, stops the plan. It never reads as empty, because an empty lock would mean creating everything again.
 
 ```toml
 version = 1
+
+[env.staging]
+universe = 10772177432
 
 [env.staging.experience]
 fingerprint = "sha256:..."
@@ -118,5 +121,9 @@ fingerprint = "sha256:..."
 icon = "sha256:..."
 status = "managed"
 ```
+
+### Start an environment afresh
+
+An ID means nothing in another universe, so when `env.<name>.universe` in `crucible.toml` differs from the universe the lock records for that environment, the plan stops and names both. If the ID changed by mistake, set it back. If the environment now deploys to a new universe, start it afresh: delete `[env.<name>]` and every `[env.<name>.*]` table from `crucible.lock`. The next plan creates everything in the new universe, and the resources in the old one stay on Roblox, unmanaged.
 
 The journal at `.crucible/journal/<env>.json` lists the creates provision has started and not recorded. `specs/provision` in the Crucible repository models how provision uses both, and states what TLC checks.

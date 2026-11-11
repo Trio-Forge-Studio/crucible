@@ -59,7 +59,8 @@ fn json_plans_every_environment_and_reads_the_lock() {
     let dir = project(CONFIG);
     std::fs::write(
         dir.path().join("crucible.lock"),
-        "version = 1\n[env.production.products.coin-pack]\nid = 3301234567\nfingerprint = \"sha256:old\"\nstatus = \"managed\"\n",
+        "version = 1\n[env.production]\nuniverse = 10769815992\n[env.production.products.coin-pack]\nid = 3301234567\n\
+         fingerprint = \"sha256:old\"\nstatus = \"managed\"\n",
     )
     .unwrap();
     let out = plan(dir.path(), &["--json"]);
@@ -92,6 +93,41 @@ fn a_broken_rule_exits_2_and_names_the_file_line_and_key() {
         "{}",
         text(&out.stderr)
     );
+}
+
+const STAGING_LOCK: &str = "version = 1\n[env.staging]\nuniverse = 10772177432\n[env.staging.products.coin-pack]\n\
+                            id = 3301234567\nfingerprint = \"sha256:old\"\nstatus = \"managed\"\n";
+
+/// Runs `plan staging` as text and as JSON, checks both exit 2, and returns the JSON problems.
+fn refused(dir: &Path) -> Value {
+    let out = plan(dir, &["staging"]);
+    assert_eq!(out.status.code(), Some(2), "{}{}", text(&out.stdout), text(&out.stderr));
+    assert!(text(&out.stdout).is_empty());
+    assert!(text(&out.stderr).starts_with("the plan breaks the provisioning rules:\n  "), "{}", text(&out.stderr));
+    let out = plan(dir, &["staging", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let document = document(&out);
+    assert_eq!(document["error"]["kind"], "usage");
+    document["error"]["problems"].clone()
+}
+
+#[test]
+fn a_lock_for_another_universe_exits_2() {
+    let dir = project(&CONFIG.replace("universe = 10772177432", "universe = 99999999999"));
+    std::fs::write(dir.path().join("crucible.lock"), STAGING_LOCK).unwrap();
+    let problems = refused(dir.path());
+    assert_eq!((&problems[0]["file"], &problems[0]["line"]), (&json!("crucible.lock"), &json!(3)));
+    assert_eq!(problems[0]["key"], "env.staging.universe");
+    let message = problems[0]["message"].as_str().unwrap();
+    assert!(message.contains("universe 10772177432") && message.contains("universe 99999999999"), "{message}");
+}
+
+#[test]
+fn a_locked_resource_removed_from_the_config_exits_2() {
+    let dir = project(&CONFIG.replace("[products.coin-pack]\nname = \"Coin pack\"\nprice = 49\n", ""));
+    std::fs::write(dir.path().join("crucible.lock"), STAGING_LOCK).unwrap();
+    let problems = refused(dir.path());
+    assert_eq!((&problems[0]["file"], &problems[0]["key"]), (&json!("crucible.toml"), &json!("products.coin-pack")));
 }
 
 #[test]

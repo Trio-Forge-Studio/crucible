@@ -202,7 +202,7 @@ A TypeScript front end, `crucible.config.ts`, can come later and produce the sam
 
 ### The lock file records what Roblox assigned
 
-`crucible.lock` is committed TOML, organized by environment, then resource kind, then key. Each entry holds the Roblox ID, a fingerprint of the applied inputs, the icon's content hash, and a status of `managed` or `retired`. It shows up in pull request diffs and needs no secret store. Bedrock's Gist and S3 state show the cost of the alternative. Gists cannot lock, and S3 locking still cannot fence a partitioned process that keeps writing to Roblox.
+`crucible.lock` is committed TOML, organized by environment, then resource kind, then key. Each environment records the universe its IDs belong to, and a command whose config names another universe for it stops, because the IDs mean nothing there. Each entry holds the Roblox ID, a fingerprint of the applied inputs, the icon's content hash, and a status of `managed` or `retired`. It shows up in pull request diffs and needs no secret store. Bedrock's Gist and S3 state show the cost of the alternative. Gists cannot lock, and S3 locking still cannot fence a partitioned process that keeps writing to Roblox.
 
 A missing lock is a first deploy. A lock that fails to parse, or has a newer format version, stops every command. It never becomes an empty state, because an empty state means create everything again.
 
