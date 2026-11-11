@@ -1,9 +1,11 @@
-//! `.crucible/journal/<env>.json` holds the creates `provision` has started and not yet recorded in the lock. This
-//! module reads it for `plan`. An intent the lock does not resolve means a create's outcome is unknown.
+//! `.crucible/journal/<env>.json` holds the creates `provision` has started and not yet recorded in the lock, with the
+//! universe they were sent to and the display name each one sent. This module reads it for `plan`. An intent the lock
+//! does not resolve means a create's outcome is unknown, and the resource may exist under the name the intent sent.
 
 use crate::model::Kind;
 use serde::Deserialize;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 
 pub const FORMAT: u32 = 1;
@@ -12,9 +14,11 @@ pub fn path(env: &str) -> PathBuf {
     PathBuf::from(".crucible").join("journal").join(format!("{env}.json"))
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Journal {
     version: u32,
+    /// The universe the creates were sent to.
+    pub universe: NonZeroU64,
     pub intents: Vec<Intent>,
 }
 
@@ -23,6 +27,9 @@ pub struct Journal {
 pub struct Intent {
     pub kind: Kind,
     pub key: String,
+    /// The display name the create sent. The adopt check after an unknown outcome looks for it as well as the declared
+    /// name, so a rename after a lost create still finds the resource.
+    pub name: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,11 +57,12 @@ impl Journal {
         if journal.version != FORMAT {
             return Err(error(format!("has format {}, which no crucible writes", journal.version)));
         }
+        for (at, intent) in journal.intents.iter().enumerate() {
+            if journal.intents[..at].iter().any(|other| other.kind == intent.kind && other.key == intent.key) {
+                return Err(error(format!("holds two intents for {} {}", intent.kind.noun(), intent.key)));
+            }
+        }
         Ok(journal)
-    }
-
-    pub fn intends(&self, kind: Kind, key: &str) -> bool {
-        self.intents.iter().any(|intent| intent.kind == kind && intent.key == key)
     }
 }
 
@@ -63,14 +71,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_intents_and_ignores_the_fields_provision_keeps() {
+    fn reads_the_universe_and_each_intent_with_the_name_it_sent() {
         let journal = Journal::parse(
             "staging",
-            r#"{"version":1,"intents":[{"kind":"badge","key":"first-delivery","name":"First delivery","sent":true}]}"#,
+            r#"{"version":1,"universe":10772177432,"intents":[{"kind":"badge","key":"first-delivery","name":"First delivery","sent":true}]}"#,
         )
         .unwrap();
-        assert!(journal.intends(Kind::Badge, "first-delivery"));
-        assert!(!journal.intends(Kind::Product, "first-delivery"));
+        assert_eq!(journal.universe.get(), 10772177432);
+        assert_eq!(
+            journal.intents,
+            [Intent { kind: Kind::Badge, key: "first-delivery".into(), name: "First delivery".into() }]
+        );
     }
 
     #[test]
@@ -83,7 +94,16 @@ mod tests {
                 path("staging").display()
             )
         );
-        assert!(Journal::parse("staging", r#"{"version":1,"intents":[{"kind":"place","key":"start"}]}"#).is_err());
-        assert!(Journal::parse("staging", "").is_err());
+        for text in [
+            r#"{"version":1,"universe":1,"intents":[{"kind":"place","key":"start","name":"Start"}]}"#,
+            r#"{"version":1,"universe":1,"intents":[{"kind":"pass","key":"vip"}]}"#,
+            r#"{"version":1,"intents":[]}"#,
+            r#"{"version":1,"universe":0,"intents":[]}"#,
+            "",
+        ] {
+            assert!(Journal::parse("staging", text).is_err(), "{text}");
+        }
+        let twice = r#"{"version":1,"universe":1,"intents":[{"kind":"pass","key":"vip","name":"VIP"},{"kind":"pass","key":"vip","name":"Gold"}]}"#;
+        assert!(Journal::parse("staging", twice).unwrap_err().message.ends_with("holds two intents for pass vip"));
     }
 }

@@ -1,7 +1,7 @@
 use crucible_iac::journal::Journal;
 use crucible_iac::lock::Lock;
 use crucible_iac::model::{Experience, Kind, Lifecycle, Problem, content_hash};
-use crucible_iac::plan::{Action, Change, Inputs, Plan, plan};
+use crucible_iac::plan::{Action, Change, Inputs, Plan, StepIntent, plan};
 use crucible_project::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -240,16 +240,153 @@ fn a_rename_keeps_the_id_only_with_moved_from() {
     assert_eq!(gold.handle.as_deref(), Some("Passes.Gold"));
 }
 
+/// A staging journal with one intent per `(kind, key, name)`.
+fn journal(intents: &[(&str, &str, &str)]) -> String {
+    let intents: Vec<_> =
+        intents.iter().map(|(kind, key, name)| serde_json::json!({"kind": kind, "key": key, "name": name})).collect();
+    serde_json::json!({"version": 1, "universe": 10772177432_u64, "intents": intents}).to_string()
+}
+
+fn intent(plan: &Plan, key: &str) -> (Action, Option<StepIntent>) {
+    let step = plan.steps.iter().find(|step| step.key == key).unwrap();
+    (step.action, step.intent.clone())
+}
+
+fn sent(name: &str, resolved: bool) -> Option<StepIntent> {
+    Some(StepIntent { name: name.into(), resolved })
+}
+
 #[test]
-fn an_intent_without_an_id_is_an_adopt_check() {
+fn an_intent_without_an_id_is_an_adopt_check_for_the_name_it_sent() {
     let project = Project::new(CONFIG);
-    let journal = r#"{"version":1,"intents":[{"kind":"badge","key":"first-delivery"},{"kind":"pass","key":"vip"}]}"#;
+    let journal = journal(&[("badge", "first-delivery", "First delivery"), ("pass", "vip", "Gold")]);
+    let plan = project.plan("staging", None, Some(&journal)).unwrap();
+    assert_eq!(intent(&plan, "first-delivery"), (Action::AdoptCheck, sent("First delivery", false)));
+    assert_eq!(intent(&plan, "vip"), (Action::AdoptCheck, sent("Gold", false)), "the name it sent, not the declared");
+    let plan = project.plan("staging", Some(&project.applied("staging")), Some(&journal)).unwrap();
+    assert_eq!(intent(&plan, "vip"), (Action::NoOp, sent("Gold", true)), "a lock ID resolves the intent");
+}
+
+#[test]
+fn a_moved_key_or_a_retired_lock_entry_carries_the_intent_of_its_key() {
+    let project = Project::new(CONFIG);
     let lock = project.applied("staging");
-    let plan = project.plan("staging", None, Some(journal)).unwrap();
-    assert_eq!(plan.steps[3].action, Action::AdoptCheck);
-    assert_eq!(plan.steps[2].action, Action::AdoptCheck);
-    let plan = project.plan("staging", Some(&lock), Some(journal)).unwrap();
-    assert_eq!(plan.steps[2].action, Action::NoOp, "a lock ID resolves the intent");
+    let journal = journal(&[("pass", "vip", "VIP")]);
+    let moved = Project::new(&CONFIG.replace("[passes.vip]", "[passes.gold]\nmoved_from = \"vip\""));
+    assert_eq!(
+        intent(&moved.plan("staging", None, Some(&journal)).unwrap(), "gold"),
+        (Action::AdoptCheck, sent("VIP", false))
+    );
+    assert_eq!(
+        intent(&moved.plan("staging", Some(&lock), Some(&journal)).unwrap(), "gold"),
+        (Action::Update, sent("VIP", true))
+    );
+    let retired = Project::new(&CONFIG.replace("price = 299\n", "price = 299\nretired = true\n"));
+    let retired_lock = retired.applied("staging");
+    let gone = Project::new(&CONFIG.replace("[passes.vip]\nname = \"VIP\"\nprice = 299\n", ""));
+    assert_eq!(
+        intent(&gone.plan("staging", Some(&retired_lock), Some(&journal)).unwrap(), "vip"),
+        (Action::NoOp, sent("VIP", true))
+    );
+}
+
+#[test]
+fn an_intent_no_step_can_carry_stops_the_plan() {
+    let path = crucible_iac::journal::path("staging").display().to_string();
+    let undeclared = Project::new(CONFIG).plan("staging", None, Some(&journal(&[("product", "gem-pack", "Gem pack")])));
+    let problems = undeclared.unwrap_err();
+    assert_eq!(
+        (problems[0].file.as_str(), problems[0].line, problems[0].key.as_str()),
+        (path.as_str(), None, "products.gem-pack")
+    );
+    assert_eq!(
+        messages(problems),
+        [format!(
+            "{path}: products.gem-pack: the journal holds an intent to create product gem-pack as \"Gem pack\", and \
+             crucible.lock holds no ID for it, so the create may have landed in universe 10772177432. crucible.toml \
+             declares no products.gem-pack. If it was renamed, set moved_from = \"gem-pack\" on the new key, one of \
+             products.coin-pack. Declare it again until provision resolves the intent, or resolve it yourself: record the product named \"Gem pack\" in universe 10772177432 with `crucible adopt product \
+             gem-pack <id>`, or remove the intent from {path} if universe 10772177432 has no such product"
+        )]
+    );
+    let lock = Project::new(CONFIG).applied("staging");
+    let vip = journal(&[("pass", "vip", "VIP")]);
+    for (config, lock, journal, expected) in [
+        (
+            CONFIG.replace("price = 299\n", "price = 299\nretired = true\n"),
+            None,
+            &vip,
+            "crucible.toml retires passes.vip, so provision would never look for it. Remove retired = true until",
+        ),
+        (
+            CONFIG.replace("price = 299\n", "untrack = true\n"),
+            None,
+            &vip,
+            "crucible.toml untracks passes.vip, so provision would never look for it. Remove untrack = true until",
+        ),
+        (
+            CONFIG.replace("[passes.vip]", "[passes.gold]"),
+            None,
+            &vip,
+            ". If it was renamed, set moved_from = \"vip\" on the new key, one of passes.gold",
+        ),
+        (
+            CONFIG.to_owned(),
+            None,
+            &journal(&[("product", "first-delivery", "First delivery")]),
+            ", and badges.first-delivery is declared, but the intent is for a product",
+        ),
+        (
+            CONFIG.replace("[passes.vip]\nname = \"VIP\"\nprice = 299\n", ""),
+            Some(&lock),
+            &vip,
+            "and crucible.lock holds its ID 1001, so the create landed. crucible.toml no longer declares passes.vip",
+        ),
+    ] {
+        let problems =
+            messages(Project::new(&config).plan("staging", lock.map(String::as_str), Some(journal)).unwrap_err());
+        assert!(
+            problems.iter().any(|problem| problem.starts_with(&format!("{path}: ")) && problem.contains(expected)),
+            "{expected}: {problems:#?}"
+        );
+    }
+}
+
+#[test]
+fn a_name_another_key_s_unresolved_intent_sent_stops_the_plan() {
+    let config = CONFIG.to_owned() + "[passes.gold]\nname = \"Gold\"\nprice = 1\n";
+    let line = config.lines().position(|line| line == "[passes.gold]").unwrap() + 1;
+    let project = Project::new(&config);
+    let journal = journal(&[("pass", "vip", "Gold")]);
+    let problems = messages(project.plan("staging", None, Some(&journal)).unwrap_err());
+    assert_eq!(
+        problems,
+        [format!(
+            "crucible.toml:{line}: passes.gold.name: \"Gold\" is the name the journal's intent for passes.vip sent, and \
+             crucible.lock holds no ID for it, so its create may have landed under that name and the adopt check could \
+             bind passes.gold to it. Give passes.gold another name until provision resolves that intent, or resolve it \
+             yourself with `crucible adopt pass vip <id>`, or remove the intent from {} if no pass has that name",
+            crucible_iac::journal::path("staging").display()
+        )]
+    );
+    let lock = project.applied("staging");
+    assert!(project.plan("staging", Some(&lock), Some(&journal)).is_ok(), "the lock resolves vip's intent");
+}
+
+#[test]
+fn a_journal_for_another_universe_is_refused() {
+    let project = Project::new(&CONFIG.replace("universe = 10772177432", "universe = 99999999999"));
+    let problems = messages(project.plan("staging", None, Some(&journal(&[("pass", "vip", "VIP")]))).unwrap_err());
+    let path = crucible_iac::journal::path("staging").display().to_string();
+    assert_eq!(
+        problems,
+        [format!(
+            "{path}: universe: the journal holds intents sent to universe 10772177432, and crucible.toml names \
+             universe 99999999999 for staging. If the universe ID changed by mistake, set env.staging.universe back to \
+             10772177432 in crucible.toml. If staging now deploys to universe 99999999999, look in universe \
+             10772177432 for the resources its intents name, whose creates may have landed there, then delete {path}"
+        )]
+    );
 }
 
 #[test]

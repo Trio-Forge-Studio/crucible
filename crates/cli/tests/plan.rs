@@ -130,6 +130,60 @@ fn a_locked_resource_removed_from_the_config_exits_2() {
     assert_eq!((&problems[0]["file"], &problems[0]["key"]), (&json!("crucible.toml"), &json!("products.coin-pack")));
 }
 
+fn write_journal(dir: &Path, journal: &Value) {
+    std::fs::create_dir_all(dir.join(".crucible/journal")).unwrap();
+    std::fs::write(dir.join(".crucible/journal/staging.json"), journal.to_string()).unwrap();
+}
+
+fn intents(universe: u64, intents: Value) -> Value {
+    json!({"version": 1, "universe": universe, "intents": intents})
+}
+
+#[test]
+fn an_intent_shows_on_its_step_with_the_name_it_sent() {
+    let dir = project(CONFIG);
+    write_journal(dir.path(), &intents(10772177432, json!([{"kind":"product","key":"coin-pack","name":"Coins"}])));
+    let out = plan(dir.path(), &["staging"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(
+        text(&out.stdout),
+        "staging (universe 10772177432)\n\
+         \x20 adopt-check  product coin-pack     Products.CoinPack       intent sent \"Coins\"\n\
+         \x20 create       badge first-delivery  Badges.FirstDelivery\n\
+         \x20 1 create, 1 adopt-check.\n\
+         \x20 Provision adopts the one existing resource with a create's name instead of creating it.\n"
+    );
+    let document = document(&plan(dir.path(), &["staging", "--json"]));
+    assert_eq!(document["environments"][0]["steps"][0]["intent"], json!({"name": "Coins", "resolved": false}));
+}
+
+#[test]
+fn an_intent_no_step_carries_exits_2() {
+    let dir = project(CONFIG);
+    write_journal(dir.path(), &intents(10772177432, json!([{"kind":"pass","key":"vip","name":"VIP"}])));
+    let problems = refused(dir.path());
+    assert_eq!(problems[0]["key"], "passes.vip");
+    assert!(problems[0]["file"].as_str().unwrap().ends_with("staging.json"), "{problems}");
+}
+
+#[test]
+fn a_journal_for_another_universe_exits_2() {
+    let dir = project(CONFIG);
+    write_journal(dir.path(), &intents(99999999999, json!([])));
+    let problems = refused(dir.path());
+    assert_eq!(problems[0]["key"], "universe");
+}
+
+#[test]
+fn a_name_another_key_s_intent_sent_exits_2() {
+    let dir = project(CONFIG);
+    write_journal(dir.path(), &intents(10772177432, json!([{"kind":"product","key":"gem-pack","name":"Coin pack"}])));
+    let problems = refused(dir.path());
+    let keys: Vec<_> = problems.as_array().unwrap().iter().map(|problem| problem["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["products.gem-pack", "products.coin-pack.name"]);
+    assert_eq!((&problems[1]["file"], &problems[1]["line"]), (&json!("crucible.toml"), &json!(12)));
+}
+
 #[test]
 fn an_unknown_environment_a_bad_lock_or_no_config_exits_2() {
     let dir = project(CONFIG);

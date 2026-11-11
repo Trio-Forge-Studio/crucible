@@ -30,7 +30,7 @@ pub enum Command {
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
-    /// Show what crucible provision would do in each environment, from crucible.toml and crucible.lock alone.
+    /// Show what crucible provision would do in each environment, from crucible.toml, crucible.lock and the journal.
     Plan(crate::plan::Args),
     /// Build and publish the places in a crucible.toml environment. One JSON document.
     Publish(crate::publish::Args),

@@ -65,6 +65,13 @@ impl Fields {
     pub fn fingerprint(&self) -> String {
         fingerprint(self)
     }
+
+    /// The display name, which provision's adopt check matches.
+    pub fn name(&self) -> &str {
+        match self {
+            Fields::Priced { name, .. } | Fields::Badge { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +108,7 @@ impl ResolvedSettings {
 /// A rule the files break. `line` is a line of `file`, when one table holds the cause.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Problem {
-    pub file: &'static str,
+    pub file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
     pub key: String,
@@ -110,7 +117,7 @@ pub struct Problem {
 
 impl Problem {
     pub fn at(line: usize, key: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { file: FILE, line: Some(line), key: key.into(), message: message.into() }
+        Self { file: FILE.into(), line: Some(line), key: key.into(), message: message.into() }
     }
 }
 

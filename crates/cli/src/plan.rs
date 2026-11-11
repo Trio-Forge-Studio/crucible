@@ -136,6 +136,10 @@ fn render(plans: &[Plan]) -> String {
                 if let Some(old) = &step.moved_from {
                     detail.push(format!("from {old}"));
                 }
+                if let Some(intent) = &step.intent {
+                    let resolved = if intent.resolved { ", resolved by the lock" } else { "" };
+                    detail.push(format!("intent sent {:?}{resolved}", intent.name));
+                }
                 detail.extend(step.note.clone());
                 [
                     label(&json!(step.action)),

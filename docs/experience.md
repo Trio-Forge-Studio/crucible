@@ -74,7 +74,7 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 | Action | When | What provision does |
 | --- | --- | --- |
 | `create` | The lock has no ID for the key. | Lists the universe's resources and adopts the one with the same name, or creates one. |
-| `adopt-check` | The journal holds an intent for the key and the lock has no ID. | Treats the earlier create's outcome as unknown and looks for the resource before anything else. |
+| `adopt-check` | The journal holds an intent for the key, or for the key it moved from, and the lock has no ID. | Treats the earlier create's outcome as unknown and looks for the resource, under the declared name and the name the intent sent, before anything else. |
 | `update` | The name, description, price, `enabled`, icon or key differs from what the lock recorded, or a retired resource is declared again. | Updates the resource in place. |
 | `retire` | The table sets `retired = true` and the lock records the resource as managed. | Takes it off sale or disables it. |
 | `untrack` | The table sets `untrack = true` and the lock holds its ID. | Removes it from the lock. |
@@ -126,4 +126,18 @@ status = "managed"
 
 An ID means nothing in another universe, so when `env.<name>.universe` in `crucible.toml` differs from the universe the lock records for that environment, the plan stops and names both. If the ID changed by mistake, set it back. If the environment now deploys to a new universe, start it afresh: delete `[env.<name>]` and every `[env.<name>.*]` table from `crucible.lock`. The next plan creates everything in the new universe, and the resources in the old one stay on Roblox, unmanaged.
 
-The journal at `.crucible/journal/<env>.json` lists the creates provision has started and not recorded. `specs/provision` in the Crucible repository models how provision uses both, and states what TLC checks.
+## The journal
+
+`.crucible/journal/<env>.json` lists the creates provision has started and not recorded in the lock, with the universe it sent them to and the display name each one sent.
+
+```json
+{
+  "version": 1,
+  "universe": 10772177432,
+  "intents": [{ "kind": "badge", "key": "first-delivery", "name": "First delivery" }]
+}
+```
+
+Every intent shows in the plan, as `intent sent "<name>"` on the step of its key, or of the key that moved from it. When the lock holds the ID, the create landed, and the step adds `resolved by the lock`. Otherwise the step is an `adopt-check`. An intent no step can carry stops the plan and says what to do: its key is no longer declared, or is retired or untracked while the lock has no ID, so provision would never look for the resource. The plan also stops when a declared name is the name another key's unresolved intent sent, because that key's create may have landed under it, and when the journal names another universe than `crucible.toml`.
+
+`specs/provision` in the Crucible repository models how provision uses the lock and the journal, and states what TLC checks.
