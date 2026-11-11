@@ -7,6 +7,29 @@ use serde_json::Value;
 const SINGLETONS: [&str; 3] = ["@rbxts/charm", "@rbxts/vide", "@rbxts/charm-sync"];
 const FIX: &str = "Align the declared ranges and use npm overrides or pnpm.overrides followed by reinstalling, then map only one package directory for each library.";
 
+/// The version range a dependency entry for `name` declares, or None when the entry names another source, such as a
+/// path, a link, a Git or URL spec, a tag, a pnpm catalog or a bare workspace protocol. Package managers judge those by
+/// the installed copy's own version, so the check does too. An `npm:` alias of the same package and a `workspace:` entry
+/// with a range keep the range they hold.
+fn declared_range(name: &str, spec: &str) -> Option<node_semver::Range> {
+    let spec = spec.trim();
+    let range = if let Some(alias) = spec.strip_prefix("npm:") {
+        let at = alias.rfind('@').filter(|&at| at > 0)?;
+        if alias[..at] != *name {
+            return None;
+        }
+        &alias[at + 1..]
+    } else if let Some(range) = spec.strip_prefix("workspace:") {
+        range
+    } else {
+        spec
+    };
+    if range.is_empty() || matches!(range, "^" | "~") {
+        return None;
+    }
+    node_semver::Range::parse(range).ok()
+}
+
 #[derive(Default)]
 struct Scan {
     manifests: BTreeMap<PathBuf, Value>,
@@ -180,10 +203,9 @@ impl Checker {
                 let version = node_semver::Version::parse(version).map_err(|e| format!("{}: {e}", path.display()))?;
                 for (owner, manifest) in &scan.manifests {
                     for field in ["dependencies", "peerDependencies"] {
-                        if let Some(range) = manifest[field][name].as_str() {
-                            let parsed = node_semver::Range::parse(range).map_err(|e| {
-                                format!("{} declares unsupported {name} range {range}: {e}", owner.display())
-                            })?;
+                        if let Some(range) = manifest[field][name].as_str()
+                            && let Some(parsed) = declared_range(name, range)
+                        {
                             if !parsed.satisfies(&version) {
                                 errors.push(format!(
                                     "{name} {} does not satisfy {} {} at {}: {field} range {range}",

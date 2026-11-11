@@ -1000,3 +1000,53 @@ fn reactive_peer_ranges_accept_npm_unions_and_hyphens() {
     assert_eq!(code(&output), 1);
     assert!(text(&output.stderr).contains("peerDependencies range ^0.12.0"));
 }
+
+#[test]
+fn reactive_entries_that_name_another_source_build() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    for spec in [
+        "npm:@rbxts/charm@0.11.1",
+        "npm:@rbxts/charm",
+        "npm:@rbxts/charm@latest",
+        "file:../vendor/charm",
+        "link:../vendor/charm",
+        "workspace:*",
+        "workspace:^",
+        "workspace:~",
+        "catalog:",
+        "catalog:roblox",
+        "git+https://github.com/littensy/charm.git#v0.11.1",
+        "github:littensy/charm",
+        "littensy/charm",
+        "https://example.com/charm-0.11.1.tgz",
+        "latest",
+        "",
+    ] {
+        let manifest = json!({"name":"probe-game", "version":"0.0.0", "dependencies":{"@rbxts/charm":spec}});
+        game.json("package.json", &manifest);
+        let holder = json!({"name":"@rbxts/holder", "version":"1.0.0", "peerDependencies":{"@rbxts/charm":spec}});
+        game.json("node_modules/@rbxts/holder/package.json", &holder);
+        let output = game.build(&[]);
+        assert_eq!(code(&output), 0, "{spec:?}: {}", text(&output.stderr));
+    }
+}
+
+#[test]
+fn reactive_alias_and_workspace_entries_keep_their_range() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    for spec in ["npm:@rbxts/charm@^0.12.0", "workspace:^0.12.0"] {
+        game.json(
+            "package.json",
+            &json!({"name":"probe-game", "version":"0.0.0", "dependencies":{"@rbxts/charm":spec}}),
+        );
+        let output = game.build(&[]);
+        assert_eq!(code(&output), 1, "{spec}");
+        assert!(text(&output.stderr).contains(spec), "{}", text(&output.stderr));
+    }
+    let other = "npm:@rbxts/charm-fork@^0.12.0";
+    game.json("package.json", &json!({"name":"probe-game", "version":"0.0.0", "dependencies":{"@rbxts/charm":other}}));
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "an alias of another package names another source: {}", text(&output.stderr));
+}
