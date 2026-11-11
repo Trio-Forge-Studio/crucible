@@ -19,6 +19,7 @@ export default defineConfig({
 			"pnpm-lock.yaml",
 			"**/*.md",
 			"crates/oc-registry/spec/**",
+			"crates/project/crucible.schema.json",
 			"crates/cli/notices.hbs",
 			"target/**",
 		],

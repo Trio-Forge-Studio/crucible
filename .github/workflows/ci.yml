@@ -71,6 +71,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
       - run: cargo xtask abi check
+      - run: cargo xtask schema check
       - name: Check the architecture rules and that no violation is new against the base
         shell: bash
         env:

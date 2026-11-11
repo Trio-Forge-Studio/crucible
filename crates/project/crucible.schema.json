@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "crucible.toml",
+  "description": "A Crucible game's places, environments and experience.",
+  "type": "object",
+  "properties": {
+    "badges": {
+      "description": "Badges, by key.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Badge"
+      }
+    },
+    "crucible": {
+      "description": "The oldest crucible that can read this file, such as \"0.6\".",
+      "type": "string"
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Environment"
+      }
+    },
+    "experience": {
+      "description": "Settings of the universe.",
+      "$ref": "#/$defs/Settings"
+    },
+    "passes": {
+      "description": "Game passes, by key.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Priced"
+      }
+    },
+    "places": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Place"
+      }
+    },
+    "products": {
+      "description": "Developer products, by key. A key uses lowercase letters, digits and '-', and starts with a letter.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Priced"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Badge": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Defaults to true.",
+          "type": "boolean"
+        },
+        "icon": {
+          "description": "An image path relative to the project root.",
+          "type": "string"
+        },
+        "moved_from": {
+          "description": "The key it had before a rename, so it keeps its ID.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "retired": {
+          "description": "Disable it. Roblox cannot delete it.",
+          "type": "boolean",
+          "default": false
+        },
+        "untrack": {
+          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "BadgeOverlay": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Environment": {
+      "description": "One Roblox universe the game deploys to.",
+      "type": "object",
+      "properties": {
+        "badges": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/BadgeOverlay"
+          }
+        },
+        "passes": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PricedOverlay"
+          }
+        },
+        "place": {
+          "description": "The place ID when `start` is the only place.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1
+        },
+        "places": {
+          "description": "Each place's ID, by place name.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          }
+        },
+        "products": {
+          "description": "This environment's changes to declared products.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PricedOverlay"
+          }
+        },
+        "universe": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1
+        },
+        "version_type": {
+          "$ref": "#/$defs/VersionType"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "universe"
+      ]
+    },
+    "Place": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "description": "The folder the project maps for the runtime library.",
+          "type": "string",
+          "default": "include"
+        },
+        "project": {
+          "description": "The Rojo project that lays out the place.",
+          "type": "string"
+        },
+        "tsconfig": {
+          "type": "string",
+          "default": "tsconfig.json"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project"
+      ]
+    },
+    "Priced": {
+      "description": "A developer product or a game pass.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "icon": {
+          "description": "An image path relative to the project root.",
+          "type": "string"
+        },
+        "moved_from": {
+          "description": "The key it had before a rename, so it keeps its ID.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "price": {
+          "description": "The price in Robux. A price of 0 is not off sale: set `retired = true` instead.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "retired": {
+          "description": "Take it off sale. Roblox cannot delete it.",
+          "type": "boolean",
+          "default": false
+        },
+        "untrack": {
+          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "PricedOverlay": {
+      "description": "The fields an environment may override.",
+      "type": "object",
+      "properties": {
+        "price": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Settings": {
+      "type": "object",
+      "properties": {
+        "private_server_price": {
+          "description": "The private server price in Robux. 0 makes private servers free.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "voice_chat": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "VersionType": {
+      "type": "string",
+      "enum": [
+        "Saved",
+        "Published"
+      ]
+    }
+  }
+}

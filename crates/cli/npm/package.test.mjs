@@ -73,6 +73,10 @@ test("the shim depends on every platform package at the CLI version", () => {
 test("npx crucible runs the installed platform binary", { skip: !supported && `no package for ${host}` }, () => {
 	const app = project("app", [shim, platform]);
 	const installed = join(app, "node_modules", `@trioforge/crucible-cli-${host}`);
+	const schema = JSON.parse(
+		readFileSync(join(app, "node_modules", "@trioforge/crucible-cli", "crucible.schema.json"), "utf8"),
+	);
+	assert.equal(schema.title, "crucible.toml", "the shim ships the crucible.toml schema for editors");
 	assert.match(readFileSync(join(installed, "LICENSE"), "utf8"), /^MIT License/);
 	assert.match(readFileSync(join(installed, "THIRD_PARTY_NOTICES"), "utf8"), /example-crate 1.0.0 MIT/);
 	const version = run("npx", ["crucible", "--version"], app);
