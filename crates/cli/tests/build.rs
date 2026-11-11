@@ -934,32 +934,185 @@ fn reactive_second_mapped_folder_fails_but_unmapped_copy_is_ignored() {
     }
 }
 
-#[test]
-fn reactive_pnpm_symlinks_to_one_copy_pass() {
-    let game = reactive_game();
-    package(&game, "node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
-    fs::create_dir_all(game.path("node_modules/@rbxts")).unwrap();
-    fs::create_dir_all(game.path("second")).unwrap();
-    let real = game.path("node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts/charm");
-    for link in [game.path("node_modules/@rbxts/charm"), game.path("second/charm")] {
-        #[cfg(windows)]
-        {
-            let output = Command::new("cmd")
-                .args(["/c", "mklink", "/J"])
-                .arg(link.to_string_lossy().replace('/', "\\"))
-                .arg(real.to_string_lossy().replace('/', "\\"))
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "{}", text(&output.stderr));
-        }
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&real, link).unwrap();
+fn junction(game: &Game, link: &str, target: &str) {
+    let (link, target) = (game.path(link), game.path(target));
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    #[cfg(windows)]
+    {
+        let output = Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", text(&output.stderr));
     }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+fn map(game: &Game, instance: &str, path: Value) {
     let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
-    project["tree"]["ReplicatedStorage"]["Second"] = json!({"$path":"second"});
+    project["tree"]["ReplicatedStorage"][instance] = json!({ "$path": path });
     game.json("default.project.json", &project);
+}
+
+// Counts the ModuleScripts named `name` in the place, as Rojo's sourcemap lists them.
+fn modules_in_place(game: &Game, name: &str) -> usize {
+    fn count(node: &Value, name: &str) -> usize {
+        let children = node["children"].as_array().into_iter().flatten().map(|child| count(child, name)).sum::<usize>();
+        children + usize::from(node["name"] == name && node["className"] == "ModuleScript")
+    }
+    // Rojo needs the folders a build writes, and a check that fails stops the build before it writes them.
+    let missing: Vec<_> =
+        ["include", "out/shared", "out/server"].map(|f| game.path(f)).into_iter().filter(|f| !f.exists()).collect();
+    for folder in &missing {
+        fs::create_dir_all(folder).unwrap();
+    }
+    let output = game.path("sourcemap.json");
+    let command = librojo::cli::SourcemapCommand {
+        project: game.path("default.project.json"),
+        output: Some(output.clone()),
+        include_non_scripts: false,
+        watch: false,
+        absolute: false,
+    };
+    command.run().unwrap();
+    for folder in missing {
+        fs::remove_dir_all(folder).unwrap();
+    }
+    let _ = fs::remove_dir(game.path("out"));
+    count(&serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap(), name)
+}
+
+// pnpm's layout: the top-level link and the store's sibling link for vide-charm reach one store copy.
+fn pnpm_game() -> Game {
+    let game = reactive_game();
+    let store = "node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts/charm";
+    package(&game, store, "@rbxts/charm", "0.11.1");
+    let bridge = "node_modules/.pnpm/@rbxts+vide-charm@0.4.1/node_modules/@rbxts/vide-charm";
+    game.json(
+        &format!("{bridge}/package.json"),
+        &json!({"name":"@rbxts/vide-charm", "version":"0.4.1", "dependencies":{"@rbxts/charm":"^0.11.1"}}),
+    );
+    game.write(&format!("{bridge}/init.luau"), "return {}\n");
+    junction(&game, "node_modules/.pnpm/@rbxts+vide-charm@0.4.1/node_modules/@rbxts/charm", store);
+    junction(&game, "node_modules/@rbxts/charm", store);
+    junction(&game, "node_modules/@rbxts/vide-charm", bridge);
+    game
+}
+
+#[test]
+fn reactive_pnpm_links_to_one_store_copy_pass() {
+    let game = pnpm_game();
+    // A store neighbour of vide-charm that the place does not map, so neither its range nor its manifest counts.
+    let helper = "node_modules/.pnpm/@rbxts+vide-charm@0.4.1/node_modules/helper";
+    game.json(
+        &format!("{helper}/package.json"),
+        &json!({"name":"helper", "version":"1.0.0", "dependencies":{"@rbxts/charm":"0.10.0"}}),
+    );
     let output = game.build(&[]);
     assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+    assert_eq!(modules_in_place(&game, "charm"), 1);
+}
+
+#[test]
+fn reactive_one_store_copy_mapped_twice_fails() {
+    let game = pnpm_game();
+    map(&game, "Second", json!("node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts"));
+    assert_eq!(modules_in_place(&game, "charm"), 2, "Rojo builds the one folder into two module trees");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr).replace('\\', "/");
+    assert!(message.contains("multiple copies of @rbxts/charm"), "{message}");
+    assert!(message.contains("node_modules/.pnpm/@rbxts+charm@0.11.1/node_modules/@rbxts/charm"), "{message}");
+}
+
+#[test]
+fn reactive_copy_in_a_nested_project_file_fails() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/vide", "@rbxts/vide", "0.6.1");
+    package(&game, "vendor/node_modules/@rbxts/vide", "@rbxts/vide", "0.6.0");
+    game.json("vendor.project.json", &json!({"name":"vendor", "tree":{"$path":"vendor/node_modules/@rbxts"}}));
+    map(&game, "Extra", json!("vendor.project.json"));
+    assert_eq!(modules_in_place(&game, "vide"), 2);
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr).replace('\\', "/");
+    for expected in ["multiple copies of @rbxts/vide", "0.6.0 at", "vendor/node_modules/@rbxts/vide"] {
+        assert!(message.contains(expected), "{message}");
+    }
+}
+
+#[test]
+fn reactive_ranges_of_packages_outside_the_place_do_not_count() {
+    // npm's layout for a development tool that depends on another Charm. Nothing maps node_modules/tool-x.
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    game.json(
+        "node_modules/tool-x/package.json",
+        &json!({"name":"tool-x", "version":"1.0.0", "dependencies":{"@rbxts/charm":"0.10.0"}}),
+    );
+    package(&game, "node_modules/tool-x/node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+}
+
+#[test]
+fn reactive_ranges_count_only_against_the_copy_their_package_loads() {
+    // npm nests Charm 0.11.1 under vide-charm when the game pins 0.10.0. The game's range applies to the top copy only.
+    let game = reactive_game();
+    game.json(
+        "package.json",
+        &json!({"name":"probe-game", "version":"0.0.0", "dependencies":{"@rbxts/charm":"0.10.0"}}),
+    );
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.10.0");
+    game.json(
+        "node_modules/@rbxts/vide-charm/package.json",
+        &json!({"name":"@rbxts/vide-charm", "version":"0.4.1", "dependencies":{"@rbxts/charm":"^0.11.1"}}),
+    );
+    package(&game, "node_modules/@rbxts/vide-charm/node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr);
+    assert!(message.contains("multiple copies of @rbxts/charm"), "{message}");
+    assert!(!message.contains("does not satisfy"), "{message}");
+}
+
+#[test]
+fn reactive_glob_ignore_paths_leave_a_nested_copy_out() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    game.json(
+        "node_modules/@rbxts/holder/package.json",
+        &json!({"name":"@rbxts/holder", "version":"1.0.0", "dependencies":{"@rbxts/charm":"^0.11.0"}}),
+    );
+    package(&game, "node_modules/@rbxts/holder/node_modules/@rbxts/charm", "@rbxts/charm", "0.11.0");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    assert!(text(&output.stderr).contains("multiple copies of @rbxts/charm"));
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["globIgnorePaths"] = json!(["**/node_modules/@rbxts/*/node_modules/**"]);
+    game.json("default.project.json", &project);
+    assert_eq!(modules_in_place(&game, "charm"), 1);
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+}
+
+#[test]
+fn reactive_manifests_outside_the_place_are_not_read() {
+    let game = reactive_game();
+    package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
+    game.write("node_modules/broken/package.json", "{\"name\":\"broken\",}");
+    game.write("node_modules/bomtool/package.json", "\u{feff}{\"name\":\"bomtool\",\"version\":\"1.0.0\"}");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output.stderr));
+    game.write("node_modules/@rbxts/broken/package.json", "{\"name\":\"broken\",}");
+    let output = game.build(&[]);
+    assert_eq!(code(&output), 1);
+    let message = text(&output.stderr).replace('\\', "/");
+    assert!(message.contains("node_modules/@rbxts/broken/package.json is not valid JSON"), "{message}");
+    assert!(message.contains("trailing comma"), "{message}");
 }
 
 #[test]
@@ -989,11 +1142,11 @@ fn reactive_charm_sync_copies_split_tracking() {
 fn reactive_peer_ranges_accept_npm_unions_and_hyphens() {
     let game = reactive_game();
     package(&game, "node_modules/@rbxts/charm", "@rbxts/charm", "0.11.1");
-    game.json("node_modules/consumer/package.json", &json!({"name":"consumer", "version":"1.0.0", "peerDependencies":{"@rbxts/charm":"0.10.0 - 0.11.1 || >=1.0.0"}}));
+    game.json("node_modules/@rbxts/consumer/package.json", &json!({"name":"consumer", "version":"1.0.0", "peerDependencies":{"@rbxts/charm":"0.10.0 - 0.11.1 || >=1.0.0"}}));
     let output = game.build(&[]);
     assert_eq!(code(&output), 0, "{}", text(&output.stderr));
     game.json(
-        "node_modules/consumer/package.json",
+        "node_modules/@rbxts/consumer/package.json",
         &json!({"name":"consumer", "version":"1.0.0", "peerDependencies":{"@rbxts/charm":"^0.12.0"}}),
     );
     let output = game.build(&[]);

@@ -26,14 +26,6 @@ pub fn place(project: &Path) -> Result<Mappings, String> {
     Ok(reader.mappings)
 }
 
-/// Reads mappings from a project that may describe a package rather than a DataModel.
-pub fn project(project: &Path) -> Result<Mappings, String> {
-    let file = std::path::absolute(project).map(|p| normalize(&p)).map_err(|e| e.to_string())?;
-    let mut reader = Reader::default();
-    reader.config(&file, &mut Vec::new())?;
-    Ok(reader.mappings)
-}
-
 /// A folder that a Rojo tree maps, with the instance it becomes and the `globIgnorePaths` Rojo applies inside it.
 #[derive(Debug, Clone)]
 pub struct Folder {
