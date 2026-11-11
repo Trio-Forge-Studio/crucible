@@ -504,6 +504,11 @@ test("upgrade restores Charm Sync to a previous template and the built sync load
 	assert.equal(JSON.parse(readFileSync(file, "utf8")).dependencies["@rbxts/charm"], "0.11.1");
 	const built = run("npx", ["crucible", "build"], game);
 	assert.equal(built.status, 0, built.stdout + built.stderr);
+	// CI installs Lune only on Linux, where this load must run.
+	const lune = run("lune", ["--version"], game).status === 0;
+	if (!lune && !(process.env.CI && process.platform === "linux")) {
+		return;
+	}
 	const loaded = run(
 		"lune",
 		["run", "test/fixtures/upgrade-sync.luau", join(game, "build/start.rbxl")],
