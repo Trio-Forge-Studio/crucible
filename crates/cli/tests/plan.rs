@@ -185,6 +185,18 @@ fn a_name_another_key_s_intent_sent_exits_2() {
 }
 
 #[test]
+fn two_keys_of_a_kind_with_one_display_name_exit_2() {
+    let dir = project(&(CONFIG.to_owned() + "[products.gem-pack]\nname = \"Coin pack\"\nprice = 99\n"));
+    let out = plan(dir.path(), &["staging", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let problems = &document(&out)["error"]["problems"];
+    assert_eq!((&problems[0]["key"], &problems[0]["line"]), (&json!("products.gem-pack.name"), &json!(18)));
+    let out = plan(dir.path(), &["staging"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("products.coin-pack and products.gem-pack both have the display name"));
+}
+
+#[test]
 fn an_unknown_environment_a_bad_lock_or_no_config_exits_2() {
     let dir = project(CONFIG);
     let out = plan(dir.path(), &["qa"]);

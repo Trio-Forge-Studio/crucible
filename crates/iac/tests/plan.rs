@@ -448,6 +448,27 @@ fn keys_overlays_and_lifecycles_are_checked_across_tables() {
 }
 
 #[test]
+fn two_managed_keys_of_a_kind_may_not_share_a_display_name() {
+    let shared = CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\nprice = 1\n";
+    let line = shared.lines().position(|line| line == "[passes.vip]").unwrap() + 1;
+    assert_eq!(
+        messages(Project::new(&shared).experience().unwrap_err()),
+        [format!(
+            "crucible.toml:{line}: passes.vip.name: passes.gold and passes.vip both have the display name \"VIP\". \
+             Provision adopts an existing resource by its name, so it could not tell them apart. Give one of them \
+             another name"
+        )]
+    );
+    for allowed in [
+        CONFIG.to_owned() + "[products.vip]\nname = \"VIP\"\nprice = 1\n",
+        CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\nretired = true\n",
+        CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\nuntrack = true\n",
+    ] {
+        assert!(Project::new(&allowed).experience().is_ok(), "{allowed}");
+    }
+}
+
+#[test]
 fn a_badge_overlay_changes_only_its_environment() {
     let config = CONFIG.to_owned() + "[env.staging.badges.first-delivery]\nenabled = false\n";
     let project = Project::new(&config);

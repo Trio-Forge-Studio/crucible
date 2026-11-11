@@ -162,6 +162,8 @@ impl Experience {
         ] {
             let mut handles: BTreeMap<String, &str> = BTreeMap::new();
             let mut moves: BTreeMap<&str, &str> = BTreeMap::new();
+            // No overlay sets a name, so two names that differ here differ in every environment.
+            let mut names: BTreeMap<&str, &str> = BTreeMap::new();
             for (key, line, table) in &tables {
                 let at = |field: &str| format!("{}.{key}{field}", kind.table());
                 if !is_key(key) {
@@ -217,8 +219,24 @@ impl Experience {
                     problems.push(Problem::at(*line, at(".price"), zero_price(kind)));
                 }
                 if lifecycle == Lifecycle::Managed {
-                    if table.name().is_none_or(str::is_empty) {
-                        problems.push(Problem::at(*line, at(".name"), format!("a {} needs a name", kind.noun())));
+                    match table.name().filter(|name| !name.is_empty()) {
+                        None => {
+                            problems.push(Problem::at(*line, at(".name"), format!("a {} needs a name", kind.noun())))
+                        }
+                        Some(name) => {
+                            if let Some(other) = names.insert(name, key) {
+                                problems.push(Problem::at(
+                                    *line,
+                                    at(".name"),
+                                    format!(
+                                        "{table}.{other} and {table}.{key} both have the display name {name:?}. \
+                                         Provision adopts an existing resource by its name, so it could not tell \
+                                         them apart. Give one of them another name",
+                                        table = kind.table()
+                                    ),
+                                ));
+                            }
+                        }
                     }
                     if kind != Kind::Badge && price.is_none() {
                         problems.push(Problem::at(
