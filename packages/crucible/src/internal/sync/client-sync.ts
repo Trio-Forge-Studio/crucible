@@ -1,3 +1,5 @@
+import { checkCharmSync } from "./charm-sync";
+import { useSyncCheck } from "./declarations";
 import { Subsystem } from "../../subsystem";
 import { runtimeDiagnostic } from "../diagnostics";
 import { claim } from "../network/claims";
@@ -100,3 +102,5 @@ export function installClientSync(fault: FaultSender) {
 	installed = true;
 	define(ClientSync, { kind: "subsystem", id: "Crucible.ClientSync" as TypeId, deps: [], provides: [] }, true);
 }
+
+useSyncCheck(checkCharmSync);

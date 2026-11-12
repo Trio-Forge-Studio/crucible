@@ -87,6 +87,12 @@ pub fn build(
             selected.len()
         )));
     }
+    let mut packages = crate::reactive_packages::Checker::default();
+    for (name, place) in &selected {
+        packages
+            .check(root, &root.join(&place.project))
+            .map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
+    }
     refuse_declared_out_dir_overlaps(root, manifest)?;
     write(root, &compile_all(root, &selected)?)?;
     let mut built = Vec::new();

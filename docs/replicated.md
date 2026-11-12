@@ -4,7 +4,7 @@ Declare game state once in shared code, write it from one server Subsystem, and 
 
 Import the declarations and `syncStatus` from the root of `@trioforge/crucible`. Import `publish` from `@trioforge/crucible/server`. The client entry adds nothing: clients only read.
 
-Install `@rbxts/charm-sync` at exactly `0.4.1` alongside `@rbxts/charm` `0.11.1` in the game's dependencies. Both are required peers, included by `crucible create`. Map the game's `node_modules/@rbxts` into the place so Charm Sync finds the same Charm copy as the game.
+Install `@rbxts/charm-sync` at exactly `0.4.1` alongside `@rbxts/charm` `0.11.1` in the game's dependencies. Both are required peers, included by `crucible create` and reconciled by `crucible upgrade`. Map the game's `node_modules/@rbxts` into the place so Charm Sync finds the same Charm copy as the game.
 
 ```ts
 import { replicated, replicatedPerPlayer, syncStatus } from "@trioforge/crucible";
@@ -12,6 +12,8 @@ import type { Replicated, ReplicatedPerPlayer, SyncStatus } from "@trioforge/cru
 import { publish } from "@trioforge/crucible/server";
 import type { Publication, Published } from "@trioforge/crucible/server";
 ```
+
+The runtime pins `@rbxts/charm-sync` to exactly `0.4.1` beside Charm. Its sync load path checks the private `patch.apply` export, the `__none` deletion marker, no-change diffs and immutable nested patch application once, when replicated declarations load. Games without replicated declarations run no probe. Charm Sync exposes no version metadata in Roblox, so a failure names the expected release, reports the installed version as unavailable and tells the game to install the pinned package and rebuild.
 
 ## Declare a value
 

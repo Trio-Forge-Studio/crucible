@@ -41,6 +41,14 @@ const byName = new Map<string, Declaration>();
 const handles = setmetatable(new Map<unknown, Declaration>(), { __mode: "k" });
 let ordered = new Array<Declaration>();
 let sealed = false;
+let checkSync = () => {};
+
+/** @internal The side entries install the probe without making the shared root import Charm Sync. */
+export function useSyncCheck(check: () => void) {
+	checkSync = check;
+	if (!ordered.isEmpty()) checkSync();
+}
+
 let onRetired: (declaration: Declaration) => void = () => {};
 let onChanged: () => void = () => {};
 
@@ -70,6 +78,7 @@ function checkName(name: unknown, framework: boolean): asserts name is string {
 }
 
 function register(audience: Audience, name: string, initial: unknown, descriptor: Node): unknown {
+	checkSync();
 	if (sealed)
 		error(
 			`${name} was declared after the replicated registry sealed; declare replicated state in modules that boot loads`,
