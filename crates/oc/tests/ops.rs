@@ -1,9 +1,10 @@
 use crucible_oc::Safety;
 use crucible_oc::auth::Secret;
 use crucible_oc::ops::{BadgeDetails, Details, Image, Op, Retry, badges, passes, products};
+use crucible_oc::outcome::Failure;
 use crucible_oc::transport::{Clock, Event, Sink, Timing, Transport};
 use httpmock::{Method, MockServer};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
@@ -42,6 +43,24 @@ fn product_json(price: u64) -> serde_json::Value {
            "iconImageAssetId": 0, "priceInformation": {"defaultPriceInRobux": price, "enabledFeatures": []},
            "universeId": 1, "isImmutable": false, "isManagedPricingEnabled": false,
            "createdTimestamp": "2026-01-01T00:00:00Z", "updatedTimestamp": "2026-01-01T00:00:00Z"})
+}
+
+fn pass_json() -> Value {
+    json!({"gamePassId": 1786543210u64, "name": "VIP", "description": "Double coins.", "isForSale": false,
+           "iconAssetId": 81234, "priceInformation": {"defaultPriceInRobux": 250, "enabledFeatures": []},
+           "isManagedPricingEnabled": false, "createdTimestamp": "2026-01-01T00:00:00Z",
+           "updatedTimestamp": "2026-01-01T00:00:00Z"})
+}
+
+fn badge_json() -> Value {
+    json!({"id": 2124000000000000u64, "name": "First delivery", "description": "Deliver.", "enabled": true,
+           "iconImageId": 9, "displayName": "First delivery", "created": "2026-01-01T00:00:00Z"})
+}
+
+fn without(mut value: Value, path: &[&str]) -> Value {
+    let (last, parents) = path.split_last().unwrap();
+    parents.iter().fold(&mut value, |value, key| &mut value[*key]).as_object_mut().unwrap().remove(*last);
+    value
 }
 
 #[test]
@@ -105,18 +124,114 @@ fn a_create_whose_answer_is_lost_is_sent_once_and_reported_unknown() {
     assert_eq!((failure.code, failure.error["kind"].as_str()), (5, Some("outcome_unknown")));
 }
 
+struct Create {
+    name: &'static str,
+    id_field: &'static str,
+    path: &'static str,
+    reply: Value,
+    compared: &'static [&'static str],
+    send: fn(&Transport<'_>) -> Failure,
+}
+
 #[test]
-fn an_update_is_repeated_after_a_server_error() {
+fn a_create_that_got_a_success_status_is_never_reported_as_retry() {
+    let creates = [
+        Create {
+            name: "developer-products.create",
+            id_field: "productId",
+            path: "/developer-products/v2/universes/1/developer-products",
+            reply: product_json(49),
+            compared: &["priceInformation", "defaultPriceInRobux"],
+            send: |transport| transport.run(&products::create(id(1), &Details::default())).unwrap_err(),
+        },
+        Create {
+            name: "game-passes.create",
+            id_field: "gamePassId",
+            path: "/game-passes/v1/universes/1/game-passes",
+            reply: pass_json(),
+            compared: &["priceInformation", "defaultPriceInRobux"],
+            send: |transport| transport.run(&passes::create(id(1), &Details::default())).unwrap_err(),
+        },
+        Create {
+            name: "badges.create",
+            id_field: "id",
+            path: "/legacy-badges/v1/universes/1/badges",
+            reply: badge_json(),
+            compared: &["enabled"],
+            send: |transport| transport.run(&badges::create(id(1), "B", "", true, icon())).unwrap_err(),
+        },
+    ];
+    for Create { name, id_field, path, reply: full, compared, send: create } in creates {
+        let landed = full[id_field].as_u64().unwrap();
+        let mut string_id = full.clone();
+        string_id[id_field] = json!(landed.to_string());
+        let compared_field = compared.join(".");
+        for (case, status, body, field, kept) in [
+            ("an empty 200", 200, None, id_field, None),
+            ("a 204", 204, None, id_field, None),
+            (
+                "a reply missing a compared field",
+                200,
+                Some(without(full.clone(), compared)),
+                &compared_field,
+                Some(landed),
+            ),
+            ("an ID sent as a string", 200, Some(string_id), id_field, Some(landed)),
+        ] {
+            let server = MockServer::start();
+            let key = Secret::from_string("test-key".into());
+            let mock = server.mock(|when, then| {
+                when.method(Method::POST).path(path);
+                let then = then.status(status);
+                if let Some(body) = &body {
+                    then.json_body(body.clone());
+                }
+            });
+            let failure = create(&transport(&server, &key));
+            mock.assert_calls(1);
+            let error = &failure.error;
+            assert_eq!((failure.code, error["kind"].as_str()), (5, Some("outcome_unknown")), "{name}, {case}: {error}");
+            assert_eq!((error["operation"].as_str(), error["field"].as_str()), (Some(name), Some(field)), "{case}");
+            assert_eq!(error["id"].as_u64(), kept, "{name}, {case}: the ID a caller adopts by");
+            assert!(error["message"].as_str().unwrap().contains(field), "{name}, {case}: {error}");
+        }
+    }
+}
+
+#[test]
+fn an_update_that_may_have_landed_is_unknown() {
+    let details = BadgeDetails { enabled: Some(false), ..BadgeDetails::default() };
+    for (status, code) in [(503, 5), (500, 5), (429, 7)] {
+        let server = MockServer::start();
+        let key = Secret::from_string("test-key".into());
+        let mock = server.mock(|when, then| {
+            when.method(Method::PATCH).path("/legacy-badges/v1/badges/7").json_body(json!({"enabled": false}));
+            then.status(status);
+        });
+        let failure = transport(&server, &key).run(&badges::update(id(7), &details)).unwrap_err();
+        mock.assert_calls(3);
+        assert_eq!(failure.code, code, "HTTP {status}: only a reply that proves the update was refused is unavailable");
+        assert_eq!(failure.error["operation"], "badges.update");
+    }
+}
+
+#[test]
+fn an_update_answered_with_success_succeeds_whatever_the_body() {
     let server = MockServer::start();
     let key = Secret::from_string("test-key".into());
-    let mock = server.mock(|when, then| {
-        when.method(Method::PATCH).path("/legacy-badges/v1/badges/7").json_body(json!({"enabled": false}));
-        then.status(503);
+    let icon_mock = server.mock(|when, then| {
+        when.method(Method::POST).path("/legacy-publish/v1/badges/7/icon");
+        then.status(200).body("<html>not JSON</html>");
     });
-    let details = BadgeDetails { enabled: Some(false), ..BadgeDetails::default() };
-    let failure = transport(&server, &key).run(&badges::update(id(7), &details)).unwrap_err();
-    mock.assert_calls(3);
-    assert_eq!(failure.code, 7, "repeating an update that never answered is safe, so the failure is unavailable");
+    let product_mock = server.mock(|when, then| {
+        when.method(Method::PATCH).path("/developer-products/v2/universes/1/developer-products/2");
+        then.status(200).body("{\"unexpected\": ");
+    });
+    let transport = transport(&server, &key);
+    transport.run(&badges::overwrite_icon(id(7), icon())).unwrap();
+    transport.run(&products::update(id(1), id(2), &Details { price: Some(5), ..Details::default() })).unwrap();
+    icon_mock.assert_calls(1);
+    product_mock.assert_calls(1);
 }
 
 #[test]
@@ -179,13 +294,34 @@ fn the_public_badge_list_sends_no_key() {
 }
 
 #[test]
-fn a_malformed_reply_is_unavailable() {
+fn a_malformed_read_is_an_error_that_names_the_operation_and_the_field() {
     let server = MockServer::start();
     let key = Secret::from_string("test-key".into());
     server.mock(|when, then| {
         when.method(Method::GET).path("/game-passes/v1/universes/1/game-passes/2/creator");
         then.status(200).json_body(json!({"gamePassId": 2}));
     });
-    let failure = transport(&server, &key).run(&passes::get(id(1), id(2))).unwrap_err();
-    assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some("Roblox returned an invalid game pass")));
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/developer-products/v2/universes/1/developer-products/creator");
+        let priceless = without(product_json(49), &["priceInformation", "defaultPriceInRobux"]);
+        then.status(200).json_body(json!({"developerProducts": [product_json(49), priceless], "nextPageToken": ""}));
+    });
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/developer-products/v2/universes/1/developer-products/3/creator");
+        then.status(200).json_body(without(product_json(49), &["description"]));
+    });
+    let transport = transport(&server, &key);
+    for (failure, name, field) in [
+        (transport.run(&passes::get(id(1), id(2))).unwrap_err(), "game-passes.get", "name"),
+        (
+            transport.run(&products::list(id(1), None)).unwrap_err(),
+            "developer-products.list",
+            "developerProducts[1].priceInformation.defaultPriceInRobux",
+        ),
+        (transport.run(&products::get(id(1), id(3))).unwrap_err(), "developer-products.get", "description"),
+    ] {
+        let message = format!("{name}: Roblox's reply has no valid `{field}`");
+        assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some(message.as_str())));
+        assert_eq!((failure.error["operation"].as_str(), failure.error["field"].as_str()), (Some(name), Some(field)));
+    }
 }
