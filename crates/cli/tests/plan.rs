@@ -277,3 +277,23 @@ fn the_guide_example_plans() {
     let shown = guide.split_once("```text\n").unwrap().1.split_once("```").unwrap().0;
     assert_eq!(text(&out.stdout), shown, "docs/experience.md shows the plan of its own example");
 }
+
+#[test]
+fn a_stray_file_in_the_journal_folder_names_itself_and_the_fix() {
+    let dir = project(CONFIG);
+    std::fs::create_dir_all(dir.path().join(".crucible/journal")).unwrap();
+    std::fs::write(dir.path().join(".crucible/journal/notes.json"), "{\"todo\": []}").unwrap();
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let path = Path::new(".crucible").join("journal");
+    let stderr = text(&out.stderr);
+    assert!(stderr.starts_with(&Path::new(".crucible/journal/notes.json").display().to_string()), "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "Each .json file in {} is the journal of the environment its name gives, so a file that is not one stops \
+             every plan. If it is not, move it out of the folder",
+            path.display()
+        )),
+        "{stderr}"
+    );
+}

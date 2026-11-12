@@ -165,7 +165,13 @@ fn journals(root: &Path) -> Result<BTreeMap<String, Journal>, Failure> {
         };
         let env = env.to_string_lossy().into_owned();
         let text = std::fs::read_to_string(&path).map_err(|error| Failure::read(&journal::path(&env), &error))?;
-        let journal = Journal::parse(&env, &text).map_err(|error| Failure::usage(error.to_string()))?;
+        let journal = Journal::parse(&env, &text).map_err(|error| {
+            Failure::usage(format!(
+                "{error}. Each .json file in {} is the journal of the environment its name gives, so a file that is \
+                 not one stops every plan. If it is not, move it out of the folder",
+                folder.display()
+            ))
+        })?;
         journals.insert(env, journal);
     }
     Ok(journals)
