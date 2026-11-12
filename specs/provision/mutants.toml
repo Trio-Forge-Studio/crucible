@@ -1,0 +1,161 @@
+# Each mutant changes one line of Provision.tla. `cargo xtask tla` checks that TLC finds a counterexample to the
+# property each one names, so every property is shown to catch the bug it is there for.
+
+[[mutant]]
+name = "create-ignores-the-list"
+why = "A create runs although the list found the key's resource."
+breaks = "AtMostOne"
+find = '''
+Create(k) ==
+    /\ pc = "ready"
+    /\ lock[k] = 0
+    /\ k \notin blocked
+    /\ seen[k] = {}
+'''
+replace = '''
+Create(k) ==
+    /\ pc = "ready"
+    /\ lock[k] = 0
+    /\ k \notin blocked
+'''
+
+[[mutant]]
+name = "adopt-trusts-the-typed-id"
+why = "`crucible adopt` writes the ID it is given without reading the resource."
+breaks = "LockNamesExisting"
+find = '''
+    /\ i \in Candidates(k)
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "create-again-after-unknown"
+why = "A run sends a second create for a key after the first one's answer was lost."
+breaks = "NoBlindCreate"
+find = '''
+    /\ k \notin blocked
+    /\ seen[k] = {}
+'''
+replace = '''
+    /\ seen[k] = {}
+'''
+
+[[mutant]]
+name = "list-result-ignored"
+why = "A list runs, and the run creates without looking at what it found."
+breaks = "NoBlindCreate"
+find = '''
+    /\ seen' = [k \in Keys |-> IF lock[k] = 0 THEN Candidates(k) ELSE {}]
+'''
+replace = '''
+    /\ seen' = [k \in Keys |-> {}]
+'''
+
+[[mutant]]
+name = "create-before-intent"
+why = "The create is sent before its intent reaches the journal."
+breaks = "JournalCoversUnknown"
+find = '''
+    /\ seen[k] = {}
+    /\ journal[k] = want[k]
+'''
+replace = '''
+    /\ seen[k] = {}
+'''
+
+[[mutant]]
+name = "blocked-for-good"
+why = "Rule 1 holds per environment instead of per run, so a key whose create was lost before it landed is never created."
+breaks = "Converges"
+find = '''
+    /\ blocked' = {}
+'''
+replace = '''
+    /\ blocked' = blocked
+'''
+
+[[mutant]]
+name = "list-misses-recent-creates"
+why = "Assumption A1 fails: the list can miss a resource that exists, so the adopt check finds nothing."
+breaks = "AtMostOne"
+find = '''
+    /\ seen' = [k \in Keys |-> IF lock[k] = 0 THEN Candidates(k) ELSE {}]
+'''
+replace = '''
+    /\ seen' \in [Keys -> SUBSET Ids] /\ \A k \in Keys : seen'[k] \subseteq IF lock[k] = 0 THEN Candidates(k) ELSE {}
+'''
+
+[[mutant]]
+name = "two-keys-one-name"
+why = "crucible.toml lets two keys of one kind share a display name, so one key adopts the other's resource."
+breaks = "LockNamesExisting"
+find = '''
+Distinct(w) == \A k, j \in Keys : k # j => w[k] # w[j]
+'''
+replace = '''
+Distinct(w) == TRUE
+'''
+
+[[mutant]]
+name = "adopt-check-ignores-the-sent-name"
+why = "The intent does not record the name it sent, so a rename after a lost create hides the resource and a second one is created."
+breaks = "AtMostOne"
+find = '''
+Sought(k) == {want[k]} \cup (IF journal[k] = None THEN {} ELSE {journal[k]})
+'''
+replace = '''
+Sought(k) == {want[k]}
+'''
+
+[[mutant]]
+name = "adopt-with-two-candidates"
+why = "The adopt check takes one of two matches instead of stopping the run."
+breaks = "LockNamesExisting"
+find = '''
+    /\ Cardinality(seen[k]) = 1
+'''
+replace = '''
+    /\ Cardinality(seen[k]) >= 1
+'''
+
+[[mutant]]
+name = "plan-allows-a-sent-name"
+why = "The plan lets a key take the name another key's intent sent, so that key adopts the other's resource."
+breaks = "LockNamesExisting"
+find = '''
+    /\ ~Refused
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "adopt-ignores-other-intents"
+why = "`crucible adopt` accepts a resource whose name another key's intent sent."
+breaks = "LockNamesExisting"
+find = '''
+    /\ \A j \in Keys \ {k} : i \notin Match(journal[j])
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "rename-on-roblox-while-an-intent-is-unresolved"
+why = "Assumption A5 fails: someone renames, on Roblox, the resource a create made before its answer was lost, so the next run finds nothing under the names it seeks and creates a second one."
+breaks = "AtMostOne"
+find = '''
+    /\ ~Unresolved
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "refuse-every-run"
+why = "The plan refuses every run, so nothing is ever provisioned. Converges still holds, because a refused run is a stuck one."
+breaks = "FaultFreeBinds"
+find = '''
+Refused == \E k, j \in Keys : k # j /\ lock[j] = 0 /\ journal[j] = want[k]
+'''
+replace = '''
+Refused == TRUE
+'''

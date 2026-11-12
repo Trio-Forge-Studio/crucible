@@ -5,6 +5,7 @@ members = [
 	"crates/abi",
 	"crates/oc",
 	"crates/project",
+	"crates/iac",
 	"crates/docs",
 	"crates/oc-registry",
 	"crates/cli",

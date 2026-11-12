@@ -8,6 +8,7 @@ mod docs;
 mod exec;
 mod flows;
 mod output;
+mod plan;
 mod publish;
 mod reactive_packages;
 mod upgrade;
@@ -36,6 +37,7 @@ fn main() -> ExitCode {
         Ok(Cli { command: Command::Create(args) }) => return create::main(args),
         Ok(Cli { command: Command::Docs { topic, plain } }) => return docs::run(topic.as_deref(), plain),
         Ok(Cli { command: Command::Oc(cli) }) => cli,
+        Ok(Cli { command: Command::Plan(args) }) => return plan::main(args),
         Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::Upgrade(args) }) => return upgrade::main(args),
         Ok(Cli { command: Command::Whoami(args) }) => return whoami::main(args),

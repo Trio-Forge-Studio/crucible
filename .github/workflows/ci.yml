@@ -71,6 +71,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
       - run: cargo xtask abi check
+      - run: cargo xtask schema check
       - name: Check the architecture rules and that no violation is new against the base
         shell: bash
         env:
@@ -95,4 +96,7 @@ jobs:
       - name: Run the compiler's emitted Luau, JSX, network declarations and a virtual module's place in Lune
         if: runner.os == 'Linux'
         run: cargo test --locked -p crucible-compiler -p crucible-transform -- --ignored
+      - name: Model-check the TLA+ specs and check that each mutant breaks its property
+        if: runner.os == 'Linux'
+        run: cargo xtask tla
       - run: node --test crates/cli/npm/package.test.mjs

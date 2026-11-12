@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+schemars = "1"
+semver = "1"
 toml = "1"
 globset = "0.4"
 

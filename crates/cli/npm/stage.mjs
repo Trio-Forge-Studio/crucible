@@ -41,13 +41,14 @@ export function stage(out, binaries, notices, version = cliVersion()) {
 	const shim = join(out, "crucible");
 	mkdirSync(join(shim, "bin"), { recursive: true });
 	copyFileSync(join(cli, "npm", "crucible.cjs"), join(shim, "bin", "crucible.cjs"));
+	copyFileSync(join(cli, "..", "project", "crucible.schema.json"), join(shim, "crucible.schema.json"));
 	writeJson(join(shim, "package.json"), {
 		name: "@trioforge/crucible-cli",
 		version,
 		description: "The command line for Crucible games.",
 		...shared,
 		bin: { crucible: "bin/crucible.cjs" },
-		files: ["bin"],
+		files: ["bin", "crucible.schema.json"],
 		engines: { node: ">=18" },
 		optionalDependencies: Object.fromEntries(PLATFORMS.map((platform) => [platformPackageName(platform), version])),
 	});

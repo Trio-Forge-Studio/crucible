@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "crucible.toml",
+  "description": "A Crucible game's places, environments and experience.",
+  "type": "object",
+  "properties": {
+    "badges": {
+      "description": "Badges, by key.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Badge"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    },
+    "crucible": {
+      "description": "The oldest crucible that can read this file, such as \"0.6\".",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+){0,2}$"
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Environment"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
+      }
+    },
+    "experience": {
+      "description": "Settings of the universe.",
+      "$ref": "#/$defs/Settings"
+    },
+    "passes": {
+      "description": "Game passes, by key.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Priced"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    },
+    "places": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Place"
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
+      }
+    },
+    "products": {
+      "description": "Developer products, by key. A key uses lowercase letters, digits and '-', and starts with a letter.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Priced"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Badge": {
+      "description": "A badge. One that is not retired needs a name.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Defaults to true.",
+          "type": "boolean"
+        },
+        "icon": {
+          "description": "An image path relative to the project root.",
+          "type": "string"
+        },
+        "moved_from": {
+          "description": "The key it had before a rename, so it keeps its ID.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "description": "The display name, with no whitespace at either end.",
+          "type": "string",
+          "not": {
+            "pattern": "^[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$"
+          }
+        },
+        "retired": {
+          "description": "Disable it. Roblox cannot delete it.",
+          "type": "boolean",
+          "default": false
+        },
+        "untrack": {
+          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox. It keeps its name while declared.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "untrack": {
+                "const": true
+              }
+            },
+            "required": [
+              "untrack"
+            ]
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "minLength": 1
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      ],
+      "if": {
+        "properties": {
+          "retired": {
+            "const": false
+          },
+          "untrack": {
+            "const": false
+          }
+        }
+      },
+      "not": {
+        "properties": {
+          "retired": {
+            "const": true
+          },
+          "untrack": {
+            "const": true
+          }
+        },
+        "required": [
+          "retired",
+          "untrack"
+        ]
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "BadgeOverlay": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Environment": {
+      "description": "One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.",
+      "type": "object",
+      "properties": {
+        "badges": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/BadgeOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
+          }
+        },
+        "passes": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PricedOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
+          }
+        },
+        "place": {
+          "description": "The place ID when `start` is the only place.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1
+        },
+        "places": {
+          "description": "Each place's ID, by place name.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "products": {
+          "description": "This environment's changes to declared products.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PricedOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
+          }
+        },
+        "universe": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1
+        },
+        "version_type": {
+          "$ref": "#/$defs/VersionType"
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "place"
+          ]
+        },
+        {
+          "required": [
+            "places"
+          ]
+        }
+      ],
+      "required": [
+        "universe"
+      ]
+    },
+    "Place": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "description": "The folder the project maps for the runtime library.",
+          "type": "string",
+          "default": "include"
+        },
+        "project": {
+          "description": "The Rojo project that lays out the place.",
+          "type": "string"
+        },
+        "tsconfig": {
+          "type": "string",
+          "default": "tsconfig.json"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project"
+      ]
+    },
+    "Priced": {
+      "description": "A developer product or a game pass. One that is not retired needs a name, and one that is neither retired nor\nuntracked a price too.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "icon": {
+          "description": "An image path relative to the project root.",
+          "type": "string"
+        },
+        "moved_from": {
+          "description": "The key it had before a rename, so it keeps its ID.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "description": "The display name, with no whitespace at either end.",
+          "type": "string",
+          "not": {
+            "pattern": "^[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$"
+          }
+        },
+        "price": {
+          "description": "The price in Robux. A price of 0 is not off sale: set `retired = true` instead.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1
+        },
+        "retired": {
+          "description": "Take it off sale. Roblox cannot delete it.",
+          "type": "boolean",
+          "default": false
+        },
+        "untrack": {
+          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox. It keeps its name while declared.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "untrack": {
+                "const": true
+              }
+            },
+            "required": [
+              "untrack"
+            ]
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "minLength": 1
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      ],
+      "if": {
+        "properties": {
+          "retired": {
+            "const": false
+          },
+          "untrack": {
+            "const": false
+          }
+        }
+      },
+      "not": {
+        "properties": {
+          "retired": {
+            "const": true
+          },
+          "untrack": {
+            "const": true
+          }
+        },
+        "required": [
+          "retired",
+          "untrack"
+        ]
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "price"
+        ]
+      }
+    },
+    "PricedOverlay": {
+      "description": "The fields an environment may override.",
+      "type": "object",
+      "properties": {
+        "price": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Settings": {
+      "type": "object",
+      "properties": {
+        "private_server_price": {
+          "description": "The private server price in Robux. 0 makes private servers free.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "voice_chat": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "VersionType": {
+      "type": "string",
+      "enum": [
+        "Saved",
+        "Published"
+      ]
+    }
+  }
+}
