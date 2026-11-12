@@ -1,7 +1,7 @@
 use crucible_iac::journal::Journal;
 use crucible_iac::lock::Lock;
-use crucible_iac::model::{Experience, Kind, Lifecycle, Problem, content_hash};
-use crucible_iac::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan, StepIntent, plan};
+use crucible_iac::model::{Experience, Fields, Kind, Lifecycle, Problem, content_hash};
+use crucible_iac::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan, StepIntent, differs, plan};
 use crucible_project::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -243,6 +243,11 @@ fn a_rename_keeps_the_id_only_with_moved_from() {
         problems[0].ends_with(". If it was renamed, set moved_from = \"vip\" on the new key, one of passes.gold"),
         "{problems:?}"
     );
+    let silver = "[passes.silver]\nname = \"Silver\"\nprice = 5\n";
+    let silver_lock = Project::new(&(CONFIG.to_owned() + silver)).applied("staging");
+    let problems =
+        messages(Project::new(&(renamed.clone() + silver)).plan("staging", Some(&silver_lock), None).unwrap_err());
+    assert!(problems[0].ends_with("one of passes.gold"), "a key the lock holds is not a rename: {problems:?}");
     let moved = Project::new(&renamed.replace("price = 299\n", "price = 299\nmoved_from = \"vip\"\n"));
     let plan = moved.plan("staging", Some(&lock), None).unwrap();
     let gold = &plan.steps[2];
@@ -322,6 +327,8 @@ fn an_intent_no_step_can_carry_stops_the_plan() {
         )]
     );
     let lock = Project::new(CONFIG).applied("staging");
+    let retired_lock =
+        Project::new(&CONFIG.replace("price = 299\n", "price = 299\nretired = true\n")).applied("staging");
     let vip = journal(&[("pass", "vip", "VIP")]);
     for (config, lock, journal, expected) in [
         (
@@ -354,6 +361,12 @@ fn an_intent_no_step_can_carry_stops_the_plan() {
             &vip,
             "and crucible.lock holds its ID 1001, so the create landed. crucible.toml no longer declares passes.vip",
         ),
+        (
+            CONFIG.replace("[passes.vip]\nname = \"VIP\"\nprice = 299\n", ""),
+            Some(&retired_lock),
+            &journal(&[("pass", "gold", "Gold")]),
+            "the journal holds an intent to create pass gold as \"Gold\", and crucible.lock holds no ID for it",
+        ),
     ] {
         let problems =
             messages(Project::new(&config).plan("staging", lock.map(String::as_str), Some(journal)).unwrap_err());
@@ -383,6 +396,14 @@ fn a_name_another_key_s_unresolved_intent_sent_stops_the_plan() {
     );
     let lock = project.applied("staging");
     assert!(project.plan("staging", Some(&lock), Some(&journal)).is_ok(), "the lock resolves vip's intent");
+
+    let moved = config + "[passes.silver]\nmoved_from = \"old\"\nname = \"Silver\"\nprice = 5\n";
+    let old = Project::new(&CONFIG.replace("[passes.vip]", "[passes.old]")).applied("staging");
+    let problems = messages(Project::new(&moved).plan("staging", Some(&old), Some(&journal)).unwrap_err());
+    assert!(
+        problems.iter().any(|problem| problem.contains("passes.gold.name: \"Gold\" is the name")),
+        "another key's moved_from leaves vip's intent unresolved: {problems:#?}"
+    );
 }
 
 #[test]
@@ -464,6 +485,15 @@ fn a_lock_table_or_journal_for_an_undeclared_environment_is_refused() {
              new name. If production is gone for good, look in universe 10769815992 for the resources its intents \
              name, then delete {path}, and its resources stay on Roblox, unmanaged"
         )]
+    );
+
+    let no_vip = Project::new(&CONFIG.replace("[passes.vip]\nname = \"VIP\"\nprice = 299\n", ""));
+    let without_vip = no_vip.applied("staging") + &no_vip.applied("production").replace("version = 1\n", "");
+    let problems = undeclared(envs, Some(&Lock::parse(&without_vip).unwrap()), &journals(&vip));
+    assert_eq!(
+        (problems[0].file.as_str(), problems[0].line),
+        (path.as_str(), None),
+        "an unresolved intent points at the journal even when the lock has the environment too"
     );
 
     let resolved = messages(undeclared(envs, Some(&lock), &journals(&vip)));
@@ -641,6 +671,8 @@ fn more_badge_creates_than_are_free_today_warn() {
         plan.warnings
     );
     assert!(Project::new(CONFIG).plan("staging", None, None).unwrap().warnings.is_empty());
+    let free = config.replace("[badges.extra-4]\nname = \"Extra 4\"\n", "");
+    assert!(Project::new(&free).plan("staging", None, None).unwrap().warnings.is_empty(), "five badges are free");
 }
 
 fn listed(id: u64, name: &str, price: Option<u64>, on: bool) -> Listed {
@@ -807,9 +839,13 @@ fn a_lock_id_roblox_lacks_stops_the_plan() {
     assert!(problems[0].contains("delete [env.staging.products.coin-pack] from crucible.lock"), "{}", problems[0]);
 
     let mut hidden = observed.clone();
-    hidden.missing.insert((Kind::Product, product.id), Some(product));
+    hidden.missing.insert((Kind::Product, product.id), Some(product.clone()));
     let problems = messages(project.plan_seen("staging", Some(&lock), None, Some(&hidden)).unwrap_err());
     assert!(problems[0].contains("list of products leaves out product 1000"), "{problems:#?}");
+    let mut off_sale = observed.clone();
+    off_sale.missing.insert((Kind::Product, product.id), Some(Listed { on: false, ..product }));
+    let problems = messages(project.plan_seen("staging", Some(&lock), None, Some(&off_sale)).unwrap_err());
+    assert!(problems[0].contains("leaves out product 1000"), "only a badge is taken when off its list: {problems:#?}");
 
     let mut badge = matching();
     describe(&mut badge);
@@ -838,4 +874,44 @@ fn a_retired_resource_back_on_sale_is_retired_again() {
     observed.listed.get_mut(&Kind::Pass).unwrap()[0].on = false;
     let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
     assert_eq!(intent(&plan, "vip").0, Action::NoOp);
+    let vip = observed.listed.get_mut(&Kind::Pass).unwrap().remove(0);
+    observed.missing.insert((Kind::Pass, vip.id), None);
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
+    assert_eq!(intent(&plan, "vip").0, Action::NoOp, "a retired resource gone from Roblox is left alone");
+}
+
+#[test]
+fn a_moved_key_that_is_retired_is_retired_and_then_only_renamed_in_the_lock() {
+    let lock = Project::new(CONFIG).applied("staging");
+    let moved = CONFIG.replace("[passes.vip]", "[passes.gold]\nmoved_from = \"vip\"\nretired = true");
+    let plan = Project::new(&moved).plan("staging", Some(&lock), None).unwrap();
+    let gold = plan.steps.iter().find(|step| step.key == "gold").unwrap();
+    assert_eq!((gold.action, gold.changes.as_slice()), (Action::Retire, &[Change::Key][..]));
+    let retired = Project::new(&CONFIG.replace("price = 299\n", "price = 299\nretired = true\n")).applied("staging");
+    let plan = Project::new(&moved).plan("staging", Some(&retired), None).unwrap();
+    let gold = plan.steps.iter().find(|step| step.key == "gold").unwrap();
+    assert_eq!((gold.action, gold.changes.as_slice()), (Action::Update, &[Change::Key][..]));
+}
+
+#[test]
+fn a_badge_differs_in_any_one_field() {
+    let fields = Fields::Badge { name: "First".into(), description: "Deliver.".into(), enabled: true };
+    let same =
+        Listed { id: Id::new(1).unwrap(), name: "First".into(), description: "Deliver.".into(), price: None, on: true };
+    assert!(!differs(&fields, &same));
+    assert!(differs(&fields, &Listed { name: "Other".into(), ..same.clone() }));
+    assert!(differs(&fields, &Listed { description: "Other.".into(), ..same.clone() }));
+    assert!(differs(&fields, &Listed { on: false, ..same.clone() }));
+    let priced = Fields::Priced { name: "First".into(), description: "Deliver.".into(), price: 5 };
+    let sold = Listed { price: Some(5), ..same.clone() };
+    assert!(!differs(&priced, &sold));
+    for other in [
+        Listed { name: "Other".into(), ..sold.clone() },
+        Listed { description: "Other.".into(), ..sold.clone() },
+        Listed { price: Some(6), ..sold.clone() },
+        Listed { price: None, ..sold.clone() },
+        Listed { on: false, ..sold.clone() },
+    ] {
+        assert!(differs(&priced, &other), "{other:?}");
+    }
 }

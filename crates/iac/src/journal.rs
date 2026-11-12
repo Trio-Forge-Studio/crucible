@@ -92,6 +92,7 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn reads_the_universe_and_each_intent_with_the_name_it_sent() {
@@ -121,6 +122,27 @@ mod tests {
         assert_eq!(Journal::parse("staging", &text).unwrap(), journal);
         assert_eq!(journal.remove(Kind::Pass, "vip").map(|intent| intent.name), Some("VIP".into()));
         assert_eq!(journal.get(Kind::Pass, "vip"), None);
+    }
+
+    #[test]
+    fn an_intent_is_found_by_its_kind_and_its_key_together() {
+        let mut journal = Journal::new(NonZeroU64::new(5).unwrap());
+        for (kind, key, name) in
+            [(Kind::Pass, "vip", "VIP"), (Kind::Product, "vip", "VIP coins"), (Kind::Pass, "gold", "Gold")]
+        {
+            journal.intents.push(Intent { kind, key: key.into(), name: name.into(), before: None });
+        }
+        assert_eq!(journal.get(Kind::Pass, "gold").map(|intent| intent.name.as_str()), Some("Gold"));
+        assert_eq!(journal.get(Kind::Badge, "vip"), None);
+        assert_eq!(journal.remove(Kind::Product, "vip").map(|intent| intent.name), Some("VIP coins".into()));
+        assert_eq!(journal.remove(Kind::Badge, "gold"), None);
+        let left: Vec<_> = journal.intents.iter().map(|intent| intent.name.as_str()).collect();
+        assert_eq!(left, ["VIP", "Gold"]);
+    }
+
+    #[test]
+    fn an_environment_s_journal_is_its_json_file_in_the_journal_folder() {
+        assert_eq!(path("staging"), Path::new(".crucible/journal/staging.json"));
     }
 
     #[test]

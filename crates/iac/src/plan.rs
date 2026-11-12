@@ -305,7 +305,8 @@ pub fn plan(
     if badges > FREE_BADGES_PER_DAY {
         warnings.push(format!(
             "{badges} badges may need creating. Roblox makes {FREE_BADGES_PER_DAY} a day free in each experience and \
-             charges 100 Robux for each one after that. Provision never pays: it defers the rest to a later day."
+             charges 100 Robux for each one after that. Provision never pays: Roblox rejects a create past the free \
+             ones, provision stops there, and a run the next day creates the rest."
         ));
     }
     let mut summary = BTreeMap::new();

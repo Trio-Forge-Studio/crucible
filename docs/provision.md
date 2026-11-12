@@ -48,6 +48,7 @@ A badge is the exception. Roblox's public badge list can lag behind a create, so
 | A badge's create may have landed. | Adopt the badge, or remove the intent if there is none. |
 | The lock names an ID Roblox does not have. | If the resource is gone, delete its `[env.<env>.<kind>.<key>]` table from `crucible.lock`. Provision never replaces a resource on its own, because the lock may come from another universe. |
 | A list leaves out an ID the lock names that Roblox returns by itself. | Run provision again later. Provision trusts the list to find a resource before it creates one. |
+| Roblox rejects a badge create past the five it makes free each day, because provision offers to pay nothing. | Run provision again the next day. The plan warns when more than five badges may need creating. |
 
 The plan's stops change nothing. Exit codes follow `crucible oc`, plus exit 1 for a file that cannot be read or written:
 

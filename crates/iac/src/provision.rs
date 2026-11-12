@@ -85,8 +85,7 @@ impl Store for Files {
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let folder = path.parent().filter(|folder| !folder.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let mut file = tempfile::NamedTempFile::new_in(folder)?;
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap_or(Path::new(".")))?;
     file.write_all(bytes)?;
     file.as_file().sync_all()?;
     file.persist(path).map_err(|error| error.error)?;
@@ -324,10 +323,6 @@ impl Run {
         &self.applied
     }
 
-    pub fn is_done(&self) -> bool {
-        self.queue.is_empty()
-    }
-
     /// Makes one remote call or writes one file. Returns false once nothing is left.
     pub fn step(&mut self, remote: &mut dyn Remote, store: &mut dyn Store) -> Result<bool, Stop> {
         let Some(effect) = self.queue.pop_front() else { return Ok(false) };
@@ -440,7 +435,7 @@ fn update(
     if remote.is_none_or(|remote| remote.description != *description) {
         patch.description = Some(description.clone());
     }
-    if price.is_some() && remote.is_none_or(|remote| remote.price != price) {
+    if price.is_some_and(|price| remote.is_none_or(|remote| remote.price != Some(price))) {
         patch.price = price;
     }
     if remote.is_none_or(|remote| remote.on != on) {
@@ -468,21 +463,22 @@ fn icon(
     resource: &Resource,
     read: &mut dyn FnMut(&Path) -> io::Result<Vec<u8>>,
 ) -> io::Result<Option<(Image, String)>> {
-    let Some(path) = resource.icon.as_ref().filter(|_| resource.lifecycle == Lifecycle::Managed) else {
-        return Ok(None);
-    };
+    let Some(path) = &resource.icon else { return Ok(None) };
     let bytes = read(path)?;
     let hash = content_hash(&bytes);
+    let file_name = path.file_name().map_or_else(|| "icon".into(), |name| name.to_string_lossy().into_owned());
+    Ok(Some((Image { file_name, content_type: content_type(path).into(), bytes }, hash)))
+}
+
+fn content_type(path: &Path) -> &'static str {
     let extension = path.extension().and_then(|extension| extension.to_str()).unwrap_or_default();
-    let content_type = match extension.to_ascii_lowercase().as_str() {
+    match extension.to_ascii_lowercase().as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "bmp" => "image/bmp",
         "tga" => "image/tga",
         _ => "application/octet-stream",
-    };
-    let file_name = path.file_name().map_or_else(|| "icon".into(), |name| name.to_string_lossy().into_owned());
-    Ok(Some((Image { file_name, content_type: content_type.into(), bytes }, hash)))
+    }
 }
 
 /// Why `adopt` wrote nothing.
@@ -590,4 +586,25 @@ pub fn adopt(
             .map_err(|error| Refused::Write { path: crate::journal::path(inputs.env_name), error })?;
     }
     Ok(Applied { kind: noun, key: key.to_owned(), action: Action::Adopt, id: id.to_string() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_icon_s_content_type_follows_its_extension() {
+        for (path, expected) in [
+            ("icons/coin.png", "image/png"),
+            ("coin.PNG", "image/png"),
+            ("coin.jpg", "image/jpeg"),
+            ("coin.jpeg", "image/jpeg"),
+            ("coin.bmp", "image/bmp"),
+            ("coin.tga", "image/tga"),
+            ("coin.webp", "application/octet-stream"),
+            ("coin", "application/octet-stream"),
+        ] {
+            assert_eq!(content_type(Path::new(path)), expected, "{path}");
+        }
+    }
 }

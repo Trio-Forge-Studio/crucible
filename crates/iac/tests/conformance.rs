@@ -10,7 +10,7 @@
 use crucible_iac::journal::{self, Journal};
 use crucible_iac::lock::Lock;
 use crucible_iac::model::{Experience, Fields, Kind, Problem};
-use crucible_iac::plan::{Id, Inputs, Listed, plan, undeclared};
+use crucible_iac::plan::{Action, Id, Inputs, Listed, plan, undeclared};
 use crucible_iac::provision::{Patch, Remote, Run, Stop, Store, adopt, observe};
 use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
@@ -57,6 +57,7 @@ struct Resource {
     kind: Kind,
     id: u64,
     name: String,
+    description: String,
     price: Option<u64>,
     on: bool,
     /// The ghost owner: the key a create was for, or `None` for a resource someone made by hand.
@@ -81,6 +82,8 @@ struct World {
     /// Ghost: keys whose create lost its answer, with no list since.
     unknown: RefCell<BTreeSet<Key>>,
     violations: RefCell<Vec<String>>,
+    /// The resources the current run sent an update to.
+    updated: RefCell<Vec<(Kind, Id)>>,
 }
 
 impl World {
@@ -120,7 +123,7 @@ impl World {
     fn make(&self, kind: Kind, name: &str, owner: Option<String>, price: Option<u64>, on: bool) -> Id {
         let mut remote = self.remote.borrow_mut();
         let id = 1000 + remote.len() as u64;
-        remote.push(Resource { kind, id, name: name.into(), price, on, owner, lagging: 0 });
+        remote.push(Resource { kind, id, name: name.into(), description: String::new(), price, on, owner, lagging: 0 });
         Id::new(id).unwrap()
     }
 }
@@ -131,7 +134,7 @@ fn listed(resource: &Resource) -> Listed {
     Listed {
         id: Id::new(resource.id).unwrap(),
         name: resource.name.clone(),
-        description: String::new(),
+        description: resource.description.clone(),
         price: resource.price,
         on: resource.on,
     }
@@ -230,6 +233,10 @@ impl Remote for Fake<'_> {
     }
 
     fn update(&mut self, kind: Kind, id: Id, patch: &Patch) -> Result<(), Failure> {
+        if *patch == Patch::default() {
+            self.0.violate(format!("an update of {kind:?} {id} that sets nothing"));
+        }
+        self.0.updated.borrow_mut().push((kind, id));
         let fault = self.0.fault();
         if matches!(fault, Fault::None | Fault::LostAfter) {
             let mut remote = self.0.remote.borrow_mut();
@@ -239,6 +246,9 @@ impl Remote for Fake<'_> {
             };
             if let Some(name) = &patch.name {
                 resource.name = name.clone();
+            }
+            if let Some(description) = &patch.description {
+                resource.description = description.clone();
             }
             if patch.price.is_some() {
                 resource.price = patch.price;
@@ -314,11 +324,36 @@ fn provision(world: &World, crash_after: Option<usize>) -> Outcome {
         Ok(plan) => plan,
         Err(problems) => return Outcome::Problems(problems),
     };
+    let unbound: Vec<Key> =
+        world.want.borrow().keys().filter(|(kind, key)| world.bound(*kind, key).is_none()).cloned().collect();
+    world.updated.borrow_mut().clear();
     let mut run = Run::new(&inputs, &plan, &lock, &mut no_icons).expect("no icons are read");
     for _ in 0..crash_after.unwrap_or(usize::MAX) {
         match run.step(&mut Fake(world), &mut Files(world)) {
             Ok(true) => {}
-            Ok(false) => return Outcome::Done,
+            Ok(false) => {
+                for (kind, key) in &unbound {
+                    let Some(id) = world.bound(*kind, key) else { continue };
+                    let reported = run.applied().iter().any(|applied| {
+                        applied.kind == kind.noun()
+                            && applied.key == *key
+                            && matches!(applied.action, Action::Create | Action::Adopt)
+                            && applied.id == id.to_string()
+                    });
+                    if !reported {
+                        world.violate(format!("{kind:?} {key} was bound to {id} and the run did not report it"));
+                    }
+                }
+                for (kind, id) in world.updated.borrow().iter() {
+                    let reported = run.applied().iter().any(|applied| {
+                        applied.kind == kind.noun() && applied.action == Action::Update && applied.id == id.to_string()
+                    });
+                    if !reported {
+                        world.violate(format!("{kind:?} {id} was updated and the run did not report it"));
+                    }
+                }
+                return Outcome::Done;
+            }
             Err(Stop::Unresolved { kind, key, other }) => {
                 world.violate(format!("{kind:?} {key}'s intent was due while {other}'s was unresolved"));
                 return Outcome::Crashed;
@@ -326,7 +361,7 @@ fn provision(world: &World, crash_after: Option<usize>) -> Outcome {
             Err(stop) => return Outcome::Stopped(stop),
         }
     }
-    if run.is_done() { Outcome::Done } else { Outcome::Crashed }
+    Outcome::Crashed
 }
 
 fn check(world: &World) {
@@ -438,6 +473,20 @@ fn converge(world: &World) {
                     let id = world.bound(kind, key).unwrap_or_else(|| panic!("{kind:?} {key} is not bound"));
                     let resource = remote.iter().find(|r| r.kind == kind && r.id == id.get()).unwrap();
                     assert_eq!(resource.name, world.want.borrow()[&(kind, key.to_owned())], "{kind:?} {key}");
+                    let declared = (String::new(), (kind != Kind::Badge).then_some(10), true);
+                    assert_eq!((resource.description.clone(), resource.price, resource.on), declared, "{kind:?} {key}");
+                }
+                let manifest = Manifest::parse(&world.config()).unwrap();
+                let lock = world.lock();
+                for resource in Experience::new(&manifest).unwrap().resolve(&manifest.envs[ENV]) {
+                    let entry = &lock.env(ENV).unwrap().entries(resource.kind)[&resource.key];
+                    let fields = resource.fields.as_ref().unwrap();
+                    assert_eq!(
+                        entry.fingerprint,
+                        fields.fingerprint(),
+                        "the lock records what {} declares",
+                        resource.key
+                    );
                 }
                 assert!(world.journal().is_none(), "a fault-free run leaves no intent");
                 return;
@@ -565,7 +614,11 @@ impl StateMachineTest for Conformance {
                 if !remote.is_empty() {
                     let at = pick % remote.len();
                     let pool = names(remote[at].kind);
-                    remote[at].name = pool.get(name).map_or_else(|| format!("other {name}"), |name| (*name).to_owned());
+                    let edited = &mut remote[at];
+                    edited.name = pool.get(name).map_or_else(|| format!("other {name}"), |name| (*name).to_owned());
+                    edited.description = "Edited on Roblox.".into();
+                    edited.price = edited.price.map(|price| price + 1);
+                    edited.on = false;
                 }
             }
             Transition::HandMade { badge, name } => {

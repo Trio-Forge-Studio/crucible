@@ -271,6 +271,17 @@ status = "retired"
         assert_eq!(read.env("Stage_2").unwrap().universe(), universe);
         assert_eq!(read.env("Stage_2").unwrap().entries(Kind::Pass)["vip"], entry);
         assert_eq!(Lock::parse(&Lock::empty().render()).unwrap(), Lock::empty());
+        assert!(edited.render().contains("\n[env.Stage_2.passes.vip]\n"), "{}", edited.render());
+    }
+
+    #[test]
+    fn a_key_is_bare_only_when_toml_allows_it() {
+        for key in ["vip", "coin-pack", "Stage_2", "9"] {
+            assert_eq!(bare(key), key);
+        }
+        for (key, quoted) in [("", "\"\""), ("a b", "\"a b\""), ("a.b", "\"a.b\""), ("é", "\"é\"")] {
+            assert_eq!(bare(key), quoted);
+        }
     }
 
     #[test]
