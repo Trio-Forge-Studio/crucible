@@ -1,8 +1,8 @@
-use crucible_oc::Safety;
 use crucible_oc::auth::Secret;
-use crucible_oc::ops::{BadgeDetails, Details, Image, Op, Retry, badges, passes, products};
+use crucible_oc::ops::{BadgeDetails, Details, Image, List, Op, Retry, Sellable, badges, passes, products};
 use crucible_oc::outcome::Failure;
 use crucible_oc::transport::{Clock, Event, Sink, Timing, Transport};
+use crucible_oc::{Safety, Scope};
 use httpmock::{Method, MockServer};
 use serde_json::{Value, json};
 use std::num::NonZeroU64;
@@ -34,10 +34,6 @@ fn icon() -> Image {
     Image { file_name: "coin-pack.png".into(), content_type: "image/png".into(), bytes: b"\x89PNG".to_vec() }
 }
 
-fn safety<T, S: Retry>(op: &Op<T, S>) -> Safety {
-    op.safety()
-}
-
 fn product_json(price: u64) -> serde_json::Value {
     json!({"productId": 3301234567u64, "name": "Coin pack", "description": "100 coins.", "isForSale": true,
            "iconImageAssetId": 0, "priceInformation": {"defaultPriceInRobux": price, "enabledFeatures": []},
@@ -63,26 +59,71 @@ fn without(mut value: Value, path: &[&str]) -> Value {
     value
 }
 
-#[test]
-fn each_operation_carries_its_retry_rule_and_scopes() {
+struct Row {
+    name: &'static str,
+    method: &'static str,
+    path: String,
+    safety: Safety,
+    scopes: Vec<Scope>,
+}
+
+fn row<T, S: Retry>(op: Op<T, S>) -> Row {
+    Row {
+        name: op.name(),
+        method: op.method(),
+        path: op.path().into(),
+        safety: op.safety(),
+        scopes: op.scopes().to_vec(),
+    }
+}
+
+fn list_row<T>(list: List<T>) -> Row {
+    Row { name: list.name(), method: list.method(), path: list.path(), safety: list.safety(), scopes: list.scopes() }
+}
+
+/// Every operation, with universe 11 and resource 22, and the retry rule it must carry.
+fn every_operation() -> Vec<(Row, Safety)> {
     let details = Details::default();
-    assert_eq!(products::list(id(1)).safety(), Safety::Read);
-    assert_eq!(safety(&products::get(id(1), id(2))), Safety::Read);
-    assert_eq!(safety(&products::create(id(1), &details)), Safety::Unsafe);
-    assert_eq!(safety(&products::update(id(1), id(2), &details)), Safety::Idempotent);
-    assert_eq!(passes::list(id(1)).safety(), Safety::Read);
-    assert_eq!(safety(&passes::get(id(1), id(2))), Safety::Read);
-    assert_eq!(safety(&passes::create(id(1), &details)), Safety::Unsafe);
-    assert_eq!(safety(&passes::update(id(1), id(2), &details)), Safety::Idempotent);
-    assert_eq!(safety(&badges::create(id(1), "B", "", true, Some(icon()))), Safety::Unsafe);
-    assert_eq!(safety(&badges::update(id(2), &BadgeDetails::default())), Safety::Idempotent);
-    assert_eq!(safety(&badges::overwrite_icon(id(2), icon())), Safety::Idempotent);
-    assert_eq!(badges::list_public(id(1)).safety(), Safety::Read);
-    let scopes = |scopes: &[crucible_oc::Scope]| scopes.iter().map(|scope| scope.name.clone()).collect::<Vec<_>>();
-    assert_eq!(scopes(products::create(id(1), &details).scopes()), ["developer-product:write"]);
-    assert_eq!(scopes(&passes::list(id(1)).scopes()), ["game-pass:read"]);
-    assert_eq!(scopes(badges::overwrite_icon(id(2), icon()).scopes()), ["legacy-badge:manage"]);
-    assert!(badges::list_public(id(1)).scopes().is_empty());
+    vec![
+        (list_row(products::list(id(11))), Safety::Read),
+        (row(products::get(id(11), id(22))), Safety::Read),
+        (row(products::create(id(11), &details)), Safety::Unsafe),
+        (row(products::update(id(11), id(22), &details)), Safety::Idempotent),
+        (list_row(passes::list(id(11))), Safety::Read),
+        (row(passes::get(id(11), id(22))), Safety::Read),
+        (row(passes::create(id(11), &details)), Safety::Unsafe),
+        (row(passes::update(id(11), id(22), &details)), Safety::Idempotent),
+        (row(badges::create(id(11), "B", "", true, None)), Safety::Unsafe),
+        (row(badges::update(id(22), &BadgeDetails::default())), Safety::Idempotent),
+        (row(badges::overwrite_icon(id(22), icon())), Safety::Idempotent),
+        (list_row(badges::list_public(id(11))), Safety::Read),
+        (row(badges::get_public(id(22))), Safety::Read),
+    ]
+}
+
+#[test]
+fn each_operation_matches_the_registry_and_carries_its_retry_rule() {
+    let registry: Value =
+        serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).expect("the registry is JSON");
+    let registry = registry["ops"].as_array().unwrap();
+    let operations = every_operation();
+    assert_eq!(operations.len(), 13);
+    for (row, safety) in operations {
+        let name = row.name;
+        assert_eq!(row.safety, safety, "{name}");
+        let Some(entry) = registry.iter().find(|entry| entry["name"] == name) else {
+            assert!(name.ends_with("-public"), "{name} is not in the registry");
+            assert!(row.scopes.is_empty(), "{name} reads a public endpoint, so it needs no scope");
+            continue;
+        };
+        assert_eq!(entry["method"], row.method, "{name}");
+        let path = entry["path"].as_str().unwrap().replace("{universeId}", "11");
+        let path = path.split('/').map(|part| if part.starts_with('{') { "22" } else { part }).collect::<Vec<_>>();
+        assert_eq!(path.join("/"), row.path, "{name}");
+        let scopes: Vec<Scope> = serde_json::from_value(entry["auth"]["apikey"]["scopes"].clone()).unwrap();
+        assert_eq!(row.scopes, scopes, "{name}");
+        assert_eq!(entry["safety"] == "read", safety == Safety::Read, "{name}: only reads are reads in the registry");
+    }
 }
 
 #[test]
@@ -461,4 +502,69 @@ fn a_malformed_read_is_an_error_that_names_the_operation_and_the_field() {
         assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some(message.as_str())));
         assert_eq!((failure.error["operation"].as_str(), failure.error["field"].as_str()), (Some(name), Some(field)));
     }
+}
+
+#[test]
+fn a_game_pass_parses_whole_from_a_get_and_a_list() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let get = server.mock(|when, then| {
+        when.method(Method::GET).path("/game-passes/v1/universes/1/game-passes/1786543210/creator");
+        then.status(200).json_body(pass_json());
+    });
+    let list = server.mock(|when, then| {
+        when.method(Method::GET)
+            .path("/game-passes/v1/universes/1/game-passes/creator")
+            .query_param_missing("pageToken");
+        then.status(200).json_body(json!({"gamePasses": [pass_json()], "nextPageToken": ""}));
+    });
+    let expected = Sellable {
+        id: id(1786543210),
+        name: "VIP".into(),
+        description: "Double coins.".into(),
+        price: 250,
+        for_sale: false,
+        icon: Some(81234),
+    };
+    let transport = transport(&server, &key);
+    assert_eq!(transport.run(&passes::get(id(1), id(1786543210))).unwrap(), expected);
+    assert_eq!(transport.list_all(&passes::list(id(1))).unwrap(), [expected]);
+    get.assert_calls(1);
+    list.assert_calls(1);
+}
+
+#[test]
+fn updates_send_their_parts_to_the_resource_they_name() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let pass = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/game-passes/v1/universes/1/game-passes/2")
+            .body_includes("name=\"price\"\r\n\r\n300\r\n")
+            .body_includes("name=\"isForSale\"\r\n\r\nfalse\r\n")
+            .body_excludes("name=\"name\"");
+        then.status(204);
+    });
+    let product = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/developer-products/v2/universes/1/developer-products/3")
+            .body_includes("name=\"description\"\r\n\r\n200 coins.\r\n")
+            .body_includes("name=\"imageFile\"; filename=\"coin-pack.png\"");
+        then.status(204);
+    });
+    let icon_mock = server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/legacy-publish/v1/badges/4/icon")
+            .body_includes("name=\"Files\"; filename=\"coin-pack.png\"\r\nContent-Type: image/png\r\n\r\n");
+        then.status(200).json_body(json!({"targetId": 77}));
+    });
+    let transport = transport(&server, &key);
+    let price = Details { price: Some(300), for_sale: Some(false), ..Details::default() };
+    transport.run(&passes::update(id(1), id(2), &price)).unwrap();
+    let text = Details { description: Some("200 coins.".into()), icon: Some(icon()), ..Details::default() };
+    transport.run(&products::update(id(1), id(3), &text)).unwrap();
+    transport.run(&badges::overwrite_icon(id(4), icon())).unwrap();
+    pass.assert_calls(1);
+    product.assert_calls(1);
+    icon_mock.assert_calls(1);
 }
