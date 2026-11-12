@@ -138,7 +138,7 @@ An ID means nothing in another universe, so when `env.<name>.universe` in `cruci
 
 ### Rename or remove an environment
 
-A plan reads only the lock tables and the journal of the environment it plans, so the IDs and intents of an environment `crucible.toml` no longer declares would vanish. Renaming `[env.staging]` to `[env.stage]` would then plan a create for every resource staging already holds. So the plan stops while `crucible.lock` holds an `[env.<name>]` or `.crucible/journal/<name>.json` exists for an environment `crucible.toml` does not declare. The message names the environment, its universe and how many resources and intents it holds, and starts with any intent the lock does not resolve. Then do one of these:
+Each environment's plan uses only that environment's lock tables and journal, so the IDs and intents of an environment `crucible.toml` no longer declares would never be planned. Renaming `[env.staging]` to `[env.stage]` would then plan a create for every resource staging already holds. So the plan stops while `crucible.lock` holds an `[env.<name>]` or `.crucible/journal/<name>.json` exists for an environment `crucible.toml` does not declare. The message names the environment, its universe and how many resources and intents it holds, and starts with any intent the lock does not resolve. Then do one of these:
 
 - Declare the environment again.
 - If you renamed it and the universe is the same, rename `[env.<old>]` and every `[env.<old>.*]` table in `crucible.lock` to the new name, and rename its journal file to match.
