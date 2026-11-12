@@ -123,6 +123,11 @@ impl<'a> Transport<'a> {
         &*self.clock
     }
     pub fn send(&self, call: &impl Request) -> Result<Reply, Failure> {
+        self.send_noting(call, &mut false)
+    }
+    /// `send`, which also sets `acted` when an attempt may have changed something on Roblox: it got a 2xx or a 5xx, or
+    /// its answer was lost after the request left.
+    pub(crate) fn send_noting(&self, call: &impl Request, acted: &mut bool) -> Result<Reply, Failure> {
         let op = call.operation();
         let remaining = || call.until().map(|until| until.saturating_duration_since(self.clock.now()));
         let mut history = History::default();
@@ -194,6 +199,11 @@ impl<'a> Transport<'a> {
                     ) || matches!(&error,ureq::Error::Io(e) if matches!(e.kind(),std::io::ErrorKind::ConnectionRefused|std::io::ErrorKind::AddrNotAvailable|std::io::ErrorKind::NetworkUnreachable|std::io::ErrorKind::HostUnreachable));
                     Attempt::Transport { sent: !not_sent, message: error.to_string() }
                 }
+            };
+            *acted |= match &attempt {
+                Attempt::Response { status, .. } => (200..300).contains(status) || *status >= 500,
+                Attempt::Transport { sent, .. } => *sent,
+                Attempt::Redirect(_) | Attempt::PageOverflow { .. } => false,
             };
             let reason = match &attempt {
                 Attempt::Response { status, .. } => format!("HTTP {status}"),

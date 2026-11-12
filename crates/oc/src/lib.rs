@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod ops;
 pub mod outcome;
 pub mod transport;
 
