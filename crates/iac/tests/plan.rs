@@ -1,7 +1,7 @@
 use crucible_iac::journal::Journal;
 use crucible_iac::lock::Lock;
 use crucible_iac::model::{Experience, Kind, Lifecycle, Problem, content_hash};
-use crucible_iac::plan::{Action, Change, Inputs, Plan, StepIntent, plan};
+use crucible_iac::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan, StepIntent, plan};
 use crucible_project::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +55,16 @@ impl Project {
     }
 
     fn plan(&self, env: &str, lock: Option<&str>, journal: Option<&str>) -> Result<Plan, Vec<Problem>> {
+        self.plan_seen(env, lock, journal, None)
+    }
+
+    fn plan_seen(
+        &self,
+        env: &str,
+        lock: Option<&str>,
+        journal: Option<&str>,
+        observed: Option<&Observed>,
+    ) -> Result<Plan, Vec<Problem>> {
         let experience = self.experience()?;
         let lock = lock.map(|text| Lock::parse(text).unwrap());
         let journal = journal.map(|text| Journal::parse(env, text).unwrap());
@@ -64,6 +74,7 @@ impl Project {
             env: &self.manifest.envs[env],
             lock: lock.as_ref().and_then(|lock| lock.env(env)),
             journal: journal.as_ref(),
+            observed,
         };
         plan(&inputs, &mut |path: &Path| {
             self.files.get(path).cloned().ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
@@ -306,9 +317,8 @@ fn an_intent_no_step_can_carry_stops_the_plan() {
              crucible.lock holds no ID for it, so the create may have landed in universe 10772177432. crucible.toml \
              declares no products.gem-pack. If it was renamed, set moved_from = \"gem-pack\" on the new key, one of \
              products.coin-pack. Declare it again until provision resolves the intent, or resolve it yourself: remove \
-             the intent from {path} if universe 10772177432 has no product named \"Gem pack\", or, once `crucible \
-             provision` arrives with `crucible adopt`, record the one it has with `crucible adopt product gem-pack \
-             <id>`"
+             the intent from {path} if universe 10772177432 has no product named \"Gem pack\", or record the one it \
+             has with `crucible adopt staging product gem-pack <id>`"
         )]
     );
     let lock = Project::new(CONFIG).applied("staging");
@@ -367,8 +377,7 @@ fn a_name_another_key_s_unresolved_intent_sent_stops_the_plan() {
             "crucible.toml:{line}: passes.gold.name: \"Gold\" is the name the journal's intent for passes.vip sent, and \
              crucible.lock holds no ID for it, so its create may have landed under that name and the adopt check could \
              bind passes.gold to it. Give passes.gold another name until provision resolves that intent, or remove the \
-             intent from {} if no pass has that name, or, once `crucible provision` arrives with `crucible adopt`, \
-             resolve it with `crucible adopt pass vip <id>`",
+             intent from {} if no pass has that name, or resolve it with `crucible adopt staging pass vip <id>`",
             crucible_iac::journal::path("staging").display()
         )]
     );
@@ -377,7 +386,7 @@ fn a_name_another_key_s_unresolved_intent_sent_stops_the_plan() {
 }
 
 #[test]
-fn a_message_that_names_crucible_adopt_says_it_arrives_with_crucible_provision() {
+fn a_message_that_names_crucible_adopt_names_the_environment() {
     let gold = CONFIG.to_owned() + "[passes.gold]\nname = \"Gold\"\nprice = 1\n";
     let moved = CONFIG.replace("[passes.vip]", "[passes.gold]\nmoved_from = \"vip\"");
     let mut problems = Vec::new();
@@ -390,7 +399,10 @@ fn a_message_that_names_crucible_adopt_says_it_arrives_with_crucible_provision()
     }
     assert_eq!(problems.len(), 3, "{problems:#?}");
     for problem in problems {
-        assert!(problem.contains("once `crucible provision` arrives with `crucible adopt`"), "{problem}");
+        assert!(
+            problem.contains("`crucible adopt staging pass ") || problem.contains("`crucible adopt staging product "),
+            "{problem}"
+        );
     }
 }
 
@@ -629,4 +641,201 @@ fn more_badge_creates_than_are_free_today_warn() {
         plan.warnings
     );
     assert!(Project::new(CONFIG).plan("staging", None, None).unwrap().warnings.is_empty());
+}
+
+fn listed(id: u64, name: &str, price: Option<u64>, on: bool) -> Listed {
+    Listed { id: Id::new(id).unwrap(), name: name.into(), description: String::new(), price, on }
+}
+
+/// What Roblox holds for the staging environment of `CONFIG` once each resource matches it.
+fn matching() -> Observed {
+    Observed {
+        listed: BTreeMap::from([
+            (Kind::Product, vec![listed(1000, "Coin pack", Some(1), true)]),
+            (Kind::Pass, vec![listed(1001, "VIP", Some(299), true)]),
+            (Kind::Badge, vec![listed(1002, "First delivery", None, true)]),
+        ]),
+        missing: BTreeMap::new(),
+    }
+}
+
+fn describe(observed: &mut Observed) {
+    for listed in observed.listed.get_mut(&Kind::Product).unwrap() {
+        listed.description = "100 coins.".into();
+    }
+    observed.listed.get_mut(&Kind::Badge).unwrap()[0].description = "Deliver your first parcel.".into();
+}
+
+#[test]
+fn what_roblox_lists_decides_each_adopt_check() {
+    let project = Project::new(CONFIG);
+    let mut observed = matching();
+    observed.listed.get_mut(&Kind::Pass).unwrap().clear();
+    let plan = project.plan_seen("staging", None, None, Some(&observed)).unwrap();
+    let found: Vec<_> =
+        plan.steps.iter().skip(1).map(|step| (step.key.as_str(), step.action, step.id.clone())).collect();
+    assert_eq!(
+        found,
+        [
+            ("coin-pack", Action::Adopt, Some("1000".into())),
+            ("vip", Action::Create, None),
+            ("first-delivery", Action::Adopt, Some("1002".into())),
+        ]
+    );
+
+    observed.listed.get_mut(&Kind::Product).unwrap().push(listed(1003, "Coin pack", Some(5), false));
+    let problems = messages(project.plan_seen("staging", None, None, Some(&observed)).unwrap_err());
+    assert_eq!(problems.len(), 1, "{problems:#?}");
+    assert!(
+        problems[0].contains(
+            "universe 10772177432 holds 2 products that products.coin-pack could be: 1000, 1003. Provision adopts \
+             only one, so it stops. Record the one that is products.coin-pack's with `crucible adopt staging product \
+             coin-pack <id>`"
+        ),
+        "{}",
+        problems[0]
+    );
+}
+
+#[test]
+fn after_an_unknown_outcome_the_adopt_check_takes_an_id_the_intent_s_run_did_not_know() {
+    let project = Project::new(CONFIG);
+    let intent = |before: &str| {
+        format!(
+            r#"{{"version":1,"universe":10772177432,"intents":[{{"kind":"pass","key":"vip","name":"VIP","before":[{before}]}}]}}"#
+        )
+    };
+    let mut observed = matching();
+    observed
+        .listed
+        .insert(Kind::Pass, vec![listed(1001, "Renamed on Roblox", Some(299), true), listed(7, "Old", None, false)]);
+    let plan = project.plan_seen("staging", None, Some(&intent("7")), Some(&observed)).unwrap();
+    assert_eq!(intent_of(&plan, "vip"), (Action::Adopt, Some("1001".into())), "a renamed create is found by its ID");
+
+    let plan = project.plan_seen("staging", None, Some(&intent("7, 1001")), Some(&observed)).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "vip").unwrap();
+    assert_eq!(
+        (step.action, step.note.as_deref()),
+        (Action::Create, Some("Roblox lists nothing the earlier create could have made"))
+    );
+
+    let without_ids = journal(&[("pass", "vip", "Renamed on Roblox")]);
+    let plan = project.plan_seen("staging", None, Some(&without_ids), Some(&observed)).unwrap();
+    assert_eq!(
+        intent_of(&plan, "vip"),
+        (Action::Adopt, Some("1001".into())),
+        "an intent without IDs seeks its sent name"
+    );
+}
+
+fn intent_of(plan: &Plan, key: &str) -> (Action, Option<String>) {
+    let step = plan.steps.iter().find(|step| step.key == key).unwrap();
+    (step.action, step.id.clone())
+}
+
+#[test]
+fn a_resource_two_adopt_checks_find_stops_the_plan() {
+    let config = CONFIG.to_owned() + "[passes.gold]\nname = \"Gold\"\nprice = 1\n";
+    let project = Project::new(&config);
+    let journal =
+        r#"{"version":1,"universe":10772177432,"intents":[{"kind":"pass","key":"vip","name":"VIP","before":[]}]}"#;
+    let mut observed = matching();
+    observed.listed.insert(Kind::Pass, vec![listed(1001, "Gold", Some(299), true)]);
+    let problems = messages(project.plan_seen("staging", None, Some(journal), Some(&observed)).unwrap_err());
+    assert_eq!(problems.len(), 1, "{problems:#?}");
+    assert!(
+        problems[0].contains("the adopt checks of passes.gold and passes.vip both find pass 1001"),
+        "{}",
+        problems[0]
+    );
+}
+
+#[test]
+fn a_badge_whose_create_may_have_landed_waits_for_a_developer() {
+    let project = Project::new(CONFIG);
+    let journal = r#"{"version":1,"universe":10772177432,"intents":[{"kind":"badge","key":"first-delivery","name":"First delivery","before":[]}]}"#;
+    for badges in [vec![], vec![listed(1002, "First delivery", None, true)]] {
+        let mut observed = matching();
+        observed.listed.insert(Kind::Badge, badges);
+        let problems = messages(project.plan_seen("staging", None, Some(journal), Some(&observed)).unwrap_err());
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("so provision does not settle a badge's create on its own"), "{}", problems[0]);
+        assert!(problems[0].contains("run `crucible adopt staging badge first-delivery <id>`"), "{}", problems[0]);
+    }
+}
+
+#[test]
+fn a_change_on_roblox_is_an_update_even_when_the_lock_matches() {
+    let project = Project::new(CONFIG);
+    let lock = project.applied("staging");
+    let mut observed = matching();
+    describe(&mut observed);
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
+    assert!(plan.steps.iter().skip(1).all(|step| step.action == Action::NoOp), "{plan:#?}");
+    for change in [
+        |listed: &mut Listed| listed.name = "Coins".into(),
+        |listed: &mut Listed| listed.description = "Free coins.".into(),
+        |listed: &mut Listed| listed.price = None,
+        |listed: &mut Listed| listed.on = false,
+    ] {
+        let mut changed = observed.clone();
+        change(&mut changed.listed.get_mut(&Kind::Product).unwrap()[0]);
+        let plan = project.plan_seen("staging", Some(&lock), None, Some(&changed)).unwrap();
+        let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+        assert_eq!((step.action, step.changes.as_slice()), (Action::Update, &[Change::Details][..]));
+    }
+    let mut disabled = observed.clone();
+    disabled.listed.get_mut(&Kind::Badge).unwrap()[0].on = false;
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&disabled)).unwrap();
+    assert_eq!(intent(&plan, "first-delivery").0, Action::Update);
+}
+
+#[test]
+fn a_lock_id_roblox_lacks_stops_the_plan() {
+    let project = Project::new(CONFIG);
+    let lock = project.applied("staging");
+    let mut observed = matching();
+    describe(&mut observed);
+    let product = observed.listed.get_mut(&Kind::Product).unwrap().remove(0);
+    let mut gone = observed.clone();
+    gone.missing.insert((Kind::Product, product.id), None);
+    let problems = messages(project.plan_seen("staging", Some(&lock), None, Some(&gone)).unwrap_err());
+    assert!(
+        problems[0].contains("Roblox has no product 1000. Provision never replaces a resource on its own"),
+        "{problems:#?}"
+    );
+    assert!(problems[0].contains("delete [env.staging.products.coin-pack] from crucible.lock"), "{}", problems[0]);
+
+    let mut hidden = observed.clone();
+    hidden.missing.insert((Kind::Product, product.id), Some(product));
+    let problems = messages(project.plan_seen("staging", Some(&lock), None, Some(&hidden)).unwrap_err());
+    assert!(problems[0].contains("list of products leaves out product 1000"), "{problems:#?}");
+
+    let mut badge = matching();
+    describe(&mut badge);
+    let disabled = Listed { on: false, ..badge.listed.get_mut(&Kind::Badge).unwrap().remove(0) };
+    badge.missing.insert((Kind::Badge, disabled.id), Some(disabled));
+    let config = CONFIG.replace(
+        "[env.staging.products.coin-pack]",
+        "[env.staging.badges.first-delivery]\nenabled = false\n\n[env.staging.products.coin-pack]",
+    );
+    let disabled_project = Project::new(&config);
+    let plan =
+        disabled_project.plan_seen("staging", Some(&disabled_project.applied("staging")), None, Some(&badge)).unwrap();
+    assert_eq!(intent(&plan, "first-delivery").0, Action::NoOp, "a disabled badge found by its ID is taken");
+}
+
+#[test]
+fn a_retired_resource_back_on_sale_is_retired_again() {
+    let config = CONFIG.replace("price = 299\n", "price = 299\nretired = true\n");
+    let project = Project::new(&config);
+    let lock = project.applied("staging");
+    let mut observed = matching();
+    describe(&mut observed);
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "vip").unwrap();
+    assert_eq!((step.action, step.note.as_deref()), (Action::Retire, Some("back on sale or enabled on Roblox")));
+    observed.listed.get_mut(&Kind::Pass).unwrap()[0].on = false;
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
+    assert_eq!(intent(&plan, "vip").0, Action::NoOp);
 }

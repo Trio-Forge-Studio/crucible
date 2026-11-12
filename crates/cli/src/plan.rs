@@ -109,6 +109,7 @@ fn run(root: &Path, only: Option<&str>) -> Result<Vec<Plan>, Failure> {
             env: &manifest.envs[name],
             lock: lock.as_ref().and_then(|lock| lock.env(name)),
             journal: journals.get(name),
+            observed: None,
         };
         match plan(&inputs, &mut |path| std::fs::read(root.join(path))) {
             Ok(plan) => plans.push(plan),

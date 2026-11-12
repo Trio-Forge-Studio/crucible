@@ -1,11 +1,13 @@
-//! What `crucible provision <env>` would do, from the config, the lock and the journal alone. It makes no network
-//! call, so it cannot see Roblox: a create is always preceded by provision's adopt check, and an update is a change
-//! of the inputs the lock fingerprinted. Every intent in the journal shows on the step of its resource, or stops the
-//! plan with a problem that names it, because an intent nobody sees is a create nobody resolves.
+//! What `crucible provision <env>` does, from the config, the lock, the journal and, when provision has listed them,
+//! the resources Roblox holds. It makes no network call. Without what Roblox holds, as `crucible plan` runs it, a create
+//! is always preceded by provision's adopt check and an update is a change of the inputs the lock fingerprinted. With
+//! it, the adopt check is decided: one candidate is adopted, none is created, and two stop the plan. Every intent in the
+//! journal shows on the step of its resource, or stops the plan with a problem that names it, because an intent nobody
+//! sees is a create nobody resolves.
 
 use crate::journal::{self, Intent, Journal};
 use crate::lock::{self, Entry, EnvLock, Status};
-use crate::model::{Experience, Kind, Lifecycle, Problem, Resource, content_hash};
+use crate::model::{Experience, Fields, Kind, Lifecycle, Problem, Resource, content_hash};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
@@ -17,8 +19,11 @@ pub const FREE_BADGES_PER_DAY: usize = 5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Action {
-    /// No ID in the lock: provision adopts the one resource with this name, or creates it.
+    /// No ID in the lock: provision adopts the one resource with this name, or creates it. With what Roblox holds, no
+    /// resource matched, so provision creates it.
     Create,
+    /// The adopt check found one resource, whose ID provision records in the lock instead of creating one.
+    Adopt,
     /// The journal holds an intent and the lock no ID: an earlier create's outcome is unknown, and provision looks
     /// for the resource, under the declared name and the name the intent sent, before it does anything else.
     AdoptCheck,
@@ -83,6 +88,45 @@ pub struct Inputs<'a> {
     pub env: &'a crucible_project::Env,
     pub lock: Option<&'a EnvLock>,
     pub journal: Option<&'a Journal>,
+    /// What provision listed on Roblox, or `None` for the offline plan.
+    pub observed: Option<&'a Observed>,
+}
+
+pub type Id = NonZeroU64;
+
+/// A resource as Roblox lists it. `on` is a product's or a pass's sale state, or a badge's enabled state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub id: Id,
+    pub name: String,
+    pub description: String,
+    /// A badge has none. A product or a pass that Roblox holds no price for differs from every declared price.
+    pub price: Option<u64>,
+    pub on: bool,
+}
+
+/// What provision read from Roblox before it planned: the whole list of each kind it needs, and each lock ID a list
+/// lacked, read by itself: `Some` when Roblox has it and `None` when it answered 404.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Observed {
+    pub listed: BTreeMap<Kind, Vec<Listed>>,
+    pub missing: BTreeMap<(Kind, Id), Option<Listed>>,
+}
+
+impl Observed {
+    /// The resource a lock entry names, or the problem that stops provision: Roblox has no resource with the ID, or
+    /// its list lacked one that exists, so the list cannot be trusted to find a resource before a create. The public
+    /// badge list may leave out a disabled badge, so one found by itself is taken.
+    pub fn bound(&self, kind: Kind, id: Id) -> Result<&Listed, Option<&Listed>> {
+        if let Some(listed) = self.listed.get(&kind).and_then(|listed| listed.iter().find(|listed| listed.id == id)) {
+            return Ok(listed);
+        }
+        match self.missing.get(&(kind, id)) {
+            Some(Some(found)) if kind == Kind::Badge && !found.on => Ok(found),
+            Some(Some(found)) => Err(Some(found)),
+            _ => Err(None),
+        }
+    }
 }
 
 /// `read` returns a file's bytes by its path relative to the project root, for icon hashes.
@@ -128,6 +172,7 @@ pub fn plan(
         let entries = inputs.lock.map_or(&empty, |lock| lock.entries(kind));
         let declared: Vec<&Resource> = resources.iter().filter(|resource| resource.kind == kind).collect();
         let mut claimed = BTreeSet::new();
+        let mut sought: Vec<(&str, BTreeSet<Id>)> = Vec::new();
         for resource in &declared {
             let (entry, moved_from) = match entries.get(&resource.key) {
                 Some(entry) => (Some(entry), None),
@@ -152,10 +197,11 @@ pub fn plan(
                         &resource.key,
                         format!(
                             "the journal holds intents for {table}.{} and {table}.{}, and moved_from makes them one \
-                             resource. Remove the one whose create never landed, or, once `crucible provision` \
-                             arrives with `crucible adopt`, resolve one with `crucible adopt {} <key> <id>`",
+                             resource. Remove the one whose create never landed, or resolve one with `crucible adopt \
+                             {} {} <key> <id>`",
                             intent.map_or("", |(_, intent)| &intent.key),
                             other.key,
+                            inputs.env_name,
                             kind.noun(),
                             table = kind.table(),
                         ),
@@ -165,9 +211,38 @@ pub fn plan(
             if let Some((at, _)) = intent {
                 attached[at] = true;
             }
-            match step(inputs, resource, entry, moved_from, intent.map(|(_, intent)| intent), read) {
+            let intent = intent.map(|(_, intent)| intent);
+            let candidates = match (inputs.observed, entry, resource.lifecycle) {
+                (Some(observed), None, Lifecycle::Managed) => {
+                    let found = candidates(observed, kind, entries, resource, intent);
+                    sought.push((&resource.key, found.clone()));
+                    Some(found)
+                }
+                _ => None,
+            };
+            match step(inputs, resource, entry, moved_from, intent, candidates.as_ref(), read) {
                 Ok(step) => steps.push(step),
                 Err(problem) => problems.push(problem),
+            }
+        }
+        for (at, (key, found)) in sought.iter().enumerate() {
+            for (other, theirs) in &sought[at + 1..] {
+                for id in found.intersection(theirs) {
+                    problems.push(Problem {
+                        file: crucible_project::FILE.into(),
+                        line: None,
+                        key: format!("{}.{key}", kind.table()),
+                        message: format!(
+                            "the adopt checks of {table}.{key} and {table}.{other} both find {noun} {id}, so provision \
+                             cannot tell whose it is. Look at it in universe {universe}, then record it with `crucible \
+                             adopt {env} {noun} <key> {id}` for the key it belongs to",
+                            table = kind.table(),
+                            noun = kind.noun(),
+                            universe = inputs.env.universe,
+                            env = inputs.env_name,
+                        ),
+                    });
+                }
             }
         }
         for (key, entry) in entries.iter().filter(|(key, _)| !claimed.contains(*key)) {
@@ -413,8 +488,8 @@ fn unattached(
     let mut message = format!("the journal holds an intent to create {noun} {key} as {name:?}, ");
     let yourself = format!(
         "or resolve it yourself: remove the intent from {path} if universe {universe} has no {noun} named {name:?}, \
-         or, once `crucible provision` arrives with `crucible adopt`, record the one it has with `crucible adopt \
-         {noun} {key} <id>`"
+         or record the one it has with `crucible adopt {} {noun} {key} <id>`",
+        inputs.env_name
     );
     let lifecycle = declared.iter().find(|resource| resource.key == *key).map(|resource| resource.lifecycle);
     match (entries.get(key), lifecycle) {
@@ -471,8 +546,7 @@ fn sent_name_taken(env: &str, resource: &Resource, intent: &Intent) -> Option<Pr
             "{name:?} is the name the journal's intent for {table}.{other} sent, and crucible.lock holds no ID for it, \
              so its create may have landed under that name and the adopt check could bind {table}.{key} to it. Give \
              {table}.{key} another name until provision resolves that intent, or remove the intent from {} if no \
-             {noun} has that name, or, once `crucible provision` arrives with `crucible adopt`, resolve it with \
-             `crucible adopt {noun} {other} <id>`",
+             {noun} has that name, or resolve it with `crucible adopt {env} {noun} {other} <id>`",
             journal::path(env).display()
         ),
     ))
@@ -484,9 +558,20 @@ fn step(
     entry: Option<&Entry>,
     moved_from: Option<String>,
     intent: Option<&Intent>,
+    candidates: Option<&BTreeSet<Id>>,
     read: &mut dyn FnMut(&Path) -> std::io::Result<Vec<u8>>,
 ) -> Result<Step, Problem> {
     let kind = resource.kind;
+    let remote = match (inputs.observed, entry, resource.lifecycle) {
+        (Some(observed), Some(entry), Lifecycle::Managed | Lifecycle::Retired) => {
+            match observed.bound(kind, entry.id) {
+                Ok(remote) => Some(remote),
+                Err(None) if resource.lifecycle == Lifecycle::Retired => None,
+                Err(found) => return Err(unbound(inputs, resource, entry, found.is_some())),
+            }
+        }
+        _ => None,
+    };
     let icon = match (&resource.icon, resource.lifecycle) {
         (Some(path), Lifecycle::Managed) => Some(read(path).map(|bytes| content_hash(&bytes)).map_err(|error| {
             Problem::at(
@@ -515,13 +600,37 @@ fn step(
         (Lifecycle::Untrack, Some(_)) => step.action = Action::Untrack,
         (Lifecycle::Untrack, None) => step.note = Some("not in crucible.lock".into()),
         (Lifecycle::Retired, Some(entry)) if entry.status == Status::Managed => step.action = Action::Retire,
+        (Lifecycle::Retired, Some(_)) if remote.is_some_and(|remote| remote.on) => {
+            step.action = Action::Retire;
+            step.note = Some("back on sale or enabled on Roblox".into());
+        }
         (Lifecycle::Retired, Some(_)) => {}
         (Lifecycle::Retired, None) => step.note = Some(format!("never provisioned in {}", inputs.env_name)),
-        (Lifecycle::Managed, None) if intent.is_some() => step.action = Action::AdoptCheck,
-        (Lifecycle::Managed, None) => step.action = Action::Create,
+        (Lifecycle::Managed, None) => {
+            step.action = if intent.is_some() { Action::AdoptCheck } else { Action::Create };
+            if let Some(found) = candidates {
+                let mut ids = found.iter();
+                match (ids.next(), ids.next(), intent) {
+                    (_, _, Some(intent)) if kind == Kind::Badge => {
+                        return Err(unresolved_badge(inputs, resource, intent));
+                    }
+                    (None, _, intent) => {
+                        step.action = Action::Create;
+                        if intent.is_some() {
+                            step.note = Some("Roblox lists nothing the earlier create could have made".into());
+                        }
+                    }
+                    (Some(id), None, _) => {
+                        step.action = Action::Adopt;
+                        step.id = Some(id.to_string());
+                    }
+                    (Some(_), Some(_), _) => return Err(ambiguous(inputs, resource, found)),
+                }
+            }
+        }
         (Lifecycle::Managed, Some(entry)) => {
             let fields = resource.fields.as_ref().expect("a managed resource has its fields");
-            if entry.fingerprint != fields.fingerprint() {
+            if entry.fingerprint != fields.fingerprint() || remote.is_some_and(|remote| differs(fields, remote)) {
                 step.changes.push(Change::Details);
             }
             if icon.is_some() && entry.icon != icon {
@@ -539,4 +648,102 @@ fn step(
         step.action = Action::Update;
     }
     Ok(step)
+}
+
+/// Whether Roblox's resource differs from what the config declares for a managed key.
+pub fn differs(fields: &Fields, remote: &Listed) -> bool {
+    match fields {
+        Fields::Priced { name, description, price } => {
+            *name != remote.name || *description != remote.description || remote.price != Some(*price) || !remote.on
+        }
+        Fields::Badge { name, description, enabled } => {
+            *name != remote.name || *description != remote.description || remote.on != *enabled
+        }
+    }
+}
+
+/// Whether the adopt check of `resource` takes `listed`, which no lock entry holds: it has the declared name or, while
+/// the key has an intent, an ID the intent's run did not know, or the name an intent written without IDs sent.
+pub fn is_candidate(listed: &Listed, resource: &Resource, intent: Option<&Intent>) -> bool {
+    resource.fields.as_ref().is_some_and(|fields| fields.name() == listed.name)
+        || intent.is_some_and(|intent| match &intent.before {
+            Some(before) => !before.contains(&listed.id),
+            None => listed.name == intent.name,
+        })
+}
+
+fn candidates(
+    observed: &Observed,
+    kind: Kind,
+    entries: &BTreeMap<String, Entry>,
+    resource: &Resource,
+    intent: Option<&Intent>,
+) -> BTreeSet<Id> {
+    let locked: BTreeSet<Id> = entries.values().map(|entry| entry.id).collect();
+    observed
+        .listed
+        .get(&kind)
+        .into_iter()
+        .flatten()
+        .filter(|listed| !locked.contains(&listed.id) && is_candidate(listed, resource, intent))
+        .map(|listed| listed.id)
+        .collect()
+}
+
+fn ambiguous(inputs: &Inputs<'_>, resource: &Resource, found: &BTreeSet<Id>) -> Problem {
+    let (table, noun, key) = (resource.kind.table(), resource.kind.noun(), &resource.key);
+    let ids: Vec<String> = found.iter().map(ToString::to_string).collect();
+    Problem::at(
+        resource.line,
+        format!("{table}.{key}"),
+        format!(
+            "universe {} holds {} {noun}s that {table}.{key} could be: {}. Provision adopts only one, so it stops. Record \
+             the one that is {table}.{key}'s with `crucible adopt {} {noun} {key} <id>`, or rename the others on Roblox",
+            inputs.env.universe,
+            ids.len(),
+            ids.join(", "),
+            inputs.env_name,
+        ),
+    )
+}
+
+/// The public badge list can lag behind a create, so it can leave out a badge whose answer was lost while it shows
+/// another with the name, and provision leaves a badge's unknown outcome to someone who has looked.
+fn unresolved_badge(inputs: &Inputs<'_>, resource: &Resource, intent: &Intent) -> Problem {
+    let key = &resource.key;
+    Problem::at(
+        resource.line,
+        format!("badges.{key}"),
+        format!(
+            "the journal holds an intent to create badge {key} as {:?}, and crucible.lock holds no ID for it, so the \
+             create may have landed in universe {}. The public badge list can lag behind a create, so provision does \
+             not settle a badge's create on its own. Look for it in the experience's badges on Roblox. If it is there, \
+             run `crucible adopt {} badge {key} <id>`. If it is not, remove the intent from {} and run provision again",
+            intent.name,
+            inputs.env.universe,
+            inputs.env_name,
+            journal::path(inputs.env_name).display(),
+        ),
+    )
+}
+
+/// A lock entry whose ID Roblox's list lacks: the resource is gone, or the list left it out.
+fn unbound(inputs: &Inputs<'_>, resource: &Resource, entry: &Entry, exists: bool) -> Problem {
+    let (table, noun, key, id) = (resource.kind.table(), resource.kind.noun(), &resource.key, entry.id);
+    let (env, universe) = (inputs.env_name, inputs.env.universe);
+    let message = if exists {
+        format!(
+            "universe {universe}'s list of {table} leaves out {noun} {id}, which crucible.lock records for {key} and \
+             Roblox returns when asked for it by ID. Provision relies on that list to find a resource before it creates \
+             one, so it stops. Run it again later"
+        )
+    } else {
+        format!(
+            "crucible.lock records {key} in {env} as {noun} {id}, and Roblox has no {noun} {id}. Provision never \
+             replaces a resource on its own, because a lock that names a missing resource may belong to another \
+             universe. If {id} is gone, delete [env.{env}.{table}.{key}] from crucible.lock, and provision adopts or \
+             creates it again"
+        )
+    };
+    Problem::at(resource.line, format!("{table}.{key}"), message)
 }
