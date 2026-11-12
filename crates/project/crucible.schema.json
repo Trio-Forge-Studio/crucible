@@ -9,16 +9,23 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Badge"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
       }
     },
     "crucible": {
       "description": "The oldest crucible that can read this file, such as \"0.6\".",
-      "type": "string"
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+){0,2}$"
     },
     "env": {
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Environment"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
       }
     },
     "experience": {
@@ -30,12 +37,19 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Priced"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
       }
     },
     "places": {
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Place"
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
       }
     },
     "products": {
@@ -43,12 +57,16 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Priced"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
       }
     }
   },
   "additionalProperties": false,
   "$defs": {
     "Badge": {
+      "description": "A badge. One that is not retired needs a name.",
       "type": "object",
       "properties": {
         "description": {
@@ -64,10 +82,15 @@
         },
         "moved_from": {
           "description": "The key it had before a rename, so it keeps its ID.",
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "name": {
-          "type": "string"
+          "description": "The display name, with no whitespace at either end.",
+          "type": "string",
+          "not": {
+            "pattern": "^[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$"
+          }
         },
         "retired": {
           "description": "Disable it. Roblox cannot delete it.",
@@ -75,12 +98,70 @@
           "default": false
         },
         "untrack": {
-          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox.",
+          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox. It keeps its name while declared.",
           "type": "boolean",
           "default": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "untrack": {
+                "const": true
+              }
+            },
+            "required": [
+              "untrack"
+            ]
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "minLength": 1
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      ],
+      "if": {
+        "properties": {
+          "retired": {
+            "const": false
+          },
+          "untrack": {
+            "const": false
+          }
+        }
+      },
+      "not": {
+        "properties": {
+          "retired": {
+            "const": true
+          },
+          "untrack": {
+            "const": true
+          }
+        },
+        "required": [
+          "retired",
+          "untrack"
+        ]
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
     },
     "BadgeOverlay": {
       "type": "object",
@@ -92,19 +173,25 @@
       "additionalProperties": false
     },
     "Environment": {
-      "description": "One Roblox universe the game deploys to.",
+      "description": "One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.",
       "type": "object",
       "properties": {
         "badges": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/BadgeOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
           }
         },
         "passes": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/PricedOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
           }
         },
         "place": {
@@ -120,6 +207,10 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 1
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
         "products": {
@@ -127,6 +218,9 @@
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/PricedOverlay"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
           }
         },
         "universe": {
@@ -139,6 +233,18 @@
         }
       },
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "place"
+          ]
+        },
+        {
+          "required": [
+            "places"
+          ]
+        }
+      ],
       "required": [
         "universe"
       ]
@@ -166,7 +272,7 @@
       ]
     },
     "Priced": {
-      "description": "A developer product or a game pass.",
+      "description": "A developer product or a game pass. One that is not retired needs a name, and one that is neither retired nor\nuntracked a price too.",
       "type": "object",
       "properties": {
         "description": {
@@ -178,16 +284,21 @@
         },
         "moved_from": {
           "description": "The key it had before a rename, so it keeps its ID.",
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "name": {
-          "type": "string"
+          "description": "The display name, with no whitespace at either end.",
+          "type": "string",
+          "not": {
+            "pattern": "^[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$"
+          }
         },
         "price": {
           "description": "The price in Robux. A price of 0 is not off sale: set `retired = true` instead.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         },
         "retired": {
           "description": "Take it off sale. Roblox cannot delete it.",
@@ -195,12 +306,71 @@
           "default": false
         },
         "untrack": {
-          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox.",
+          "description": "Remove it from `crucible.lock` and leave it unchanged on Roblox. It keeps its name while declared.",
           "type": "boolean",
           "default": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "untrack": {
+                "const": true
+              }
+            },
+            "required": [
+              "untrack"
+            ]
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "minLength": 1
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      ],
+      "if": {
+        "properties": {
+          "retired": {
+            "const": false
+          },
+          "untrack": {
+            "const": false
+          }
+        }
+      },
+      "not": {
+        "properties": {
+          "retired": {
+            "const": true
+          },
+          "untrack": {
+            "const": true
+          }
+        },
+        "required": [
+          "retired",
+          "untrack"
+        ]
+      },
+      "then": {
+        "properties": {
+          "name": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "price"
+        ]
+      }
     },
     "PricedOverlay": {
       "description": "The fields an environment may override.",
@@ -209,7 +379,7 @@
         "price": {
           "type": "integer",
           "format": "uint64",
-          "minimum": 0
+          "minimum": 1
         }
       },
       "additionalProperties": false

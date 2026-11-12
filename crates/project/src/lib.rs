@@ -109,32 +109,34 @@ impl fmt::Display for ManifestError {
 #[schemars(title = "crucible.toml")]
 struct RawManifest {
     /// The oldest crucible that can read this file, such as "0.6".
-    #[schemars(with = "Option<String>")]
+    #[schemars(with = "Option<String>", regex(pattern = r"^[0-9]+(\.[0-9]+){0,2}$"))]
     crucible: Option<Spanned<String>>,
+    #[schemars(extend("minProperties" = 1, "propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     places: Option<BTreeMap<String, Place>>,
     #[serde(default)]
+    #[schemars(extend("propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     env: BTreeMap<String, RawEnv>,
     /// Settings of the universe.
     #[schemars(with = "Option<Settings>")]
     experience: Option<Spanned<Settings>>,
     /// Developer products, by key. A key uses lowercase letters, digits and '-', and starts with a letter.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Priced>")]
+    #[schemars(with = "BTreeMap<String, Priced>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     products: BTreeMap<Spanned<String>, Priced>,
     /// Game passes, by key.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Priced>")]
+    #[schemars(with = "BTreeMap<String, Priced>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     passes: BTreeMap<Spanned<String>, Priced>,
     /// Badges, by key.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, Badge>")]
+    #[schemars(with = "BTreeMap<String, Badge>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     badges: BTreeMap<Spanned<String>, Badge>,
 }
 
-/// One Roblox universe the game deploys to.
+/// One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "Environment")]
+#[schemars(rename = "Environment", extend("oneOf" = [{ "required": ["place"] }, { "required": ["places"] }]))]
 struct RawEnv {
     universe: NonZeroU64,
     #[serde(default)]
@@ -142,16 +144,17 @@ struct RawEnv {
     /// The place ID when `start` is the only place.
     place: Option<NonZeroU64>,
     /// Each place's ID, by place name.
+    #[schemars(extend("minProperties" = 1, "propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     places: Option<BTreeMap<String, NonZeroU64>>,
     /// This environment's changes to declared products.
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, PricedOverlay>")]
+    #[schemars(with = "BTreeMap<String, PricedOverlay>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     products: BTreeMap<Spanned<String>, PricedOverlay>,
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, PricedOverlay>")]
+    #[schemars(with = "BTreeMap<String, PricedOverlay>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     passes: BTreeMap<Spanned<String>, PricedOverlay>,
     #[serde(default)]
-    #[schemars(with = "BTreeMap<String, BadgeOverlay>")]
+    #[schemars(with = "BTreeMap<String, BadgeOverlay>", extend("propertyNames" = { "pattern": "^[a-z][a-z0-9-]*$" }))]
     badges: BTreeMap<Spanned<String>, BadgeOverlay>,
 }
 
@@ -220,14 +223,17 @@ impl Manifest {
     }
 
     /// Parses the file for crucible `running`. A file that needs a newer crucible fails with that version before the
-    /// strict parse, so a key that version added never reads as unknown.
+    /// strict parse, so a key or a syntax that version added never reads as an error.
     pub fn parse_for(text: &str, running: &semver::Version) -> Result<Self, ManifestError> {
         #[derive(Deserialize)]
         struct Minimum {
             crucible: Option<toml::Value>,
         }
-        if let Ok(Minimum { crucible: Some(toml::Value::String(value)) }) = toml::from_str(text)
-            && let Some(needed) = minimum(&value)
+        let lenient = || match toml::from_str(text) {
+            Ok(Minimum { crucible: Some(toml::Value::String(value)) }) => Some(value),
+            _ => None,
+        };
+        if let Some(needed) = minimum_line(text).or_else(lenient).as_deref().and_then(minimum)
             && needed > *running
         {
             return Err(ManifestError::NeedsVersion { needed, running: running.clone() });
@@ -283,6 +289,66 @@ impl Manifest {
         };
         Ok(Self { places, envs, experience })
     }
+}
+
+/// The value of a top-level `crucible = "<version>"` before the first table header, read without parsing the file, so a
+/// file whose syntax this crucible cannot parse still names the version it needs. A line inside a multi-line string is
+/// text, never a key.
+fn minimum_line(text: &str) -> Option<String> {
+    let mut open = None;
+    for line in text.strip_prefix('\u{feff}').unwrap_or(text).lines() {
+        if open.is_none() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                return None;
+            }
+            let key = ["crucible", "\"crucible\"", "'crucible'"].into_iter().find_map(|key| line.strip_prefix(key));
+            if let Some(value) = key.and_then(|rest| rest.trim_start().strip_prefix('=')).map(str::trim_start) {
+                let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+                let (value, rest) = value[1..].split_once(quote)?;
+                let rest = rest.trim_start();
+                return (rest.is_empty() || rest.starts_with('#')).then(|| value.to_owned());
+            }
+        }
+        open = string_left_open(line, open);
+    }
+    None
+}
+
+/// A multi-line string, opened by `"""` or `'''`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Multiline {
+    Basic,
+    Literal,
+}
+
+/// The multi-line string still open after `line`, which starts inside `open`. Comments and one-line strings are
+/// skipped, so a delimiter inside them opens nothing.
+fn string_left_open(line: &str, mut open: Option<Multiline>) -> Option<Multiline> {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        let rest = &bytes[at..];
+        match open {
+            Some(Multiline::Basic) if rest[0] == b'\\' => at += 2,
+            Some(Multiline::Basic) if rest.starts_with(b"\"\"\"") => (open, at) = (None, at + 3),
+            Some(Multiline::Literal) if rest.starts_with(b"'''") => (open, at) = (None, at + 3),
+            Some(_) => at += 1,
+            None if rest[0] == b'#' => break,
+            None if rest.starts_with(b"\"\"\"") => (open, at) = (Some(Multiline::Basic), at + 3),
+            None if rest.starts_with(b"'''") => (open, at) = (Some(Multiline::Literal), at + 3),
+            None if rest[0] == b'"' || rest[0] == b'\'' => {
+                let quote = rest[0];
+                at += 1;
+                while at < bytes.len() && bytes[at] != quote {
+                    at += if quote == b'"' && bytes[at] == b'\\' { 2 } else { 1 };
+                }
+                at += 1;
+            }
+            None => at += 1,
+        }
+    }
+    open
 }
 
 /// "0.6" means 0.6.0. A pre-release or build suffix is not a minimum anyone writes, so it is refused.
@@ -530,6 +596,57 @@ mod tests {
     }
 
     #[test]
+    fn a_newer_minimum_is_reported_before_a_syntax_this_crucible_cannot_parse() {
+        for text in [
+            "crucible = \"0.7\"\n[storefront\n",
+            "# needs storefronts\ncrucible = '0.7' # the first release with them\n[places.start]\nproject = \"a\"\nproject = \"b\"\n",
+            "crucible = \"0.7\"\n[storefront]\ntheme = { dark = true, }\n",
+        ] {
+            let failure = Manifest::parse_for(text, &version("0.6.2")).unwrap_err();
+            assert!(matches!(failure, ManifestError::NeedsVersion { .. }), "{text}: {failure}");
+        }
+        for (text, line) in [
+            ("crucible = \"0.6\"\n[storefront\n", 2),
+            ("[places.start]\ncrucible = \"0.7\"\n[storefront\n", 3),
+            ("crucible_min = \"0.7\"\n[storefront\n", 2),
+        ] {
+            let failure = Manifest::parse_for(text, &version("0.6.2")).unwrap_err();
+            assert!(
+                matches!(failure, ManifestError::Parse { line: Some(found), .. } if found == line),
+                "{text}: {failure}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_crucible_line_inside_a_multi_line_string_is_not_the_minimum() {
+        let needs = |text: &str| match Manifest::parse_for(text, &version("0.6.2")) {
+            Err(ManifestError::NeedsVersion { needed, .. }) => Some(needed.to_string()),
+            Ok(_) => None,
+            Err(other) => panic!("{text}: {other}"),
+        };
+        for quote in ["\"\"\"", "'''"] {
+            let holds =
+                |version: &str| format!("products.gem.description = {quote}\ncrucible = \"{version}\"\n{quote}\n");
+            let before = holds("0.1") + "crucible = \"9.0\"\n";
+            assert_eq!(needs(&before), Some("9.0.0".into()), "{before}");
+            assert_eq!(needs(&(before.clone() + "[storefront\n")), Some("9.0.0".into()), "{before}");
+            assert_eq!(needs(&holds("9.0")), None, "only in a string");
+            assert_eq!(needs(&(holds("9.0") + "crucible = \"0.1\"\n")), None, "a lower minimum after the string");
+        }
+        for text in [
+            "products.gem.description = \"\"\"\n\\\"\"\" still open\ncrucible = \"0.1\"\n\"\"\"\ncrucible = \"9.0\"\n[storefront\n",
+            "products.gem.description = \"a \\\" '''\"\ncrucible = \"9.0\"\n[storefront\n",
+            "# a comment holds \"\"\"\ncrucible = \"9.0\"\n[storefront\n",
+            "products.gem.description = '''one line'''\ncrucible = \"9.0\"\n[storefront\n",
+            "\u{feff}crucible = \"9.0\"\n[storefront\n",
+            "\"crucible\" = \"9.0\"\n[storefront\n",
+        ] {
+            assert_eq!(needs(text), Some("9.0.0".into()), "{text}");
+        }
+    }
+
+    #[test]
     fn a_minimum_must_be_a_plain_version() {
         for value in ["latest", "^0.6", "0.6.0-beta", "0..6", "1.2.3.4", ""] {
             let failure = error(&format!("\n\ncrucible = {value:?}\n"));
@@ -580,5 +697,39 @@ mod tests {
             assert!(properties.contains_key(key), "{key}");
         }
         assert_eq!(schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn the_schema_checks_the_rules_one_table_holds() {
+        let schema: serde_json::Value = serde_json::from_str(&schema()).unwrap();
+        let (properties, defs) = (&schema["properties"], &schema["$defs"]);
+        let key = serde_json::json!({ "pattern": "^[a-z][a-z0-9-]*$" });
+        let name = serde_json::json!({ "pattern": "^[A-Za-z0-9_-]+$" });
+        for table in ["products", "passes", "badges"] {
+            assert_eq!(properties[table]["propertyNames"], key, "{table}");
+            assert_eq!(defs["Environment"]["properties"][table]["propertyNames"], key, "env.<name>.{table}");
+        }
+        for (at, names) in [("places", &properties["places"]), ("env", &properties["env"])] {
+            assert_eq!(names["propertyNames"], name, "{at}");
+        }
+        assert_eq!(properties["places"]["minProperties"], 1);
+        assert_eq!(properties["crucible"]["pattern"], "^[0-9]+(\\.[0-9]+){0,2}$");
+        assert_eq!(
+            defs["Environment"]["oneOf"],
+            serde_json::json!([{ "required": ["place"] }, { "required": ["places"] }])
+        );
+        for (def, required) in
+            [("Priced", serde_json::json!(["name", "price"])), ("Badge", serde_json::json!(["name"]))]
+        {
+            assert_eq!(defs[def]["then"]["required"], required, "{def}");
+            assert_eq!(defs[def]["then"]["properties"]["name"]["minLength"], 1, "{def}");
+            assert_eq!(defs[def]["not"]["required"], serde_json::json!(["retired", "untrack"]), "{def}");
+            assert_eq!(defs[def]["allOf"][0]["then"]["required"], serde_json::json!(["name"]), "{def}");
+            assert_eq!(defs[def]["properties"]["moved_from"]["pattern"], key["pattern"], "{def}");
+            let blank = defs[def]["properties"]["name"]["not"]["pattern"].as_str().unwrap();
+            assert!(blank.starts_with("^[\\t-\\r \\u0085") && blank.ends_with("\\ufeff]$"), "{def}: {blank}");
+        }
+        assert_eq!(defs["Priced"]["properties"]["price"]["minimum"], 1);
+        assert_eq!(defs["PricedOverlay"]["properties"]["price"]["minimum"], 1);
     }
 }

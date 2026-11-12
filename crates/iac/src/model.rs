@@ -65,6 +65,13 @@ impl Fields {
     pub fn fingerprint(&self) -> String {
         fingerprint(self)
     }
+
+    /// The display name, which provision's adopt check matches.
+    pub fn name(&self) -> &str {
+        match self {
+            Fields::Priced { name, .. } | Fields::Badge { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +108,7 @@ impl ResolvedSettings {
 /// A rule the files break. `line` is a line of `file`, when one table holds the cause.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Problem {
-    pub file: &'static str,
+    pub file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
     pub key: String,
@@ -110,7 +117,7 @@ pub struct Problem {
 
 impl Problem {
     pub fn at(line: usize, key: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { file: FILE, line: Some(line), key: key.into(), message: message.into() }
+        Self { file: FILE.into(), line: Some(line), key: key.into(), message: message.into() }
     }
 }
 
@@ -155,6 +162,8 @@ impl Experience {
         ] {
             let mut handles: BTreeMap<String, &str> = BTreeMap::new();
             let mut moves: BTreeMap<&str, &str> = BTreeMap::new();
+            // No overlay sets a name, so two names that differ here differ in every environment.
+            let mut names: BTreeMap<&str, (&String, Lifecycle)> = BTreeMap::new();
             for (key, line, table) in &tables {
                 let at = |field: &str| format!("{}.{key}{field}", kind.table());
                 if !is_key(key) {
@@ -209,17 +218,70 @@ impl Experience {
                 if price == Some(0) {
                     problems.push(Problem::at(*line, at(".price"), zero_price(kind)));
                 }
-                if lifecycle == Lifecycle::Managed {
-                    if table.name().is_none_or(str::is_empty) {
-                        problems.push(Problem::at(*line, at(".name"), format!("a {} needs a name", kind.noun())));
+                match (table.name().filter(|name| !name.is_empty()), lifecycle) {
+                    (None, Lifecycle::Managed) => {
+                        problems.push(Problem::at(*line, at(".name"), format!("a {} needs a name", kind.noun())))
                     }
-                    if kind != Kind::Badge && price.is_none() {
-                        problems.push(Problem::at(
-                            *line,
-                            at(".price"),
-                            format!("a {} needs a price in Robux", kind.noun()),
-                        ));
+                    (None, Lifecycle::Untrack) => problems.push(Problem::at(
+                        *line,
+                        at(".name"),
+                        format!(
+                            "an untracked {} keeps its name while it is declared, so no other key adopts its \
+                             resource. Give it the name it has on Roblox",
+                            kind.noun()
+                        ),
+                    )),
+                    (None, Lifecycle::Retired) => {}
+                    (Some(name), _) => {
+                        if name.trim_matches(is_space) != name {
+                            problems.push(Problem::at(
+                                *line,
+                                at(".name"),
+                                format!(
+                                    "{name:?} starts or ends with whitespace. Crucible compares display names byte \
+                                     for byte and Roblox may trim them, so the name could stop matching its own \
+                                     resource. Remove the whitespace"
+                                ),
+                            ));
+                        }
+                        if let Some((other, was)) = names.insert(name, (key, lifecycle)) {
+                            let table = kind.table();
+                            // An untracked key's name is what keeps its resource from being adopted.
+                            let fix = match (was, lifecycle) {
+                                (Lifecycle::Untrack, Lifecycle::Untrack) => {
+                                    "Give each the name it has on Roblox".into()
+                                }
+                                (Lifecycle::Untrack, _) => format!(
+                                    "Give {table}.{key} another name: {table}.{other} is untracked and must keep \
+                                     the name its resource has on Roblox"
+                                ),
+                                (_, Lifecycle::Untrack) => format!(
+                                    "Give {table}.{other} another name: {table}.{key} is untracked and must keep \
+                                     the name its resource has on Roblox"
+                                ),
+                                _ if [was, lifecycle].contains(&Lifecycle::Retired) => {
+                                    "Give one of them another name, or remove the name of the retired one".into()
+                                }
+                                _ => "Give one of them another name".to_owned(),
+                            };
+                            problems.push(Problem::at(
+                                *line,
+                                at(".name"),
+                                format!(
+                                    "{table}.{other} and {table}.{key} both have the display name {name:?}. A \
+                                     declared key's name is taken whatever its status, because provision adopts an \
+                                     existing resource by its name and could not tell them apart. {fix}"
+                                ),
+                            ));
+                        }
                     }
+                }
+                if lifecycle == Lifecycle::Managed && kind != Kind::Badge && price.is_none() {
+                    problems.push(Problem::at(
+                        *line,
+                        at(".price"),
+                        format!("a {} needs a price in Robux", kind.noun()),
+                    ));
                 }
                 let resource = Resource {
                     kind,
@@ -250,6 +312,22 @@ impl Experience {
             }
             for (key, overlay) in &env.overlays.badges {
                 check(Kind::Badge, key, overlay.line, None);
+            }
+        }
+        let mut universes: BTreeMap<_, &String> = BTreeMap::new();
+        for (name, env) in &manifest.envs {
+            if let Some(first) = universes.insert(env.universe, name) {
+                problems.push(Problem {
+                    file: FILE.into(),
+                    line: None,
+                    key: format!("env.{name}.universe"),
+                    message: format!(
+                        "env.{first} and env.{name} both name universe {}. Provision adopts a resource by its name \
+                         inside a universe, so each environment would bind the other's resources, and its overlays \
+                         would overwrite the other's values. Give each environment its own universe",
+                        env.universe
+                    ),
+                });
             }
         }
         if !problems.is_empty() {
@@ -335,6 +413,12 @@ fn priced(tables: &crucible_project::experience::Tables<Priced>) -> Vec<(&String
 
 fn zero_price(kind: Kind) -> String {
     format!("a price of 0 does not take a {} off sale. Set retired = true to take it off sale", kind.noun())
+}
+
+/// Whitespace as Rust's `char::is_whitespace` and JavaScript's `\s` count it together, so the schema's name pattern
+/// and this check agree.
+fn is_space(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
 }
 
 pub fn is_key(key: &str) -> bool {

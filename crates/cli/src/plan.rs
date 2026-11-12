@@ -1,9 +1,10 @@
 use crucible_iac::journal::{self, Journal};
 use crucible_iac::lock::{self, Lock};
 use crucible_iac::model::{Experience, Problem};
-use crucible_iac::plan::{Action, Inputs, Plan, plan};
+use crucible_iac::plan::{Action, Inputs, Plan, plan, undeclared};
 use crucible_project::Manifest;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
@@ -98,19 +99,16 @@ fn run(root: &Path, only: Option<&str>) -> Result<Vec<Plan>, Failure> {
     if names.is_empty() {
         return Err(Failure::usage("crucible.toml configures no environment. Add one with [env.<name>]"));
     }
+    let journals = journals(root)?;
     let mut plans = Vec::new();
-    let mut problems = Vec::new();
+    let mut problems = undeclared(&manifest.envs, lock.as_ref(), &journals);
     for name in names {
-        let journal = read(&journal::path(name))?
-            .map(|text| Journal::parse(name, &text))
-            .transpose()
-            .map_err(|error| Failure::usage(error.to_string()))?;
         let inputs = Inputs {
             experience: &experience,
             env_name: name,
             env: &manifest.envs[name],
             lock: lock.as_ref().and_then(|lock| lock.env(name)),
-            journal: journal.as_ref(),
+            journal: journals.get(name),
         };
         match plan(&inputs, &mut |path| std::fs::read(root.join(path))) {
             Ok(plan) => plans.push(plan),
@@ -124,6 +122,29 @@ fn run(root: &Path, only: Option<&str>) -> Result<Vec<Plan>, Failure> {
     }
 }
 
+/// Every `<env>.json` in the journal folder, by the environment its name gives, declared or not.
+fn journals(root: &Path) -> Result<BTreeMap<String, Journal>, Failure> {
+    let folder = journal::path("env");
+    let folder = folder.parent().expect("a journal lives in a folder");
+    let entries = match std::fs::read_dir(root.join(folder)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => return Err(Failure::read(folder, &error)),
+    };
+    let mut journals = BTreeMap::new();
+    for entry in entries {
+        let path = entry.map_err(|error| Failure::read(folder, &error))?.path();
+        let Some(env) = path.extension().filter(|extension| *extension == "json").and(path.file_stem()) else {
+            continue;
+        };
+        let env = env.to_string_lossy().into_owned();
+        let text = std::fs::read_to_string(&path).map_err(|error| Failure::read(&journal::path(&env), &error))?;
+        let journal = Journal::parse(&env, &text).map_err(|error| Failure::usage(error.to_string()))?;
+        journals.insert(env, journal);
+    }
+    Ok(journals)
+}
+
 fn render(plans: &[Plan]) -> String {
     let mut text = String::new();
     for plan in plans {
@@ -135,6 +156,10 @@ fn render(plans: &[Plan]) -> String {
                 let mut detail: Vec<String> = step.changes.iter().map(|change| label(&json!(change))).collect();
                 if let Some(old) = &step.moved_from {
                     detail.push(format!("from {old}"));
+                }
+                if let Some(intent) = &step.intent {
+                    let resolved = if intent.resolved { ", resolved by the lock" } else { "" };
+                    detail.push(format!("intent sent {:?}{resolved}", intent.name));
                 }
                 detail.extend(step.note.clone());
                 [
