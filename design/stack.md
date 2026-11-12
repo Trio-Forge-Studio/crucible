@@ -34,7 +34,9 @@ Charm source lines refer to `@rbxts/charm` 0.11.1, file `src/init.luau`. Crucibl
 | `@rbxts/vide-charm` | Reads Charm values from Vide | The game installs it. Crucible does not import it. |
 | `@trioforge/crucible` | Lifetimes, compiler ABI, data, network, the `ui` entry | The game installs it. |
 
-The game lists Charm, Vide and `vide-charm` in its own `dependencies`. `vide-charm` 0.4.1 declares `@rbxts/charm` `^0.11.1` as a dependency and `@rbxts/vide` as a peer (`vc/package/package.json`). Crucible does not re-export Charm, because a re-export gives every value function two import paths.
+The game lists Charm and Charm Sync in its own `dependencies`, and adds Vide and `vide-charm` when it renders UI. `vide-charm` 0.4.1 declares `@rbxts/charm` `^0.11.1` as a dependency and `@rbxts/vide` as a peer (`vc/package/package.json`). Crucible does not re-export Charm, because a re-export gives every value function two import paths.
+
+The runtime pins `@rbxts/charm-sync` to exactly `0.4.1` beside Charm. Its sync load path checks the private `patch.apply` export, the `__none` deletion marker, no-change diffs and immutable nested patch application once, when replicated declarations load. Games without replicated declarations run no probe. Charm Sync exposes no version metadata in Roblox, so a failure names the expected release, reports the installed version as unavailable and tells the game to install the pinned package and rebuild.
 
 ## Values come from Charm
 

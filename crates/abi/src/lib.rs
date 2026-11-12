@@ -23,8 +23,11 @@ pub const PACKAGE: &str = "@trioforge/crucible";
 /// The `exports` key of the entry compiled code calls.
 pub const EMIT: &str = "./emit";
 
+/// The UI entry, whose optional peers a game installs only when it uses UI.
+pub const UI: &str = "ui";
+
 /// The subpaths of the runtime a game may import besides its root. CRU004 rejects every other one.
-pub const SUBPATHS: &[&str] = &["server", "client", "ui", "util/random", "maths/spline"];
+pub const SUBPATHS: &[&str] = &["server", "client", UI, "util/random", "maths/spline"];
 
 /// A function compiled code calls, with the parameters the compiler passes in order.
 #[derive(Clone, Copy, Debug)]

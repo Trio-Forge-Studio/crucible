@@ -8,6 +8,13 @@ fn roblox_ts_game(root: &Path) -> String {
     let manifest = format!(
         "{{\n\t\"name\": \"game\",\n\t\"private\": true,\n\t\"dependencies\": {{\n\t\t\"@trioforge/crucible\": \"{VERSION}\"\n\t}},\n\t\"devDependencies\": {{\n\t\t\"@trioforge/crucible-cli\": \"{VERSION}\",\n\t\t\"roblox-ts\": \"3.0.0\",\n\t\t\"typescript\": \"5.5.3\",\n\t\t\"@rbxts/compiler-types\": \"3.0.0-types.0\"\n\t}}\n}}\n"
     );
+    let mut value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    let runtime: serde_json::Value =
+        serde_json::from_str(include_str!("../../../packages/crucible/package.json")).unwrap();
+    for peer in ["@rbxts/charm", "@rbxts/charm-sync"] {
+        value["dependencies"][peer] = runtime["peerDependencies"][peer].clone();
+    }
+    let manifest = serde_json::to_string_pretty(&value).unwrap();
     fs::write(root.join("package.json"), &manifest).unwrap();
     for package in ["crucible-cli", "crucible"] {
         let dir = root.join("node_modules/@trioforge").join(package);

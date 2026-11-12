@@ -1,3 +1,5 @@
+import { checkCharmSync } from "./charm-sync";
+import { useSyncCheck } from "./declarations";
 import { effect, getActiveSub, ReactiveFlags, setActiveSub, type ReactiveNode } from "@rbxts/charm";
 import { ClientReady } from "../../network";
 import { Subsystem } from "../../subsystem";
@@ -519,3 +521,5 @@ export function installServerSync(send: FrameSender) {
 	installed = true;
 	define(ServerSync, { kind: "subsystem", id: "Crucible.ServerSync" as TypeId, deps: [], provides: [] }, true);
 }
+
+useSyncCheck(checkCharmSync);
