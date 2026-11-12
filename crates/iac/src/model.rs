@@ -245,10 +245,24 @@ impl Experience {
                             ));
                         }
                         if let Some((other, was)) = names.insert(name, (key, lifecycle)) {
-                            let retired = if [was, lifecycle].contains(&Lifecycle::Retired) {
-                                ", or remove the name of the retired one"
-                            } else {
-                                ""
+                            let table = kind.table();
+                            // An untracked key's name is what keeps its resource from being adopted.
+                            let fix = match (was, lifecycle) {
+                                (Lifecycle::Untrack, Lifecycle::Untrack) => {
+                                    "Give each the name it has on Roblox".into()
+                                }
+                                (Lifecycle::Untrack, _) => format!(
+                                    "Give {table}.{key} another name: {table}.{other} is untracked and must keep \
+                                     the name its resource has on Roblox"
+                                ),
+                                (_, Lifecycle::Untrack) => format!(
+                                    "Give {table}.{other} another name: {table}.{key} is untracked and must keep \
+                                     the name its resource has on Roblox"
+                                ),
+                                _ if [was, lifecycle].contains(&Lifecycle::Retired) => {
+                                    "Give one of them another name, or remove the name of the retired one".into()
+                                }
+                                _ => "Give one of them another name".to_owned(),
                             };
                             problems.push(Problem::at(
                                 *line,
@@ -256,9 +270,7 @@ impl Experience {
                                 format!(
                                     "{table}.{other} and {table}.{key} both have the display name {name:?}. A \
                                      declared key's name is taken whatever its status, because provision adopts an \
-                                     existing resource by its name and could not tell them apart. Give one of them \
-                                     another name{retired}",
-                                    table = kind.table()
+                                     existing resource by its name and could not tell them apart. {fix}"
                                 ),
                             ));
                         }

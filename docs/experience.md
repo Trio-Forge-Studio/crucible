@@ -69,7 +69,7 @@ enabled = false
 Roblox cannot delete a product, a pass or a badge, so removing a table that the lock holds an ID for is an error until you say what should happen to the resource.
 
 - `retired = true` takes a product or a pass off sale and disables a badge. A price of 0 is not off sale. Once the lock records the resource as retired, you can delete its table, and the lock keeps the ID.
-- `untrack = true` removes the resource from the lock and leaves it unchanged on Roblox. The key keeps its `name` while it is declared, so no other key adopts the resource. Once you remove the key from the file, the resource is like one made by hand: a new key with its name adopts it.
+- `untrack = true` removes the resource from the lock and leaves it unchanged on Roblox. The key keeps its `name` while it is declared, so no other key adopts the resource. Keep that `name` equal to the name the resource has on Roblox: Crucible no longer reads the resource, so a changed `name` frees the old one, and a new key that takes it adopts the resource. When a new key needs the same name, give the new key another one. Once you remove the key from the file, the resource is like one made by hand: a new key with its name adopts it.
 - `moved_from = "<old key>"` renames a key and keeps its ID. Without it, a rename reads as a removal and a create, and `crucible plan` names the keys that could be the new one.
 
 ## Read the plan

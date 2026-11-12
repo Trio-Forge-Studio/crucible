@@ -536,11 +536,17 @@ fn two_declared_keys_of_a_kind_may_not_share_a_display_name_whatever_their_statu
              name and could not tell them apart. Give one of them another name"
         )]
     );
-    for (status, hint) in [("retired = true\n", ", or remove the name of the retired one"), ("untrack = true\n", "")] {
+    for (status, fix) in [
+        ("retired = true\n", "Give one of them another name, or remove the name of the retired one"),
+        (
+            "untrack = true\n",
+            "Give passes.vip another name: passes.gold is untracked and must keep the name its resource has on Roblox",
+        ),
+    ] {
         let config = CONFIG.to_owned() + "[passes.gold]\nname = \"VIP\"\n" + status;
         let problems = messages(Project::new(&config).experience().unwrap_err());
         assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(problems[0].ends_with(&format!("Give one of them another name{hint}")), "{problems:?}");
+        assert!(problems[0].ends_with(fix), "{problems:?}");
     }
     let untracked = CONFIG.to_owned() + "[passes.gold]\nuntrack = true\n";
     let line = untracked.lines().position(|line| line == "[passes.gold]").unwrap() + 1;
