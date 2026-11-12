@@ -110,6 +110,8 @@ Use `-` instead of a file to read UTF-8 Luau from stdin. Scripts are limited to 
 
 An unsafe request answered with 429, or one that never left the process, is sent once and exits 7. The caller decides whether to repeat it. Read and idempotent operations retry 429, 5xx, and transport failures up to three attempts. Their default delays are 1 and 4 seconds. `Retry-After` in seconds takes precedence up to 300 seconds. A larger value stops retries and appears in `error.retryAfter`. Place publishing uses its overlay policy.
 
+`crucible provision` and `crucible adopt` send products, passes and badges through the same rules. A create is unsafe, so a lost answer exits 5 and provision never sends that create again. An update is idempotent and retries. A list is read to its last page or fails, because provision reads a resource the list leaves out as one to create. A read by ID that Roblox answers with 404 means the resource does not exist. Every other failure keeps its exit code.
+
 Once an unsafe request gets a 2xx, every later failure maps to 6 for remote failure, 8 with GET-only recovery when the resource is known, or 5 with a Creations check when it is not. Repeating the original write is unsafe. GET-only resumes retain codes 3, 4, and 7. A classified failure keeps its exit code if stdout cannot be written.
 
 The global options are `--deadline <seconds>`, `--poll-interval <seconds>`, `--retry-delay <seconds>`, and `--verbose`. The default poll interval is 2 seconds. `--retry-delay` changes delays, without making an unsafe operation retryable.
