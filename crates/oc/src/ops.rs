@@ -79,10 +79,53 @@ pub struct Badge {
     pub icon: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Page<T> {
-    pub items: Vec<T>,
-    pub next: Option<String>,
+struct Page<T> {
+    items: Vec<T>,
+    next: Option<String>,
+}
+
+/// Builds the request for the page after `token`, or the first page.
+type PageOp<T> = dyn Fn(Option<&str>) -> Op<Page<T>, Read>;
+
+/// The most pages `Transport::list_all` reads before it fails, unless `List::max_pages` sets another cap.
+pub const MAX_PAGES: usize = 1000;
+
+/// A whole list, which `Transport::list_all` reads page by page to its end. No single page is public, so no caller can
+/// mistake one page for the list.
+pub struct List<T> {
+    page: Box<PageOp<T>>,
+    max_pages: usize,
+}
+
+impl<T> List<T> {
+    fn new(page: impl Fn(Option<&str>) -> Op<Page<T>, Read> + 'static) -> Self {
+        Self { page: Box::new(page), max_pages: MAX_PAGES }
+    }
+
+    /// Fails instead of reading more than `pages` pages.
+    pub fn max_pages(self, pages: usize) -> Self {
+        Self { max_pages: pages, ..self }
+    }
+
+    pub fn name(&self) -> &'static str {
+        (self.page)(None).name
+    }
+
+    pub fn method(&self) -> &'static str {
+        (self.page)(None).method
+    }
+
+    pub fn path(&self) -> String {
+        (self.page)(None).path
+    }
+
+    pub fn safety(&self) -> Safety {
+        Safety::Read
+    }
+
+    pub fn scopes(&self) -> Vec<Scope> {
+        (self.page)(None).scopes().to_vec()
+    }
 }
 
 enum Body {
@@ -240,6 +283,29 @@ impl Transport<'_> {
         };
         (op.parse)(&value).map_err(|bad| op.malformed(bad, value))
     }
+
+    /// Reads every page of `list`, following its tokens to the end. A token Roblox sends twice, or more pages than the
+    /// list's cap, fails rather than returning part of the list, because provisioning reads "not listed" as "create".
+    pub fn list_all<T>(&self, list: &List<T>) -> Result<Vec<T>, Failure> {
+        let (mut items, mut seen, mut token) = (vec![], std::collections::BTreeSet::new(), None::<String>);
+        for _ in 0..list.max_pages {
+            let op = (list.page)(token.as_deref());
+            let page = self.run(&op)?;
+            items.extend(page.items);
+            let Some(next) = page.next else { return Ok(items) };
+            if !seen.insert(next.clone()) {
+                return Err(Failure::unavailable(format!("{}: Roblox sent the page token {next:?} twice", op.name))
+                    .with("operation", json!(op.name)));
+            }
+            token = Some(next);
+        }
+        let name = list.name();
+        Err(Failure::usage(format!(
+            "{name}: the list has more than {} pages, so it was not read whole",
+            list.max_pages
+        ))
+        .with("operation", json!(name)))
+    }
 }
 
 fn key(scopes: &[(&str, Option<&str>)]) -> Auth {
@@ -326,7 +392,17 @@ fn parts(details: &Details) -> Vec<(&'static str, Part)> {
     parts
 }
 
-fn page<T>(value: &Value, items: &str, next: &str, item: fn(&Value) -> Parsed<T>) -> Parsed<Page<T>> {
+/// How a page says whether another follows.
+#[derive(Clone, Copy)]
+enum Next {
+    /// The registry requires the field, so a page without it is malformed. An empty token ends the list.
+    Required(&'static str),
+    /// The endpoint is outside the registry. An absent, null or empty cursor ends the list only on a page shorter than
+    /// the page size the request asked for, because a misnamed field would otherwise end every list after one page.
+    Short(&'static str, usize),
+}
+
+fn page<T>(value: &Value, items: &str, next: Next, item: fn(&Value) -> Parsed<T>) -> Parsed<Page<T>> {
     let list = at(value, items)?.as_array().ok_or_else(|| bad(items))?;
     let items = list
         .iter()
@@ -335,8 +411,20 @@ fn page<T>(value: &Value, items: &str, next: &str, item: fn(&Value) -> Parsed<T>
             item(value).map_err(|bad| Bad { field: format!("{items}[{index}].{}", bad.field), ..bad })
         })
         .collect::<Parsed<Vec<T>>>()?;
-    let next = value[next].as_str().filter(|token| !token.is_empty()).map(str::to_owned);
-    Ok(Page { items, next })
+    let next = match next {
+        Next::Required(field) => Some(text(value, field)?),
+        Next::Short(field, size) => {
+            let cursor = match value.get(field) {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(text(value, field)?),
+            };
+            if cursor.as_deref().is_none_or(str::is_empty) && items.len() >= size {
+                return Err(Bad { field: field.into(), problem: "ends a full page without" });
+            }
+            cursor
+        }
+    };
+    Ok(Page { items, next: next.filter(|token| !token.is_empty()) })
 }
 
 pub mod products {
@@ -356,18 +444,20 @@ pub mod products {
         })
     }
 
-    pub fn list(universe: Id, token: Option<&str>) -> Op<Page<Sellable>, Read> {
-        let mut op = op(
-            "developer-products.list",
-            "GET",
-            APIS,
-            format!("/developer-products/v2/universes/{universe}/developer-products/creator"),
-            key(READ),
-            Body::Empty,
-            |value| page(value, "developerProducts", "nextPageToken", product),
-        );
-        op.query.extend(token.map(|token| ("pageToken", token.to_owned())));
-        op
+    pub fn list(universe: Id) -> List<Sellable> {
+        List::new(move |token| {
+            let mut op = op(
+                "developer-products.list",
+                "GET",
+                APIS,
+                format!("/developer-products/v2/universes/{universe}/developer-products/creator"),
+                key(READ),
+                Body::Empty,
+                |value| page(value, "developerProducts", Next::Required("nextPageToken"), product),
+            );
+            op.query.extend(token.map(|token| ("pageToken", token.to_owned())));
+            op
+        })
     }
 
     pub fn get(universe: Id, product_id: Id) -> Op<Sellable, Read> {
@@ -424,18 +514,20 @@ pub mod passes {
         })
     }
 
-    pub fn list(universe: Id, token: Option<&str>) -> Op<Page<Sellable>, Read> {
-        let mut op = op(
-            "game-passes.list",
-            "GET",
-            APIS,
-            format!("/game-passes/v1/universes/{universe}/game-passes/creator"),
-            key(READ),
-            Body::Empty,
-            |value| page(value, "gamePasses", "nextPageToken", pass),
-        );
-        op.query.extend(token.map(|token| ("pageToken", token.to_owned())));
-        op
+    pub fn list(universe: Id) -> List<Sellable> {
+        List::new(move |token| {
+            let mut op = op(
+                "game-passes.list",
+                "GET",
+                APIS,
+                format!("/game-passes/v1/universes/{universe}/game-passes/creator"),
+                key(READ),
+                Body::Empty,
+                |value| page(value, "gamePasses", Next::Required("nextPageToken"), pass),
+            );
+            op.query.extend(token.map(|token| ("pageToken", token.to_owned())));
+            op
+        })
     }
 
     pub fn get(universe: Id, pass_id: Id) -> Op<Sellable, Read> {
@@ -547,19 +639,22 @@ pub mod badges {
     }
 
     /// Badges have no API-key list. This documented public endpoint needs no key, so it sends none.
-    pub fn list_public(universe: Id, cursor: Option<&str>) -> Op<Page<Badge>, Read> {
-        let mut op = op(
-            "badges.list-public",
-            "GET",
-            BADGES,
-            format!("/v1/universes/{universe}/badges"),
-            Auth::None,
-            Body::Empty,
-            |value| page(value, "data", "nextPageCursor", badge),
-        );
-        op.query.push(("limit", "100".into()));
-        op.query.push(("sortOrder", "Asc".into()));
-        op.query.extend(cursor.map(|cursor| ("cursor", cursor.to_owned())));
-        op
+    pub fn list_public(universe: Id) -> List<Badge> {
+        const LIMIT: usize = 100;
+        List::new(move |cursor| {
+            let mut op = op(
+                "badges.list-public",
+                "GET",
+                BADGES,
+                format!("/v1/universes/{universe}/badges"),
+                Auth::None,
+                Body::Empty,
+                |value| page(value, "data", Next::Short("nextPageCursor", LIMIT), badge),
+            );
+            op.query.push(("limit", LIMIT.to_string()));
+            op.query.push(("sortOrder", "Asc".into()));
+            op.query.extend(cursor.map(|cursor| ("cursor", cursor.to_owned())));
+            op
+        })
     }
 }

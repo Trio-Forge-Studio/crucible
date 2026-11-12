@@ -41,21 +41,16 @@ fn transport(key: &Secret) -> Transport<'_> {
 fn reads_list_products_passes_and_public_badges() {
     let (key, universe) = staging();
     let transport = transport(&key);
-    let products = transport.run(&products::list(universe, None)).unwrap();
-    if let Some(first) = products.items.first() {
+    let products = transport.list_all(&products::list(universe)).unwrap();
+    if let Some(first) = products.first() {
         assert_eq!(transport.run(&products::get(universe, first.id)).unwrap().id, first.id);
     }
-    let passes = transport.run(&passes::list(universe, None)).unwrap();
-    if let Some(first) = passes.items.first() {
+    let passes = transport.list_all(&passes::list(universe)).unwrap();
+    if let Some(first) = passes.first() {
         assert_eq!(transport.run(&passes::get(universe, first.id)).unwrap().id, first.id);
     }
-    let badges = transport.run(&badges::list_public(universe, None)).unwrap();
-    eprintln!(
-        "{} products, {} passes, {} badges on the first pages",
-        products.items.len(),
-        passes.items.len(),
-        badges.items.len()
-    );
+    let badges = transport.list_all(&badges::list_public(universe)).unwrap();
+    eprintln!("{} products, {} passes, {} badges", products.len(), passes.len(), badges.len());
 }
 
 #[test]
@@ -64,16 +59,8 @@ fn writes_adopt_then_update_one_product() {
     assert_eq!(std::env::var("CRUCIBLE_OC_LIVE_WRITES").as_deref(), Ok("1"), "set CRUCIBLE_OC_LIVE_WRITES=1 to write");
     let (key, universe) = staging();
     let transport = transport(&key);
-    let mut token = None;
-    let mut found = vec![];
-    loop {
-        let page = transport.run(&products::list(universe, token.as_deref())).unwrap();
-        found.extend(page.items.into_iter().filter(|product| product.name == PRODUCT));
-        match page.next {
-            Some(next) => token = Some(next),
-            None => break,
-        }
-    }
+    let mut found = transport.list_all(&products::list(universe)).unwrap();
+    found.retain(|product| product.name == PRODUCT);
     assert!(found.len() <= 1, "two products are named {PRODUCT:?}; delete neither, and adopt one by hand");
     let product = match found.pop() {
         Some(product) => product,

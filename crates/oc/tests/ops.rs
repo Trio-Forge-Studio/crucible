@@ -66,23 +66,23 @@ fn without(mut value: Value, path: &[&str]) -> Value {
 #[test]
 fn each_operation_carries_its_retry_rule_and_scopes() {
     let details = Details::default();
-    assert_eq!(safety(&products::list(id(1), None)), Safety::Read);
+    assert_eq!(products::list(id(1)).safety(), Safety::Read);
     assert_eq!(safety(&products::get(id(1), id(2))), Safety::Read);
     assert_eq!(safety(&products::create(id(1), &details)), Safety::Unsafe);
     assert_eq!(safety(&products::update(id(1), id(2), &details)), Safety::Idempotent);
-    assert_eq!(safety(&passes::list(id(1), None)), Safety::Read);
+    assert_eq!(passes::list(id(1)).safety(), Safety::Read);
     assert_eq!(safety(&passes::get(id(1), id(2))), Safety::Read);
     assert_eq!(safety(&passes::create(id(1), &details)), Safety::Unsafe);
     assert_eq!(safety(&passes::update(id(1), id(2), &details)), Safety::Idempotent);
     assert_eq!(safety(&badges::create(id(1), "B", "", true, icon())), Safety::Unsafe);
     assert_eq!(safety(&badges::update(id(2), &BadgeDetails::default())), Safety::Idempotent);
     assert_eq!(safety(&badges::overwrite_icon(id(2), icon())), Safety::Idempotent);
-    assert_eq!(safety(&badges::list_public(id(1), None)), Safety::Read);
+    assert_eq!(badges::list_public(id(1)).safety(), Safety::Read);
     let scopes = |scopes: &[crucible_oc::Scope]| scopes.iter().map(|scope| scope.name.clone()).collect::<Vec<_>>();
     assert_eq!(scopes(products::create(id(1), &details).scopes()), ["developer-product:write"]);
-    assert_eq!(scopes(passes::list(id(1), None).scopes()), ["game-pass:read"]);
+    assert_eq!(scopes(&passes::list(id(1)).scopes()), ["game-pass:read"]);
     assert_eq!(scopes(badges::overwrite_icon(id(2), icon()).scopes()), ["legacy-badge:manage"]);
-    assert!(badges::list_public(id(1), None).scopes().is_empty());
+    assert!(badges::list_public(id(1)).scopes().is_empty());
 }
 
 #[test]
@@ -234,29 +234,147 @@ fn an_update_answered_with_success_succeeds_whatever_the_body() {
     product_mock.assert_calls(1);
 }
 
+const PRODUCTS: &str = "/developer-products/v2/universes/1/developer-products/creator";
+
+fn products_page(ids: &[u64], next: Value) -> Value {
+    let items: Vec<Value> = ids
+        .iter()
+        .map(|id| {
+            let mut product = product_json(49);
+            product["productId"] = json!(id);
+            product
+        })
+        .collect();
+    let mut page = json!({ "developerProducts": items });
+    if !next.is_null() || ids.is_empty() {
+        page["nextPageToken"] = next;
+    }
+    page
+}
+
 #[test]
-fn lists_follow_their_page_tokens() {
+fn a_list_follows_its_tokens_to_the_end() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let pages = [
+        server.mock(|when, then| {
+            when.method(Method::GET).path(PRODUCTS).query_param_missing("pageToken");
+            then.status(200).json_body(products_page(&[1, 2], json!("two")));
+        }),
+        server.mock(|when, then| {
+            when.method(Method::GET).path(PRODUCTS).query_param("pageToken", "two");
+            then.status(200).json_body(products_page(&[], json!("three")));
+        }),
+        server.mock(|when, then| {
+            when.method(Method::GET).path(PRODUCTS).query_param("pageToken", "three");
+            then.status(200).json_body(products_page(&[3], json!("")));
+        }),
+    ];
+    let products = transport(&server, &key).list_all(&products::list(id(1))).unwrap();
+    assert_eq!(products.iter().map(|product| product.id.get()).collect::<Vec<_>>(), [1, 2, 3]);
+    for page in pages {
+        page.assert_calls(1);
+    }
+}
+
+#[test]
+fn a_list_fails_rather_than_return_part_of_itself() {
+    let key = Secret::from_string("test-key".into());
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path(PRODUCTS).query_param_missing("pageToken");
+        then.status(200).json_body(products_page(&[1], json!("two")));
+    });
+    let again = server.mock(|when, then| {
+        when.method(Method::GET).path(PRODUCTS).query_param("pageToken", "two");
+        then.status(200).json_body(products_page(&[2], json!("two")));
+    });
+    let failure = transport(&server, &key).list_all(&products::list(id(1))).unwrap_err();
+    again.assert_calls(1);
+    assert_eq!(failure.code, 7, "a repeated token: {}", failure.error);
+    assert_eq!(failure.error["message"], "developer-products.list: Roblox sent the page token \"two\" twice");
+
+    let server = MockServer::start();
+    let pages: Vec<_> = [(None, "a"), (Some("a"), "b"), (Some("b"), "")]
+        .into_iter()
+        .map(|(token, next)| {
+            server.mock(|when, then| {
+                let when = when.method(Method::GET).path(PRODUCTS);
+                match token {
+                    Some(token) => when.query_param("pageToken", token),
+                    None => when.query_param_missing("pageToken"),
+                };
+                then.status(200).json_body(products_page(&[1], json!(next)));
+            })
+        })
+        .collect();
+    let failure = transport(&server, &key).list_all(&products::list(id(1)).max_pages(2)).unwrap_err();
+    assert_eq!(failure.code, 2, "more pages than the cap: {}", failure.error);
+    assert_eq!(pages.iter().map(|page| page.calls()).collect::<Vec<_>>(), [1, 1, 0], "the cap stops the reads");
+
+    for next in [None, Some(json!(null)), Some(json!(12))] {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(Method::GET).path(PRODUCTS);
+            let mut page = products_page(&[1], json!(null));
+            if let Some(next) = &next {
+                page["nextPageToken"] = next.clone();
+            }
+            then.status(200).json_body(page);
+        });
+        let failure = transport(&server, &key).list_all(&products::list(id(1))).unwrap_err();
+        assert_eq!((failure.code, failure.error["field"].as_str()), (7, Some("nextPageToken")), "{next:?}");
+    }
+}
+
+fn badges_page(first: u64, count: u64) -> Vec<Value> {
+    (first..first + count)
+        .map(|id| json!({"id": id, "name": format!("Badge {id}"), "description": null, "enabled": true}))
+        .collect()
+}
+
+#[test]
+fn the_public_badge_list_sends_no_key_and_follows_its_cursor() {
     let server = MockServer::start();
     let key = Secret::from_string("test-key".into());
     let first = server.mock(|when, then| {
         when.method(Method::GET)
-            .path("/developer-products/v2/universes/1/developer-products/creator")
-            .query_param_missing("pageToken");
-        then.status(200).json_body(json!({"developerProducts": [product_json(49)], "nextPageToken": "two"}));
+            .path("/v1/universes/1/badges")
+            .query_param("limit", "100")
+            .query_param("sortOrder", "Asc")
+            .query_param_missing("cursor")
+            .header_missing("x-api-key");
+        then.status(200)
+            .json_body(json!({"previousPageCursor": null, "nextPageCursor": "c2", "data": badges_page(1, 100)}));
     });
     let second = server.mock(|when, then| {
-        when.method(Method::GET)
-            .path("/developer-products/v2/universes/1/developer-products/creator")
-            .query_param("pageToken", "two");
-        then.status(200).json_body(json!({"developerProducts": [], "nextPageToken": ""}));
+        when.method(Method::GET).path("/v1/universes/1/badges").query_param("cursor", "c2").header_missing("x-api-key");
+        then.status(200).json_body(json!({"data": badges_page(101, 1)}));
     });
-    let transport = transport(&server, &key);
-    let page = transport.run(&products::list(id(1), None)).unwrap();
-    assert_eq!((page.items.len(), page.next.as_deref()), (1, Some("two")));
-    let page = transport.run(&products::list(id(1), page.next.as_deref())).unwrap();
-    assert_eq!((page.items.len(), page.next), (0, None));
+    let badges = transport(&server, &key).list_all(&badges::list_public(id(1))).unwrap();
     first.assert();
     second.assert();
+    assert_eq!(badges.len(), 101);
+    assert_eq!((badges[100].id.get(), badges[100].description.as_str(), badges[100].icon), (101, "", None));
+}
+
+#[test]
+fn the_public_badge_list_ends_only_on_a_short_page() {
+    let key = Secret::from_string("test-key".into());
+    for cursor in [None, Some(json!(null)), Some(json!(""))] {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/v1/universes/1/badges");
+            let mut page = json!({"data": badges_page(1, 100)});
+            if let Some(cursor) = &cursor {
+                page["nextPageCursor"] = cursor.clone();
+            }
+            then.status(200).json_body(page);
+        });
+        let failure = transport(&server, &key).list_all(&badges::list_public(id(1))).unwrap_err();
+        let message = "badges.list-public: Roblox's reply ends a full page without `nextPageCursor`";
+        assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some(message)), "{cursor:?}");
+    }
 }
 
 #[test]
@@ -273,24 +391,6 @@ fn a_badge_create_never_offers_to_pay() {
     let badge = transport(&server, &key).run(&badges::create(id(1), "First delivery", "", false, icon())).unwrap();
     mock.assert();
     assert_eq!((badge.id.get(), badge.enabled, badge.icon), (2124000000000000, false, Some(9)));
-}
-
-#[test]
-fn the_public_badge_list_sends_no_key() {
-    let server = MockServer::start();
-    let key = Secret::from_string("test-key".into());
-    let mock = server.mock(|when, then| {
-        when.method(Method::GET)
-            .path("/v1/universes/1/badges")
-            .query_param("limit", "100")
-            .query_param("sortOrder", "Asc")
-            .header_missing("x-api-key");
-        then.status(200).json_body(json!({"previousPageCursor": null, "nextPageCursor": null,
-            "data": [{"id": 5, "name": "First delivery", "description": "Deliver.", "enabled": true, "iconImageId": 0}]}));
-    });
-    let page = transport(&server, &key).run(&badges::list_public(id(1), None)).unwrap();
-    mock.assert();
-    assert_eq!((page.items[0].name.as_str(), page.items[0].icon, page.next), ("First delivery", None, None));
 }
 
 #[test]
@@ -314,7 +414,7 @@ fn a_malformed_read_is_an_error_that_names_the_operation_and_the_field() {
     for (failure, name, field) in [
         (transport.run(&passes::get(id(1), id(2))).unwrap_err(), "game-passes.get", "name"),
         (
-            transport.run(&products::list(id(1), None)).unwrap_err(),
+            transport.list_all(&products::list(id(1))).unwrap_err(),
             "developer-products.list",
             "developerProducts[1].priceInformation.defaultPriceInRobux",
         ),
