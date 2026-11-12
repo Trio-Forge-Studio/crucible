@@ -65,7 +65,8 @@ pub struct Sellable {
     pub id: Id,
     pub name: String,
     pub description: String,
-    pub price: u64,
+    /// `None` when Roblox holds no price for it, which is not the same as off sale.
+    pub price: Option<u64>,
     pub for_sale: bool,
     pub icon: Option<u64>,
 }
@@ -367,6 +368,19 @@ fn id(value: &Value, field: &str) -> Parsed<Id> {
     NonZeroU64::new(number(value, field)?).ok_or_else(|| bad(field))
 }
 
+/// The Robux price. The registry requires both fields and lets either be null, which means no price is set.
+fn price(value: &Value) -> Parsed<Option<u64>> {
+    const FIELD: &str = "priceInformation.defaultPriceInRobux";
+    let price = match value.get("priceInformation").ok_or_else(|| bad(FIELD))? {
+        Value::Null => return Ok(None),
+        information => information.get("defaultPriceInRobux").ok_or_else(|| bad(FIELD))?,
+    };
+    match price {
+        Value::Null => Ok(None),
+        price => price.as_u64().map(Some).ok_or_else(|| bad(FIELD)),
+    }
+}
+
 /// An icon asset ID, where 0 or no field means no icon. Nothing compares icons yet, so this field stays lenient.
 fn icon(value: &Value, field: &str) -> Option<u64> {
     value[field].as_u64().filter(|id| *id != 0)
@@ -392,17 +406,9 @@ fn parts(details: &Details) -> Vec<(&'static str, Part)> {
     parts
 }
 
-/// How a page says whether another follows.
-#[derive(Clone, Copy)]
-enum Next {
-    /// The registry requires the field, so a page without it is malformed. An empty token ends the list.
-    Required(&'static str),
-    /// The endpoint is outside the registry. An absent, null or empty cursor ends the list only on a page shorter than
-    /// the page size the request asked for, because a misnamed field would otherwise end every list after one page.
-    Short(&'static str, usize),
-}
-
-fn page<T>(value: &Value, items: &str, next: Next, item: fn(&Value) -> Parsed<T>) -> Parsed<Page<T>> {
+/// Reads one page. Every page must hold the `next` field, so a misnamed field fails the list instead of ending it
+/// after one page. A null or empty token ends the list.
+fn page<T>(value: &Value, items: &str, next: &str, item: fn(&Value) -> Parsed<T>) -> Parsed<Page<T>> {
     let list = at(value, items)?.as_array().ok_or_else(|| bad(items))?;
     let items = list
         .iter()
@@ -411,18 +417,9 @@ fn page<T>(value: &Value, items: &str, next: Next, item: fn(&Value) -> Parsed<T>
             item(value).map_err(|bad| Bad { field: format!("{items}[{index}].{}", bad.field), ..bad })
         })
         .collect::<Parsed<Vec<T>>>()?;
-    let next = match next {
-        Next::Required(field) => Some(text(value, field)?),
-        Next::Short(field, size) => {
-            let cursor = match value.get(field) {
-                None | Some(Value::Null) => None,
-                Some(_) => Some(text(value, field)?),
-            };
-            if cursor.as_deref().is_none_or(str::is_empty) && items.len() >= size {
-                return Err(Bad { field: field.into(), problem: "ends a full page without" });
-            }
-            cursor
-        }
+    let next = match value.get(next).ok_or_else(|| bad(next))? {
+        Value::Null => None,
+        token => Some(token.as_str().ok_or_else(|| bad(next))?.to_owned()),
     };
     Ok(Page { items, next: next.filter(|token| !token.is_empty()) })
 }
@@ -438,7 +435,7 @@ pub mod products {
             id: id(value, "productId")?,
             name: text(value, "name")?,
             description: text(value, "description")?,
-            price: number(value, "priceInformation.defaultPriceInRobux")?,
+            price: price(value)?,
             for_sale: flag(value, "isForSale")?,
             icon: icon(value, "iconImageAssetId"),
         })
@@ -453,7 +450,7 @@ pub mod products {
                 format!("/developer-products/v2/universes/{universe}/developer-products/creator"),
                 key(READ),
                 Body::Empty,
-                |value| page(value, "developerProducts", Next::Required("nextPageToken"), product),
+                |value| page(value, "developerProducts", "nextPageToken", product),
             );
             op.query.extend(token.map(|token| ("pageToken", token.to_owned())));
             op
@@ -508,7 +505,7 @@ pub mod passes {
             id: id(value, "gamePassId")?,
             name: text(value, "name")?,
             description: text(value, "description")?,
-            price: number(value, "priceInformation.defaultPriceInRobux")?,
+            price: price(value)?,
             for_sale: flag(value, "isForSale")?,
             icon: icon(value, "iconAssetId"),
         })
@@ -523,7 +520,7 @@ pub mod passes {
                 format!("/game-passes/v1/universes/{universe}/game-passes/creator"),
                 key(READ),
                 Body::Empty,
-                |value| page(value, "gamePasses", Next::Required("nextPageToken"), pass),
+                |value| page(value, "gamePasses", "nextPageToken", pass),
             );
             op.query.extend(token.map(|token| ("pageToken", token.to_owned())));
             op
@@ -661,7 +658,7 @@ pub mod badges {
                 format!("/v1/universes/{universe}/badges"),
                 Auth::None,
                 Body::Empty,
-                |value| page(value, "data", Next::Short("nextPageCursor", LIMIT), badge),
+                |value| page(value, "data", "nextPageCursor", badge),
             );
             op.query.push(("limit", LIMIT.to_string()));
             op.query.push(("sortOrder", "Asc".into()));

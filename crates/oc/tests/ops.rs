@@ -149,7 +149,7 @@ fn a_product_create_sends_multipart_and_parses_the_product() {
     };
     let product = transport(&server, &key).run(&products::create(id(10772177432), &details)).unwrap();
     mock.assert();
-    assert_eq!((product.id.get(), product.price, product.for_sale, product.icon), (3301234567, 49, true, None));
+    assert_eq!((product.id.get(), product.price, product.for_sale, product.icon), (3301234567, Some(49), true, None));
 }
 
 #[test]
@@ -319,6 +319,50 @@ fn a_list_follows_its_tokens_to_the_end() {
 }
 
 #[test]
+fn a_null_token_ends_a_list() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let first = server.mock(|when, then| {
+        when.method(Method::GET).path(PRODUCTS).query_param_missing("pageToken");
+        then.status(200).json_body(products_page(&[1], json!("two")));
+    });
+    let last = server.mock(|when, then| {
+        when.method(Method::GET).path(PRODUCTS).query_param("pageToken", "two");
+        let mut page = products_page(&[2], json!(""));
+        page["nextPageToken"] = json!(null);
+        then.status(200).json_body(page);
+    });
+    let products = transport(&server, &key).list_all(&products::list(id(1))).unwrap();
+    assert_eq!(products.iter().map(|product| product.id.get()).collect::<Vec<_>>(), [1, 2]);
+    first.assert_calls(1);
+    last.assert_calls(1);
+}
+
+#[test]
+fn a_product_or_a_pass_without_a_price_still_lists() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    server.mock(|when, then| {
+        when.method(Method::GET).path(PRODUCTS);
+        let (mut unpriced, mut no_information) = (product_json(49), product_json(49));
+        unpriced["priceInformation"]["defaultPriceInRobux"] = json!(null);
+        no_information["priceInformation"] = json!(null);
+        let products = [product_json(49), unpriced, no_information];
+        then.status(200).json_body(json!({"developerProducts": products, "nextPageToken": null}));
+    });
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/game-passes/v1/universes/1/game-passes/2/creator");
+        let mut pass = pass_json();
+        pass["priceInformation"] = json!(null);
+        then.status(200).json_body(pass);
+    });
+    let transport = transport(&server, &key);
+    let products = transport.list_all(&products::list(id(1))).unwrap();
+    assert_eq!(products.iter().map(|product| product.price).collect::<Vec<_>>(), [Some(49), None, None]);
+    assert_eq!(transport.run(&passes::get(id(1), id(2))).unwrap().price, None);
+}
+
+#[test]
 fn a_list_fails_rather_than_return_part_of_itself() {
     let key = Secret::from_string("test-key".into());
     let server = MockServer::start();
@@ -353,7 +397,7 @@ fn a_list_fails_rather_than_return_part_of_itself() {
     assert_eq!(failure.code, 2, "more pages than the cap: {}", failure.error);
     assert_eq!(pages.iter().map(|page| page.calls()).collect::<Vec<_>>(), [1, 1, 0], "the cap stops the reads");
 
-    for next in [None, Some(json!(null)), Some(json!(12))] {
+    for next in [None, Some(json!(12))] {
         let server = MockServer::start();
         server.mock(|when, then| {
             when.method(Method::GET).path(PRODUCTS);
@@ -390,7 +434,8 @@ fn the_public_badge_list_sends_no_key_and_follows_its_cursor() {
     });
     let second = server.mock(|when, then| {
         when.method(Method::GET).path("/v1/universes/1/badges").query_param("cursor", "c2").header_missing("x-api-key");
-        then.status(200).json_body(json!({"data": badges_page(101, 1)}));
+        then.status(200)
+            .json_body(json!({"previousPageCursor": "c1", "nextPageCursor": null, "data": badges_page(101, 1)}));
     });
     let badges = transport(&server, &key).list_all(&badges::list_public(id(1))).unwrap();
     first.assert();
@@ -436,22 +481,24 @@ fn a_badge_is_read_by_id_from_the_public_endpoint_without_a_key() {
 }
 
 #[test]
-fn the_public_badge_list_ends_only_on_a_short_page() {
+fn the_public_badge_list_ends_on_a_null_cursor_and_fails_without_the_field() {
     let key = Secret::from_string("test-key".into());
-    for cursor in [None, Some(json!(null)), Some(json!(""))] {
-        let server = MockServer::start();
-        server.mock(|when, then| {
-            when.method(Method::GET).path("/v1/universes/1/badges");
-            let mut page = json!({"data": badges_page(1, 100)});
-            if let Some(cursor) = &cursor {
-                page["nextPageCursor"] = cursor.clone();
-            }
-            then.status(200).json_body(page);
-        });
-        let failure = transport(&server, &key).list_all(&badges::list_public(id(1))).unwrap_err();
-        let message = "badges.list-public: Roblox's reply ends a full page without `nextPageCursor`";
-        assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some(message)), "{cursor:?}");
-    }
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/universes/1/badges");
+        then.status(200).json_body(json!({"nextPageCursor": null, "data": badges_page(1, 100)}));
+    });
+    let badges = transport(&server, &key).list_all(&badges::list_public(id(1))).unwrap();
+    assert_eq!(badges.len(), 100, "a full last page");
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/universes/1/badges");
+        then.status(200).json_body(json!({"nextCursor": "c2", "data": badges_page(1, 3)}));
+    });
+    let failure = transport(&server, &key).list_all(&badges::list_public(id(1))).unwrap_err();
+    let message = "badges.list-public: Roblox's reply has no valid `nextPageCursor`";
+    assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some(message)));
 }
 
 #[test]
@@ -522,7 +569,7 @@ fn a_game_pass_parses_whole_from_a_get_and_a_list() {
         id: id(1786543210),
         name: "VIP".into(),
         description: "Double coins.".into(),
-        price: 250,
+        price: Some(250),
         for_sale: false,
         icon: Some(81234),
     };
