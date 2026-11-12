@@ -74,7 +74,7 @@ fn each_operation_carries_its_retry_rule_and_scopes() {
     assert_eq!(safety(&passes::get(id(1), id(2))), Safety::Read);
     assert_eq!(safety(&passes::create(id(1), &details)), Safety::Unsafe);
     assert_eq!(safety(&passes::update(id(1), id(2), &details)), Safety::Idempotent);
-    assert_eq!(safety(&badges::create(id(1), "B", "", true, icon())), Safety::Unsafe);
+    assert_eq!(safety(&badges::create(id(1), "B", "", true, Some(icon()))), Safety::Unsafe);
     assert_eq!(safety(&badges::update(id(2), &BadgeDetails::default())), Safety::Idempotent);
     assert_eq!(safety(&badges::overwrite_icon(id(2), icon())), Safety::Idempotent);
     assert_eq!(badges::list_public(id(1)).safety(), Safety::Read);
@@ -158,7 +158,7 @@ fn a_create_that_got_a_success_status_is_never_reported_as_retry() {
             path: "/legacy-badges/v1/universes/1/badges",
             reply: badge_json(),
             compared: &["enabled"],
-            send: |transport| transport.run(&badges::create(id(1), "B", "", true, icon())).unwrap_err(),
+            send: |transport| transport.run(&badges::create(id(1), "B", "", true, Some(icon()))).unwrap_err(),
         },
     ];
     for Create { name, id_field, path, reply: full, compared, send: create } in creates {
@@ -359,6 +359,42 @@ fn the_public_badge_list_sends_no_key_and_follows_its_cursor() {
 }
 
 #[test]
+fn a_badge_create_sends_an_icon_only_when_it_has_one() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let mock = server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/legacy-badges/v1/universes/1/badges")
+            .body_includes("name=\"name\"\r\n\r\nFirst delivery\r\n")
+            .body_excludes("name=\"files\"");
+        then.status(200).json_body(badge_json());
+    });
+    let badge = transport(&server, &key).run(&badges::create(id(1), "First delivery", "Deliver.", true, None)).unwrap();
+    mock.assert_calls(1);
+    assert_eq!(badge.id.get(), 2124000000000000);
+}
+
+#[test]
+fn a_badge_is_read_by_id_from_the_public_endpoint_without_a_key() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let mock = server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/badges/2124000000000000").header_missing("x-api-key");
+        then.status(200).json_body(badge_json());
+    });
+    let badge = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap();
+    mock.assert_calls(1);
+    let expected = crucible_oc::ops::Badge {
+        id: id(2124000000000000),
+        name: "First delivery".into(),
+        description: "Deliver.".into(),
+        enabled: true,
+        icon: Some(9),
+    };
+    assert_eq!(badge, expected);
+}
+
+#[test]
 fn the_public_badge_list_ends_only_on_a_short_page() {
     let key = Secret::from_string("test-key".into());
     for cursor in [None, Some(json!(null)), Some(json!(""))] {
@@ -388,7 +424,8 @@ fn a_badge_create_never_offers_to_pay() {
             .body_includes("name=\"isActive\"\r\n\r\nfalse\r\n");
         then.status(200).json_body(json!({"id": 2124000000000000u64, "name": "First delivery", "description": "", "enabled": false, "iconImageId": 9}));
     });
-    let badge = transport(&server, &key).run(&badges::create(id(1), "First delivery", "", false, icon())).unwrap();
+    let badge =
+        transport(&server, &key).run(&badges::create(id(1), "First delivery", "", false, Some(icon()))).unwrap();
     mock.assert();
     assert_eq!((badge.id.get(), badge.enabled, badge.icon), (2124000000000000, false, Some(9)));
 }

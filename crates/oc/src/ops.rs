@@ -585,14 +585,21 @@ pub mod badges {
     }
 
     /// Sends `expectedCost` 0, so Roblox refuses a create that would charge Robux instead of charging it.
-    pub fn create(universe: Id, name: &str, description: &str, enabled: bool, icon: Image) -> Op<Badge, Unsafe> {
-        let parts = vec![
+    /// The registry makes the icon optional, as `crucible.toml` does.
+    pub fn create(
+        universe: Id,
+        name: &str,
+        description: &str,
+        enabled: bool,
+        icon: Option<Image>,
+    ) -> Op<Badge, Unsafe> {
+        let mut parts = vec![
             ("name", Part::Text(name.into())),
             ("description", Part::Text(description.into())),
             ("isActive", Part::Text(enabled.to_string())),
             ("expectedCost", Part::Text("0".into())),
-            ("files", Part::File(icon)),
         ];
+        parts.extend(icon.map(|icon| ("files", Part::File(icon))));
         let mut op = op(
             "badges.create",
             "POST",
@@ -636,6 +643,11 @@ pub mod badges {
             key(&[("legacy-badge:manage", None)]),
             Body::Multipart(vec![("Files", Part::File(icon))]),
         )
+    }
+
+    /// The pinned registry has no badge read by ID, so this reads the documented public endpoint, which needs no key.
+    pub fn get_public(badge_id: Id) -> Op<Badge, Read> {
+        op("badges.get-public", "GET", BADGES, format!("/v1/badges/{badge_id}"), Auth::None, Body::Empty, badge)
     }
 
     /// Badges have no API-key list. This documented public endpoint needs no key, so it sends none.
