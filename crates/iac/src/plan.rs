@@ -152,8 +152,8 @@ pub fn plan(
                         &resource.key,
                         format!(
                             "the journal holds intents for {table}.{} and {table}.{}, and moved_from makes them one \
-                             resource. Resolve one with `crucible adopt {} <key> <id>`, or remove the one whose create \
-                             never landed",
+                             resource. Remove the one whose create never landed, or, once `crucible provision` \
+                             arrives with `crucible adopt`, resolve one with `crucible adopt {} <key> <id>`",
                             intent.map_or("", |(_, intent)| &intent.key),
                             other.key,
                             kind.noun(),
@@ -412,8 +412,9 @@ fn unattached(
     let path = journal::path(inputs.env_name).display().to_string();
     let mut message = format!("the journal holds an intent to create {noun} {key} as {name:?}, ");
     let yourself = format!(
-        "or resolve it yourself: record the {noun} named {name:?} in universe {universe} with `crucible adopt {noun} \
-         {key} <id>`, or remove the intent from {path} if universe {universe} has no such {noun}"
+        "or resolve it yourself: remove the intent from {path} if universe {universe} has no {noun} named {name:?}, \
+         or, once `crucible provision` arrives with `crucible adopt`, record the one it has with `crucible adopt \
+         {noun} {key} <id>`"
     );
     let lifecycle = declared.iter().find(|resource| resource.key == *key).map(|resource| resource.lifecycle);
     match (entries.get(key), lifecycle) {
@@ -469,8 +470,9 @@ fn sent_name_taken(env: &str, resource: &Resource, intent: &Intent) -> Option<Pr
         format!(
             "{name:?} is the name the journal's intent for {table}.{other} sent, and crucible.lock holds no ID for it, \
              so its create may have landed under that name and the adopt check could bind {table}.{key} to it. Give \
-             {table}.{key} another name until provision resolves that intent, or resolve it yourself with `crucible \
-             adopt {noun} {other} <id>`, or remove the intent from {} if no {noun} has that name",
+             {table}.{key} another name until provision resolves that intent, or remove the intent from {} if no \
+             {noun} has that name, or, once `crucible provision` arrives with `crucible adopt`, resolve it with \
+             `crucible adopt {noun} {other} <id>`",
             journal::path(env).display()
         ),
     ))

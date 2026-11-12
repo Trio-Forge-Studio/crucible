@@ -305,8 +305,10 @@ fn an_intent_no_step_can_carry_stops_the_plan() {
             "{path}: products.gem-pack: the journal holds an intent to create product gem-pack as \"Gem pack\", and \
              crucible.lock holds no ID for it, so the create may have landed in universe 10772177432. crucible.toml \
              declares no products.gem-pack. If it was renamed, set moved_from = \"gem-pack\" on the new key, one of \
-             products.coin-pack. Declare it again until provision resolves the intent, or resolve it yourself: record the product named \"Gem pack\" in universe 10772177432 with `crucible adopt product \
-             gem-pack <id>`, or remove the intent from {path} if universe 10772177432 has no such product"
+             products.coin-pack. Declare it again until provision resolves the intent, or resolve it yourself: remove \
+             the intent from {path} if universe 10772177432 has no product named \"Gem pack\", or, once `crucible \
+             provision` arrives with `crucible adopt`, record the one it has with `crucible adopt product gem-pack \
+             <id>`"
         )]
     );
     let lock = Project::new(CONFIG).applied("staging");
@@ -364,13 +366,32 @@ fn a_name_another_key_s_unresolved_intent_sent_stops_the_plan() {
         [format!(
             "crucible.toml:{line}: passes.gold.name: \"Gold\" is the name the journal's intent for passes.vip sent, and \
              crucible.lock holds no ID for it, so its create may have landed under that name and the adopt check could \
-             bind passes.gold to it. Give passes.gold another name until provision resolves that intent, or resolve it \
-             yourself with `crucible adopt pass vip <id>`, or remove the intent from {} if no pass has that name",
+             bind passes.gold to it. Give passes.gold another name until provision resolves that intent, or remove the \
+             intent from {} if no pass has that name, or, once `crucible provision` arrives with `crucible adopt`, \
+             resolve it with `crucible adopt pass vip <id>`",
             crucible_iac::journal::path("staging").display()
         )]
     );
     let lock = project.applied("staging");
     assert!(project.plan("staging", Some(&lock), Some(&journal)).is_ok(), "the lock resolves vip's intent");
+}
+
+#[test]
+fn a_message_that_names_crucible_adopt_says_it_arrives_with_crucible_provision() {
+    let gold = CONFIG.to_owned() + "[passes.gold]\nname = \"Gold\"\nprice = 1\n";
+    let moved = CONFIG.replace("[passes.vip]", "[passes.gold]\nmoved_from = \"vip\"");
+    let mut problems = Vec::new();
+    for (config, journal) in [
+        (CONFIG.to_owned(), journal(&[("product", "gem-pack", "Gem pack")])),
+        (gold, journal(&[("pass", "vip", "Gold")])),
+        (moved, journal(&[("pass", "vip", "VIP"), ("pass", "gold", "VIP")])),
+    ] {
+        problems.extend(messages(Project::new(&config).plan("staging", None, Some(&journal)).unwrap_err()));
+    }
+    assert_eq!(problems.len(), 3, "{problems:#?}");
+    for problem in problems {
+        assert!(problem.contains("once `crucible provision` arrives with `crucible adopt`"), "{problem}");
+    }
 }
 
 #[test]
