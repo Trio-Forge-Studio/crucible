@@ -1,7 +1,7 @@
 use crucible_iac::journal::{self, Journal};
 use crucible_iac::lock::{self, Lock};
 use crucible_iac::model::{Experience, Problem};
-use crucible_iac::plan::{Action, Inputs, Plan, plan, undeclared};
+use crucible_iac::plan::{Action, Inputs, Observed, Plan, plan, undeclared};
 use crucible_project::Manifest;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -18,18 +18,18 @@ pub struct Args {
     pub json: bool,
 }
 
-struct Failure {
-    code: u8,
-    message: String,
-    problems: Vec<Problem>,
+pub(crate) struct Failure {
+    pub code: u8,
+    pub message: String,
+    pub problems: Vec<Problem>,
 }
 
 impl Failure {
-    fn usage(message: impl Into<String>) -> Self {
+    pub fn usage(message: impl Into<String>) -> Self {
         Self { code: 2, message: message.into(), problems: vec![] }
     }
 
-    fn read(path: &Path, error: &std::io::Error) -> Self {
+    pub fn read(path: &Path, error: &std::io::Error) -> Self {
         Self { code: 1, message: format!("cannot read {}: {error}", path.display()), problems: vec![] }
     }
 }
@@ -69,49 +69,74 @@ fn print(text: &str) -> std::io::Result<()> {
     writeln!(std::io::stdout().lock(), "{text}")
 }
 
+/// The files a plan reads.
+pub(crate) struct Project {
+    pub manifest: Manifest,
+    pub experience: Experience,
+    pub lock: Option<Lock>,
+    pub journals: BTreeMap<String, Journal>,
+}
+
+impl Project {
+    pub fn load(root: &Path, command: &str) -> Result<Self, Failure> {
+        let read = |path: &Path| match std::fs::read_to_string(root.join(path)) {
+            Ok(text) => Ok(Some(text)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(Failure::read(path, &error)),
+        };
+        let text = read(Path::new(crucible_project::FILE))?.ok_or_else(|| {
+            Failure::usage(format!("{command} needs crucible.toml. Run `crucible docs experience` for an example"))
+        })?;
+        let manifest = Manifest::parse(&text).map_err(|error| Failure::usage(error.to_string()))?;
+        let experience = Experience::new(&manifest).map_err(|problems| Failure {
+            code: 2,
+            message: "crucible.toml breaks the experience rules:".into(),
+            problems,
+        })?;
+        let lock = read(Path::new(lock::FILE))?
+            .map(|text| Lock::parse(&text))
+            .transpose()
+            .map_err(|error| Failure::usage(error.to_string()))?;
+        let journals = journals(root)?;
+        Ok(Self { manifest, experience, lock, journals })
+    }
+
+    pub fn unknown(&self, name: &str) -> Failure {
+        Failure::usage(format!(
+            "unknown environment {name}. Environments: {}",
+            self.manifest.envs.keys().cloned().collect::<Vec<_>>().join(", ")
+        ))
+    }
+
+    /// The inputs of `env`'s plan, with what Roblox holds when provision has listed it.
+    pub fn inputs<'a>(&'a self, env: &'a str, observed: Option<&'a Observed>) -> Inputs<'a> {
+        Inputs {
+            experience: &self.experience,
+            env_name: env,
+            env: &self.manifest.envs[env],
+            lock: self.lock.as_ref().and_then(|lock| lock.env(env)),
+            journal: self.journals.get(env),
+            observed,
+        }
+    }
+}
+
 fn run(root: &Path, only: Option<&str>) -> Result<Vec<Plan>, Failure> {
-    let read = |path: &Path| match std::fs::read_to_string(root.join(path)) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(Failure::read(path, &error)),
-    };
-    let text = read(Path::new(crucible_project::FILE))?
-        .ok_or_else(|| Failure::usage("plan needs crucible.toml. Run `crucible docs experience` for an example"))?;
-    let manifest = Manifest::parse(&text).map_err(|error| Failure::usage(error.to_string()))?;
-    let experience = Experience::new(&manifest).map_err(|problems| Failure {
-        code: 2,
-        message: "crucible.toml breaks the experience rules:".into(),
-        problems,
-    })?;
-    let lock = read(Path::new(lock::FILE))?
-        .map(|text| Lock::parse(&text))
-        .transpose()
-        .map_err(|error| Failure::usage(error.to_string()))?;
+    let project = Project::load(root, "plan")?;
+    let Project { manifest, lock, journals, .. } = &project;
     let names: Vec<&String> = match only {
-        Some(name) => vec![manifest.envs.get_key_value(name).map(|(name, _)| name).ok_or_else(|| {
-            Failure::usage(format!(
-                "unknown environment {name}. Environments: {}",
-                manifest.envs.keys().cloned().collect::<Vec<_>>().join(", ")
-            ))
-        })?],
+        Some(name) => {
+            vec![manifest.envs.get_key_value(name).map(|(name, _)| name).ok_or_else(|| project.unknown(name))?]
+        }
         None => manifest.envs.keys().collect(),
     };
     if names.is_empty() {
         return Err(Failure::usage("crucible.toml configures no environment. Add one with [env.<name>]"));
     }
-    let journals = journals(root)?;
     let mut plans = Vec::new();
-    let mut problems = undeclared(&manifest.envs, lock.as_ref(), &journals);
+    let mut problems = undeclared(&manifest.envs, lock.as_ref(), journals);
     for name in names {
-        let inputs = Inputs {
-            experience: &experience,
-            env_name: name,
-            env: &manifest.envs[name],
-            lock: lock.as_ref().and_then(|lock| lock.env(name)),
-            journal: journals.get(name),
-            observed: None,
-        };
-        match plan(&inputs, &mut |path| std::fs::read(root.join(path))) {
+        match plan(&project.inputs(name, None), &mut |path| std::fs::read(root.join(path))) {
             Ok(plan) => plans.push(plan),
             Err(found) => problems.extend(found),
         }
@@ -146,7 +171,7 @@ fn journals(root: &Path) -> Result<BTreeMap<String, Journal>, Failure> {
     Ok(journals)
 }
 
-fn render(plans: &[Plan]) -> String {
+pub(crate) fn render(plans: &[Plan]) -> String {
     let mut text = String::new();
     for plan in plans {
         text += &format!("{} (universe {})\n", plan.environment, plan.universe);

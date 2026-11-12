@@ -2,7 +2,7 @@
 
 Declare developer products, game passes and badges in `crucible.toml`, and plan their provisioning offline with `crucible plan`.
 
-`crucible plan` reads the declarations, `crucible.lock` and the provisioning journal, and prints what `crucible provision` would do in each environment. It makes no network call and writes nothing. `crucible provision` itself arrives in a later release, so today the lock and the journal exist only when you write them.
+`crucible plan` reads the declarations, `crucible.lock` and the provisioning journal, and prints what `crucible provision` would do in each environment. It makes no network call and writes nothing. `crucible provision` applies the plan and writes the lock and the journal, as `npx crucible docs provision` describes.
 
 ## Declare the experience
 
@@ -90,7 +90,7 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 | `untrack` | The table sets `untrack = true` and the lock holds its ID. | Removes it from the lock. |
 | `no-op` | Nothing differs. | Nothing. |
 
-`changes` says why an update happens: `details`, `icon`, `restore` or `key`. The lock keeps a fingerprint of the fields it applied, not the fields, so the plan cannot say which detail changed. More than five badge creates in one plan add a warning, because Roblox makes five badges a day free in each experience and charges 100 Robux for each one after that.
+`crucible provision` plans with what Roblox lists too, so its plan can also show `adopt`, with the ID of the one resource a `create` or an `adopt-check` found, and an `update` for a change someone made on Roblox. `changes` says why an update happens: `details`, `icon`, `restore` or `key`. The lock keeps a fingerprint of the fields it applied, not the fields, so the plan cannot say which detail changed. More than five badge creates in one plan add a warning, because Roblox makes five badges a day free in each experience and charges 100 Robux for each one after that.
 
 ```text
 staging (universe 10772177432)
@@ -146,13 +146,13 @@ Each environment's plan uses only that environment's lock tables and journal, so
 
 ## The journal
 
-`.crucible/journal/<env>.json` lists the creates provision has started and not recorded in the lock, with the universe it sent them to and the display name each one sent.
+`.crucible/journal/<env>.json` lists the creates provision has started and not recorded in the lock, with the universe it sent them to, the display name each one sent, and the IDs of that kind the run knew before it. Provision removes the file when it holds no intent.
 
 ```json
 {
   "version": 1,
   "universe": 10772177432,
-  "intents": [{ "kind": "badge", "key": "first-delivery", "name": "First delivery" }]
+  "intents": [{ "kind": "badge", "key": "first-delivery", "name": "First delivery", "before": [2124000000000000] }]
 }
 ```
 

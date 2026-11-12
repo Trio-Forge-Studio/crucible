@@ -8,7 +8,7 @@ Each `crucible oc` command writes one JSON document to stdout. Progress goes to 
 
 ## Configure a key
 
-A game has one Open Cloud key. `crucible oc`, `crucible publish`, and `crucible whoami` read it from `CRUCIBLE_OC_API_KEY`. Keys never belong in command arguments.
+A game has one Open Cloud key. `crucible oc`, `crucible publish`, `crucible provision`, `crucible adopt`, and `crucible whoami` read it from `CRUCIBLE_OC_API_KEY`. Keys never belong in command arguments.
 
 In CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Locally, put it in a `.env` file at the project root, which is the directory you run `crucible` from.
 

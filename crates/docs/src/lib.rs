@@ -36,6 +36,7 @@ pub static TOPICS: &[Topic] = topics![
     "networking.md",
     "oc.md",
     "profile-stores.md",
+    "provision.md",
     "random.md",
     "reactive.md",
     "replicated.md",
