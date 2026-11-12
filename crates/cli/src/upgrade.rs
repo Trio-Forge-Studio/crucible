@@ -101,7 +101,7 @@ enum Change {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Manager {
+pub(crate) enum Manager {
     Npm,
     Pnpm,
     Yarn,
@@ -110,7 +110,7 @@ enum Manager {
 }
 
 impl Manager {
-    fn program(self) -> &'static str {
+    pub(crate) fn program(self) -> &'static str {
         match self {
             Self::Npm => "npm",
             Self::Pnpm => "pnpm",
@@ -1266,7 +1266,7 @@ fn busy(error: &io::Error) -> bool {
 }
 
 // A pnpm, Yarn, or npm workspace keeps one lockfile at its root, above the game.
-fn detect_manager(root: &Path, agent: &str) -> Manager {
+pub(crate) fn detect_manager(root: &Path, agent: &str) -> Manager {
     detect_manager_in(root.ancestors(), agent)
 }
 
