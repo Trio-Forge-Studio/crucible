@@ -58,6 +58,7 @@ enabled = false
   - an environment that maps a place `[places]` does not declare, leaves one unmapped, or sets `place` when `start` is not the only place.
 - A key such as `coin-pack` uses lowercase letters, digits and `-`, and starts with a letter. Game code will reach it as `Products.CoinPack`, so two keys that become the same handle, such as `a-1b` and `a1b`, are an error.
 - Two products, two passes or two badges may not share a `name`. A declared key's name is taken whatever its status, retired and untracked included, because provision adopts an existing resource by its name and could not tell them apart. Only a retired key may leave out its `name`. A product and a pass may share one.
+- Crucible compares display names byte for byte, so case, trailing spaces and Unicode forms make different names to it, though Roblox may treat them as one. A name that starts or ends with whitespace is an error.
 - Each environment needs its own universe. Provision adopts a resource by its name inside a universe, so two environments on one universe would bind each other's resources, and one environment's overlays would overwrite the other's values.
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.
 - `[env.<name>.products.<key>]` and `[env.<name>.passes.<key>]` may change only `price`, and `[env.<name>.badges.<key>]` only `enabled`. An overlay for a key that is not declared is an error, so a typo cannot create a resource.

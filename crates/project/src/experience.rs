@@ -29,6 +29,8 @@ pub struct Settings {
     }],
 ))]
 pub struct Priced {
+    /// The display name, with no whitespace at either end.
+    #[schemars(extend("not" = { "pattern": "^[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$" }))]
     pub name: Option<String>,
     pub description: Option<String>,
     /// The price in Robux. A price of 0 is not off sale: set `retired = true` instead.
@@ -60,6 +62,8 @@ pub struct Priced {
     }],
 ))]
 pub struct Badge {
+    /// The display name, with no whitespace at either end.
+    #[schemars(extend("not" = { "pattern": "^[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$" }))]
     pub name: Option<String>,
     pub description: Option<String>,
     /// An image path relative to the project root.

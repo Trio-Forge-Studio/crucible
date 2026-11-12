@@ -726,6 +726,8 @@ mod tests {
             assert_eq!(defs[def]["not"]["required"], serde_json::json!(["retired", "untrack"]), "{def}");
             assert_eq!(defs[def]["allOf"][0]["then"]["required"], serde_json::json!(["name"]), "{def}");
             assert_eq!(defs[def]["properties"]["moved_from"]["pattern"], key["pattern"], "{def}");
+            let blank = defs[def]["properties"]["name"]["not"]["pattern"].as_str().unwrap();
+            assert!(blank.starts_with("^[\\t-\\r \\u0085") && blank.ends_with("\\ufeff]$"), "{def}: {blank}");
         }
         assert_eq!(defs["Priced"]["properties"]["price"]["minimum"], 1);
         assert_eq!(defs["PricedOverlay"]["properties"]["price"]["minimum"], 1);

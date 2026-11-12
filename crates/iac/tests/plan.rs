@@ -554,6 +554,30 @@ fn two_environments_may_not_share_a_universe() {
 }
 
 #[test]
+fn a_display_name_has_no_whitespace_at_either_end() {
+    for name in [" VIP", "VIP ", "VIP\n", "   ", "\u{feff}VIP", "VIP\u{3000}"] {
+        for status in ["price = 299\n", "retired = true\n", "untrack = true\n"] {
+            let toml = format!("name = \"{}\"\n{status}", name.replace('\n', "\\n"));
+            let config = CONFIG.replace("name = \"VIP\"\nprice = 299\n", &toml);
+            let problems = messages(Project::new(&config).experience().unwrap_err());
+            assert_eq!(
+                problems,
+                [format!(
+                    "crucible.toml:25: passes.vip.name: {name:?} starts or ends with whitespace. Crucible compares \
+                     display names byte for byte and Roblox may trim them, so the name could stop matching its own \
+                     resource. Remove the whitespace"
+                )],
+                "{status}"
+            );
+        }
+    }
+    for name in ["V I P", "VIP", "Café"] {
+        let config = CONFIG.replace("name = \"VIP\"", &format!("name = \"{name}\""));
+        assert!(Project::new(&config).experience().is_ok(), "{name:?}");
+    }
+}
+
+#[test]
 fn a_badge_overlay_changes_only_its_environment() {
     let config = CONFIG.to_owned() + "[env.staging.badges.first-delivery]\nenabled = false\n";
     let project = Project::new(&config);

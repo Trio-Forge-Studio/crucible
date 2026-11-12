@@ -233,6 +233,17 @@ impl Experience {
                     )),
                     (None, Lifecycle::Retired) => {}
                     (Some(name), _) => {
+                        if name.trim_matches(is_space) != name {
+                            problems.push(Problem::at(
+                                *line,
+                                at(".name"),
+                                format!(
+                                    "{name:?} starts or ends with whitespace. Crucible compares display names byte \
+                                     for byte and Roblox may trim them, so the name could stop matching its own \
+                                     resource. Remove the whitespace"
+                                ),
+                            ));
+                        }
                         if let Some((other, was)) = names.insert(name, (key, lifecycle)) {
                             let retired = if [was, lifecycle].contains(&Lifecycle::Retired) {
                                 ", or remove the name of the retired one"
@@ -390,6 +401,12 @@ fn priced(tables: &crucible_project::experience::Tables<Priced>) -> Vec<(&String
 
 fn zero_price(kind: Kind) -> String {
     format!("a price of 0 does not take a {} off sale. Set retired = true to take it off sale", kind.noun())
+}
+
+/// Whitespace as Rust's `char::is_whitespace` and JavaScript's `\s` count it together, so the schema's name pattern
+/// and this check agree.
+fn is_space(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
 }
 
 pub fn is_key(key: &str) -> bool {
