@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+crucible-abi = { path = "../abi" }
 crucible-docs = { path = "../docs" }
 crucible-oc = { path = "../oc" }
 crucible-project = { path = "../project" }
