@@ -10,6 +10,7 @@ mod flows;
 mod output;
 mod plan;
 mod publish;
+mod reactive_packages;
 mod upgrade;
 mod whoami;
 

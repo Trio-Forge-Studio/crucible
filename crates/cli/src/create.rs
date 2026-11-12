@@ -163,12 +163,35 @@ pub fn package_manager(agent: &str) -> &'static str {
     }
 }
 
+pub fn peer_versions() -> Vec<(&'static str, String)> {
+    let runtime: serde_json::Value = serde_json::from_str(include_str!("../../../packages/crucible/package.json"))
+        .expect("runtime manifest is valid");
+    peer_versions_from(&runtime["peerDependencies"])
+}
+
+pub fn peer_versions_from(peers: &serde_json::Value) -> Vec<(&'static str, String)> {
+    let sample: serde_json::Value = serde_json::from_str(include_str!("../../../examples/sample-game/package.json"))
+        .expect("sample manifest is valid");
+    let mut versions: Vec<_> = ["@rbxts/charm", "@rbxts/charm-sync", "@rbxts/vide"]
+        .into_iter()
+        .filter_map(|package| peers[package].as_str().map(|spec| (package, spec.to_owned())))
+        .collect();
+    if peers.get("@rbxts/vide").is_some() {
+        versions.push((
+            "@rbxts/vide-charm",
+            sample["dependencies"]["@rbxts/vide-charm"].as_str().expect("bridge version is pinned").to_owned(),
+        ));
+    }
+    versions
+}
+
 pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
     let workspace: serde_json::Value =
         serde_json::from_str(include_str!("../../../package.json")).expect("workspace package.json is valid");
     let sample: serde_json::Value = serde_json::from_str(include_str!("../../../examples/sample-game/package.json"))
         .expect("sample package.json is valid");
     let mut tokens = vec![("__NAME__", name.into()), ("__VERSION__", env!("CARGO_PKG_VERSION").into())];
+    let peers = peer_versions();
     for (token, package, manifest, group) in [
         ("__VITE_PLUS__", "vite-plus", &workspace, "devDependencies"),
         ("__RBXTS_TYPES__", "@rbxts/types", &sample, "devDependencies"),
@@ -177,7 +200,14 @@ pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
         ("__VIDE__", "@rbxts/vide", &sample, "dependencies"),
         ("__VIDE_CHARM__", "@rbxts/vide-charm", &sample, "dependencies"),
     ] {
-        tokens.push((token, manifest[group][package].as_str().expect("package version is pinned").into()));
+        tokens.push((
+            token,
+            peers
+                .iter()
+                .find(|(name, _)| *name == package)
+                .map(|(_, spec)| spec.clone())
+                .unwrap_or_else(|| manifest[group][package].as_str().expect("package version is pinned").into()),
+        ));
     }
     tokens
 }
