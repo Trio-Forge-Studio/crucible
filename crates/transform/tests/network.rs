@@ -3171,8 +3171,10 @@ fn cru039_names_a_second_grant_of_a_product_and_where_the_first_is() {
     assert_eq!(messages(&reports, "src/server/shop.ts"), Vec::<String>::new());
     assert_eq!(
         messages(&reports, "src/server/skins.ts"),
-        ["CRU039: Product coin-pack is granted here and at src/server/shop.ts:5. A purchase runs one grant, so grant \
-          each product once."]
+        [
+            "CRU039: Product coin-pack is granted here and at src/server/shop.ts:5:16. A purchase runs one grant, so grant \
+          each product once."
+        ]
     );
 }
 
@@ -3181,14 +3183,20 @@ fn cru039_names_a_product_a_granting_place_never_grants() {
     let game = experience_game();
     game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack"]));
     let facts = game.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)));
-    let found: Vec<_> =
-        facts.diagnostics.iter().filter(|d| d.code == 90039).map(|d| (d.path.clone(), &d.message)).collect();
+    let found: Vec<_> = facts
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == 90039)
+        .map(|d| (d.path.as_deref().map(|path| path.ends_with("/src/server/shop.ts")), d.line, d.column, &d.message))
+        .collect();
     assert_eq!(
         found,
         [(
-            None,
-            &"CRU039: Product gem-pack has no grant. src/crucible-experience.d.ts:8 declares it as Products.GemPack. This \
-              place grants other products at src/server/shop.ts:5, so a purchase of gem-pack would be refused. Grant it \
+            Some(true),
+            5,
+            16,
+            &"CRU039: Product gem-pack has no grant. src/crucible-experience.d.ts:8:3 declares it as Products.GemPack. \
+              This place grants other products at src/server/shop.ts:5:16, so a purchase of gem-pack would be refused. Grant it \
               once with a profile store's grant(Products.GemPack, ...)."
                 .to_owned()
         )]
@@ -3235,7 +3243,47 @@ fn cru039_lets_a_place_grant_a_retired_product_once_or_not_at_all() {
     game.write("src/server/skins.ts", &shop("Skins", &["Products.OldPack"]));
     assert_eq!(
         messages(&reports_of(&game), "src/server/skins.ts"),
-        ["CRU039: Product old-pack is granted here and at src/server/shop.ts:7. A purchase runs one grant, so grant \
-          each product once."]
+        [
+            "CRU039: Product old-pack is granted here and at src/server/shop.ts:7:16. A purchase runs one grant, so grant \
+          each product once."
+        ]
+    );
+}
+
+#[test]
+fn cru039_says_which_grants_it_cannot_read_when_they_go_through_a_helper() {
+    let game = experience_game();
+    game.write(
+        "src/server/shop.ts",
+        "import { Subsystem, type ProductHandle } from \"@trioforge/crucible\";\nimport { Products } from \"crucible:experience\";\nimport { PlayerData } from \"../shared/store\";\nconst sell = (product: ProductHandle) => PlayerData.grant(product, (_, data) => data);\nexport class Shop extends Subsystem {\n\treadonly coins = sell(Products.CoinPack);\n}\n",
+    );
+    let facts = game.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)));
+    let found: Vec<_> =
+        facts.diagnostics.iter().filter(|d| d.code == 90039).map(|d| (d.line, d.message.as_str())).collect();
+    let (unkeyed, missing): (Vec<_>, Vec<_>) =
+        found.iter().partition(|(_, message)| message.contains("whose key the compiler cannot see"));
+    assert_eq!((unkeyed.len(), missing.len()), (1, 2), "{found:?}");
+    for &(line, message) in missing {
+        assert_eq!(line, 4, "at the helper's grant: {message}");
+        assert!(
+            message.contains(". This place's grants take handles whose keys the compiler cannot see, so a purchase"),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn cru039_names_the_column_of_each_grant_when_two_share_a_line() {
+    let game = experience_game();
+    game.write(
+        "src/server/shop.ts",
+        "import { Subsystem } from \"@trioforge/crucible\";\nimport { Products } from \"crucible:experience\";\nimport { PlayerData } from \"../shared/store\";\nexport class Shop extends Subsystem {\n\treadonly gems = PlayerData.grant(Products.GemPack, (_, data) => data);\n\treadonly coins = 1 > 0 ? PlayerData.grant(Products.CoinPack, (_, data) => data) : PlayerData.grant(Products.CoinPack, (_, data) => data);\n}\n",
+    );
+    assert_eq!(
+        messages(&reports_of(&game), "src/server/shop.ts"),
+        [
+            "CRU039: Product coin-pack is granted here and at src/server/shop.ts:6:27. A purchase runs one grant, so grant \
+          each product once."
+        ]
     );
 }

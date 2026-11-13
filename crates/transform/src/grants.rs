@@ -21,7 +21,10 @@ const RULE: Code = Code::Rule(39);
 
 #[derive(Default)]
 pub(crate) struct Grants {
-    any: bool,
+    /// The program's first grant, where a product with no grant is reported.
+    first: Option<Node>,
+    /// Whether a grant takes a handle whose key the checker cannot see, such as a helper's parameter.
+    unkeyed: bool,
     /// Each product key a grant names, with where each of its grants is.
     by_key: BTreeMap<String, Vec<String>>,
 }
@@ -30,13 +33,14 @@ fn place(cx: &ProgramCx<'_>, n: Node) -> String {
     let file = n.file();
     let path = file.path();
     let shown = Path::new(&path).strip_prefix(cx.config_dir()).map_or(path.clone(), |p| p.to_string_lossy().into());
-    format!("{}:{}", shown.replace('\\', "/"), file.position(n.span().start).line)
+    let position = file.position(n.span().start);
+    format!("{}:{}:{}", shown.replace('\\', "/"), position.line, position.column)
 }
 
 impl Walk<'_, '_> {
     /// Records the products a profile store's `grant` call names through their handles.
     pub(crate) fn grant(&mut self, call: Node) {
-        self.state.grants.any = true;
+        self.state.grants.first.get_or_insert(call);
         let Some(argument) = call.arguments().get(0) else { return };
         let t = self.cx.type_at(argument);
         let members = if t.flags().intersects(TypeFlags::Union) { t.types() } else { vec![t] };
@@ -53,6 +57,7 @@ impl Walk<'_, '_> {
                          that each product has one grant. Pass a handle of {EXPERIENCE}, such as {PRODUCTS}.CoinPack."
                     );
                     self.report(argument, RULE, &message);
+                    self.state.grants.unkeyed = true;
                     return;
                 }
             }
@@ -74,17 +79,16 @@ impl Walk<'_, '_> {
 }
 
 impl Grants {
-    /// Reports each product the program declares and never grants, once the program grants any.
+    /// Reports each product the program declares and never grants at the program's first grant, once it grants any.
     pub(crate) fn finish(&self, cx: &mut ProgramCx<'_>, api: &Api) {
-        if !self.any {
-            return;
-        }
+        let Some(first) = self.first else { return };
         for (key, handle, declared) in declared_products(cx, api) {
             if self.by_key.contains_key(&key) || handle.retired {
                 continue;
             }
             let granted: Vec<_> = self.by_key.values().flatten().map(String::as_str).collect();
             let elsewhere = match granted.as_slice() {
+                [] if self.unkeyed => "This place's grants take handles whose keys the compiler cannot see".to_owned(),
                 [] => "This place grants products only by ID".to_owned(),
                 _ => format!("This place grants other products at {}", granted.join(", ")),
             };
@@ -94,7 +98,7 @@ impl Grants {
                  purchase of {key} would be refused. Grant it once with a profile store's grant({PRODUCTS}.{handle}, \
                  ...)."
             ));
-            cx.report(code, message);
+            cx.report_at(first, code, message);
         }
     }
 }
