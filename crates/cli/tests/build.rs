@@ -1416,6 +1416,11 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// The canonical path without Windows's verbatim prefix, which mklink and TypeScript reject.
+fn canonical(path: &Path) -> PathBuf {
+    PathBuf::from(path.canonicalize().unwrap().to_string_lossy().trim_start_matches(r"\\?\"))
+}
+
 /// A copy of the sample game whose packages are the repository's, so its place boots on the repository's runtime.
 fn sample_game() -> Game {
     let game = Game { dir: tempfile::tempdir().unwrap() };
@@ -1424,7 +1429,7 @@ fn sample_game() -> Game {
         fs::copy(sample.join(file), game.path(file)).unwrap();
     }
     copy_dir(&sample.join("src"), &game.path("src"));
-    let root = slashes(&repo().canonicalize().unwrap().join("tsconfig.json"));
+    let root = slashes(&canonical(&repo()).join("tsconfig.json"));
     game.write(
         "tsconfig.json",
         &fs::read_to_string(sample.join("tsconfig.json")).unwrap().replace("../../tsconfig.json", &root),
@@ -1432,9 +1437,7 @@ fn sample_game() -> Game {
     for scope in ["@rbxts", "@trioforge"] {
         for entry in fs::read_dir(sample.join("node_modules").join(scope)).unwrap() {
             let entry = entry.unwrap();
-            let target = entry.path().canonicalize().unwrap();
-            // mklink takes no verbatim path.
-            let target = PathBuf::from(target.to_string_lossy().trim_start_matches(r"\\?\"));
+            let target = canonical(&entry.path());
             junction_to(&game.path(&format!("node_modules/{scope}")).join(entry.file_name()), &target);
         }
     }
