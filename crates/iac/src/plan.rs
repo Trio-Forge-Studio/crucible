@@ -748,10 +748,11 @@ pub fn differs(fields: &Fields, remote: &Listed) -> bool {
 /// The fields of Roblox's resource that differ from what the config declares for a managed key, in the order an update
 /// sends them.
 pub fn differences(fields: &Fields, remote: &Listed) -> Vec<Field> {
-    let (name, description, price, on, state) = match fields {
-        Fields::Priced { name, description, price } => (name, description, Some(*price), true, Field::Sale),
-        Fields::Badge { name, description, enabled } => (name, description, None, *enabled, Field::Enabled),
+    let (name, description, price, state) = match fields {
+        Fields::Priced { name, description, price, .. } => (name, description, Some(*price), Field::Sale),
+        Fields::Badge { name, description, .. } => (name, description, None, Field::Enabled),
     };
+    let on = fields.on();
     let mut differ = Vec::new();
     if *name != remote.name {
         differ.push(Field::Name);
@@ -759,7 +760,8 @@ pub fn differences(fields: &Fields, remote: &Listed) -> Vec<Field> {
     if *description != remote.description {
         differ.push(Field::Description);
     }
-    if price.is_some() && remote.price != price {
+    // Roblox may hold no price for a resource off sale, and nobody can buy it, so only a price it holds can differ.
+    if price.is_some() && remote.price != price && (on || remote.price.is_some()) {
         differ.push(Field::Price);
     }
     if remote.on != on {

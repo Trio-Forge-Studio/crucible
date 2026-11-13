@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-e2ba88a0539c4d8c9de6364e8db433d208702017f228f4187d011a4149cb384a  build/sample-game.rbxl
+76414af911b5293968713c1f8f73f6346111b7dfed2f4b852908e4ff823bf51d  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -13,7 +13,7 @@ aaa8a4e44ed707b7d35b28fd84e39f469f68a0400f70fe6c63aaff2f8921124e  examples/sampl
 2e366ff7fab593eb4f7526eaca974076405ce1d20c2ac975b3e450c5d2fda8b1  examples/sample-game/out/server/systems/shop.luau
 89cb4c2decc0cfa2f116286a886f143077ebaddf879f8bffc1731232488680f9  examples/sample-game/out/server/systems/store.luau
 0b135ba9d1907ade141c26f1d6f88bbc18cfc5be025c41cdbe440ff8429c360f  examples/sample-game/out/server/systems/wallet.luau
-846f39d1100c8000dd4daa95e4b5bfa608837ff110ae519062c050a754d46808  examples/sample-game/out/shared/crucible-experience.luau
+bb1097eba92b48f34d14e447465ab8fdc99202031e055d78f0b1c4b6f4bf7037  examples/sample-game/out/shared/crucible-experience.luau
 6a8c86fae88306ce910d50e06d92e44ad74e13d919b53ac87e319754ecaaa77c  examples/sample-game/out/shared/messages.luau
 e2f3e190cedd8a207dceba78e2ade07243943e4fb72ef965cc620e973e95ac3d  examples/sample-game/out/shared/profile.luau
 695ea811394cfd9ebdc35867a5c6ce11bec6fc5d480c5c7223d7dff64be4fe08  examples/sample-game/out/shared/state.luau
@@ -41,7 +41,7 @@ ab61a5a82168674e15d660c8520064c9bf78c4ddd2f66f9678955800ed6128e1  packages/cruci
 e8b57a4a853d31454bfd48e6542fc8e43977fdb3f657ab66d7f9bd21248024eb  packages/crucible/out/emit/network.luau
 a014fdecb93b704c26e3b1e60de86ef858b8bf7c14ec94b1881a6d8ac1944535  packages/crucible/out/emit/replicated.d.ts
 4346a094736f2106e0d6106026b7a1d414f0e27cfdc9e754f9552e653c99fe03  packages/crucible/out/emit/replicated.luau
-5aa0ae44fd0c66b10a98314f85a3f5afb4967f7bd7022b673f9a59d98c67fc32  packages/crucible/out/experience.d.ts
+ab3ffd331f9c8e83b5ea825b5fc8a81585f1c4fc8ecab74239ab5c884ddc6000  packages/crucible/out/experience.d.ts
 96ac64f9843ee89dfa6d96316df59d0cb2c177cad02e3407ce8708d52c9cc45c  packages/crucible/out/experience.luau
 d8d6ce9033a13112bb5c3370e6b33afae49deaf1f30e9538d771976e4b339c90  packages/crucible/out/index.d.ts
 aa11ca3d87715874a765f2fac410445c94d630b2993c4aa6b7764ca1f792e10e  packages/crucible/out/init.luau

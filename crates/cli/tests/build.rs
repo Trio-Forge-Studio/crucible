@@ -1355,7 +1355,7 @@ fn a_build_for_an_environment_binds_the_lock_s_ids_or_names_provision() {
     let out = game.build(&["--env", "staging"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     let bindings = game.read(BINDINGS);
-    assert!(bindings.contains("\t\tVip = bound(\"vip\", 3301234567),\n"), "{bindings}");
+    assert!(bindings.contains("\t\tVip = bound(\"vip\", 3301234567, true),\n"), "{bindings}");
     assert!(bindings.contains("\t\tFirstPickup = bound(\"first-pickup\", 2124000000000000),\n"), "{bindings}");
     let out = game.build(&["--env", "production"]);
     assert_eq!(code(&out), 2);
@@ -1393,7 +1393,8 @@ fn an_unbound_handle_throws_naming_its_key_when_its_id_is_read() {
         "read.luau",
         "local experience = require(\"./out/shared/crucible-experience\")\nassert(experience.Passes.Vip.key == \"vip\")\n\
          local ok, message = pcall(function() return experience.Passes.Vip.id end)\nassert(not ok)\nprint(message)\n\
-         assert(not pcall(function() experience.Passes.Vip.key = \"x\" end), \"frozen\")\n",
+         assert(not pcall(function() experience.Passes.Vip.key = \"x\" end), \"frozen\")\n\
+         assert(not pcall(function() return experience.Passes.Vip.forSale end), \"forSale throws unbound\")\n",
     );
     // Rokit finds lune through the repository's rokit.toml.
     let out = Command::new("lune").arg("run").arg(game.path("read.luau")).current_dir(repo()).output().unwrap();
@@ -1475,7 +1476,7 @@ fn a_retired_product_an_environment_never_had_lets_its_place_boot() {
 
     let out = game.build(&["--env", "sample", "--output", "build/sample.rbxl"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    assert!(game.read(BINDINGS).contains("\t\tOldPack = bound(\"old-pack\", 1002),\n"));
+    assert!(game.read(BINDINGS).contains("\t\tOldPack = bound(\"old-pack\", 1002, false),\n"));
     let out = game.build(&["--env", "fresh", "--output", "build/fresh.rbxl"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     assert!(game.read(BINDINGS).contains("\t\tOldPack = absent(\"old-pack\", "), "{}", game.read(BINDINGS));

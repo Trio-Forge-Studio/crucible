@@ -370,6 +370,10 @@
       "description": "The fields an environment may override.",
       "type": "object",
       "properties": {
+        "for_sale": {
+          "description": "`false` keeps it off sale in this environment while its handle stays bound. Defaults to true. `retired` wins.",
+          "type": "boolean"
+        },
         "price": {
           "type": "integer",
           "format": "uint64",

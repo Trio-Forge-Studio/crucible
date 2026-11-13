@@ -668,7 +668,8 @@ mod tests {
         let manifest = Manifest::parse(
             "[experience]\nvoice_chat = true\n\n[products.coin-pack]\nname = \"Coin pack\"\nprice = 49\n\n\
              [badges]\nfirst-delivery = { name = \"First delivery\" }\n\n[passes.vip]\nname = \"VIP\"\nretired = true\n\
-             [env.staging]\nuniverse = 1\nplace = 2\n[env.staging.products.coin-pack]\nprice = 1\n",
+             [env.staging]\nuniverse = 1\nplace = 2\n[env.staging.products.coin-pack]\nprice = 1\n\
+             [env.staging.passes.vip]\nfor_sale = false\n",
         )
         .unwrap();
         let declared = &manifest.experience;
@@ -678,7 +679,8 @@ mod tests {
         assert_eq!(declared.badges["first-delivery"].line, 9);
         assert!(declared.passes["vip"].value.retired);
         let overlay = &manifest.envs["staging"].overlays.products["coin-pack"];
-        assert_eq!((overlay.line, overlay.value.price), (17, Some(1)));
+        assert_eq!((overlay.line, overlay.value.price, overlay.value.for_sale), (17, Some(1), None));
+        assert_eq!(manifest.envs["staging"].overlays.passes["vip"].value.for_sale, Some(false));
     }
 
     #[test]
@@ -691,6 +693,11 @@ mod tests {
                 "crucible.toml:5: unknown field `name`, expected `enabled`",
             ),
             ("[experience]\nname = \"Game\"\n", "crucible.toml:2: unknown field `name`"),
+            ("[products.coin-pack]\nname = \"Coin\"\nfor_sale = false\n", "crucible.toml:3: unknown field `for_sale`"),
+            (
+                "[env.staging]\nuniverse = 1\n[env.staging.badges.first]\nfor_sale = false\n",
+                "crucible.toml:4: unknown field `for_sale`, expected `enabled`",
+            ),
         ] {
             let message = error(text).to_string();
             assert!(message.starts_with(start), "{message}");

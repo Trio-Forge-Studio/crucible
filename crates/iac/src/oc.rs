@@ -118,12 +118,12 @@ impl Remote for Roblox<'_, '_> {
     fn create(&mut self, kind: Kind, fields: &Fields, icon: Option<&Image>) -> Result<Id, Failure> {
         let universe = self.universe;
         match fields {
-            Fields::Priced { name, description, price } => {
+            Fields::Priced { name, description, price, for_sale } => {
                 let details = Details {
                     name: Some(name.clone()),
                     description: Some(description.clone()),
                     price: Some(*price),
-                    for_sale: Some(true),
+                    for_sale: Some(*for_sale),
                     icon: icon.cloned(),
                 };
                 let created = match kind {

@@ -250,7 +250,7 @@ fn adopt_writes_the_lock_then_clears_the_key_s_intents() {
     let lock = disk.lock.unwrap();
     let entry = &lock.env("staging").unwrap().entries(Kind::Product)["moved"];
     assert_eq!((entry.id, entry.status, entry.icon.as_deref()), (id(5), Status::Managed, None));
-    let fields = Fields::Priced { name: "Moved".into(), description: String::new(), price: 3 };
+    let fields = Fields::Priced { name: "Moved".into(), description: String::new(), price: 3, for_sale: true };
     assert_eq!(entry.fingerprint, fields.fingerprint());
     assert_eq!(disk.journal.unwrap().intents, [intent("beta", "Beta", &[5, 6])], "only the key's intent is cleared");
 

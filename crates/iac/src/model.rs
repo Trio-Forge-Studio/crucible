@@ -57,13 +57,32 @@ pub enum Lifecycle {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Fields {
-    Priced { name: String, description: String, price: u64 },
-    Badge { name: String, description: String, enabled: bool },
+    Priced {
+        name: String,
+        description: String,
+        price: u64,
+        /// Left out of the fingerprint when true, so the locks written before the field keep matching.
+        #[serde(skip_serializing_if = "is_true")]
+        for_sale: bool,
+    },
+    Badge {
+        name: String,
+        description: String,
+        enabled: bool,
+    },
 }
 
 impl Fields {
     pub fn fingerprint(&self) -> String {
         fingerprint(self)
+    }
+
+    /// Whether a product or a pass is for sale, or a badge enabled.
+    pub fn on(&self) -> bool {
+        match self {
+            Fields::Priced { for_sale, .. } => *for_sale,
+            Fields::Badge { enabled, .. } => *enabled,
+        }
     }
 
     /// The display name, which provision's adopt check matches.
@@ -379,11 +398,14 @@ impl Experience {
                     Tables::Priced(base) => {
                         let overlays =
                             if resource.kind == Kind::Product { &env.overlays.products } else { &env.overlays.passes };
-                        let price = overlays.get(&resource.key).and_then(|overlay| overlay.value.price).or(base.price);
+                        let overlay = overlays.get(&resource.key).map(|overlay| &overlay.value);
+                        let price = overlay.and_then(|overlay| overlay.price).or(base.price);
+                        let for_sale = overlay.and_then(|overlay| overlay.for_sale).unwrap_or(true);
                         base.name.clone().zip(price).map(|(name, price)| Fields::Priced {
                             name,
                             description: base.description.clone().unwrap_or_default(),
                             price,
+                            for_sale,
                         })
                     }
                     Tables::Badge(base) => {
@@ -457,6 +479,10 @@ pub fn handle(key: &str) -> String {
             chars.next().map_or_else(String::new, |first| first.to_ascii_uppercase().to_string() + chars.as_str())
         })
         .collect()
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn fingerprint(value: &impl Serialize) -> String {

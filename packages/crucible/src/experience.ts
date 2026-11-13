@@ -11,6 +11,11 @@ export interface ProductHandle<K extends string = string> {
 	readonly key: K;
 	/** The product's Roblox ID in the environment the place was built for. Reading it throws when the build has none. */
 	readonly id: number;
+	/**
+	 * Whether the product is on sale in the environment the place was built for: false when it is retired or the
+	 * environment's overlay sets `for_sale = false`. Reading it throws when the build has no environment.
+	 */
+	readonly forSale: boolean;
 }
 
 /**
@@ -25,6 +30,11 @@ export interface PassHandle<K extends string = string> {
 	readonly key: K;
 	/** The pass's Roblox ID in the environment the place was built for. Reading it throws when the build has none. */
 	readonly id: number;
+	/**
+	 * Whether the pass is on sale in the environment the place was built for: false when it is retired or the
+	 * environment's overlay sets `for_sale = false`. Reading it throws when the build has no environment.
+	 */
+	readonly forSale: boolean;
 }
 
 /** A badge `crucible.toml` declares, imported from `crucible:experience` as `Badges.<Key>`. */

@@ -963,6 +963,60 @@ fn a_moved_key_that_is_retired_is_retired_and_then_only_renamed_in_the_lock() {
 }
 
 #[test]
+fn an_overlay_off_sale_creates_off_sale_and_changes_the_sale_state_both_ways() {
+    let off =
+        CONFIG.replace("[env.staging.products.coin-pack]\n", "[env.staging.products.coin-pack]\nfor_sale = false\n");
+    let project = Project::new(&off);
+    let resources = project.experience().unwrap().resolve(&project.manifest.envs["staging"]);
+    let fields = |key: &str| resources.iter().find(|resource| resource.key == key).unwrap().fields.clone().unwrap();
+    assert!(!fields("coin-pack").on() && fields("vip").on());
+    let production = project.experience().unwrap().resolve(&project.manifest.envs["production"]);
+    assert!(production[0].fields.as_ref().unwrap().on(), "the overlay changes only its environment");
+
+    let on_sale = Project::new(CONFIG).applied("staging");
+    let plan = project.plan("staging", Some(&on_sale), None).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+    assert_eq!((step.action, step.changes.as_slice()), (Action::Update, &[Change::Details][..]), "offline");
+    let off_sale = project.applied("staging");
+    assert_ne!(off_sale, on_sale, "the fingerprint covers the sale state");
+    assert!(
+        project
+            .plan("staging", Some(&off_sale), None)
+            .unwrap()
+            .steps
+            .iter()
+            .all(|step| step.action == Action::NoOp || step.kind == "experience")
+    );
+    let plan = Project::new(CONFIG).plan("staging", Some(&off_sale), None).unwrap();
+    assert_eq!(intent(&plan, "coin-pack").0, Action::Update, "removing the field puts it back on sale");
+
+    let mut observed = matching();
+    describe(&mut observed);
+    let plan = project.plan_seen("staging", Some(&off_sale), None, Some(&observed)).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+    assert_eq!((step.action, step.fields.as_slice()), (Action::Update, &[Field::Sale][..]));
+    let product = &mut observed.listed.get_mut(&Kind::Product).unwrap()[0];
+    product.on = false;
+    product.price = None;
+    let plan = project.plan_seen("staging", Some(&off_sale), None, Some(&observed)).unwrap();
+    assert_eq!(intent(&plan, "coin-pack").0, Action::NoOp, "an off-sale resource Roblox holds no price for matches");
+    let plan = Project::new(CONFIG).plan_seen("staging", Some(&on_sale), None, Some(&observed)).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+    assert_eq!(step.fields, [Field::Price, Field::Sale], "back on sale, it needs its price");
+
+    let retired = off.replace("icon = \"assets/coin-pack.png\"\n", "icon = \"assets/coin-pack.png\"\nretired = true\n");
+    let plan = Project::new(&retired).plan("staging", Some(&on_sale), None).unwrap();
+    assert_eq!(intent(&plan, "coin-pack").0, Action::Retire, "retired wins");
+}
+
+#[test]
+fn an_on_sale_fingerprint_is_the_one_locks_hold_from_before_for_sale() {
+    let fields = Fields::Priced { name: "VIP".into(), description: String::new(), price: 299, for_sale: true };
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(br#"{"name":"VIP","description":"","price":299}"#);
+    assert_eq!(fields.fingerprint(), format!("sha256:{digest:x}"));
+}
+
+#[test]
 fn a_badge_differs_in_any_one_field() {
     let fields = Fields::Badge { name: "First".into(), description: "Deliver.".into(), enabled: true };
     let same =
@@ -971,7 +1025,7 @@ fn a_badge_differs_in_any_one_field() {
     assert!(differs(&fields, &Listed { name: "Other".into(), ..same.clone() }));
     assert!(differs(&fields, &Listed { description: "Other.".into(), ..same.clone() }));
     assert!(differs(&fields, &Listed { on: false, ..same.clone() }));
-    let priced = Fields::Priced { name: "First".into(), description: "Deliver.".into(), price: 5 };
+    let priced = Fields::Priced { name: "First".into(), description: "Deliver.".into(), price: 5, for_sale: true };
     let sold = Listed { price: Some(5), ..same.clone() };
     assert!(!differs(&priced, &sold));
     for other in [

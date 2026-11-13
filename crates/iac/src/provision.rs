@@ -23,7 +23,7 @@
 use crate::journal::{Intent, Journal};
 use crate::lock::{Entry, EnvLock, Lock, Status};
 use crate::model::{Experience, Fields, Kind, Lifecycle, ResolvedSettings, Resource, content_hash};
-use crate::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan};
+use crate::plan::{Action, Change, Field, Id, Inputs, Listed, Observed, Plan, differences};
 use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
 use serde::Serialize;
@@ -546,17 +546,18 @@ fn update(
 ) -> io::Result<Vec<Effect>> {
     let fields = resource.fields.as_ref().expect("a managed resource has its fields");
     let mut patch = Patch::default();
-    let (name, description, price, on) = match fields {
-        Fields::Priced { name, description, price } => (name, description, Some(*price), true),
-        Fields::Badge { name, description, enabled } => (name, description, None, *enabled),
+    let (name, description, price) = match fields {
+        Fields::Priced { name, description, price, .. } => (name, description, Some(*price)),
+        Fields::Badge { name, description, .. } => (name, description, None),
     };
+    let on = fields.on();
     if remote.is_none_or(|remote| remote.name != *name) {
         patch.name = Some(name.clone());
     }
     if remote.is_none_or(|remote| remote.description != *description) {
         patch.description = Some(description.clone());
     }
-    if price.is_some_and(|price| remote.is_none_or(|remote| remote.price != Some(price))) {
+    if remote.is_none_or(|remote| differences(fields, remote).contains(&Field::Price)) {
         patch.price = price;
     }
     if remote.is_none_or(|remote| remote.on != on) {
