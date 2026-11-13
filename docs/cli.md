@@ -235,9 +235,19 @@ copy node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe %TEMP%\crucible
 
 ### When install fails
 
-A failed install restores `package.json` and exits 1. `node_modules` can still hold a mix of versions, so the message names the install command that returns it to the restored pins, such as `npm install` or `pnpm install --no-frozen-lockfile`. Run it, then upgrade again. If the restore itself fails, the message names the temporary file beside `package.json` that holds the original.
+A failed install restores `package.json` and exits 1. `node_modules` can still hold a mix of versions, so the message names the command that returns it to the restored pins:
 
-The new version's binary runs a second install when it moves the game off roblox-ts. When that install fails, it restores `package.json` to the new version with the roblox-ts packages still listed, prints the report of the template files it already refreshed, and exits 1. Run the install command the message names, then run `npx crucible upgrade` again. Crucible is then already at the new version, so the upgrade only finishes the move. An upgrade started from 0.3.0 also prints that the template was not refreshed, because that binary cannot tell this failure from a failed refresh. The report above that line lists what was refreshed.
+| Package manager | Command |
+| --- | --- |
+| npm | `npm install` |
+| pnpm | `pnpm install --force --no-frozen-lockfile` |
+| Yarn 1 | `yarn install` |
+| Yarn 2 or later | Delete `node_modules/.yarn-state.yml`, then `yarn install --no-immutable` |
+| Bun | `bun install` |
+
+pnpm and Yarn 2 keep their own record of `node_modules`, and after a failed install that record can describe packages that were never put in place, so a plain install reports nothing to do. Run the command, then upgrade again. If the restore itself fails, the message names the temporary file beside `package.json` that holds the original.
+
+The new version's binary runs a second install when it moves the game off roblox-ts. When that install fails, it restores `package.json` to the new version with the roblox-ts packages still listed, prints the report of the template files it already refreshed, and exits 1. Run the command the message names, then run `npx crucible upgrade` again. Crucible is then already at the new version, so the upgrade only finishes the move. An upgrade started from 0.3.0 also prints that the template was not refreshed, because that binary cannot tell this failure from a failed refresh. The report above that line lists what was refreshed.
 
 An interrupted install, such as a closed terminal, leaves `package.json` at the new version. Restore `package.json` from version control, run the install command, then upgrade again. Running `npx crucible upgrade <version>` straight away also finishes the install, but it can skip or only list template changes, because the old template is no longer known.
 

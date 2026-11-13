@@ -488,7 +488,7 @@ test(
 			assert.match(
 				failed.stderr,
 				new RegExp(
-					`package\\.json is restored to @trioforge/crucible-cli ${next} and @trioforge/crucible ${next}\\. Run \`npm install\``,
+					`package\\.json is restored to @trioforge/crucible-cli ${next} and @trioforge/crucible ${next}\\. To return node_modules to those versions, run \`npm install\``,
 				),
 			);
 			assert.equal(readFileSync(manifestFile, "utf8"), failing, `${attempt} restores package.json byte for byte`);

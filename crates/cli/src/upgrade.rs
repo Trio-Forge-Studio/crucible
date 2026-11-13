@@ -131,6 +131,18 @@ impl Manager {
     fn install_line(self) -> String {
         [self.program()].iter().chain(self.install_args()).copied().collect::<Vec<_>>().join(" ")
     }
+
+    // A failed pnpm or Yarn Berry install can leave the manager's own record of node_modules describing packages it
+    // never placed, and then a plain install reports nothing to do. Each command here restored such a node_modules.
+    fn recovery(self) -> &'static str {
+        match self {
+            Self::Npm => "run `npm install`",
+            Self::Pnpm => "run `pnpm install --force --no-frozen-lockfile`",
+            Self::Yarn => "run `yarn install`",
+            Self::YarnBerry => "delete node_modules/.yarn-state.yml, then run `yarn install --no-immutable`",
+            Self::Bun => "run `bun install`",
+        }
+    }
 }
 
 struct Pins {
@@ -236,17 +248,18 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     let bumped = peer_manifest_with(root, &bumped, target_peers(root, &target)?)?;
     write_atomic(&manifest_path, &bumped)
         .map_err(|error| Error::Failed(format!("cannot write {}: {error}", manifest_path.display())))?;
+    let recovery = manager.recovery();
     eprintln!(
-        "crucible upgrade: running `{install}` for crucible {target}. If it is interrupted, restore package.json and run `{install}`"
+        "crucible upgrade: running `{install}` for crucible {target}. If it is interrupted, restore package.json and {recovery}"
     );
     if let Err(error) = run_install(root, manager) {
         let pinned = format!("{CLI} {} and {RUNTIME} {}", pins.crucible, pins.runtime);
         return Err(Error::Failed(match restore(&manifest_path, &manifest_text) {
             Ok(()) => format!(
-                "{error}. package.json is restored to {pinned}. Run `{install}` to return node_modules to those versions"
+                "{error}. package.json is restored to {pinned}. To return node_modules to those versions, {recovery}"
             ),
             Err(restore) => {
-                format!("{error}. Restoring package.json also failed: {restore}. Set {pinned} and run `{install}`")
+                format!("{error}. Restoring package.json also failed: {restore}. Set {pinned}, then {recovery}")
             }
         }));
     }
@@ -883,8 +896,8 @@ fn reconcile_peers(root: &Path, manager: Manager) -> Result<Vec<String>, Error> 
             Err(error) => format!("restoring package.json also failed: {error}"),
         };
         return Err(Error::Failed(format!(
-            "{error}. {restored}. Run `{}` and `npx crucible upgrade` again",
-            manager.install_line()
+            "{error}. {restored}. To return node_modules to it, {}, then run `npx crucible upgrade` again",
+            manager.recovery()
         )));
     }
     Ok(vec!["package.json now lists the runtime's required peers".into(), format!("ran `{}`", manager.install_line())])
@@ -999,12 +1012,15 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
     }
     if let Err(error) = run_install(root, manager) {
         let then = "then run `npx crucible upgrade` again to finish the move off roblox-ts";
+        let recovery = manager.recovery();
         migration.failed = Some(match restore(&manifest_path, &text) {
             Ok(()) => format!(
-                "{error}. package.json is restored, so it still lists {}. Run `{install}` to return node_modules to it, {then}",
+                "{error}. package.json is restored, so it still lists {}. To return node_modules to it, {recovery}, {then}",
                 dropped.join(", ")
             ),
-            Err(restore) => format!("{error}. Restoring package.json also failed: {restore}. Run `{install}`, {then}"),
+            Err(restore) => format!(
+                "{error}. Restoring package.json also failed: {restore}. Once package.json is restored, {recovery}, {then}"
+            ),
         });
         return true;
     }
@@ -1820,6 +1836,18 @@ mod tests {
         assert_eq!(Manager::YarnBerry.install_line(), "yarn install --no-immutable");
         assert_eq!(Manager::Yarn.install_line(), "yarn install");
         assert_eq!(Manager::Npm.install_line(), "npm install");
+    }
+
+    #[test]
+    fn each_manager_names_a_recovery_that_reinstalls_what_its_record_already_lists() {
+        assert_eq!(Manager::Npm.recovery(), "run `npm install`");
+        assert_eq!(Manager::Pnpm.recovery(), "run `pnpm install --force --no-frozen-lockfile`");
+        assert_eq!(Manager::Yarn.recovery(), "run `yarn install`");
+        assert_eq!(
+            Manager::YarnBerry.recovery(),
+            "delete node_modules/.yarn-state.yml, then run `yarn install --no-immutable`"
+        );
+        assert_eq!(Manager::Bun.recovery(), "run `bun install`");
     }
 
     #[test]

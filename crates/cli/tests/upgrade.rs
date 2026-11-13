@@ -71,7 +71,7 @@ fn a_failed_reinstall_off_roblox_ts_restores_package_json_and_exits_1_until_upgr
     assert!(stderr.contains("reinstall-output"), "{stderr}");
     assert!(
         stderr.contains(
-            "`npm install` failed. package.json is restored, so it still lists roblox-ts, typescript, @rbxts/compiler-types. Run `npm install` to return node_modules to it, then run `npx crucible upgrade` again to finish the move off roblox-ts"
+            "`npm install` failed. package.json is restored, so it still lists roblox-ts, typescript, @rbxts/compiler-types. To return node_modules to it, run `npm install`, then run `npx crucible upgrade` again to finish the move off roblox-ts"
         ),
         "{stderr}"
     );
