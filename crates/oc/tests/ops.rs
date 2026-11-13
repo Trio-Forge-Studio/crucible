@@ -1,5 +1,8 @@
 use crucible_oc::auth::Secret;
-use crucible_oc::ops::{BadgeDetails, Details, Image, List, Op, Retry, Sellable, badges, passes, products};
+use crucible_oc::ops::{
+    BadgeDetails, Details, Image, List, Op, Retry, Sellable, UniverseSettings, api_keys, badges, passes, products,
+    universes,
+};
 use crucible_oc::outcome::Failure;
 use crucible_oc::transport::{Clock, Event, Sink, Timing, Transport};
 use crucible_oc::{Safety, Scope};
@@ -98,6 +101,11 @@ fn every_operation() -> Vec<(Row, Safety)> {
         (row(badges::overwrite_icon(id(22), icon())), Safety::Idempotent),
         (list_row(badges::list_public(id(11))), Safety::Read),
         (row(badges::get_public(id(22))), Safety::Read),
+        (
+            row(universes::update(id(11), &UniverseSettings { voice_chat: Some(true), ..Default::default() }).unwrap()),
+            Safety::Idempotent,
+        ),
+        (row(api_keys::introspect()), Safety::Read),
     ]
 }
 
@@ -107,7 +115,7 @@ fn each_operation_matches_the_registry_and_carries_its_retry_rule() {
         serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).expect("the registry is JSON");
     let registry = registry["ops"].as_array().unwrap();
     let operations = every_operation();
-    assert_eq!(operations.len(), 13);
+    assert_eq!(operations.len(), 15);
     for (row, safety) in operations {
         let name = row.name;
         assert_eq!(row.safety, safety, "{name}");
@@ -117,10 +125,13 @@ fn each_operation_matches_the_registry_and_carries_its_retry_rule() {
             continue;
         };
         assert_eq!(entry["method"], row.method, "{name}");
-        let path = entry["path"].as_str().unwrap().replace("{universeId}", "11");
+        let path = entry["path"].as_str().unwrap().replace("{universeId}", "11").replace("{universe_id}", "11");
         let path = path.split('/').map(|part| if part.starts_with('{') { "22" } else { part }).collect::<Vec<_>>();
         assert_eq!(path.join("/"), row.path, "{name}");
-        let scopes: Vec<Scope> = serde_json::from_value(entry["auth"]["apikey"]["scopes"].clone()).unwrap();
+        let scopes: Vec<Scope> = match &entry["auth"]["bodykey"] {
+            Value::Null => serde_json::from_value(entry["auth"]["apikey"]["scopes"].clone()).unwrap(),
+            _ => vec![],
+        };
         assert_eq!(row.scopes, scopes, "{name}");
         assert_eq!(entry["safety"] == "read", safety == Safety::Read, "{name}: only reads are reads in the registry");
     }
@@ -750,4 +761,82 @@ fn every_multipart_part_is_one_the_registry_names() {
             );
         }
     }
+}
+
+#[test]
+fn a_universe_update_masks_the_settings_it_sends() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let both = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/10772177432")
+            .query_param("updateMask", "privateServerPriceRobux,voiceChatEnabled")
+            .header("x-api-key", "test-key")
+            .json_body(json!({"privateServerPriceRobux": 0, "voiceChatEnabled": false}));
+        then.status(200).json_body(json!({"path": "universes/10772177432", "voiceChatEnabled": false}));
+    });
+    let one = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .json_body(json!({"voiceChatEnabled": true}));
+        then.status(200);
+    });
+    let transport = transport(&server, &key);
+    let settings = UniverseSettings { private_server_price: Some(0), voice_chat: Some(false) };
+    transport.run(&universes::update(id(10772177432), &settings).unwrap()).unwrap();
+    let settings = UniverseSettings { voice_chat: Some(true), ..UniverseSettings::default() };
+    transport.run(&universes::update(id(1), &settings).unwrap()).unwrap();
+    both.assert_calls(1);
+    one.assert_calls(1);
+    assert!(universes::update(id(1), &UniverseSettings::default()).is_none(), "an empty mask could mean every field");
+}
+
+#[test]
+fn a_universe_update_is_repeated_and_unknown_once_it_may_have_landed() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let mock = server.mock(|when, then| {
+        when.method(Method::PATCH).path("/cloud/v2/universes/1");
+        then.status(503);
+    });
+    let settings = UniverseSettings { voice_chat: Some(true), ..UniverseSettings::default() };
+    let failure = transport(&server, &key).run(&universes::update(id(1), &settings).unwrap()).unwrap_err();
+    mock.assert_calls(3);
+    assert_eq!((failure.code, failure.error["operation"].as_str()), (5, Some("universes.update")));
+}
+
+#[test]
+fn introspection_sends_the_key_in_its_body_and_names_what_the_key_lacks() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    let mock = server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/api-keys/v1/introspect")
+            .json_body(json!({"apiKey": "test-key"}))
+            .header_missing("x-api-key");
+        then.status(200).json_body(json!({"name": "deploy", "enabled": true, "expired": false, "scopes": [
+            {"name": "universe-places", "operations": ["write"]},
+            {"name": "developer-product", "operations": ["read", "write"]},
+        ]}));
+    });
+    let reply = transport(&server, &key).run(&api_keys::introspect()).unwrap();
+    mock.assert_calls(1);
+    assert_eq!((reply.name.as_str(), reply.enabled, reply.expired), ("deploy", true, false));
+    let scope = |name: &str| Scope { name: name.into(), target: Some("universes".into()) };
+    let needed =
+        [scope("universe:write"), scope("developer-product:write"), scope("game-pass:read"), scope("universe:write")];
+    assert_eq!(reply.missing(&needed), ["game-pass:read", "universe:write"]);
+}
+
+#[test]
+fn an_introspection_reply_without_scopes_is_unavailable() {
+    let server = MockServer::start();
+    let key = Secret::from_string("test-key".into());
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect");
+        then.status(200).json_body(json!({"name": "deploy", "enabled": true, "expired": false}));
+    });
+    let failure = transport(&server, &key).run(&api_keys::introspect()).unwrap_err();
+    assert_eq!((failure.code, failure.error["field"].as_str()), (7, Some("scopes")), "{}", failure.error);
 }

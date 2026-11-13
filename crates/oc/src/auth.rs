@@ -1,5 +1,5 @@
-use crate::Auth;
 use crate::outcome::Failure;
+use crate::{Auth, Scope};
 use serde::Deserialize;
 use serde_json::json;
 use std::ffi::OsString;
@@ -7,14 +7,14 @@ use std::ffi::OsString;
 pub const KEY: &str = "CRUCIBLE_OC_API_KEY";
 
 pub struct Secret(String);
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Introspection {
     pub name: String,
     pub enabled: bool,
     pub expired: bool,
     scopes: Vec<IntrospectedScope>,
 }
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct IntrospectedScope {
     name: String,
     operations: Vec<String>,
@@ -32,6 +32,15 @@ impl Introspection {
         scopes.sort();
         scopes.dedup();
         scopes
+    }
+    /// The scopes in `needed` that the key lacks, each once, in order.
+    pub fn missing(&self, needed: &[Scope]) -> Vec<String> {
+        let granted = self.scopes();
+        let mut missing: Vec<String> =
+            needed.iter().filter(|scope| !granted.contains(&scope.name)).map(|scope| scope.name.clone()).collect();
+        missing.sort();
+        missing.dedup();
+        missing
     }
 }
 impl Secret {
