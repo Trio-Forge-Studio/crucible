@@ -1,0 +1,105 @@
+# Each mutant changes one part of Asks.tla. `cargo xtask tla` checks that TLC finds a counterexample to the property
+# each one names, so every property is shown to catch the bug it is there for.
+
+[[mutant]]
+name = "late-reply-settles"
+why = "The client settles an ask on any reply, without checking that it still waits."
+breaks = "OneResult"
+find = '''
+       ELSE IF pending[p.n] = "waiting" THEN Settle(p.n, p.r) /\ UNCHANGED <<cpeer, queue>>
+'''
+replace = '''
+       ELSE IF pending[p.n] # "none" THEN Settle(p.n, p.r) /\ UNCHANGED <<cpeer, queue>>
+'''
+
+[[mutant]]
+name = "settle-keeps-the-entry"
+why = "Settling an ask leaves it in the pending map, so its timer or a reply settles it again."
+breaks = "OneResult"
+find = '''
+    /\ pending' = [pending EXCEPT ![n] = "settled"]
+'''
+replace = '''
+    /\ pending' = [pending EXCEPT ![n] = IF @ = "waiting" THEN "waiting" ELSE "settled"]
+'''
+
+[[mutant]]
+name = "timer-spares-a-queued-ask"
+why = "The timeout leaves an ask alone while its packet waits for READY, so it waits for ever if the client never commits."
+breaks = "Settles"
+find = '''
+    /\ pending[n] = "waiting"
+    /\ queue' = Remove(queue, n)
+'''
+replace = '''
+    /\ pending[n] = "waiting"
+    /\ n \notin Range(queue)
+    /\ queue' = Remove(queue, n)
+'''
+
+[[mutant]]
+name = "pending-cap-ignored"
+why = "Network.ask adds a pending ask past MAX_PENDING_ASKS instead of returning overloaded."
+breaks = "Bounded"
+find = '''
+       ELSE IF Cardinality(Waiting) >= MaxPending THEN
+'''
+replace = '''
+       ELSE IF FALSE THEN
+'''
+
+[[mutant]]
+name = "retire-leaves-the-entry-open"
+why = "A retirement answers a running request unavailable without settling its entry, so the handler replies again."
+breaks = "OneReply"
+find = '''
+       /\ answered' = [n \in Nonces |-> answered[n] \/ n \in open]
+'''
+replace = '''
+       /\ answered' = answered
+'''
+
+[[mutant]]
+name = "finish-ignores-the-settled-entry"
+why = "A finishing handler replies although its entry was already answered."
+breaks = "OneReply"
+find = '''
+    /\ IF ~answered[n] /\ speer # "ended"
+'''
+replace = '''
+    /\ IF speer # "ended"
+'''
+
+[[mutant]]
+name = "overrun-keeps-counting"
+why = "A handler past its lifetime still counts toward MAX_ACTIVE_HANDLERS."
+breaks = "Counted"
+find = '''
+    /\ handler' = [handler EXCEPT ![n] = "overrun"]
+    /\ counted' = counted - 1
+'''
+replace = '''
+    /\ handler' = [handler EXCEPT ![n] = "overrun"]
+    /\ counted' = counted
+'''
+
+[[mutant]]
+name = "finish-uncounts-twice"
+why = "A handler that overran is uncounted again when it finishes."
+breaks = "Counted"
+find = '''
+    /\ counted' = IF handler[n] = "running" THEN counted - 1 ELSE counted
+'''
+replace = '''
+    /\ counted' = counted - 1
+'''
+
+[[mutant]]
+name = "no-active-cap"
+why = "The server starts a handler past MAX_ACTIVE_HANDLERS instead of refusing overloaded."
+breaks = "Counted"
+find = '''
+                /\ counted < MaxActive
+'''
+replace = '''
+'''
