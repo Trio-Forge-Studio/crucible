@@ -54,7 +54,7 @@ version_type = "Published"   # default "Saved"
 places = { start = 4321, arena = 4322 }
 ```
 
-Every env must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
+An env that maps places must map every declared place, and only declared places. A game whose only place is `start` can write `place = 4321` in an env instead of `places`. Such a game can also omit `[places]`. An env may set neither `place` nor `places` when crucible never publishes it, such as for a game that publishes its places with its own scripts: `crucible plan`, `provision`, `adopt` and `build --env` need only its `universe`, and `crucible deploy` refuses it with exit 2 before any request. Place and env names use letters, digits, `-` and `_`. Unknown keys are errors.
 
 ### One reactive library copy per place
 

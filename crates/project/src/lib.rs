@@ -50,7 +50,9 @@ impl Place {
 pub struct Env {
     pub universe: NonZeroU64,
     pub version_type: VersionType,
-    pub places: BTreeMap<String, NonZeroU64>,
+    /// Each place's ID, by place name, or `None` for an environment that sets neither `place` nor `places`, which
+    /// `crucible deploy` refuses.
+    pub places: Option<BTreeMap<String, NonZeroU64>>,
     pub overlays: Overlays,
 }
 
@@ -92,7 +94,7 @@ impl fmt::Display for ManifestError {
             Self::InvalidName { kind, name } => {
                 write!(f, "{FILE}: {kind} name {name:?} must use only letters, digits, '-' and '_'")
             }
-            Self::PlaceMapping { env } => write!(f, "{FILE}: env {env} must set exactly one of place or places"),
+            Self::PlaceMapping { env } => write!(f, "{FILE}: env {env} sets both place and places. Set one of them"),
             Self::PlaceShorthand { env } => write!(
                 f,
                 "{FILE}: env {env} sets place = <id>, which works only when {DEFAULT_PLACE} is the only place. Map each place with places = {{ <name> = <id>, ... }}"
@@ -133,10 +135,11 @@ struct RawManifest {
     badges: BTreeMap<Spanned<String>, Badge>,
 }
 
-/// One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.
+/// One Roblox universe the game deploys to. It sets one of `place` and `places`, or neither when `crucible deploy` never
+/// publishes it, such as for a game that publishes its places with its own scripts.
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "Environment", extend("oneOf" = [{ "required": ["place"] }, { "required": ["places"] }]))]
+#[schemars(rename = "Environment", extend("not" = { "required": ["place", "places"] }))]
 struct RawEnv {
     universe: NonZeroU64,
     #[serde(default)]
@@ -259,17 +262,19 @@ impl Manifest {
         for (name, env) in raw.env {
             let mapping = match (env.place, env.places) {
                 (Some(id), None) if places.len() == 1 && places.contains_key(DEFAULT_PLACE) => {
-                    BTreeMap::from([(DEFAULT_PLACE.to_owned(), id)])
+                    Some(BTreeMap::from([(DEFAULT_PLACE.to_owned(), id)]))
                 }
                 (Some(_), None) => return Err(ManifestError::PlaceShorthand { env: name }),
-                (None, Some(mapping)) => mapping,
-                _ => return Err(ManifestError::PlaceMapping { env: name }),
+                (None, mapping) => mapping,
+                (Some(_), Some(_)) => return Err(ManifestError::PlaceMapping { env: name }),
             };
-            if let Some(place) = mapping.keys().find(|place| !places.contains_key(*place)) {
-                return Err(ManifestError::UnknownPlace { env: name, place: place.clone() });
-            }
-            if let Some(place) = places.keys().find(|place| !mapping.contains_key(*place)) {
-                return Err(ManifestError::UnmappedPlace { env: name, place: place.clone() });
+            if let Some(mapping) = &mapping {
+                if let Some(place) = mapping.keys().find(|place| !places.contains_key(*place)) {
+                    return Err(ManifestError::UnknownPlace { env: name, place: place.clone() });
+                }
+                if let Some(place) = places.keys().find(|place| !mapping.contains_key(*place)) {
+                    return Err(ManifestError::UnmappedPlace { env: name, place: place.clone() });
+                }
             }
             let overlays = Overlays {
                 products: located(text, env.products),
@@ -425,7 +430,7 @@ mod tests {
             Env {
                 universe: id(1234),
                 version_type: VersionType::Saved,
-                places: BTreeMap::from([("start".into(), id(5678)), ("arena".into(), id(5679))]),
+                places: Some(BTreeMap::from([("start".into(), id(5678)), ("arena".into(), id(5679))])),
                 overlays: Overlays::default(),
             }
         );
@@ -447,7 +452,7 @@ mod tests {
         assert_eq!(Manifest::default().places["start"].project, PathBuf::from("default.project.json"));
         let manifest = Manifest::parse("[env.production]\nuniverse = 9999\nplace = 4321\n").unwrap();
         assert_eq!(manifest.places, Manifest::default().places);
-        assert_eq!(manifest.envs["production"].places, BTreeMap::from([("start".into(), id(4321))]));
+        assert_eq!(manifest.envs["production"].places, Some(BTreeMap::from([("start".into(), id(4321))])));
     }
 
     #[test]
@@ -531,15 +536,18 @@ mod tests {
     }
 
     #[test]
-    fn env_sets_exactly_one_place_form() {
-        for text in
-            ["[env.staging]\nuniverse = 1\n", "[env.staging]\nuniverse = 1\nplace = 2\nplaces = { start = 3 }\n"]
-        {
-            match error(text) {
-                ManifestError::PlaceMapping { env } => assert_eq!(env, "staging"),
-                other => panic!("{text}: {other:?}"),
-            }
-        }
+    fn env_sets_at_most_one_place_form() {
+        let failure = error("[env.staging]\nuniverse = 1\nplace = 2\nplaces = { start = 3 }\n");
+        assert_eq!(failure.to_string(), "crucible.toml: env staging sets both place and places. Set one of them");
+        assert!(matches!(failure, ManifestError::PlaceMapping { env } if env == "staging"));
+    }
+
+    #[test]
+    fn an_env_may_map_no_place() {
+        let text = "[places.start]\nproject = \"default.project.json\"\n[places.arena]\nproject = \"arena.project.json\"\n\
+                    [env.staging]\nuniverse = 1\n";
+        let manifest = Manifest::parse(text).unwrap();
+        assert_eq!((manifest.envs["staging"].universe, manifest.envs["staging"].places.as_ref()), (id(1), None));
     }
 
     #[test]
@@ -565,7 +573,7 @@ mod tests {
             );
         }
         let manifest = Manifest::parse(&format!("{start}[env.staging]\nuniverse = 1\nplace = 2\n")).unwrap();
-        assert_eq!(manifest.envs["staging"].places, BTreeMap::from([("start".into(), id(2))]));
+        assert_eq!(manifest.envs["staging"].places, Some(BTreeMap::from([("start".into(), id(2))])));
     }
 
     #[test]
@@ -714,10 +722,7 @@ mod tests {
         }
         assert_eq!(properties["places"]["minProperties"], 1);
         assert_eq!(properties["crucible"]["pattern"], "^[0-9]+(\\.[0-9]+){0,2}$");
-        assert_eq!(
-            defs["Environment"]["oneOf"],
-            serde_json::json!([{ "required": ["place"] }, { "required": ["places"] }])
-        );
+        assert_eq!(defs["Environment"]["not"], serde_json::json!({ "required": ["place", "places"] }));
         for (def, required) in
             [("Priced", serde_json::json!(["name", "price"])), ("Badge", serde_json::json!(["name"]))]
         {

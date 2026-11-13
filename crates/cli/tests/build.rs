@@ -1271,7 +1271,8 @@ fn reactive_alias_and_workspace_entries_keep_their_range() {
     assert_eq!(code(&output), 0, "an alias of another package names another source: {}", text(&output.stderr));
 }
 
-const EXPERIENCE: &str = "[places.start]\nproject = \"default.project.json\"\n\n[env.staging]\nuniverse = 10772177432\nplace = 1\n\n[passes.vip]\nname = \"VIP\"\nprice = 299\n\n[badges.first-pickup]\nname = \"First pickup\"\n";
+/// Its environment maps no place, as for a game that provisions and builds with crucible and publishes by itself.
+const EXPERIENCE: &str = "[places.start]\nproject = \"default.project.json\"\n\n[env.staging]\nuniverse = 10772177432\n\n[passes.vip]\nname = \"VIP\"\nprice = 299\n\n[badges.first-pickup]\nname = \"First pickup\"\n";
 const DECLARATION: &str = "src/crucible-experience.d.ts";
 const BINDINGS: &str = "out/shared/crucible-experience.luau";
 
@@ -1338,9 +1339,9 @@ fn a_build_for_an_environment_binds_the_lock_s_ids_or_names_provision() {
     assert_eq!(code(&out), 2);
     assert_eq!(
         text(&out.stderr),
-        "crucible build: this build cannot bind crucible:experience:\n  crucible.toml:8: passes.vip: \
+        "crucible build: this build cannot bind crucible:experience:\n  crucible.toml:7: passes.vip: \
          crucible.lock holds no ID for it in staging, so a build for staging cannot bind Passes.Vip. Run \
-         crucible provision staging, commit crucible.lock, and build again\n  crucible.toml:12: badges.first-pickup: \
+         crucible provision staging, commit crucible.lock, and build again\n  crucible.toml:11: badges.first-pickup: \
          crucible.lock holds no ID for it in staging, so a build for staging cannot bind Badges.FirstPickup. Run \
          crucible provision staging, commit crucible.lock, and build again\n"
     );

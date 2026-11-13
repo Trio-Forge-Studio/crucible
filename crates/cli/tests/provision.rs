@@ -3,12 +3,12 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Output};
 
+/// Its environment maps no place: provision and adopt need only the universe.
 const CONFIG: &str = r#"[places.start]
 project = "default.project.json"
 
 [env.staging]
 universe = 1
-place = 2
 
 [products.coin-pack]
 name = "Coin pack"
