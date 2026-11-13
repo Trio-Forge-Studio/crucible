@@ -38,7 +38,7 @@ export type {
 	u32,
 } from "./network";
 
-export type { ProductHandle, PassHandle, BadgeHandle } from "./experience";
+export type { ProductHandle, RetiredProductHandle, PassHandle, BadgeHandle } from "./experience";
 
 export { profileStore, serverOnly, replicatedPaths } from "./data";
 export type {

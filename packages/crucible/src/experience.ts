@@ -13,6 +13,12 @@ export interface ProductHandle<K extends string = string> {
 	readonly id: number;
 }
 
+/**
+ * A developer product `crucible.toml` retires. It is off sale, but a purchase made before can still send a receipt, so
+ * a place may grant it once, or not at all. In an environment that never had it, its grant claims nothing.
+ */
+export interface RetiredProductHandle<K extends string = string> extends ProductHandle<K> {}
+
 /** A game pass `crucible.toml` declares, imported from `crucible:experience` as `Passes.<Key>`. */
 export interface PassHandle<K extends string = string> {
 	readonly [passKind]: K;

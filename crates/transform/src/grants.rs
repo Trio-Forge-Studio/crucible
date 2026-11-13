@@ -1,5 +1,6 @@
-//! CRU039: a place that grants products grants each product `crucible:experience` declares exactly once. A place that
-//! grants none leaves ProcessReceipt unset, and Roblox offers its purchases again in a server that handles them.
+//! CRU039: a place that grants products grants each product `crucible:experience` declares exactly once, and a retired
+//! product at most once. A place that grants none leaves ProcessReceipt unset, and Roblox offers its purchases again in
+//! a server that handles them.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -13,6 +14,9 @@ use crate::registration::Walk;
 /// The module `crucible build` generates from `crucible.toml`.
 const EXPERIENCE: &str = "crucible:experience";
 const PRODUCTS: &str = "Products";
+const HANDLE: &str = "ProductHandle";
+/// A product `crucible.toml` retires, which may have a grant for the receipts of earlier purchases, or none.
+const RETIRED: &str = "RetiredProductHandle";
 const RULE: Code = Code::Rule(39);
 
 #[derive(Default)]
@@ -38,7 +42,7 @@ impl Walk<'_, '_> {
         let members = if t.flags().intersects(TypeFlags::Union) { t.types() } else { vec![t] };
         let mut keys = Vec::new();
         for member in members {
-            if self.api(member.symbol()) != Some("ProductHandle") {
+            if !matches!(self.api(member.symbol()), Some(HANDLE | RETIRED)) {
                 return;
             }
             match self.cx.type_arguments(member).first().and_then(|key| key.literal_string()) {
@@ -76,7 +80,7 @@ impl Grants {
             return;
         }
         for (key, handle, declared) in declared_products(cx, api) {
-            if self.by_key.contains_key(&key) {
+            if self.by_key.contains_key(&key) || handle.retired {
                 continue;
             }
             let granted: Vec<_> = self.by_key.values().flatten().map(String::as_str).collect();
@@ -84,6 +88,7 @@ impl Grants {
                 [] => "This place grants products only by ID".to_owned(),
                 _ => format!("This place grants other products at {}", granted.join(", ")),
             };
+            let handle = handle.name;
             let (code, message) = RULE.render(&format!(
                 "Product {key} has no grant. {declared} declares it as {PRODUCTS}.{handle}. {elsewhere}, so a \
                  purchase of {key} would be refused. Grant it once with a profile store's grant({PRODUCTS}.{handle}, \
@@ -94,8 +99,13 @@ impl Grants {
     }
 }
 
+struct Handle {
+    name: String,
+    retired: bool,
+}
+
 /// Each product of `crucible:experience`'s `Products`: its key, its handle and where it is declared.
-fn declared_products(cx: &mut ProgramCx<'_>, api: &Api) -> Vec<(String, String, String)> {
+fn declared_products(cx: &mut ProgramCx<'_>, api: &Api) -> Vec<(String, Handle, String)> {
     let mut found = Vec::new();
     for file in cx.files() {
         if !file.is_declaration() || cx.is_default_library(file) {
@@ -112,14 +122,16 @@ fn declared_products(cx: &mut ProgramCx<'_>, api: &Api) -> Vec<(String, String, 
                     let products = cx.type_of_symbol(symbol);
                     for property in cx.properties_of_type(products) {
                         let t = cx.type_of_symbol(property);
-                        if api.name(cx, t.symbol()) != Some("ProductHandle") {
-                            continue;
-                        }
+                        let retired = match api.name(cx, t.symbol()) {
+                            Some(HANDLE) => false,
+                            Some(RETIRED) => true,
+                            _ => continue,
+                        };
                         let Some(key) = cx.type_arguments(t).first().and_then(|key| key.literal_string()) else {
                             continue;
                         };
                         let at = property.declarations().first().map_or_else(|| place(cx, name), |d| place(cx, *d));
-                        found.push((key.to_owned(), property.name().to_owned(), at));
+                        found.push((key.to_owned(), Handle { name: property.name().to_owned(), retired }, at));
                     }
                 }
             }

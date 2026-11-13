@@ -994,7 +994,10 @@ fn reactive_second_mapped_folder_fails_but_unmapped_copy_is_ignored() {
 }
 
 fn junction(game: &Game, link: &str, target: &str) {
-    let (link, target) = (game.path(link), game.path(target));
+    junction_to(&game.path(link), &game.path(target));
+}
+
+fn junction_to(link: &Path, target: &Path) {
     fs::create_dir_all(link.parent().unwrap()).unwrap();
     #[cfg(windows)]
     {
@@ -1400,5 +1403,87 @@ fn an_unbound_handle_throws_naming_its_key_when_its_id_is_read() {
         ),
         "{}",
         text(&out.stdout)
+    );
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let path = entry.unwrap().path();
+        let target = to.join(path.file_name().unwrap());
+        if path.is_dir() { copy_dir(&path, &target) } else { fs::copy(&path, &target).map(drop).unwrap() }
+    }
+}
+
+/// A copy of the sample game whose packages are the repository's, so its place boots on the repository's runtime.
+fn sample_game() -> Game {
+    let game = Game { dir: tempfile::tempdir().unwrap() };
+    let sample = repo().join("examples/sample-game");
+    for file in ["package.json", "crucible.toml", "crucible.lock", "default.project.json"] {
+        fs::copy(sample.join(file), game.path(file)).unwrap();
+    }
+    copy_dir(&sample.join("src"), &game.path("src"));
+    let root = slashes(&repo().canonicalize().unwrap().join("tsconfig.json"));
+    game.write(
+        "tsconfig.json",
+        &fs::read_to_string(sample.join("tsconfig.json")).unwrap().replace("../../tsconfig.json", &root),
+    );
+    for scope in ["@rbxts", "@trioforge"] {
+        for entry in fs::read_dir(sample.join("node_modules").join(scope)).unwrap() {
+            let entry = entry.unwrap();
+            junction_to(
+                &game.path(&format!("node_modules/{scope}")).join(entry.file_name()),
+                &entry.path().canonicalize().unwrap(),
+            );
+        }
+    }
+    game
+}
+
+#[test]
+#[ignore = "needs lune on PATH and pnpm build"]
+fn a_retired_product_an_environment_never_had_lets_its_place_boot() {
+    let game = sample_game();
+    game.write(
+        "crucible.toml",
+        &(game.read("crucible.toml")
+            + "\n[env.fresh]\nuniverse = 77\nplace = 7\n\n[products.old-pack]\nretired = true\n"),
+    );
+    let lock = game.read("crucible.lock");
+    let zero = "fingerprint = \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"";
+    let mut fresh = format!(
+        "{lock}\n[env.sample.products.old-pack]\nid = 1002\n{zero}\nstatus = \"retired\"\n\n[env.fresh]\nuniverse = 77\n"
+    );
+    for (kind, key, id) in [("products", "coin-pack", 7001), ("passes", "vip", 7002), ("badges", "first-pickup", 7003)]
+    {
+        fresh += &format!("\n[env.fresh.{kind}.{key}]\nid = {id}\n{zero}\nstatus = \"managed\"\n");
+    }
+    game.write("crucible.lock", &fresh);
+    let shop = game.read("src/server/systems/shop.ts");
+    game.write(
+        "src/server/systems/shop.ts",
+        &shop.replace(
+            "\n}\n",
+            "\n\tprivate readonly oldPack = PlayerData.grant(Products.OldPack, (_, data) => data);\n}\n",
+        ),
+    );
+
+    let out = game.build(&["--env", "sample", "--output", "build/sample.rbxl"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.read(BINDINGS).contains("\t\tOldPack = bound(\"old-pack\", 1002),\n"));
+    let out = game.build(&["--env", "fresh", "--output", "build/fresh.rbxl"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.read(BINDINGS).contains("\t\tOldPack = absent(\"old-pack\", "), "{}", game.read(BINDINGS));
+
+    let place = slashes(&game.root().join("build/fresh.rbxl"));
+    let out =
+        Command::new("lune").args(["run", "test/lib/boot-place", &place, "7001"]).current_dir(repo()).output().unwrap();
+    assert!(out.status.success(), "{}{}", text(&out.stdout), text(&out.stderr));
+    let stdout = text(&out.stdout);
+    let old = stdout.lines().find(|line| line.starts_with("old-pack: ")).unwrap_or_else(|| panic!("{stdout}"));
+    assert!(
+        old.starts_with("old-pack: throws ")
+            && old.ends_with("retired product old-pack has no Roblox ID in crucible.lock for fresh"),
+        "{stdout}"
     );
 }

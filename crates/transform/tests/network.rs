@@ -3221,3 +3221,21 @@ fn cru039_rejects_a_grant_whose_handle_has_no_key() {
           each product has one grant. Pass a handle of crucible:experience, such as Products.CoinPack."]
     );
 }
+
+#[test]
+fn cru039_lets_a_place_grant_a_retired_product_once_or_not_at_all() {
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack", "Products.GemPack"]));
+    none(&reports_of(&game));
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack", "Products.GemPack", "Products.OldPack"]));
+    none(&reports_of(&game));
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack", "Products.GemPack", "Products.OldPack"]));
+    game.write("src/server/skins.ts", &shop("Skins", &["Products.OldPack"]));
+    assert_eq!(
+        messages(&reports_of(&game), "src/server/skins.ts"),
+        ["CRU039: Product old-pack is granted here and at src/server/shop.ts:7. A purchase runs one grant, so grant \
+          each product once."]
+    );
+}
