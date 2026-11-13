@@ -3,7 +3,7 @@ use std::fmt::Write;
 use super::{BinOp, Expr, Field, Function, Part, Stmt, UnOp, is_name};
 
 pub fn print(chunk: &[Stmt]) -> String {
-    let mut p = Printer { out: String::with_capacity(4096), depth: 0 };
+    let mut p = Printer { out: String::with_capacity(4096), depth: 0, first: false };
     p.block(chunk);
     p.out
 }
@@ -11,6 +11,8 @@ pub fn print(chunk: &[Stmt]) -> String {
 struct Printer {
     out: String,
     depth: usize,
+    /// The statement being printed opens its block, so nothing before it can take a `(` as a call.
+    first: bool,
 }
 
 const OR: u8 = 1;
@@ -83,6 +85,7 @@ impl Printer {
             if i > 0 || !self.out.is_empty() {
                 self.line();
             }
+            self.first = i == 0;
             let last = i + 1 == block.len();
             let terminal = matches!(s, Stmt::Return(_) | Stmt::Break | Stmt::Continue);
             if terminal && !last {
@@ -257,8 +260,12 @@ impl Printer {
         }
     }
 
-    /// A statement that starts with `(` would continue the previous line's call, so it starts with `;` instead.
+    /// A statement that starts with `(` would continue the previous line's call, so it starts with `;` instead. Luau
+    /// rejects a `;` with no statement before it, so the first statement of a block has none.
     fn statement_start(&mut self, e: &Expr) {
+        if self.first {
+            return;
+        }
         let mut head = e;
         while let Expr::Index(base, _) | Expr::Call(base, _) | Expr::Method(base, ..) = head {
             head = base;
@@ -575,7 +582,7 @@ mod tests {
             Stmt::Return(Vec::new()),
             Stmt::Call(Expr::name("f").call(Vec::new())),
             Stmt::Call(Expr::Paren(Box::new(Expr::name("g"))).call(Vec::new())),
-            Stmt::Do(Vec::new()),
+            Stmt::Do(vec![Stmt::Call(Expr::Paren(Box::new(Expr::name("h"))).call(Vec::new()))]),
             Stmt::If(
                 Expr::name("a"),
                 vec![Stmt::Break],
@@ -584,7 +591,7 @@ mod tests {
         ];
         assert_eq!(
             print(&block),
-            "do return end\nf()\n;(g)()\ndo end\nif a then\n\tbreak\nelseif b then else\n\tcontinue\nend"
+            "do return end\nf()\n;(g)()\ndo\n\t(h)()\nend\nif a then\n\tbreak\nelseif b then else\n\tcontinue\nend"
         );
         let method = Function { params: vec!["x".into()], varargs: true, body: Vec::new() };
         assert_eq!(
