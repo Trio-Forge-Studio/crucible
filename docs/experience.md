@@ -35,15 +35,15 @@ icon = "assets/icons/coin-pack.png"
 name = "VIP"
 price = 299
 
-[badges.first-delivery]
-name = "First delivery"
-description = "Deliver your first parcel."
-icon = "assets/badges/first-delivery.png"
+[badges.first-pickup]
+name = "First pickup"
+description = "Collect your first coin."
+icon = "assets/badges/first-pickup.png"
 
 [env.staging.products.coin-pack]
 price = 1
 
-[env.staging.badges.first-delivery]
+[env.staging.badges.first-pickup]
 enabled = false
 ```
 
@@ -138,10 +138,10 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 
 ```text
 staging (universe 10772177432)
-  update  experience settings                         10772177432  details
-  create  product coin-pack     Products.CoinPack
-  create  pass vip              Passes.Vip
-  create  badge first-delivery  Badges.FirstDelivery
+  update  experience settings                      10772177432  details
+  create  product coin-pack    Products.CoinPack
+  create  pass vip             Passes.Vip
+  create  badge first-pickup   Badges.FirstPickup
   3 create, 1 update.
   Provision adopts the one existing resource with a create's name instead of creating it.
 ```
@@ -196,7 +196,7 @@ Each environment's plan uses only that environment's lock tables and journal, so
 {
   "version": 1,
   "universe": 10772177432,
-  "intents": [{ "kind": "badge", "key": "first-delivery", "name": "First delivery", "before": [2124000000000000] }]
+  "intents": [{ "kind": "badge", "key": "first-pickup", "name": "First pickup", "before": [2124000000000000] }]
 }
 ```
 

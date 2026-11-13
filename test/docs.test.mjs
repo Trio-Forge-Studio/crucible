@@ -53,6 +53,22 @@ test("TypeScript blocks in docs type-check against the runtime package", () => {
 
 const read = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 
+test("the experience guide's code names only handles its crucible.toml declares", () => {
+	const markdown = read(path.join(repo, "docs/experience.md"));
+	const toml = markdown.match(/^```toml\n([\s\S]*?)^```$/m)[1];
+	const pascal = (key) => key.replace(/(?:^|-)([a-z0-9])/g, (_, letter) => letter.toUpperCase());
+	const handles = new Set(
+		[...toml.matchAll(/^\[(products|passes|badges)\.([a-z0-9-]+)\]$/gm)].map(
+			([, table, key]) => `${table[0].toUpperCase()}${table.slice(1)}.${pascal(key)}`,
+		),
+	);
+	const code = [...markdown.matchAll(/^```ts\n([\s\S]*?)^```$/gm)].map((block) => block[1]).join("\n");
+	const named = [...code.matchAll(/\b(?:Products|Passes|Badges)\.[A-Z]\w*/g)].map((match) => match[0]);
+	assert.ok(named.length > 0, "the experience guide's code names handles");
+	for (const handle of named)
+		assert.ok(handles.has(handle), `${handle} is not declared in the guide's crucible.toml`);
+});
+
 const cru = (number) => `CRU${String(number).padStart(3, "0")}`;
 const sorted = (codes) => [...new Set(codes)].sort();
 test("the diagnostics guide lists every CRU code the compiler and the transform report, in order", () => {

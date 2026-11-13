@@ -268,7 +268,7 @@ fn the_guide_example_plans() {
     let (_, rest) = guide.split_once("```toml\n").unwrap();
     let (config, _) = rest.split_once("```").unwrap();
     let dir = project(config);
-    for icon in ["assets/icons/coin-pack.png", "assets/badges/first-delivery.png"] {
+    for icon in config.lines().filter_map(|line| line.strip_prefix("icon = \"")?.strip_suffix('"')) {
         std::fs::create_dir_all(dir.path().join(icon).parent().unwrap()).unwrap();
         std::fs::write(dir.path().join(icon), b"png").unwrap();
     }
