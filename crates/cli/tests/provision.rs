@@ -592,6 +592,45 @@ fn a_failed_read_of_the_settings_is_a_note_and_provision_compares_them_with_the_
 }
 
 #[test]
+fn a_read_of_the_settings_that_does_not_answer_within_ten_seconds_is_a_note() {
+    let dir = project();
+    settings_lock(dir.path(), "private_server_price = 100\nvoice_chat = false\n");
+    std::fs::write(
+        dir.path().join("crucible.toml"),
+        format!("{CONFIG}\n[experience]\nprivate_server_price = 100\nvoice_chat = true\n"),
+    )
+    .unwrap();
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let read = server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1");
+        then.status(200).delay(std::time::Duration::from_secs(60)).json_body(json!({"voiceChatEnabled": false}));
+    });
+    let patch = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .json_body(json!({"voiceChatEnabled": true}));
+        then.status(200).json_body(json!({"path": "universes/1"}));
+    });
+    let started = std::time::Instant::now();
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--no-scope-check", "--json"]);
+    let took = started.elapsed();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(30), "took {took:?}");
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("Could not read the experience settings Roblox holds: request deadline passed"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("retrying"), "{stderr}");
+    read.assert_calls(1);
+    patch.assert_calls(1);
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.experience]\nprivate_server_price = 100\nvoice_chat = true\n"), "{lock}");
+}
+
+#[test]
 fn a_price_change_needs_the_product_write_scope_before_any_update() {
     let dir = project();
     let lock = "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.products.coin-pack]\nid = 77\n\

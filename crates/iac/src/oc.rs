@@ -9,6 +9,11 @@ use crucible_oc::ops::{
 };
 use crucible_oc::outcome::Failure;
 use crucible_oc::transport::Transport;
+use std::time::Duration;
+
+/// How long the read of the experience settings may take, retries and waits included. The read is advisory, like the
+/// scope check, and a run whose read fails compares the settings with the lock.
+pub const READ_LIMIT: Duration = Duration::from_secs(10);
 
 pub struct Roblox<'t, 'a> {
     pub transport: &'t Transport<'a>,
@@ -169,7 +174,8 @@ impl Remote for Roblox<'_, '_> {
     }
 
     fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
-        let held = self.transport.run(&universes::get(self.universe))?;
+        let read = universes::get(self.universe).deadline(self.transport.clock().now() + READ_LIMIT);
+        let held = self.transport.run(&read)?;
         Ok(ResolvedSettings { private_server_price: held.private_server_price, voice_chat: held.voice_chat })
     }
 }
