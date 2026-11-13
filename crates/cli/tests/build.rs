@@ -1519,6 +1519,21 @@ fn a_game_whose_places_grant_none_of_its_products_fails_and_names_each_one() {
 }
 
 #[test]
+fn a_game_that_answers_process_receipt_itself_builds_without_a_grant() {
+    let game = sample_game();
+    game.write(
+        "src/server/systems/shop.ts",
+        "import { Subsystem } from \"@trioforge/crucible\";\nimport { Products } from \"crucible:experience\";\n\nexport \
+         class Shop extends Subsystem {\n\tconstructor() {\n\t\tsuper();\n\t\tgame.GetService(\"MarketplaceService\").\
+         ProcessReceipt = (receipt) =>\n\t\t\treceipt.ProductId === Products.CoinPack.id\n\t\t\t\t? \
+         Enum.ProductPurchaseDecision.PurchaseGranted\n\t\t\t\t: Enum.ProductPurchaseDecision.NotProcessedYet;\n\t}\n}\n",
+    );
+    let out = game.build(&["--env", "sample", "--output", "build/own.rbxl"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert_place(&game.path("build/own.rbxl"));
+}
+
+#[test]
 fn a_place_whose_tsconfig_leaves_out_the_declaration_is_told_which_file_to_include() {
     let game = experience_game();
     game.config(|c| c["include"] = json!(["src/server", "src/shared"]));

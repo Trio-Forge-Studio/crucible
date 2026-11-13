@@ -62,12 +62,21 @@ pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure>
     crucible_compiler::compile_with(tsconfig, target, &mut [&mut Crucible::default()])
 }
 
-/// `compile`, and the key of each product the program grants through its handle. A place that grants nothing passes
-/// CRU039, so `crucible build` checks across its places that some place grants each product.
-pub fn compile_granting(tsconfig: &Path, target: Target<'_>) -> Result<(Compiled, Vec<String>), Failure> {
+/// How a program answers purchases, which `crucible build` reads across its places.
+pub struct Receipts {
+    /// The key of each product the program grants through its handle. A place that grants nothing passes CRU039, so
+    /// `crucible build` checks across its places that some place grants each product.
+    pub granted: Vec<String>,
+    /// Whether the program assigns `MarketplaceService.ProcessReceipt` itself, and so answers every product.
+    pub answered: bool,
+}
+
+/// `compile`, and how the program answers purchases.
+pub fn compile_granting(tsconfig: &Path, target: Target<'_>) -> Result<(Compiled, Receipts), Failure> {
     let mut crucible = Crucible::default();
     let compiled = crucible_compiler::compile_with(tsconfig, target, &mut [&mut crucible])?;
-    Ok((compiled, crucible.state.grants.keys()))
+    let grants = &crucible.state.grants;
+    Ok((compiled, Receipts { granted: grants.keys(), answered: grants.answers_receipts }))
 }
 
 #[cfg(feature = "test-support")]

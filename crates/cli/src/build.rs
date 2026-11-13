@@ -1,6 +1,7 @@
 use crate::child;
 use crucible_compiler::{Compiled, InstanceMap, Module, Target, VirtualModule};
 use crucible_project::{Manifest, ManifestError, Place};
+use crucible_transform::Receipts;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fmt;
@@ -102,9 +103,11 @@ pub fn build(
     refuse_declared_out_dir_overlaps(root, manifest)?;
     let experience = crate::experience::prepare(root, manifest, env)?;
     let compiles = compile_all(root, &selected, experience.as_deref())?;
-    // A place that grants nothing is exempt from CRU039, so only the whole game shows a product nobody grants.
-    if experience.is_some() && selected.len() == manifest.places.len() {
-        crate::experience::refuse_ungranted(manifest, compiles.iter().flat_map(|shared| &shared.granted))?;
+    // A place that grants nothing is exempt from CRU039, so only the whole game shows a product nobody grants. A game
+    // that assigns ProcessReceipt itself answers every product.
+    let answered = compiles.iter().any(|shared| shared.receipts.answered);
+    if experience.is_some() && selected.len() == manifest.places.len() && !answered {
+        crate::experience::refuse_ungranted(manifest, compiles.iter().flat_map(|shared| &shared.receipts.granted))?;
     }
     write(root, &compiles)?;
     let mut built = Vec::new();
@@ -123,7 +126,7 @@ pub fn build(
 struct SharedCompile<'m> {
     place: &'m Place,
     compiled: Compiled,
-    granted: Vec<String>,
+    receipts: Receipts,
 }
 
 fn compile_all<'m>(
@@ -136,9 +139,9 @@ fn compile_all<'m>(
         if compiles.iter().any(|shared| shared.place == place) {
             continue;
         }
-        let (compiled, granted) =
+        let (compiled, receipts) =
             compile(root, place, experience).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
-        compiles.push(SharedCompile { place, compiled, granted });
+        compiles.push(SharedCompile { place, compiled, receipts });
     }
     Ok(compiles)
 }
@@ -250,10 +253,12 @@ struct ChildModules {
     modules: Vec<(String, String)>,
     /// The key of each product the place grants through its handle.
     granted: Vec<String>,
+    /// Whether the place assigns `MarketplaceService.ProcessReceipt` itself.
+    answered: bool,
 }
 
 // tsrs never frees a program, so each compile runs in its own process and a build's peak memory is its largest place.
-fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Compiled, Vec<String>), String> {
+fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Compiled, Receipts), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
     let mut command = Command::new(exe);
     command.arg(COMPILE).arg(&place.tsconfig).arg(&place.project).arg(&place.include);
@@ -283,7 +288,7 @@ fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Comp
     let child: ChildModules =
         serde_json::from_slice(&json).map_err(|error| format!("cannot read the compiler's output: {error}"))?;
     let modules = child.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
-    Ok((Compiled { out_dir: child.out_dir, modules }, child.granted))
+    Ok((Compiled { out_dir: child.out_dir, modules }, Receipts { granted: child.granted, answered: child.answered }))
 }
 
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, experience: Option<PathBuf>) -> ExitCode {
@@ -321,9 +326,9 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, exper
         &tsconfig,
         Target::Game { instances: &instances, include: &include, modules: &modules },
     ) {
-        Ok((compiled, granted)) => {
+        Ok((compiled, Receipts { granted, answered })) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
-            let child = ChildModules { out_dir: compiled.out_dir, modules, granted };
+            let child = ChildModules { out_dir: compiled.out_dir, modules, granted, answered };
             match serde_json::to_writer(std::io::stdout().lock(), &child) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {

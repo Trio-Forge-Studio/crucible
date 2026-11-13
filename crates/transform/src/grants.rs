@@ -27,6 +27,8 @@ pub(crate) struct Grants {
     unkeyed: bool,
     /// Each product key a grant names, with where each of its grants is.
     by_key: BTreeMap<String, Vec<String>>,
+    /// Whether the program assigns `MarketplaceService.ProcessReceipt` itself.
+    pub(crate) answers_receipts: bool,
 }
 
 fn place(cx: &ProgramCx<'_>, n: Node) -> String {
