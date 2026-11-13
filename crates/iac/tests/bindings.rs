@@ -98,11 +98,12 @@ declare module "crucible:experience" {
 }
 
 #[test]
-fn a_kind_with_no_key_declares_an_empty_object() {
+fn a_kind_with_no_key_declares_an_empty_record() {
     let (_, experience) = experience("[places.start]\nproject = \"p.json\"\n\n[badges.a]\nname = \"A\"\n");
     let text = declaration(&experience);
-    assert!(text.contains("\texport const Products: {};\n"), "{text}");
-    assert!(text.contains("\texport const Passes: {};\n"), "{text}");
+    assert!(text.contains("\texport const Products: Record<never, never>;\n"), "{text}");
+    assert!(text.contains("\texport const Passes: Record<never, never>;\n"), "{text}");
+    assert!(!text.contains("{}"), "{text}");
 }
 
 #[test]

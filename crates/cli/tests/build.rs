@@ -1309,7 +1309,7 @@ fn a_build_writes_the_experience_declaration_and_binds_no_id_without_an_environm
     for line in [
         "declare module \"crucible:experience\" {\n",
         "\t\treadonly Vip: PassHandle<\"vip\">;\n",
-        "\texport const Products: {};\n",
+        "\texport const Products: Record<never, never>;\n",
         "\t\treadonly FirstPickup: BadgeHandle<\"first-pickup\">;\n",
     ] {
         assert!(declaration.contains(line), "{line:?} in\n{declaration}");

@@ -51,8 +51,9 @@ pub fn declaration(experience: &Experience) -> String {
     );
     for kind in Kind::ALL {
         let members: Vec<_> = handles(experience, kind).collect();
+        // Lint rules such as no-empty-object-type reject `{}`, and the file is committed.
         if members.is_empty() {
-            text += &format!("\n\texport const {}: {{}};\n", kind.handles());
+            text += &format!("\n\texport const {}: Record<never, never>;\n", kind.handles());
             continue;
         }
         text += &format!("\n\texport const {}: {{\n", kind.handles());
