@@ -1,0 +1,112 @@
+# Each mutant changes one part of Profile.tla. `cargo xtask tla` checks that TLC finds a counterexample to the
+# property each one names, so every property is shown to catch the bug it is there for.
+
+[[mutant]]
+name = "no-token-fence"
+why = "An owned write lands without checking that its session still holds the lease, so a superseded session's write replaces the data of the session that took over."
+breaks = "AckedDurable"
+find = '''
+    ELSE IF store.lease # r.tok \/ store.epoch # r.epoch THEN "fenced"
+'''
+replace = '''
+    ELSE IF FALSE THEN "fenced"
+'''
+
+[[mutant]]
+name = "local-outlives-lease"
+why = "A confirmed write extends local authority past the lease it renewed and the takeover that follows its expiry."
+breaks = "OneAuthority"
+find = '''
+       ELSE [y EXCEPT !.safe = Max(@, earliest + Local)]
+'''
+replace = '''
+       ELSE [y EXCEPT !.safe = Max(@, earliest + Lease + 2)]
+'''
+
+[[mutant]]
+name = "authority-from-the-answer"
+why = "A load counts its local authority from when the acquire's answer arrives instead of from when it was sent."
+breaks = "OneAuthority"
+find = '''
+        earliest == IF x.earliest = -1 THEN r.sent ELSE x.earliest
+'''
+replace = '''
+        earliest == now
+'''
+
+[[mutant]]
+name = "takeover-before-expiry"
+why = "An acquire takes a lease that has not expired."
+breaks = "OneAuthority"
+find = '''
+    ELSE IF store.lease # 0 /\ found = {} /\ now <= store.exp + Grace THEN "held"
+'''
+replace = '''
+    ELSE IF FALSE THEN "held"
+'''
+
+[[mutant]]
+name = "grant-a-staged-id-again"
+why = "ProcessReceipt grants a purchase whose id the session already staged."
+breaks = "GrantOnce"
+find = '''
+    ELSE IF p \notin sess[t].staged
+'''
+replace = '''
+    ELSE IF TRUE
+'''
+
+[[mutant]]
+name = "grant-without-authority"
+why = "ProcessReceipt grants into a session that is not writable."
+breaks = "StopsWriting"
+find = '''
+    ELSE IF ~Writable(t) THEN /\ cb' = [cb EXCEPT ![s][p] = NoCall] /\ UNCHANGED <<sess, acked, ran>>
+'''
+replace = '''
+    ELSE IF sess[t].phase = "loading" THEN /\ cb' = [cb EXCEPT ![s][p] = NoCall] /\ UNCHANGED <<sess, acked, ran>>
+'''
+
+[[mutant]]
+name = "grant-without-its-id"
+why = "An owned write stores the grant without the purchase id it was granted for."
+breaks = "GrantWithId"
+find = '''
+                     !.receipts = IF newer THEN @ \cup r.snap.staged ELSE @,
+'''
+replace = '''
+                     !.receipts = @,
+'''
+
+[[mutant]]
+name = "acknowledged-before-durable"
+why = "A granting callback answers PurchaseGranted before the record holds its id."
+breaks = "AckedDurable"
+find = '''
+    /\ \/ /\ p \in sess[t].durable
+'''
+replace = '''
+    /\ \/ /\ TRUE
+'''
+
+[[mutant]]
+name = "durable-from-the-snapshot"
+why = "A confirmed write marks durable every id the session staged, including those staged after its snapshot."
+breaks = "DurableStored"
+find = '''
+        y == [x EXCEPT !.durable = r.env.receipts]
+'''
+replace = '''
+        y == [x EXCEPT !.durable = x.staged]
+'''
+
+[[mutant]]
+name = "effects-without-a-grant"
+why = "PurchaseGranted runs afterGrant effects that this session never staged."
+breaks = "EffectsOnce"
+find = '''
+    /\ IF p \in sess[t].effects
+'''
+replace = '''
+    /\ IF TRUE
+'''
