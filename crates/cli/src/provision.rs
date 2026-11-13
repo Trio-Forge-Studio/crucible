@@ -3,7 +3,7 @@ use crate::plan::{Failure, Project, render};
 use crucible_iac::model::Kind;
 use crucible_iac::oc::Roblox;
 use crucible_iac::plan::{Plan, plan, undeclared};
-use crucible_iac::provision::{Applied, Files, Refused, Run, Stop, forget, observe};
+use crucible_iac::provision::{Applied, Files, Refused, Run, Stop, forget, listed_kinds, observe};
 use crucible_oc::auth;
 use crucible_oc::transport::{Event, Sink, SystemClock, Timing, Transport};
 use serde_json::{Value, json};
@@ -24,6 +24,9 @@ pub struct Args {
     /// Write request details to stderr.
     #[arg(long)]
     pub verbose: bool,
+    /// Do not check the key's scopes first. A call that lacks a scope then fails by itself.
+    #[arg(long)]
+    pub no_scope_check: bool,
 }
 
 struct Notes<'a>(&'a Output);
@@ -65,9 +68,6 @@ pub fn main(args: Args) -> ExitCode {
         if let Some(plan) = &report.plan {
             text += &render(std::slice::from_ref(plan));
             text.push('\n');
-            if plan.steps.iter().any(|step| step.kind == "experience") {
-                text += "  Provision does not write experience settings yet. They stay as they are on Roblox.\n";
-            }
         }
         for applied in &report.applied {
             let action = json!(applied.action);
@@ -133,12 +133,31 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
         Ok(transport) => transport,
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
     };
-    let mut roblox = Roblox { transport: &transport, universe: declared.universe };
     let lock = project.lock.as_ref().and_then(|lock| lock.env(env));
+    let key = if args.no_scope_check {
+        None
+    } else {
+        match crate::scopes::introspect(&transport, output) {
+            Ok(key) => key,
+            Err(failure) => return remote(None, vec![], failure, Some(&source)),
+        }
+    };
+    let reads = listed_kinds(&project.experience, declared, lock, project.journals.get(env));
+    let needed = crucible_iac::oc::scopes(&reads, &[]);
+    if let Err(failure) = crate::scopes::require(key.as_ref(), &needed) {
+        return scoped(None, vec![], failure, Some(&source), Some(needed));
+    }
+    let mut roblox = Roblox { transport: &transport, universe: declared.universe };
     let observed = match observe(&project.experience, declared, lock, project.journals.get(env), &mut roblox) {
         Ok(observed) => observed,
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
     };
+    if let Some(Err(message)) = &observed.settings {
+        output.note(&format!(
+            "Could not read the experience settings Roblox holds: {message}. Going on; provision compares them with \
+             crucible.lock instead."
+        ));
+    }
     let inputs = project.inputs(env, Some(&observed));
     let plan = match plan(&inputs, read) {
         Ok(plan) => plan,
@@ -158,6 +177,10 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
             return Report { plan: Some(plan), ..failed(&failure) };
         }
     };
+    let needed = crucible_iac::oc::scopes(&[], &run.writes());
+    if let Err(failure) = crate::scopes::require(key.as_ref(), &needed) {
+        return scoped(Some(plan), vec![], failure, Some(&source), Some(needed));
+    }
     let mut files = Files { root: root.to_owned() };
     let stopped = loop {
         match run.step(&mut roblox, &mut files) {
@@ -184,6 +207,18 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
             }
             report
         }
+        Some(Stop::Settings(failure)) => {
+            let mut report = remote(Some(plan), applied, failure, Some(&source));
+            if let Some((_, error)) = &mut report.error {
+                error["resource"] = json!("experience settings");
+                error["hint"] = json!(
+                    "Provision writes the experience settings last, so every product, pass and badge step was \
+                     applied, and crucible.lock records it: commit it. The next provision sends the settings again, and \
+                     until then `crucible deploy` warns about them and goes on"
+                );
+            }
+            report
+        }
         Some(Stop::Write { path, error }) => {
             let failure =
                 Failure { code: 1, message: format!("cannot write {}: {error}", path.display()), problems: vec![] };
@@ -205,7 +240,10 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
     }
 }
 
-fn transport<'a>(key: &'a auth::Secret, output: &'a Output) -> Result<Transport<'a>, crucible_oc::outcome::Failure> {
+pub(crate) fn transport<'a>(
+    key: &'a auth::Secret,
+    output: &'a Output,
+) -> Result<Transport<'a>, crucible_oc::outcome::Failure> {
     let timing =
         Timing { deadline: Duration::from_secs(300), poll_interval: Duration::from_secs(2), retry_delay: None };
     let origin = std::env::var("CRUCIBLE_OC_ORIGIN").ok();
@@ -404,7 +442,18 @@ fn remote(
     failure: crucible_oc::outcome::Failure,
     source: Option<&auth::KeySource>,
 ) -> Report {
-    let auth = crucible_oc::Auth::ApiKey { scopes: None };
+    scoped(plan, applied, failure, source, None)
+}
+
+/// `remote`, for a failure of the scope check, whose `requiredScopes` are the scopes the run needs.
+fn scoped(
+    plan: Option<Plan>,
+    applied: Vec<Applied>,
+    failure: crucible_oc::outcome::Failure,
+    source: Option<&auth::KeySource>,
+    needed: Option<Vec<crucible_oc::Scope>>,
+) -> Report {
+    let auth = crucible_oc::Auth::ApiKey { scopes: needed };
     let failure = auth::decorate(failure, &auth, source);
     Report { plan, applied, error: Some((failure.code, failure.error)), passed: vec![] }
 }

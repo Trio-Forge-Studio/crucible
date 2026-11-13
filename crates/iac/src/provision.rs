@@ -15,16 +15,20 @@
 //!    the run did not know is the intent's own or one made by hand. An unknown outcome stops the run with the intent
 //!    kept, and the next run's adopt check resolves it. A create Roblox certainly refused clears its intent, then stops
 //!    the run. Nothing sends a create twice for one intent.
+//! 5. The experience settings update last, so a settings update Roblox refuses stops nothing a product, a pass or a
+//!    badge needs. The update sends only the settings whose declared value differs from what Roblox's reply states, or
+//!    from the lock's value when the reply leaves a setting out, because a price write may cancel private server
+//!    subscriptions. The lock then records each value.
 
 use crate::journal::{Intent, Journal};
 use crate::lock::{Entry, EnvLock, Lock, Status};
-use crate::model::{Experience, Fields, Kind, Lifecycle, Resource, content_hash};
+use crate::model::{Experience, Fields, Kind, Lifecycle, ResolvedSettings, Resource, content_hash};
 use crate::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan};
 use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::io::{self, Write};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 /// Roblox, as provision reaches it. `crucible_oc`'s typed operations implement it in `oc`, and tests fake it.
@@ -36,6 +40,10 @@ pub trait Remote {
     /// A failure for which `may_have_landed` holds leaves the create's outcome unknown.
     fn create(&mut self, kind: Kind, fields: &Fields, icon: Option<&Image>) -> Result<Id, Failure>;
     fn update(&mut self, kind: Kind, id: Id, patch: &Patch) -> Result<(), Failure>;
+    /// Writes the settings that are set and leaves the rest as they are. A run never calls it with none set.
+    fn update_settings(&mut self, settings: &ResolvedSettings) -> Result<(), Failure>;
+    /// The experience settings the universe holds, `None` for each the reply does not state.
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure>;
 }
 
 /// The fields an update sets. `on` is the sale state of a product or a pass, or whether a badge is enabled.
@@ -112,8 +120,28 @@ fn sync_folder(folder: &Path) {
     let _ = folder;
 }
 
-/// Lists each kind the environment declares or its lock or journal holds, and reads by ID each lock ID a list lacks,
-/// so the plan can tell a resource that is gone from one the list left out.
+/// The kinds `observe` lists: each kind the environment declares or its lock or journal holds.
+pub fn listed_kinds(
+    experience: &Experience,
+    env: &crucible_project::Env,
+    lock: Option<&EnvLock>,
+    journal: Option<&Journal>,
+) -> Vec<Kind> {
+    let declared = experience.resolve(env);
+    Kind::ALL
+        .into_iter()
+        .filter(|&kind| {
+            declared.iter().any(|resource| resource.kind == kind)
+                || lock.is_some_and(|lock| !lock.entries(kind).is_empty())
+                || journal.is_some_and(|journal| journal.intents.iter().any(|intent| intent.kind == kind))
+        })
+        .collect()
+}
+
+/// Lists each of `listed_kinds`, and reads by ID each lock ID a list lacks, so the plan can tell a resource that is
+/// gone from one the list left out. When the environment declares experience settings, it reads what the universe
+/// holds too. A failed read of the settings does not fail `observe`: it keeps why, and the plan compares the settings
+/// with the lock only.
 pub fn observe(
     experience: &Experience,
     env: &crucible_project::Env,
@@ -121,16 +149,9 @@ pub fn observe(
     journal: Option<&Journal>,
     remote: &mut dyn Remote,
 ) -> Result<Observed, Failure> {
-    let declared = experience.resolve(env);
     let mut observed = Observed::default();
-    for kind in Kind::ALL {
+    for kind in listed_kinds(experience, env, lock, journal) {
         let locked = lock.map(|lock| lock.entries(kind));
-        let needed = declared.iter().any(|resource| resource.kind == kind)
-            || locked.is_some_and(|entries| !entries.is_empty())
-            || journal.is_some_and(|journal| journal.intents.iter().any(|intent| intent.kind == kind));
-        if !needed {
-            continue;
-        }
         let listed = remote.list(kind)?;
         for entry in locked.into_iter().flat_map(|entries| entries.values()) {
             if !listed.iter().any(|listed| listed.id == entry.id) {
@@ -138,6 +159,11 @@ pub fn observe(
             }
         }
         observed.listed.insert(kind, listed);
+    }
+    if experience.settings().is_some() {
+        observed.settings = Some(remote.read_settings().map_err(|failure| {
+            failure.error["message"].as_str().unwrap_or("Roblox's answer could not be read").to_owned()
+        }));
     }
     Ok(observed)
 }
@@ -162,6 +188,9 @@ pub enum Stop {
         failure: Failure,
         intent: bool,
     },
+    /// Roblox refused or failed the update of the experience settings. It is the last write, so every other effect was
+    /// applied. It writes absolute values, so a rerun repeats it.
+    Settings(Failure),
     Write {
         path: PathBuf,
         error: io::Error,
@@ -173,6 +202,19 @@ pub enum Stop {
         key: String,
         other: String,
     },
+}
+
+/// A write a run will send to Roblox, for the scopes it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Write {
+    Create(Kind),
+    /// An update of a resource. A badge's details and its icon go through two operations.
+    Update {
+        kind: Kind,
+        details: bool,
+        icon: bool,
+    },
+    Settings,
 }
 
 enum Effect {
@@ -192,6 +234,10 @@ enum Effect {
         id: Id,
         patch: Patch,
     },
+    Settings(ResolvedSettings),
+    /// One lock write that records the value of each setting the run wrote or found held, and keeps the value the lock
+    /// had for each setting `[experience]` no longer sets.
+    RecordSettings(ResolvedSettings),
     Intend {
         kind: Kind,
         key: String,
@@ -253,7 +299,17 @@ impl Run {
             })
             .map(|intent| (intent.kind, intent.key.clone()))
             .collect();
-        let (mut adopts, mut changes, mut creates) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut adopts, mut changes, mut creates, mut settings) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        if let Some(declared) = inputs.experience.settings()
+            && plan.steps.iter().any(|step| step.kind == "experience" && step.action == Action::Update)
+        {
+            let (recorded, known) = crate::plan::known_settings(inputs);
+            let write = declared.unheld(&known);
+            if !write.is_empty() {
+                settings.push(Effect::Settings(write));
+            }
+            settings.push(Effect::RecordSettings(declared.or(&recorded)));
+        }
         for step in &plan.steps {
             let Some(resource) =
                 resources.iter().find(|resource| resource.kind.noun() == step.kind && resource.key == step.key)
@@ -323,6 +379,7 @@ impl Run {
         queue.extend(adopts);
         queue.extend(changes);
         queue.extend(creates);
+        queue.extend(settings);
         let mut known = BTreeMap::new();
         for (kind, listed) in &observed.listed {
             let ids: &mut BTreeSet<Id> = known.entry(*kind).or_default();
@@ -340,6 +397,26 @@ impl Run {
             known,
             applied: Vec::new(),
         })
+    }
+
+    /// The writes the run has left to send, in order.
+    pub fn writes(&self) -> Vec<Write> {
+        self.queue
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Create { kind, .. } => Some(Write::Create(*kind)),
+                Effect::Update { kind, patch, .. } => Some(Write::Update {
+                    kind: *kind,
+                    details: patch.name.is_some()
+                        || patch.description.is_some()
+                        || patch.price.is_some()
+                        || patch.on.is_some(),
+                    icon: patch.icon.is_some(),
+                }),
+                Effect::Settings(_) => Some(Write::Settings),
+                _ => None,
+            })
+            .collect()
     }
 
     /// What the run has done so far.
@@ -381,6 +458,13 @@ impl Run {
                     failure,
                     intent: false,
                 })?;
+            }
+            Effect::Settings(settings) => remote.update_settings(&settings).map_err(Stop::Settings)?,
+            Effect::RecordSettings(settings) => {
+                self.lock.env_mut(&self.env, self.universe).experience = Some(settings);
+                self.save_lock(store)?;
+                let id = self.universe.to_string();
+                self.applied.push(Applied { kind: "experience", key: "settings".into(), action: Action::Update, id });
             }
             Effect::Intend { kind, key, name } => {
                 let env = self.lock.env(&self.env);

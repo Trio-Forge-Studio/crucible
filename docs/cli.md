@@ -8,7 +8,7 @@ Run `crucible` commands and read their output and exit codes.
 
 ## Output and exit codes
 
-Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc`, `crucible publish`, and `crucible whoami` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`. `crucible provision` and `crucible adopt` use those exit codes too, and print one JSON document with `--json`.
+Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc`, `crucible deploy`, and `crucible whoami` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`. `crucible provision` and `crucible adopt` use those exit codes too, and print one JSON document with `--json`.
 
 | Exit | Meaning |
 | --- | --- |
@@ -28,7 +28,7 @@ Run `npx crucible build` from the game's root. It compiles every place in `cruci
 - Each place compiles in its own process, so a build's peak memory is that of its largest place.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.
-- `--env <name>` binds `crucible:experience` to that environment's IDs in `crucible.lock`, as `npx crucible docs experience` describes under "Use the handles in game code". `crucible publish <env>` builds with its environment.
+- `--env <name>` binds `crucible:experience` to that environment's IDs in `crucible.lock`, as `npx crucible docs experience` describes under "Use the handles in game code". `crucible deploy <env>` builds with its environment.
 - Exit 0 means every place built. Exit 1 means `crucible.toml` could not be read, a place failed to compile or write, no place grants a declared product and none answers `ProcessReceipt` itself, or Rojo failed. Exit 2 means a usage error or an invalid `crucible.toml`, reported before anything compiles.
 
 `crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `tsconfig.json`, `default.project.json`, and the `include` folder at the root.
@@ -76,6 +76,40 @@ In the new directory, run `npx crucible build`, then open `build/start.rbxl` in 
 
 Run `npm run check` to lint, check formatting, compile, and build `build/start.rbxl`. `npm run build` builds the game, and `npm run fmt` fixes formatting. Use the equivalent script commands with your package manager. Read the generated `AGENTS.md` and `npx crucible docs cli` before developing the game.
 
+## crucible deploy
+
+`npx crucible deploy production` checks that `crucible.lock` records every product, pass and badge `crucible.toml` declares for `[env.production]`, and warns when it does not record the experience settings yet, then builds the game and uploads every place to the ids in `[env.production]`. It never creates or changes a product, a pass, a badge or an experience setting: run `npx crucible provision production` and commit `crucible.lock` first. Run `npx crucible docs deploy` for the checks, their order and the release flow. `crucible publish`, which 0.6.0 replaced, prints a usage error that names `crucible deploy` and exits 2.
+
+`--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
+
+`--dry-run` runs the same checks and builds the selected places, and sends no upload request. `--no-scope-check` skips the check of the key's scopes.
+
+The key comes from `CRUCIBLE_OC_API_KEY` in the environment, or from `.env` at the game's root, as [Configure a key](oc.md#configure-a-key) describes. A missing or invalid key fails without trying another. `--verbose` writes redacted request diagnostics to stderr. `version_type` defaults to `Saved`; set `Published` in the environment to publish the new versions.
+
+Deploy prints exactly one JSON document on stdout. Build progress and compiler diagnostics go to stderr. It uses the [Open Cloud exit codes](oc.md#exit-codes), including usage 2, auth 3, rejected 4, outcome_unknown 5, remote_failure 6, unavailable 7, and pending 8. Build failures are unavailable, exit 7. A missing, unreadable or invalid `crucible.toml`, `crucible.lock` or journal is usage 2, and so are unknown environments or places, with valid names.
+
+Success, exit 0, includes each confirmed upload's version number. Ids are strings and version numbers are integers.
+
+```json
+{"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"},{"name":"start","universeId":"9999","placeId":"4321","versionNumber":8,"versionType":"published"}],"failed":null,"notAttempted":[]}
+```
+
+An upload failure keeps the existing Open Cloud error fields and puts progress under `error.deploy`. `failed` names the place whose upload failed. Its outcome can be unknown. `published` contains only confirmed receipts, and `notAttempted` lists the selected places after the failed place. The exit code classifies the failed upload independently of earlier successes. `next` is a JSON array of string arguments beginning with `"crucible"`. It selects the failed place and every unattempted place with `--place=<name>` and preserves an explicit `--verbose` flag. It does not copy environment variables, so the replay reads the key again from the environment or `.env`. Pass `next` as argv to a process spawn API without shell parsing or joining its elements. With an installed npm package, run it through `npx` with `next` as the argument array.
+
+After a partial failure, never rerun the environment without `--place`, because that uploads confirmed places again. For `outcome_unknown`, check the failed place's versions before re-uploading it. Uploads follow the [place publishing retry policy](oc.md#publish-a-place).
+
+```json
+{"error":{"kind":"rejected","message":"HTTP 400","status":400,"detail":{},"deploy":{"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"}],"failed":"start","notAttempted":[],"next":["crucible","deploy","production","--place=start"]}}}
+```
+
+Credential, scope and build failures have the same progress object, with `failed` null and all selected places in `notAttempted`. A refused check of the files returns the usual `{"error":{"kind":"usage","message":"..."}}` before reading the key, with `steps` or `problems` when the plan caused it.
+
+A successful dry run exits 0 with no published receipts. `auth` is the `crucible whoami` result, or `null` when the introspection failed or `--no-scope-check` skipped it. All selected places remain unattempted.
+
+```json
+{"environment":"production","dryRun":true,"published":[],"failed":null,"notAttempted":["arena","start"],"auth":{"keySource":"CRUCIBLE_OC_API_KEY","name":"deploy-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}}
+```
+
 ## crucible docs
 
 Prints a guide as Markdown, or opens it in a reader at a terminal. Read the guide for a module before you write code that uses it.
@@ -120,39 +154,7 @@ Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc 
 
 ## crucible provision
 
-`npx crucible provision <env>` lists the products, passes and badges in the environment's universe, prints the plan, and applies it: it adopts an existing resource by its name, creates the rest, updates what differs, and records each ID in `crucible.lock`. `--dry-run` lists and plans and writes nothing. `npx crucible adopt <env> <kind> <key> <id>` records one resource for a key when a run stopped on two candidates or on a badge whose create may have landed. Both read the Open Cloud key like `crucible oc`. Run `npx crucible docs provision` for the steps, the journal, the stops and the exit codes.
-
-## crucible publish
-
-`npx crucible publish production` builds the game, then uploads every place to the ids in `[env.production]` in `crucible.toml`. `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. Credentials load before building. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
-
-`--dry-run` builds the selected places and runs the same key and scope check as `crucible whoami --for universes.create-place-version`. It sends an introspection request and no upload requests. The check verifies that the key is enabled, unexpired, and has the declared operation scopes. It does not prove access to a particular universe or place.
-
-The key comes from `CRUCIBLE_OC_API_KEY` in the environment, or from `.env` at the game's root, as [Configure a key](oc.md#configure-a-key) describes. A missing or invalid key fails without trying another. `--verbose` writes redacted request diagnostics to stderr. `version_type` defaults to `Saved`; set `Published` in the environment to publish the new versions.
-
-Publish prints exactly one JSON document on stdout. Build progress and compiler diagnostics go to stderr. It uses the [Open Cloud exit codes](oc.md#exit-codes), including usage 2, auth 3, rejected 4, outcome_unknown 5, remote_failure 6, unavailable 7, and pending 8. Build failures are unavailable, exit 7. Missing `crucible.toml` is usage 2 with an example. Unknown environments or places are usage 2 with valid names.
-
-Success, exit 0, includes each confirmed upload's version number. Ids are strings and version numbers are integers.
-
-```json
-{"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"},{"name":"start","universeId":"9999","placeId":"4321","versionNumber":8,"versionType":"published"}],"failed":null,"notAttempted":[]}
-```
-
-An upload failure keeps the existing Open Cloud error fields and puts progress under `error.publish`. `failed` names the place whose upload failed. Its outcome can be unknown. `published` contains only confirmed receipts, and `notAttempted` lists the selected places after the failed place. The exit code classifies the failed upload independently of earlier successes. `next` is a JSON array of string arguments beginning with `"crucible"`. It selects the failed place and every unattempted place with `--place=<name>` and preserves an explicit `--verbose` flag. It does not copy environment variables, so the replay reads the key again from the environment or `.env`. Pass `next` as argv to a process spawn API without shell parsing or joining its elements. With an installed npm package, run it through `npx` with `next` as the argument array.
-
-After a partial failure, never rerun the environment without `--place`, because that uploads confirmed places again. For `outcome_unknown`, check the failed place's versions before re-uploading it. Uploads follow the [place publishing retry policy](oc.md#publish-a-place).
-
-```json
-{"error":{"kind":"rejected","message":"HTTP 400","status":400,"detail":{},"publish":{"environment":"production","dryRun":false,"published":[{"name":"arena","universeId":"9999","placeId":"4322","versionNumber":7,"versionType":"published"}],"failed":"start","notAttempted":[],"next":["crucible","publish","production","--place=start"]}}}
-```
-
-Credential, build, and dry-run auth failures have the same progress object, with `failed` null and all selected places in `notAttempted`. Config and target validation errors return the usual `{"error":{"kind":"usage","message":"..."}}` before building.
-
-A successful dry run exits 0 with no published receipts. `auth` is the `crucible whoami` result. All selected places remain unattempted.
-
-```json
-{"environment":"production","dryRun":true,"published":[],"failed":null,"notAttempted":["arena","start"],"auth":{"keySource":"CRUCIBLE_OC_API_KEY","name":"publish-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}}
-```
+`npx crucible provision <env>` lists the products, passes and badges in the environment's universe, prints the plan, and applies it: it adopts an existing resource by its name, creates the rest, updates what differs, and records each ID in `crucible.lock`. `--dry-run` lists and plans and writes nothing, and `--no-scope-check` skips the check of the key's scopes. `npx crucible adopt <env> <kind> <key> <id>` records one resource for a key when a run stopped on two candidates or on a badge whose create may have landed. Both read the Open Cloud key like `crucible oc`. Run `npx crucible docs provision` for the steps, the journal, the stops and the exit codes.
 
 ## crucible upgrade
 

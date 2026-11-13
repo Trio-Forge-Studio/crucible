@@ -10,7 +10,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// The private server price in Robux. 0 makes private servers free.
+    /// The private server price in Robux. 0 makes private servers free. Roblox's API reference says changing the price
+    /// cancels every private server subscription.
     pub private_server_price: Option<u32>,
     pub voice_chat: Option<bool>,
 }

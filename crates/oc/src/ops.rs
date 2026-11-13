@@ -1,5 +1,5 @@
-//! The Open Cloud calls provisioning makes for developer products, game passes and badges, as typed requests and
-//! replies over `Transport`. An operation's retry rule is its type's `S` parameter, not a registry lookup: a create
+//! The Open Cloud calls provisioning and deploy make for developer products, game passes, badges, the universe and the
+//! key itself, as typed requests and replies over `Transport`. An operation's retry rule is its type's `S` parameter, not a registry lookup: a create
 //! is `Unsafe`, because Roblox takes no idempotency key and cannot delete a duplicate, so the outcome judge never
 //! repeats it after a lost answer. An update writes absolute values, so repeating it leaves the same state.
 //!
@@ -7,6 +7,7 @@
 //! reports it as unavailable: it returns the parsed reply or exit 5, with what the reply held, so a caller checks
 //! Roblox before it writes again.
 
+use crate::auth::Introspection;
 use crate::outcome::{Failure, UNKNOWN_HINT};
 use crate::transport::{Operation, Reply, Request, Transport};
 use crate::{Auth, Payload, Safety, Scope};
@@ -58,6 +59,13 @@ pub struct BadgeDetails {
     pub name: Option<String>,
     pub description: Option<String>,
     pub enabled: Option<bool>,
+}
+
+/// The experience settings a universe update writes. `None` leaves a setting unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UniverseSettings {
+    pub private_server_price: Option<u32>,
+    pub voice_chat: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +176,8 @@ pub struct Op<T, S> {
     parse: fn(&Value) -> Parsed<T>,
     /// The reply field that holds the ID of what a create made, which a failure keeps so a caller can adopt it.
     id_field: Option<&'static str>,
+    /// When the transport gives up on the call, retries and waits included.
+    until: Option<Instant>,
     retry: PhantomData<S>,
 }
 
@@ -191,6 +201,11 @@ impl<T, S: Retry> Op<T, S> {
 
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Gives up at `at`: no attempt or wait runs past it, and the call then fails as unavailable.
+    pub fn deadline(self, at: Instant) -> Self {
+        Self { until: Some(at), ..self }
     }
 
     fn failed(&self, mut failure: Failure, acted: bool) -> Failure {
@@ -278,7 +293,7 @@ impl<T, S: Retry> Request for Op<T, S> {
     }
 
     fn until(&self) -> Option<Instant> {
-        None
+        self.until
     }
 }
 
@@ -337,7 +352,20 @@ fn op<T, S>(
     parse: fn(&Value) -> Parsed<T>,
 ) -> Op<T, S> {
     let response = Payload::Json { shape: () };
-    Op { name, method, origin, path, query: vec![], auth, response, body, parse, id_field: None, retry: PhantomData }
+    Op {
+        name,
+        method,
+        origin,
+        path,
+        query: vec![],
+        auth,
+        response,
+        body,
+        parse,
+        id_field: None,
+        until: None,
+        retry: PhantomData,
+    }
 }
 
 /// A write whose reply nothing reads, so any 2xx is its success, whatever the body holds.
@@ -675,5 +703,83 @@ pub mod badges {
             op.query.extend(cursor.map(|cursor| ("cursor", cursor.to_owned())));
             op
         })
+    }
+}
+
+pub mod universes {
+    use super::*;
+
+    /// The experience settings the universe holds. A setting the reply leaves out is `None`: Roblox's JSON may omit a
+    /// field that holds its default, so a caller cannot read an absent field as any value. The registry leaves the
+    /// operation's scopes unknown, so it declares none, and a key Roblox refuses fails the read with exit 3.
+    pub fn get(universe: Id) -> Op<UniverseSettings, Read> {
+        op(
+            "universes.get",
+            "GET",
+            APIS,
+            format!("/cloud/v2/universes/{universe}"),
+            Auth::ApiKey { scopes: None },
+            Body::Empty,
+            |value| {
+                const PRICE: &str = "privateServerPriceRobux";
+                const VOICE: &str = "voiceChatEnabled";
+                let stated = |field| value.get(field).filter(|value| !value.is_null());
+                let price = stated(PRICE)
+                    .map(|price| price.as_u64().and_then(|price| u32::try_from(price).ok()).ok_or_else(|| bad(PRICE)))
+                    .transpose()?;
+                let voice = stated(VOICE).map(|on| on.as_bool().ok_or_else(|| bad(VOICE))).transpose()?;
+                Ok(UniverseSettings { private_server_price: price, voice_chat: voice })
+            },
+        )
+    }
+
+    /// Writes the settings that are set, and names each in `updateMask`, the registry's "list of fields to update", so
+    /// Roblox leaves every other field alone. `None` when no setting is set, because an empty mask could read as every
+    /// field. The registry marks the operation unsafe, as it does every `PATCH` it has no rule for. The body holds
+    /// absolute values under the mask, so a repeat leaves the same state, and it is `Idempotent` here.
+    pub fn update(universe: Id, settings: &UniverseSettings) -> Option<Op<(), Idempotent>> {
+        let mut body = serde_json::Map::new();
+        if let Some(price) = settings.private_server_price {
+            body.insert("privateServerPriceRobux".into(), json!(price));
+        }
+        if let Some(enabled) = settings.voice_chat {
+            body.insert("voiceChatEnabled".into(), json!(enabled));
+        }
+        if body.is_empty() {
+            return None;
+        }
+        let mask = body.keys().cloned().collect::<Vec<_>>().join(",");
+        let mut op = write(
+            "universes.update",
+            "PATCH",
+            format!("/cloud/v2/universes/{universe}"),
+            key(&[("universe:write", Some("universes"))]),
+            Body::Json(Value::Object(body)),
+        );
+        op.query.push(("updateMask", mask));
+        Some(op)
+    }
+}
+
+pub mod api_keys {
+    use super::*;
+
+    /// What the key that `Transport` sends can do. The key goes in the body, so the call needs no scope.
+    pub fn introspect() -> Op<Introspection, Read> {
+        op(
+            "api-keys.introspect",
+            "POST",
+            APIS,
+            "/api-keys/v1/introspect".into(),
+            Auth::BodyKey { field: "apiKey".into() },
+            Body::Empty,
+            |value| {
+                text(value, "name")?;
+                flag(value, "enabled")?;
+                flag(value, "expired")?;
+                at(value, "scopes")?.as_array().ok_or_else(|| bad("scopes"))?;
+                Introspection::parse(value.clone()).map_err(|_| bad("scopes"))
+            },
+        )
     }
 }

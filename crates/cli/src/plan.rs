@@ -194,6 +194,10 @@ pub(crate) fn render(plans: &[Plan]) -> String {
                     detail.push(format!("intent sent {:?}{resolved}", intent.name));
                 }
                 detail.extend(step.note.clone());
+                detail.extend(step.settings.iter().map(|setting| match &setting.roblox {
+                    Some(held) => format!("{} = {} (Roblox holds {held})", setting.key, setting.value),
+                    None => format!("{} = {}", setting.key, setting.value),
+                }));
                 [
                     label(&json!(step.action)),
                     format!("{} {}", step.kind, step.key),

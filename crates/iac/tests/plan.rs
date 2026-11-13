@@ -86,7 +86,11 @@ impl Project {
         let experience = self.experience().unwrap();
         let mut lock = format!("version = 1\n[env.{env}]\nuniverse = {}\n", self.manifest.envs[env].universe);
         if let Some(settings) = experience.settings() {
-            lock += &format!("[env.{env}.experience]\nfingerprint = {:?}\n", settings.fingerprint());
+            lock += &format!("[env.{env}.experience]\n");
+            lock += &settings
+                .private_server_price
+                .map_or_else(String::new, |price| format!("private_server_price = {price}\n"));
+            lock += &settings.voice_chat.map_or_else(String::new, |on| format!("voice_chat = {on}\n"));
         }
         for (at, resource) in experience.resolve(&self.manifest.envs[env]).iter().enumerate() {
             let status = if resource.lifecycle == Lifecycle::Retired { "retired" } else { "managed" };
@@ -687,6 +691,7 @@ fn matching() -> Observed {
             (Kind::Badge, vec![listed(1002, "First delivery", None, true)]),
         ]),
         missing: BTreeMap::new(),
+        settings: None,
     }
 }
 

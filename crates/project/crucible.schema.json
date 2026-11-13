@@ -388,7 +388,7 @@
       "type": "object",
       "properties": {
         "private_server_price": {
-          "description": "The private server price in Robux. 0 makes private servers free.",
+          "description": "The private server price in Robux. 0 makes private servers free. Roblox's API reference says changing the price\ncancels every private server subscription.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0

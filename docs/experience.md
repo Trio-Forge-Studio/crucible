@@ -13,7 +13,10 @@ Declare developer products, game passes and badges in `crucible.toml`, reach the
 project = "default.project.json"
 
 [experience]
-private_server_price = 0
+# Provision writes each setting here to the universe. Leave one out to keep what Roblox holds.
+# A private server costs 100 Robux. 0 makes private servers free. Changing it cancels every private server subscription.
+private_server_price = 100
+# Voice chat is off in the experience.
 voice_chat = false
 
 [env.staging]
@@ -47,6 +50,7 @@ price = 1
 enabled = false
 ```
 
+- `[experience]` holds settings provision writes to each environment's universe: `private_server_price`, the Robux a private server costs, where 0 makes private servers free, and `voice_chat`, whether players can use voice chat. A setting you leave out keeps what Roblox holds. Roblox's API reference says changing `private_server_price` cancels every existing private server subscription, so change it on purpose. Provision never sends a price Roblox already holds, or, when it cannot read the universe, the price `crucible.lock` records. Before 0.6.0, provision wrote none of them, so the first `crucible provision <env>` after upgrading to 0.6.0 writes the table to the universe. Check each value against the Creator Dashboard before you run it, and remove a setting you do not mean to manage.
 - `crucible = "0.6"` at the top names the oldest crucible that can read the file. An older crucible that knows the key stops with `this project needs crucible 0.6.0 or later` before it reads anything else, so a key a newer release added never reads as unknown. A release from before the key reports ``unknown field `crucible` `` instead.
 - The `#:schema` line gives Taplo and the Even Better TOML extension completion and checking from the schema the CLI package ships. The schema checks what one table holds: unknown keys, types, key and name formats, prices of at least 1, a `name` on what is not retired and a `price` on a product or a pass that is neither retired nor untracked, and one of `place` or `places`. Only `crucible plan` and the other commands check the rules that span tables or need the running crucible:
   - a `crucible` version newer than the one running;
@@ -102,7 +106,7 @@ export class Shop extends Subsystem {
 - `crucible build` writes `src/crucible-experience.d.ts`, which declares `crucible:experience` with `Products`, `Passes` and `Badges`. Each key becomes a handle named in PascalCase, so `coin-pack` is `Products.CoinPack`, typed `ProductHandle<"coin-pack">`. An untracked key has no handle. The file holds no ID, so it is the same in every environment: commit it. The build writes it when `crucible.toml` declares a product, a pass or a badge, or when the file exists, and rewrites it whenever its bytes differ from what `crucible.toml` gives, so do not edit it. It writes the file whole through a rename, and leaves it alone when nothing changed. Each place's tsconfig must include the file. A tsconfig whose `include` names only some folders, or another source folder, leaves it out, and the build then fails with TS2307 for `crucible:experience` and names the path to add to that tsconfig's `include`.
 - `ProductHandle`, `RetiredProductHandle`, `PassHandle` and `BadgeHandle` come from `@trioforge/crucible`. A handle has the `key` and the `id` of its resource. A profile store's `grant` takes a product handle. Crucible has no call of its own to award a badge or check a pass: Roblox's calls, such as `BadgeService.AwardBadge`, `MarketplaceService.PromptGamePassPurchase` and `MarketplaceService.PromptProductPurchase`, take the handle's `id`.
 - The build puts the handles in the place as a module, `crucible-experience.luau`, inside the shallowest folder of the `outDir` that the Rojo project maps under `ReplicatedStorage`, so the server and the client both read it. A build fails when the project maps none.
-- `crucible build --env <name>` binds each handle to the ID `crucible.lock` records for that environment. It fails when the lock holds no ID for a key that is neither retired nor untracked, and names `crucible provision <name>`, so a place for an environment never ships a product it cannot sell. It also fails when the lock records the environment in another universe. `crucible publish <env>` builds this way.
+- `crucible build --env <name>` binds each handle to the ID `crucible.lock` records for that environment. It fails when the lock holds no ID for a key that is neither retired nor untracked, and names `crucible provision <name>`, so a place for an environment never ships a product it cannot sell. It also fails when the lock records the environment in another universe. `crucible deploy <env>` builds this way.
 - `crucible build` without `--env` binds no ID, so the game compiles before anything is provisioned. Reading a handle's `id` in that place throws an error that names the key. A grant reads it when its Subsystem is made, so the server fails at boot rather than with ID 0.
 - A retired product is off sale, but a purchase made before it retired can still send a receipt, so it keeps its handle, typed `RetiredProductHandle`. In an environment whose lock holds no ID for it, the product never existed, so its handle is absent: a grant of it claims nothing and does not throw, because no receipt can name it, and reading its `id` throws an error that names the key and the environment. A retired pass or badge with no ID is absent the same way. A key that is neither retired nor untracked and has no ID still fails `crucible build --env`. Keep a retired product's grant until the receipts of its earlier purchases have drained, because a place that grants products answers a receipt for a product with no grant `NotProcessedYet`.
 - A place that grants any product must grant each product `Products` declares exactly once, and a retired product once or not at all, or the build fails with CRU039, which names the key and the files. A product has one grant call site, so to grant it differently by case, branch inside the grant's function, not around two grant calls. A place that grants none, such as a place where nothing is sold, leaves `ProcessReceipt` unset, and Roblox offers its purchases again in a server that handles them.
@@ -134,11 +138,11 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 | `untrack` | The table sets `untrack = true` and the lock holds its ID. | Removes it from the lock. |
 | `no-op` | Nothing differs. | Nothing. |
 
-`crucible provision` plans with what Roblox lists too, so its plan can also show `adopt`, with the ID of the one resource a `create` or an `adopt-check` found, and an `update` for a change someone made on Roblox. `changes` says why an update happens: `details`, `icon`, `restore` or `key`. The lock keeps a fingerprint of the fields it applied, not the fields, so the plan cannot say which detail changed. More than five badge creates in one plan add a warning, because Roblox makes five badges a day free in each experience and charges 100 Robux for each one after that.
+`crucible provision` plans with what Roblox lists too, so its plan can also show `adopt`, with the ID of the one resource a `create` or an `adopt-check` found, and an `update` for a change someone made on Roblox. `changes` says why an update happens: `details`, `icon`, `restore` or `key`. The experience settings step lists each setting `[experience]` sets with the value provision writes, in `settings` with `--json`, such as `{"key": "voice_chat", "value": false}`. `crucible provision` also reads the universe, and adds the value Roblox holds, as `(Roblox holds true)` in text and `"roblox": true` in JSON, for each setting its reply states. The lock keeps a fingerprint of the fields it applied to a product, a pass or a badge, not the fields, so the plan cannot say which of its details changed. More than five badge creates in one plan add a warning, because Roblox makes five badges a day free in each experience and charges 100 Robux for each one after that.
 
 ```text
 staging (universe 10772177432)
-  update  experience settings                      10772177432  details
+  update  experience settings                      10772177432  details, private_server_price = 100, voice_chat = false
   create  product coin-pack    Products.CoinPack
   create  pass vip             Passes.Vip
   create  badge first-pickup   Badges.FirstPickup
@@ -167,7 +171,8 @@ version = 1
 universe = 10772177432
 
 [env.staging.experience]
-fingerprint = "sha256:..."
+private_server_price = 100
+voice_chat = false
 
 [env.staging.products.coin-pack]
 id = 3301234567

@@ -93,15 +93,34 @@ impl Resource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// The experience settings `[experience]` sets, those Roblox's reply states, or those `crucible.lock` records. `None` is
+/// a setting left unset, one the reply did not state, or one no provision wrote.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResolvedSettings {
     pub private_server_price: Option<u32>,
     pub voice_chat: Option<bool>,
 }
 
 impl ResolvedSettings {
-    pub fn fingerprint(&self) -> String {
-        fingerprint(self)
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The settings this sets that `known` does not state with the same value.
+    pub fn unheld(&self, known: &ResolvedSettings) -> ResolvedSettings {
+        ResolvedSettings {
+            private_server_price: self.private_server_price.filter(|price| known.private_server_price != Some(*price)),
+            voice_chat: self.voice_chat.filter(|on| known.voice_chat != Some(*on)),
+        }
+    }
+
+    /// Each setting this sets, and `other`'s value for each this leaves unset.
+    pub fn or(&self, other: &ResolvedSettings) -> ResolvedSettings {
+        ResolvedSettings {
+            private_server_price: self.private_server_price.or(other.private_server_price),
+            voice_chat: self.voice_chat.or(other.voice_chat),
+        }
     }
 }
 

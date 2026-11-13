@@ -8,8 +8,9 @@
 
 use crate::journal::{self, Intent, Journal};
 use crate::lock::{self, Entry, EnvLock, Status};
-use crate::model::{Experience, Fields, Kind, Lifecycle, Problem, Resource, content_hash};
+use crate::model::{Experience, Fields, Kind, Lifecycle, Problem, ResolvedSettings, Resource, content_hash};
 use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 use std::path::Path;
@@ -75,6 +76,44 @@ pub struct Step {
     pub intent: Option<StepIntent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The experience settings step's settings, each that `[experience]` sets.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<Setting>,
+}
+
+/// One setting `[experience]` sets, and the value a provision writes for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Setting {
+    /// Its key in `[experience]`.
+    pub key: &'static str,
+    pub value: Value,
+    /// What Roblox holds, when provision read the universe and its reply stated the setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roblox: Option<Value>,
+}
+
+fn settings(declared: &ResolvedSettings, held: Option<&ResolvedSettings>) -> Vec<Setting> {
+    let mut settings = Vec::new();
+    if let Some(price) = declared.private_server_price {
+        let roblox = held.and_then(|held| held.private_server_price).map(|price| json!(price));
+        settings.push(Setting { key: "private_server_price", value: json!(price), roblox });
+    }
+    if let Some(on) = declared.voice_chat {
+        let roblox = held.and_then(|held| held.voice_chat).map(|on| json!(on));
+        settings.push(Setting { key: "voice_chat", value: json!(on), roblox });
+    }
+    settings
+}
+
+/// The settings `crucible.lock` records, and what the universe is known to hold: each setting Roblox's reply states,
+/// and the lock's value for each the reply leaves out or when the read failed.
+pub(crate) fn known_settings(inputs: &Inputs) -> (ResolvedSettings, ResolvedSettings) {
+    let recorded = inputs.lock.and_then(|lock| lock.experience.clone()).unwrap_or_default();
+    let known = match inputs.observed.and_then(Observed::held_settings) {
+        Some(held) => held.or(&recorded),
+        None => recorded.clone(),
+    };
+    (recorded, known)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -115,9 +154,17 @@ pub struct Listed {
 pub struct Observed {
     pub listed: BTreeMap<Kind, Vec<Listed>>,
     pub missing: BTreeMap<(Kind, Id), Option<Listed>>,
+    /// The experience settings the universe holds, or why they could not be read. `None` when the environment declares
+    /// no settings. A plan without them compares the settings with the lock only.
+    pub settings: Option<Result<ResolvedSettings, String>>,
 }
 
 impl Observed {
+    /// The experience settings provision read from the universe.
+    pub fn held_settings(&self) -> Option<&ResolvedSettings> {
+        self.settings.as_ref()?.as_ref().ok()
+    }
+
     /// The resource a lock entry names, or the problem that stops provision: Roblox has no resource with the ID, or
     /// its list lacked one that exists, so the list cannot be trusted to find a resource before a create. The public
     /// badge list may leave out a disabled badge, so one found by itself is taken.
@@ -155,9 +202,10 @@ pub fn plan(
     let intents: &[Intent] = inputs.journal.map_or(&[], |journal| &journal.intents);
     let mut attached = vec![false; intents.len()];
     let mut steps = Vec::new();
-    if let Some(settings) = inputs.experience.settings() {
-        let applied = inputs.lock.and_then(|lock| lock.experience.as_ref());
-        let changed = applied.is_none_or(|applied| applied.fingerprint != settings.fingerprint());
+    if let Some(declared) = inputs.experience.settings() {
+        let (recorded, known) = known_settings(inputs);
+        let held = inputs.observed.and_then(Observed::held_settings);
+        let changed = !declared.unheld(&known).is_empty() || !declared.unheld(&recorded).is_empty();
         steps.push(Step {
             kind: "experience",
             key: "settings".into(),
@@ -168,6 +216,7 @@ pub fn plan(
             moved_from: None,
             intent: None,
             note: None,
+            settings: settings(declared, held),
         });
     }
     let resources = inputs.experience.resolve(inputs.env);
@@ -266,6 +315,7 @@ pub fn plan(
                     moved_from: None,
                     intent: intent.map(|at| StepIntent { name: intents[at].name.clone(), resolved: true }),
                     note: Some("retired and no longer declared; the lock keeps its ID".into()),
+                    settings: vec![],
                 });
                 continue;
             }
@@ -596,6 +646,7 @@ fn step(
         moved_from,
         intent: intent.map(|intent| StepIntent { name: intent.name.clone(), resolved: entry.is_some() }),
         note: None,
+        settings: vec![],
     };
     if step.moved_from.is_some() {
         step.changes.push(Change::Key);

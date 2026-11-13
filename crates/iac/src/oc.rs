@@ -1,15 +1,77 @@
 //! `Remote` over `crucible-oc`'s typed operations in one universe.
 
-use crate::model::{Fields, Kind};
+use crate::model::{Fields, Kind, ResolvedSettings};
 use crate::plan::{Id, Listed};
-use crate::provision::{Patch, Remote};
-use crucible_oc::ops::{self, BadgeDetails, Details, Image, Sellable, badges, passes, products};
+use crate::provision::{Patch, Remote, Write};
+use crucible_oc::Scope;
+use crucible_oc::ops::{
+    self, BadgeDetails, Details, Image, Sellable, UniverseSettings, badges, passes, products, universes,
+};
 use crucible_oc::outcome::Failure;
 use crucible_oc::transport::Transport;
+use std::time::Duration;
+
+/// How long the read of the experience settings may take, retries and waits included. The read is advisory, like the
+/// scope check, and a run whose read fails compares the settings with the lock.
+pub const READ_LIMIT: Duration = Duration::from_secs(10);
 
 pub struct Roblox<'t, 'a> {
     pub transport: &'t Transport<'a>,
     pub universe: Id,
+}
+
+/// The scopes the calls need that list and read `reads` and send `writes`, as `crucible-oc`'s operations declare them,
+/// each once and in order. A public badge read needs none.
+pub fn scopes(reads: &[Kind], writes: &[Write]) -> Vec<Scope> {
+    let id = Id::MIN;
+    let mut scopes = Vec::new();
+    for kind in reads {
+        match kind {
+            Kind::Product => {
+                scopes.extend(products::list(id).scopes());
+                scopes.extend_from_slice(products::get(id, id).scopes());
+            }
+            Kind::Pass => {
+                scopes.extend(passes::list(id).scopes());
+                scopes.extend_from_slice(passes::get(id, id).scopes());
+            }
+            Kind::Badge => {
+                scopes.extend(badges::list_public(id).scopes());
+                scopes.extend_from_slice(badges::get_public(id).scopes());
+            }
+        }
+    }
+    let details = Details::default();
+    for write in writes {
+        match *write {
+            Write::Create(Kind::Product) => scopes.extend_from_slice(products::create(id, &details).scopes()),
+            Write::Create(Kind::Pass) => scopes.extend_from_slice(passes::create(id, &details).scopes()),
+            Write::Create(Kind::Badge) => scopes.extend_from_slice(badges::create(id, "", "", true, None).scopes()),
+            Write::Update { kind: Kind::Product, .. } => {
+                scopes.extend_from_slice(products::update(id, id, &details).scopes());
+            }
+            Write::Update { kind: Kind::Pass, .. } => {
+                scopes.extend_from_slice(passes::update(id, id, &details).scopes())
+            }
+            Write::Update { kind: Kind::Badge, details, icon } => {
+                if details {
+                    scopes.extend_from_slice(badges::update(id, &BadgeDetails::default()).scopes());
+                }
+                if icon {
+                    let image = Image { file_name: String::new(), content_type: String::new(), bytes: vec![] };
+                    scopes.extend_from_slice(badges::overwrite_icon(id, image).scopes());
+                }
+            }
+            Write::Settings => {
+                let settings = UniverseSettings { voice_chat: Some(true), ..UniverseSettings::default() };
+                let op = universes::update(id, &settings).expect("a setting is set");
+                scopes.extend_from_slice(op.scopes());
+            }
+        }
+    }
+    scopes.sort();
+    scopes.dedup();
+    scopes
 }
 
 fn sellable(item: Sellable) -> Listed {
@@ -100,5 +162,20 @@ impl Remote for Roblox<'_, '_> {
             Kind::Product => self.transport.run(&products::update(universe, id, &details)),
             _ => self.transport.run(&passes::update(universe, id, &details)),
         }
+    }
+
+    fn update_settings(&mut self, settings: &ResolvedSettings) -> Result<(), Failure> {
+        let settings =
+            UniverseSettings { private_server_price: settings.private_server_price, voice_chat: settings.voice_chat };
+        match universes::update(self.universe, &settings) {
+            Some(op) => self.transport.run(&op),
+            None => Ok(()),
+        }
+    }
+
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
+        let read = universes::get(self.universe).deadline(self.transport.clock().now() + READ_LIMIT);
+        let held = self.transport.run(&read)?;
+        Ok(ResolvedSettings { private_server_price: held.private_server_price, voice_chat: held.voice_chat })
     }
 }

@@ -29,6 +29,7 @@ pub static TOPICS: &[Topic] = topics![
     "cli.md",
     "configs.md",
     "data-stores.md",
+    "deploy.md",
     "diagnostics.md",
     "experience.md",
     "lifecycle.md",

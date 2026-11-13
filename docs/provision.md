@@ -2,7 +2,7 @@
 
 Create, adopt and update the products, passes and badges `crucible.toml` declares, and record their IDs in `crucible.lock`.
 
-`crucible provision <env>` makes the developer products, game passes and badges in one environment's universe match `crucible.toml`. It lists what the universe holds, plans with the same rules as `crucible plan`, prints the plan, and applies it without asking. It writes each ID Roblox assigns to `crucible.lock`, which you commit. Run `npx crucible docs experience` for the declarations, the plan and the lock.
+`crucible provision <env>` makes the developer products, game passes, badges and experience settings in one environment's universe match `crucible.toml`. It lists what the universe holds, plans with the same rules as `crucible plan`, prints the plan, and applies it without asking. It writes each ID Roblox assigns to `crucible.lock`, which you commit. Run `npx crucible docs experience` for the declarations, the plan and the lock.
 
 ```console
 npx crucible provision staging --dry-run
@@ -10,18 +10,30 @@ npx crucible provision staging
 git add crucible.lock && git commit -m "chore(experience): provision staging"
 ```
 
-It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon. Badges are listed through Roblox's public badge endpoint, which needs no key. Run one provision per environment at a time: the lock is a file, and nothing stops two machines from both creating a resource.
+Then `npx crucible deploy staging` builds and publishes the places, as `npx crucible docs deploy` describes. Deploy refuses while the plan still has a product, pass or badge step for provision to do, and only warns about experience settings provision has not written.
+
+It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon and `universe:write` to write experience settings. Badges are listed through Roblox's public badge endpoint, which needs no key.
+
+Before its first list, provision posts the key to Roblox's key introspection endpoint. It stops with exit 3 when the key is disabled or expired, or lacks a scope the lists need. After it plans, and before its first write, it stops with exit 3 when the key lacks a scope the plan's writes need, such as `legacy-badge:manage` only when a badge icon changes. `error.missingScopes` lists each missing scope, `error.requiredScopes` every scope the check asked for, and the message names `--no-scope-check`. `--dry-run` writes nothing, so it checks only the read scopes. The check is advisory: when the introspection fails or takes longer than 10 seconds, retries included, provision prints why on stderr and goes on, and a call that lacks a scope fails by itself. `--no-scope-check` skips the introspection, for a key whose scopes Roblox names otherwise than the registry Crucible ships. Roblox's introspection reply, as Crucible reads it, names each scope and its operations but not the universes it covers, so the check matches scopes by name only: a key whose scope covers another universe passes, and the first call that needs it fails.
+
+Run one provision per environment at a time: the lock is a file, and nothing stops two machines from both creating a resource.
 
 ## What a run does
 
 1. It reads `crucible.toml`, `crucible.lock` and `.crucible/journal/<env>.json`, and stops on everything `crucible plan` stops on.
 2. It lists every product, pass and badge of the universe, to the last page. A list it cannot read whole stops the run, because a resource it did not see would be created again. It reads by ID each resource the lock names that a list left out.
 3. It plans. A key with no ID in the lock is adopted when exactly one resource has its declared name, and created when none has. A key with an ID is updated when its name, description, price, sale state, `enabled` state or icon differs from the declaration, on Roblox or in the lock.
-4. It prints the plan, then applies it: adopts first, then updates, retirements and untracks, then creates.
+4. It prints the plan, then applies it: adopts first, then updates, retirements and untracks, then creates, then the experience settings.
 
-`--dry-run` stops after step 3 and writes nothing. `--json` prints one document, `{"plan": ..., "applied": [...], "dryRun": false}`, with an `error` object when the run failed. Without `--json`, the plan and each applied action go to stdout, and errors to stderr. Experience settings, such as `private_server_price`, show in the plan, and provision does not write them yet.
+`--dry-run` stops after step 3 and writes nothing. `--json` prints one document, `{"plan": ..., "applied": [...], "dryRun": false}`, with an `error` object when the run failed. Without `--json`, the plan and each applied action go to stdout, and errors to stderr.
 
 Each action in `applied` is `adopt`, `create`, `update`, `retire` or `untrack`, with the kind, the key and the ID. An `update` sends only the fields that differ, and the icon when its file changed since the lock recorded it or the lock records none. A retire takes a product or a pass off sale or disables a badge, and repeats when someone puts it back on sale on Roblox. An untrack removes the key from the lock and leaves the resource on Roblox.
+
+## Experience settings
+
+`[experience]` sets `private_server_price` and `voice_chat`. `crucible.lock` records under `[env.<env>.experience]` the value of each setting provision last wrote or found Roblox already held. Provision reads the universe and compares each setting the table sets with the value Roblox's reply states, or with the lock's value when the reply leaves the setting out. It sends one universe update with only the settings whose value differs, and an update mask that names only them, so Roblox leaves the rest alone. A setting that did not change is never sent again, because Roblox's API reference says changing the private server price cancels every private server subscription, and it does not say whether a write of the same price counts. Provision then records each value the table sets and keeps the lock's value for a setting the table no longer sets, and `applied` lists `{"kind": "experience", "key": "settings", "action": "update", "id": "<universe>"}`. When the lock records another value but Roblox already holds the table's, the step updates the lock and sends nothing. An empty `[experience]` table sends and records nothing. The plan prints each setting with the value it writes and, when the read stated it, the value Roblox holds. Before 0.6.0, provision wrote no setting, so the first provision after upgrading writes the whole table: read the settings step of `crucible provision <env> --dry-run` first.
+
+When the read of the universe fails, provision prints a note on stderr and compares every setting with the lock. The read gives up after 10 s, retries and waits included, as the scope check does. When Roblox's reply leaves a setting out, provision compares that setting with the lock and prints nothing. Either way, a change made on Roblox stays until a read states it or `[experience]` changes. The registry does not say which scope the read needs, so the scope check asks for none for it. The update writes absolute values, so a run that stops after it repeats it. If Roblox accepts an update and its reply to the next read still states another value, provision sends that setting on every run, and the plan shows the step each time. It is the run's last write, so a settings update Roblox refuses or fails stops no product, pass or badge step. When it fails, every other step was applied and recorded in `crucible.lock`, `error.resource` is `experience settings`, `error.hint` says so, and the lock keeps the values it had, so the next run sends the settings again.
 
 ## Creates and the journal
 
@@ -60,7 +72,7 @@ The plan's stops change nothing. Exit codes follow `crucible oc`, plus exit 1 fo
 | 0 | The plan was applied, or printed with `--dry-run`. |
 | 1 | A file could not be read or written, or provision caught a bug in itself before it sent the create, with `error.kind` `internal`. |
 | 2 | A file is invalid, the environment is unknown, or the plan stops. `error.problems` lists each cause with its `file`, `key` and `line`. |
-| 3 | The key is missing, or Roblox refused it. |
+| 3 | The key is missing, disabled, expired or lacks a scope the run needs, or Roblox refused it. |
 | 4 | Roblox rejected a request. |
 | 5 | A create or an update may have landed. `error.resource` names it. Run provision again: it looks before it writes. |
 | 7 | Roblox was unavailable. Nothing was left unknown. |

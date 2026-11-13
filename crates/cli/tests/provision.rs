@@ -333,3 +333,323 @@ fn provision_without_a_key_stops_before_any_call() {
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stdout));
     assert_eq!(document(&out)["error"]["kind"], "auth");
 }
+
+#[test]
+fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
+    let dir = project();
+    std::fs::write(dir.path().join("crucible.toml"), format!("{CONFIG}\n[experience]\nvoice_chat = true\n")).unwrap();
+    let lock = "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.products.coin-pack]\nid = 77\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n\n[env.staging.badges.first-delivery]\nid = 88\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n";
+    std::fs::write(dir.path().join("crucible.lock"), lock).unwrap();
+    let server = MockServer::start();
+    let (mut products, mut badges) = lists(&server, vec![product(77)], vec![badge(88)]);
+    let settings = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .header("x-api-key", "test-key")
+            .json_body(json!({"voiceChatEnabled": true}));
+        then.status(200).json_body(json!({"path": "universes/1", "voiceChatEnabled": true}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    settings.assert_calls(1);
+    let stdout = text(&out.stdout);
+    assert!(stdout.contains("  update  experience settings"), "{stdout}");
+    assert!(stdout.contains("  details, voice_chat = true\n"), "the plan shows the value it writes: {stdout}");
+    assert!(stdout.contains("update experience settings 1\n"), "{stdout}");
+    assert!(!stdout.contains("does not write"), "{stdout}");
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.experience]\nvoice_chat = true\n"), "{lock}");
+
+    products.delete();
+    badges.delete();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    settings.assert_calls(1);
+    let document = document(&out);
+    assert_eq!(document["applied"], json!([]), "the lock records the settings it applied");
+    assert_eq!(document["plan"]["steps"][0]["settings"], json!([{"key": "voice_chat", "value": true}]));
+}
+
+#[test]
+fn a_refused_settings_update_comes_after_every_resource_step_and_records_no_settings() {
+    let dir = project();
+    std::fs::write(dir.path().join("crucible.toml"), format!("{CONFIG}\n[experience]\nprivate_server_price = 0\n"))
+        .unwrap();
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![]);
+    let create = server.mock(|when, then| {
+        when.method(Method::POST).path("/legacy-badges/v1/universes/1/badges");
+        then.status(200).json_body(badge(88));
+    });
+    let settings = server.mock(|when, then| {
+        when.method(Method::PATCH).path("/cloud/v2/universes/1");
+        then.status(400).json_body(json!({"message": "bad"}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(4), "{}", text(&out.stderr));
+    create.assert_calls(1);
+    settings.assert_calls(1);
+    let document = document(&out);
+    assert_eq!(document["error"]["resource"], "experience settings", "{document}");
+    assert!(
+        document["error"]["hint"].as_str().unwrap().contains("every product, pass and badge step was applied"),
+        "{document}"
+    );
+    assert_eq!(
+        document["applied"],
+        json!([{"kind": "product", "key": "coin-pack", "action": "adopt", "id": "77"},
+               {"kind": "badge", "key": "first-delivery", "action": "create", "id": "88"}])
+    );
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.badges.first-delivery]\nid = 88\n"), "{lock}");
+    assert!(!lock.contains("[env.staging.experience]"), "{lock}");
+    assert!(!dir.path().join(".crucible/journal/staging.json").exists(), "no intent is left");
+}
+
+fn introspection(server: &MockServer, scopes: Value, enabled: bool) -> httpmock::Mock<'_> {
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect").json_body(json!({"apiKey": "test-key"}));
+        then.status(200).json_body(json!({"name": "ci", "enabled": enabled, "expired": false, "scopes": scopes}));
+    })
+}
+
+#[test]
+fn a_key_without_the_read_scopes_stops_provision_before_its_first_list() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, badges) = lists(&server, vec![], vec![]);
+    introspection(&server, json!([{"name": "universe-places", "operations": ["write"]}]), true);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(document["error"]["missingScopes"], json!(["developer-product:read"]), "{document}");
+    let message = document["error"]["message"].as_str().unwrap();
+    assert!(message.contains("the key lacks developer-product:read"), "{message}");
+    assert!(message.contains("rerun with --no-scope-check"), "{message}");
+    assert_eq!(
+        (document["error"]["requiredScopes"][0]["name"].as_str(), document["error"]["scopeMetadata"].as_str()),
+        (Some("developer-product:read"), Some("declared")),
+        "the error names the scopes it checked: {document}"
+    );
+    products.assert_calls(0);
+    badges.assert_calls(0);
+}
+
+#[test]
+fn no_scope_check_skips_the_introspection() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    let introspection = introspection(&server, json!([]), true);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--no-scope-check", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    introspection.assert_calls(0);
+    products.assert_calls(1);
+}
+
+#[test]
+fn an_introspection_that_does_not_answer_within_ten_seconds_is_a_note() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect");
+        then.status(200).delay(std::time::Duration::from_secs(60)).json_body(json!({}));
+    });
+    let started = std::time::Instant::now();
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    let took = started.elapsed();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(30), "took {took:?}");
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("Could not check the key's scopes within 10 s: request deadline passed"), "{stderr}");
+    products.assert_calls(1);
+}
+
+#[test]
+fn a_key_without_the_write_scopes_stops_provision_after_listing_and_before_any_write() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    introspection(&server, json!([{"name": "developer-product", "operations": ["read"]}]), true);
+    let create = server.mock(|when, then| {
+        when.method(Method::POST);
+        then.status(200).json_body(product(77));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(
+        document["error"]["missingScopes"],
+        json!(["developer-product:write", "legacy-universe.badge:manage-and-spend-robux"]),
+        "{document}"
+    );
+    assert_eq!(document["applied"], json!([]));
+    products.assert_calls(1);
+    create.assert_calls(0);
+    assert!(!dir.path().join(".crucible/journal/staging.json").exists(), "no intent was written");
+
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "a dry run writes nothing, so it needs only the read scopes");
+}
+
+#[test]
+fn a_disabled_key_stops_provision_and_an_unanswered_introspection_does_not() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    let mut disabled = introspection(&server, json!([]), false);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    assert_eq!(document(&out)["error"]["message"], "the key is disabled or expired");
+    products.assert_calls(0);
+
+    disabled.delete();
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect");
+        then.status(403);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("Could not check the key's scopes"), "{}", text(&out.stderr));
+    products.assert_calls(1);
+}
+
+/// A project whose `[experience]` holds `table`, and a lock that records `table` as the settings provision wrote.
+fn settings_lock(dir: &Path, table: &str) {
+    std::fs::write(dir.join("crucible.toml"), format!("{CONFIG}\n[experience]\n{table}")).unwrap();
+    let lock = format!(
+        "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.experience]\n{table}\n\
+         [env.staging.products.coin-pack]\nid = 77\nfingerprint = \"x\"\nstatus = \"managed\"\n"
+    );
+    std::fs::write(dir.join("crucible.lock"), lock).unwrap();
+}
+
+#[test]
+fn provision_repairs_a_setting_changed_on_roblox_that_the_lock_still_records() {
+    let dir = project();
+    settings_lock(dir.path(), "private_server_price = 100\nvoice_chat = false\n");
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1").header("x-api-key", "test-key");
+        then.status(200)
+            .json_body(json!({"path": "universes/1", "privateServerPriceRobux": 100, "voiceChatEnabled": true}));
+    });
+    let patch = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .json_body(json!({"voiceChatEnabled": false}));
+        then.status(200).json_body(json!({"path": "universes/1"}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let stdout = text(&out.stdout);
+    assert!(
+        stdout.contains(
+            "details, private_server_price = 100 (Roblox holds 100), voice_chat = false (Roblox holds true)\n"
+        ),
+        "{stdout}"
+    );
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    patch.assert_calls(1);
+    let document = document(&out);
+    assert_eq!(
+        document["plan"]["steps"][0]["settings"],
+        json!([{"key": "private_server_price", "value": 100, "roblox": 100},
+               {"key": "voice_chat", "value": false, "roblox": true}])
+    );
+}
+
+#[test]
+fn a_failed_read_of_the_settings_is_a_note_and_provision_compares_them_with_the_lock() {
+    let dir = project();
+    settings_lock(dir.path(), "voice_chat = false\n");
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let read = server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1");
+        then.status(403).json_body(json!({"message": "denied"}));
+    });
+    let patch = server.mock(|when, then| {
+        when.method(Method::PATCH).path("/cloud/v2/universes/1");
+        then.status(200);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    read.assert_calls(1);
+    patch.assert_calls(0);
+    assert!(text(&out.stderr).contains("Could not read the experience settings Roblox holds"), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(document["plan"]["steps"][0]["action"], "no-op", "{document}");
+    assert_eq!(document["plan"]["steps"][0]["settings"], json!([{"key": "voice_chat", "value": false}]));
+}
+
+#[test]
+fn a_read_of_the_settings_that_does_not_answer_within_ten_seconds_is_a_note() {
+    let dir = project();
+    settings_lock(dir.path(), "private_server_price = 100\nvoice_chat = false\n");
+    std::fs::write(
+        dir.path().join("crucible.toml"),
+        format!("{CONFIG}\n[experience]\nprivate_server_price = 100\nvoice_chat = true\n"),
+    )
+    .unwrap();
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let read = server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1");
+        then.status(200).delay(std::time::Duration::from_secs(60)).json_body(json!({"voiceChatEnabled": false}));
+    });
+    let patch = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .json_body(json!({"voiceChatEnabled": true}));
+        then.status(200).json_body(json!({"path": "universes/1"}));
+    });
+    let started = std::time::Instant::now();
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--no-scope-check", "--json"]);
+    let took = started.elapsed();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(30), "took {took:?}");
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("Could not read the experience settings Roblox holds: request deadline passed"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("retrying"), "{stderr}");
+    read.assert_calls(1);
+    patch.assert_calls(1);
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.experience]\nprivate_server_price = 100\nvoice_chat = true\n"), "{lock}");
+}
+
+#[test]
+fn a_price_change_needs_the_product_write_scope_before_any_update() {
+    let dir = project();
+    let lock = "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.products.coin-pack]\nid = 77\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n\n[env.staging.badges.first-delivery]\nid = 88\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n";
+    std::fs::write(dir.path().join("crucible.lock"), lock).unwrap();
+    let server = MockServer::start();
+    let mut cheap = product(77);
+    cheap["priceInformation"]["defaultPriceInRobux"] = json!(10);
+    lists(&server, vec![cheap], vec![badge(88)]);
+    introspection(&server, json!([{"name": "developer-product", "operations": ["read"]}]), true);
+    let update = server.mock(|when, then| {
+        when.method(Method::PATCH);
+        then.status(200);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(document["error"]["missingScopes"], json!(["developer-product:write"]), "{document}");
+    update.assert_calls(0);
+    assert_eq!(std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap(), lock, "nothing was recorded");
+}
