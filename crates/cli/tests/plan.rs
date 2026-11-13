@@ -287,7 +287,7 @@ fn a_stray_file_in_the_journal_folder_names_itself_and_the_fix() {
     assert_eq!(out.status.code(), Some(2));
     let path = Path::new(".crucible").join("journal");
     let stderr = text(&out.stderr);
-    assert!(stderr.starts_with(&Path::new(".crucible/journal/notes.json").display().to_string()), "{stderr}");
+    assert!(stderr.starts_with(&path.join("notes.json").display().to_string()), "{stderr}");
     assert!(
         stderr.contains(&format!(
             "Each .json file in {} is the journal of the environment its name gives, so a file that is not one stops \
