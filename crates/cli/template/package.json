@@ -11,14 +11,16 @@
 	"dependencies": {
 		"@rbxts/charm": "__CHARM__",
 		"@rbxts/charm-sync": "__CHARM_SYNC__",
+		"@rbxts/ripple": "__RIPPLE__",
 		"@rbxts/vide": "__VIDE__",
 		"@rbxts/vide-charm": "__VIDE_CHARM__",
+		"@rbxts/vide-ripple": "__VIDE_RIPPLE__",
 		"@trioforge/crucible": "__VERSION__"
 	},
 	"devDependencies": {
-		"@trioforge/crucible-cli": "__VERSION__",
-		"@trioforge/compiler-types": "__VERSION__",
 		"@rbxts/types": "__RBXTS_TYPES__",
+		"@trioforge/compiler-types": "__VERSION__",
+		"@trioforge/crucible-cli": "__VERSION__",
 		"vite-plus": "__VITE_PLUS__"
 	}
 }

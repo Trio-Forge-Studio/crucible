@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
@@ -98,6 +108,20 @@ test("npx crucible runs the installed platform binary", { skip: !supported && `n
 	const unknown = run("npx", ["crucible", "oc", "call", "no-such.operation"], app);
 	assert.equal(unknown.status, 2, "the shim forwards the binary's exit code");
 	assert.equal(JSON.parse(unknown.stdout).error.kind, "usage");
+
+	const scope = join(app, "node_modules", "@trioforge");
+	for (const name of [`.crucible-cli-${host}-AbCd1234`, `crucible-cli-${host}_pacquet-stage_1_2_3`]) {
+		mkdirSync(join(scope, name));
+		writeFileSync(join(scope, name, "crucible.exe"), "an old binary");
+	}
+	mkdirSync(join(scope, "crucible-cli-notes"));
+	const cleaned = run("npx", ["crucible", "--version"], app);
+	assert.equal(cleaned.status, 0, cleaned.stderr);
+	assert.deepEqual(
+		readdirSync(scope).sort(),
+		["crucible-cli", `crucible-cli-${host}`, "crucible-cli-notes"].sort(),
+		"the shim deletes the old binaries npm and pnpm moved aside, and nothing else",
+	);
 });
 
 test(
@@ -190,6 +214,10 @@ test(
 			join(game, "src", "client", "greeting.tsx"),
 			'import Vide from "@rbxts/vide";\n\nexport function Greeting() {\n\treturn (\n\t\t<>\n\t\t\t<textlabel Text="Hello" />\n\t\t</>\n\t);\n}\n',
 		);
+		writeFileSync(
+			join(game, "src", "client", "fade.tsx"),
+			'import Vide from "@rbxts/vide";\nimport { useSpring } from "@rbxts/vide-ripple";\n\nexport function Fade() {\n\tconst [transparency, spring] = useSpring(1);\n\tspring.setGoal(0);\n\treturn <frame BackgroundTransparency={transparency} />;\n}\n',
+		);
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
 		assert.match(checked.stdout, /vp check/);
@@ -198,6 +226,11 @@ test(
 			readFileSync(join(game, "out", "client", "greeting.luau"), "utf8"),
 			/Vide\.jsx\(Vide\.Fragment/,
 			"a component that imports Vide only for JSX passes the check and builds",
+		);
+		assert.match(
+			readFileSync(join(game, "out", "client", "fade.luau"), "utf8"),
+			/"vide-ripple"/,
+			"a component that springs a property through vide-ripple passes the check and builds",
 		);
 		assert.ok(
 			readFileSync(join(game, "build", "start.rbxl"))
@@ -381,6 +414,14 @@ function assertPinned(game, version) {
 	assert.equal(manifest.dependencies["@trioforge/crucible"], version);
 	assert.equal(installedVersion(game, "@trioforge/crucible-cli"), version);
 	assert.equal(installedVersion(game, "@trioforge/crucible"), version);
+	// npm and pnpm move a folder aside when Windows refuses to delete the binary running in it.
+	assert.deepEqual(
+		readdirSync(join(game, "node_modules", "@trioforge")).filter(
+			(name) => name.startsWith(".") || name.includes("_pacquet-stage_"),
+		),
+		[],
+		"the install replaced the platform package in place",
+	);
 }
 
 test(
@@ -456,7 +497,7 @@ test(
 			assert.match(
 				failed.stderr,
 				new RegExp(
-					`package\\.json is restored to @trioforge/crucible-cli ${next} and @trioforge/crucible ${next}\\. Run \`npm install\``,
+					`package\\.json is restored to @trioforge/crucible-cli ${next} and @trioforge/crucible ${next}\\. To return node_modules to those versions, run \`npm install\``,
 				),
 			);
 			assert.equal(readFileSync(manifestFile, "utf8"), failing, `${attempt} restores package.json byte for byte`);
@@ -506,6 +547,8 @@ test("upgrade restores Charm Sync to a previous template and the built sync load
 	assert.equal(upgraded.status, 0, upgraded.stdout + upgraded.stderr);
 	assert.equal(JSON.parse(readFileSync(file, "utf8")).dependencies["@rbxts/charm-sync"], "0.4.1");
 	assert.equal(JSON.parse(readFileSync(file, "utf8")).dependencies["@rbxts/charm"], "0.11.1");
+	const names = Object.keys(JSON.parse(readFileSync(file, "utf8")).dependencies);
+	assert.deepEqual(names, [...names].sort(), "the added peer goes where a package manager sorts it");
 	const built = run("npx", ["crucible", "build"], game);
 	assert.equal(built.status, 0, built.stdout + built.stderr);
 	// CI installs Lune only on Linux, where this load must run.
@@ -568,11 +611,13 @@ test(
 );
 
 test(
-	"upgrade reinstalls a pnpm game under CI despite its frozen lockfile default",
+	"upgrade reinstalls a hoisted pnpm game under CI despite its frozen lockfile default",
 	{ skip: !supported && `no package for ${host}` },
 	async () => {
 		const setup = await startUpgradeRegistry();
 		const game = createGame("pnpm-game", setup);
+		// The hoisted layout keeps the platform package at one path, so the install must replace the running binary's folder.
+		writeFileSync(join(game, "pnpm-workspace.yaml"), "nodeLinker: hoisted\n");
 		const ci = { CI: "true" };
 		const installed = run("pnpm", ["install"], game, ci);
 		assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);

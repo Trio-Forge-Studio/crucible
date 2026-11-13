@@ -3,7 +3,7 @@ use crate::create::{FILES, package_manager, package_manager_command, render, tok
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::ops::Range;
@@ -29,6 +29,7 @@ const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 const CLI: &str = "@trioforge/crucible-cli";
 const RUNTIME: &str = "@trioforge/crucible";
 const COMPILER_TYPES: &str = "@trioforge/compiler-types";
+const ANVIL: &str = "@trioforge/anvil";
 const RELEASED_WITH_CLI: [&str; 3] = [CLI, RUNTIME, COMPILER_TYPES];
 const GROUPS: [&str; 2] = ["dependencies", "devDependencies"];
 const ROBLOX_TS_TOOLCHAIN: [&str; 3] = ["roblox-ts", "typescript", "@rbxts/compiler-types"];
@@ -131,6 +132,18 @@ impl Manager {
     fn install_line(self) -> String {
         [self.program()].iter().chain(self.install_args()).copied().collect::<Vec<_>>().join(" ")
     }
+
+    // A failed pnpm or Yarn Berry install can leave the manager's own record of node_modules describing packages it
+    // never placed, and then a plain install reports nothing to do. Each command here restored such a node_modules.
+    fn recovery(self) -> &'static str {
+        match self {
+            Self::Npm => "run `npm install`",
+            Self::Pnpm => "run `pnpm install --force --no-frozen-lockfile`",
+            Self::Yarn => "run `yarn install`",
+            Self::YarnBerry => "delete node_modules/.yarn-state.yml, then run `yarn install --no-immutable`",
+            Self::Bun => "run `bun install`",
+        }
+    }
 }
 
 struct Pins {
@@ -204,25 +217,19 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     match plan(&pins, &installed, &target, args.version.is_some(), args.allow_downgrade)? {
         Plan::Current if on_roblox_ts(&manifest) => {
             let mut report = format!("crucible is already at {target}.\n");
-            let peers = reconcile_peers(root, manager)?;
-            if !peers.is_empty() {
-                report += "\nUpdated runtime peers:\n";
-                report.extend(peers.iter().map(|line| format!("  {line}\n")));
-            }
+            reconcile_dependencies(root, manager)?.report(&mut report);
             let migration = move_off_roblox_ts(root, &target, manager);
             migration.report(&mut report);
             return Report::new(report, migration, manager).print();
         }
         Plan::Current => {
-            let peers = reconcile_peers(root, manager)?;
-            println!("crucible is already at {target}.");
-            if !peers.is_empty() {
-                println!("\nUpdated runtime peers:");
-                for line in peers {
-                    println!("  {line}");
-                }
-                println!("\nRun `{} run check` next.", manager.program());
+            let mut report = format!("crucible is already at {target}.\n");
+            let dependencies = reconcile_dependencies(root, manager)?;
+            dependencies.report(&mut report);
+            if !dependencies.updated.is_empty() {
+                report += &format!("\nRun `{} run check` next.\n", manager.program());
             }
+            print!("{report}");
             return Ok(());
         }
         Plan::NewerThanLatest(newest) => {
@@ -236,17 +243,18 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     let bumped = peer_manifest_with(root, &bumped, target_peers(root, &target)?)?;
     write_atomic(&manifest_path, &bumped)
         .map_err(|error| Error::Failed(format!("cannot write {}: {error}", manifest_path.display())))?;
+    let recovery = manager.recovery();
     eprintln!(
-        "crucible upgrade: running `{install}` for crucible {target}. If it is interrupted, restore package.json and run `{install}`"
+        "crucible upgrade: running `{install}` for crucible {target}. If it is interrupted, restore package.json and {recovery}"
     );
     if let Err(error) = run_install(root, manager) {
         let pinned = format!("{CLI} {} and {RUNTIME} {}", pins.crucible, pins.runtime);
         return Err(Error::Failed(match restore(&manifest_path, &manifest_text) {
             Ok(()) => format!(
-                "{error}. package.json is restored to {pinned}. Run `{install}` to return node_modules to those versions"
+                "{error}. package.json is restored to {pinned}. To return node_modules to those versions, {recovery}"
             ),
             Err(restore) => {
-                format!("{error}. Restoring package.json also failed: {restore}. Set {pinned} and run `{install}`")
+                format!("{error}. Restoring package.json also failed: {restore}. Set {pinned}, then {recovery}")
             }
         }));
     }
@@ -361,6 +369,7 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
     let old = old_template(input, from, pins)
         .inspect_err(|reason| eprintln!("crucible upgrade: {reason}, so the old template is unknown"))
         .ok();
+    let from = &old.as_ref().and_then(|old| old.version.parse().ok()).unwrap_or_else(|| from.clone());
     let new = snapshot(&name);
     let to = installed_version(root, CLI)?
         .ok_or_else(|| Error::Failed(format!("crucible is not installed in {}", root.display())))?;
@@ -411,15 +420,15 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
         .map(|(topic, _)| topic.as_str())
         .collect();
     let manager = detect_manager(root, &std::env::var("npm_config_user_agent").unwrap_or_default());
-    let peers = if manifest["dependencies"].get(RUNTIME).is_some() || manifest["devDependencies"].get(RUNTIME).is_some()
-    {
-        reconcile_peers(root, manager)
-    } else {
-        Ok(Vec::new())
-    };
-    let (peers, migration) = match peers {
-        Ok(peers) => (peers, move_off_roblox_ts(root, &to, manager)),
-        Err(error) => (Vec::new(), Migration { failed: Some(error.to_string()), ..Migration::default() }),
+    let dependencies =
+        if manifest["dependencies"].get(RUNTIME).is_some() || manifest["devDependencies"].get(RUNTIME).is_some() {
+            reconcile_dependencies(root, manager)
+        } else {
+            Ok(Dependencies::default())
+        };
+    let (dependencies, migration) = match dependencies {
+        Ok(dependencies) => (dependencies, move_off_roblox_ts(root, &to, manager)),
+        Err(error) => (Dependencies::default(), Migration { failed: Some(error.to_string()), ..Migration::default() }),
     };
 
     let mut report = if *from == to {
@@ -427,13 +436,13 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
     } else {
         format!("Upgraded crucible and {RUNTIME} from {from} to {to}.\n")
     };
+    dependencies.report(&mut report);
     let mut list = |heading: &str, labels: &[String]| {
         if !labels.is_empty() {
             report += &format!("\n{heading}\n");
             report.extend(labels.iter().map(|label| format!("  {label}\n")));
         }
     };
-    list("Updated runtime peers:", &peers);
     list("Refreshed from the new template:", &written);
     list(
         if old.is_some() {
@@ -477,12 +486,16 @@ impl Report {
     }
 }
 
+// An install that failed on Windows can leave the new shim package beside the old binary, so `from` names the new
+// version while the snapshot comes from the old binary. Pins that hold the snapshot's version still vouch for it.
 fn old_template(input: &str, from: &Version, pins: &Pins) -> Result<SnapshotV1, String> {
     let old = decode(input)?;
-    if old.version.parse().ok().as_ref() != Some(from) {
+    let pins = [&pins.crucible, &pins.runtime];
+    let pinned = |version: &Version| pins.iter().all(|pin| satisfies(pin, version) == Some(true));
+    let Some(version) = old.version.parse::<Version>().ok().filter(|version| version == from || pinned(version)) else {
         return Err(format!("the old template is from crucible {}, but {from} was installed", old.version));
-    }
-    if let Some(pin) = [&pins.crucible, &pins.runtime].into_iter().find(|pin| satisfies(pin, from) == Some(false)) {
+    };
+    if let Some(pin) = pins.into_iter().find(|pin| satisfies(pin, &version) == Some(false)) {
         return Err(format!("package.json pinned {pin}, which does not match the installed {from}"));
     }
     Ok(old)
@@ -776,12 +789,8 @@ fn peer_manifest_with(root: &Path, text: &str, versions: Vec<(&str, String)>) ->
                 .into_iter()
                 .find(|group| manifest[group].get(RUNTIME).is_some())
                 .ok_or_else(|| Error::Failed("package.json must list the runtime".into()))?;
-            let found = entries(&result, RUNTIME, manifest[group][RUNTIME].as_str().unwrap());
-            let [runtime] = found.as_slice() else {
-                return Err(Error::Failed("cannot edit runtime peers in package.json".into()));
-            };
-            let separator = &result[result[..runtime.start].trim_end().len()..runtime.start];
-            result.insert_str(runtime.value.end, &format!(",{separator}{}: {}", quoted(package), quoted(&required)));
+            result = insert_sorted(&result, group, package, &required)
+                .ok_or_else(|| Error::Failed("cannot edit runtime peers in package.json".into()))?;
             manifest[group][package] = required.into();
         }
     }
@@ -791,8 +800,43 @@ fn peer_manifest_with(root: &Path, text: &str, versions: Vec<(&str, String)>) ->
     Ok(result)
 }
 
+// Package managers write each dependency group sorted by name, so a new entry goes where the next install would put
+// it: before the first entry that sorts after it, with that entry's indentation and line ending.
+fn insert_sorted(text: &str, group: &str, package: &str, version: &str) -> Option<String> {
+    let parsed = jsonc_parser::parse_to_ast(text, &Default::default(), &Default::default()).ok()?;
+    let root = parsed.value?;
+    let entries = &root.as_object()?.get(group)?.value.as_object()?.properties;
+    let separator = |start: usize| &text[text[..start].trim_end().len()..start];
+    let entry = format!("{}: {}", quoted(package), quoted(version));
+    let mut result = text.to_owned();
+    match entries.iter().find(|existing| existing.name.as_str() > package) {
+        Some(next) => result.insert_str(next.range.start, &format!("{entry},{}", separator(next.range.start))),
+        None => {
+            let last = entries.last()?;
+            result.insert_str(last.range.end, &format!(",{}{entry}", separator(last.range.start)));
+        }
+    }
+    Some(result)
+}
+
 fn imports_ui(source: &str) -> bool {
     let entry = format!("{}/{}", crucible_abi::PACKAGE, crucible_abi::UI);
+    imports(source, |specifier| specifier == entry)
+}
+
+// Removing a package the game still uses breaks its build, and keeping one it does not costs a line of the report,
+// so any mention counts: an import this scan cannot parse, a Rojo mapping, or a comment.
+fn names_anvil(bytes: &[u8]) -> bool {
+    let name = ANVIL.as_bytes();
+    bytes.windows(name.len()).enumerate().any(|(at, window)| {
+        window == name
+            && !bytes
+                .get(at + name.len())
+                .is_some_and(|next| next.is_ascii_alphanumeric() || matches!(next, b'-' | b'_'))
+    })
+}
+
+fn imports(source: &str, matches: impl Fn(&str) -> bool) -> bool {
     let bytes = source.as_bytes();
     let mut at = 0;
     let mut importing = false;
@@ -818,7 +862,7 @@ fn imports_ui(source: &str) -> bool {
                 }
                 at += 1;
             }
-            if importing && source.get(start..at) == Some(entry.as_str()) {
+            if importing && source.get(start..at).is_some_and(&matches) {
                 return true;
             }
             at = (at + 1).min(bytes.len());
@@ -847,42 +891,133 @@ fn imports_ui(source: &str) -> bool {
 }
 
 fn uses_ui(root: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(root) else { return false };
-    entries.flatten().any(|entry| {
+    any_source(root, &["ts", "tsx"], imports_ui)
+}
+
+fn any_source(root: &Path, extensions: &[&str], imports: fn(&str) -> bool) -> bool {
+    let wanted = |path: &Path| {
+        path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| extensions.contains(&ext))
+            && fs::read_to_string(path).is_ok_and(|source| imports(&source))
+    };
+    find_file(root, &mut HashSet::new(), &wanted).is_some()
+}
+
+// The compiler and Rojo follow a linked folder, so this does too. `seen` ends a link that leads back into itself.
+fn find_file(folder: &Path, seen: &mut HashSet<PathBuf>, wanted: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    if !seen.insert(fs::canonicalize(folder).ok()?) {
+        return None;
+    }
+    let mut entries: Vec<_> = fs::read_dir(folder).ok()?.flatten().collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    entries.into_iter().find_map(|entry| {
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if name.starts_with('.') || matches!(name.as_ref(), "node_modules" | "out" | "build" | "target") {
-            return false;
+            return None;
         }
-        if path.is_dir() && !entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
-            return uses_ui(&path);
+        if path.is_dir() {
+            return find_file(&path, seen, wanted);
         }
-        matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx"))
-            && fs::read_to_string(path).is_ok_and(|source| imports_ui(&source))
+        wanted(&path).then_some(path)
     })
 }
 
-fn reconcile_peers(root: &Path, manager: Manager) -> Result<Vec<String>, Error> {
+#[derive(Default)]
+struct Dependencies {
+    updated: Vec<String>,
+    left: Option<String>,
+}
+
+impl Dependencies {
+    fn report(&self, report: &mut String) {
+        if !self.updated.is_empty() {
+            *report += "\nUpdated dependencies:\n";
+            report.extend(self.updated.iter().map(|line| format!("  {line}\n")));
+        }
+        if let Some(left) = &self.left {
+            *report += &format!("\n{left}\n");
+        }
+    }
+}
+
+fn reconcile_dependencies(root: &Path, manager: Manager) -> Result<Dependencies, Error> {
     let (text, _) = read_manifest(root)?;
-    let edited = peer_manifest(root, &text)?;
+    let peers = peer_manifest(root, &text)?;
+    let (edited, anvil) = without_anvil(root, &peers);
+    let mut dependencies = Dependencies::default();
+    if peers != text {
+        dependencies.updated.push("package.json now lists the runtime's required peers".into());
+    }
+    match anvil {
+        Anvil::Absent => {}
+        Anvil::Removed => {
+            dependencies
+                .updated
+                .push(format!("package.json no longer lists {ANVIL}, whose exports moved to {RUNTIME}/ui"));
+        }
+        Anvil::Named(file) => {
+            let file = file.strip_prefix(root).unwrap_or(&file).display();
+            dependencies.left = Some(format!(
+                "{file} still names {ANVIL}, whose exports moved to {RUNTIME}/ui. Move its imports and delete any Rojo mapping of it, then remove {ANVIL} from package.json. `npx crucible docs ui` explains the move."
+            ));
+        }
+        Anvil::Unedited => {
+            dependencies.left = Some(format!(
+                "Remove {ANVIL} from package.json, because its exports moved to {RUNTIME}/ui. crucible upgrade cannot edit it in place. Then run `{}`.",
+                manager.install_line()
+            ));
+        }
+    }
     if edited == text {
-        return Ok(Vec::new());
+        return Ok(dependencies);
     }
     let path = root.join("package.json");
     write_atomic(&path, &edited).map_err(|error| Error::Failed(format!("cannot write {}: {error}", path.display())))?;
-    eprintln!("crucible upgrade: running `{}` for the runtime's peers", manager.install_line());
+    eprintln!("crucible upgrade: running `{}` for the dependencies it updated", manager.install_line());
     if let Err(error) = run_install(root, manager) {
         let restored = match restore(&path, &text) {
             Ok(()) => "package.json is restored".to_owned(),
             Err(error) => format!("restoring package.json also failed: {error}"),
         };
         return Err(Error::Failed(format!(
-            "{error}. {restored}. Run `{}` and `npx crucible upgrade` again",
-            manager.install_line()
+            "{error}. {restored}. To return node_modules to it, {}, then run `npx crucible upgrade` again",
+            manager.recovery()
         )));
     }
-    Ok(vec!["package.json now lists the runtime's required peers".into(), format!("ran `{}`", manager.install_line())])
+    dependencies.updated.push(format!("ran `{}`", manager.install_line()));
+    Ok(dependencies)
+}
+
+enum Anvil {
+    Absent,
+    Removed,
+    Named(PathBuf),
+    Unedited,
+}
+
+// A game that kept the retired package would load a second copy of the primitives on another reactive core.
+fn without_anvil(root: &Path, text: &str) -> (String, Anvil) {
+    let manifest: serde_json::Value = serde_json::from_str(text).expect("manifest was parsed");
+    if !GROUPS.iter().any(|group| manifest[group].get(ANVIL).is_some()) {
+        return (text.to_owned(), Anvil::Absent);
+    }
+    let names = |path: &Path| {
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let code = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+            .contains(&path.extension().and_then(|ext| ext.to_str()).unwrap_or_default());
+        (code || name.ends_with(".project.json")) && fs::read(path).map_or(true, |bytes| names_anvil(&bytes))
+    };
+    if let Some(file) = find_file(root, &mut HashSet::new(), &names) {
+        return (text.to_owned(), Anvil::Named(file));
+    }
+    let mut expected = manifest;
+    match remove_packages(text, &mut expected, &[ANVIL])
+        .filter(|edited| serde_json::from_str::<serde_json::Value>(edited).ok().as_ref() == Some(&expected))
+    {
+        Some(edited) => (edited, Anvil::Removed),
+        None => (text.to_owned(), Anvil::Unedited),
+    }
 }
 
 fn quoted(text: &str) -> String {
@@ -994,12 +1129,15 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
     }
     if let Err(error) = run_install(root, manager) {
         let then = "then run `npx crucible upgrade` again to finish the move off roblox-ts";
+        let recovery = manager.recovery();
         migration.failed = Some(match restore(&manifest_path, &text) {
             Ok(()) => format!(
-                "{error}. package.json is restored, so it still lists {}. Run `{install}` to return node_modules to it, {then}",
+                "{error}. package.json is restored, so it still lists {}. To return node_modules to it, {recovery}, {then}",
                 dropped.join(", ")
             ),
-            Err(restore) => format!("{error}. Restoring package.json also failed: {restore}. Run `{install}`, {then}"),
+            Err(restore) => format!(
+                "{error}. Restoring package.json also failed: {restore}. Once package.json is restored, {recovery}, {then}"
+            ),
         });
         return true;
     }
@@ -1013,9 +1151,20 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
 
 fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], added: Option<&str>) -> Option<String> {
     let mut expected = manifest.clone();
+    let mut result = remove_packages(text, &mut expected, dropped)?;
+    if let Some(version) = added {
+        let group = GROUPS.into_iter().find(|group| expected[group].get(CLI).is_some())?;
+        result = insert_sorted(&result, group, COMPILER_TYPES, version)?;
+        expected[group][COMPILER_TYPES] = version.into();
+    }
+    (serde_json::from_str::<serde_json::Value>(&result).ok()? == expected).then_some(result)
+}
+
+// Removes each package from `text` and from `expected`, which the caller compares with the edited text.
+fn remove_packages(text: &str, expected: &mut serde_json::Value, packages: &[&str]) -> Option<String> {
     let mut result = text.to_owned();
     for group in GROUPS {
-        for package in dropped {
+        for package in packages {
             let Some(spec) = expected.get_mut(group).and_then(|packages| packages.as_object_mut()?.remove(*package))
             else {
                 continue;
@@ -1025,16 +1174,7 @@ fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], ad
             }
         }
     }
-    if let Some(version) = added {
-        let group = GROUPS.into_iter().find(|group| expected[group].get(CLI).is_some())?;
-        let found = entries(&result, CLI, expected[group][CLI].as_str()?);
-        let [cli] = found.as_slice() else { return None };
-        let separator = &result[result[..cli.start].trim_end().len()..cli.start];
-        let entry = format!(",{separator}{}: {}", quoted(COMPILER_TYPES), quoted(version));
-        result.insert_str(cli.value.end, &entry);
-        expected[group][COMPILER_TYPES] = version.into();
-    }
-    (serde_json::from_str::<serde_json::Value>(&result).ok()? == expected).then_some(result)
+    Some(result)
 }
 
 fn remove_entry(text: &mut String, entry: Entry) {
@@ -1815,6 +1955,156 @@ mod tests {
         assert_eq!(Manager::YarnBerry.install_line(), "yarn install --no-immutable");
         assert_eq!(Manager::Yarn.install_line(), "yarn install");
         assert_eq!(Manager::Npm.install_line(), "npm install");
+    }
+
+    #[test]
+    fn each_manager_names_a_recovery_that_reinstalls_what_its_record_already_lists() {
+        assert_eq!(Manager::Npm.recovery(), "run `npm install`");
+        assert_eq!(Manager::Pnpm.recovery(), "run `pnpm install --force --no-frozen-lockfile`");
+        assert_eq!(Manager::Yarn.recovery(), "run `yarn install`");
+        assert_eq!(
+            Manager::YarnBerry.recovery(),
+            "delete node_modules/.yarn-state.yml, then run `yarn install --no-immutable`"
+        );
+        assert_eq!(Manager::Bun.recovery(), "run `bun install`");
+    }
+
+    #[test]
+    fn new_entries_go_where_a_package_manager_sorts_them() {
+        let text = "{\n\t\"dependencies\": {\n\t\t\"@rbxts/vide\": \"^0.6.1\",\n\t\t\"@trioforge/crucible\": \"0.5.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"@trioforge/crucible-cli\": \"0.5.0\"\n\t}\n}\n";
+        let insert = |text: &str, group, package| insert_sorted(text, group, package, "1.0.0").unwrap();
+        assert_eq!(
+            insert(text, "dependencies", "@rbxts/charm"),
+            text.replace("{\n\t\t\"@rbxts/vide\"", "{\n\t\t\"@rbxts/charm\": \"1.0.0\",\n\t\t\"@rbxts/vide\"")
+        );
+        assert_eq!(
+            insert(text, "dependencies", "@rbxts/vide-charm"),
+            text.replace("\"^0.6.1\",", "\"^0.6.1\",\n\t\t\"@rbxts/vide-charm\": \"1.0.0\",")
+        );
+        assert_eq!(
+            insert(text, "dependencies", "zod"),
+            text.replace("\"0.5.0\"\n\t},", "\"0.5.0\",\n\t\t\"zod\": \"1.0.0\"\n\t},")
+        );
+        assert_eq!(
+            insert(text, "devDependencies", "@trioforge/compiler-types"),
+            text.replace(
+                "{\n\t\t\"@trioforge/crucible-cli\"",
+                "{\n\t\t\"@trioforge/compiler-types\": \"1.0.0\",\n\t\t\"@trioforge/crucible-cli\""
+            )
+        );
+        let spaces = text.replace('\t', "  ").replace('\n', "\r\n");
+        assert_eq!(
+            insert(&spaces, "dependencies", "@rbxts/charm"),
+            insert(text, "dependencies", "@rbxts/charm").replace('\t', "  ").replace('\n', "\r\n")
+        );
+        assert_eq!(insert_sorted("{\"dependencies\":{}}", "dependencies", "a", "1.0.0"), None);
+    }
+
+    #[test]
+    fn added_peers_keep_the_group_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "{\n  \"dependencies\": {\n    \"@rbxts/services\": \"1.5.5\",\n    \"@trioforge/crucible\": \"0.5.0\"\n  }\n}\n";
+        let peers = serde_json::json!({"@rbxts/charm": "0.11.1", "@rbxts/charm-sync": "0.4.1"});
+        let updated = peer_manifest_with(dir.path(), text, crate::create::peer_versions_from(&peers)).unwrap();
+        assert_eq!(
+            updated,
+            "{\n  \"dependencies\": {\n    \"@rbxts/charm\": \"0.11.1\",\n    \"@rbxts/charm-sync\": \"0.4.1\",\n    \"@rbxts/services\": \"1.5.5\",\n    \"@trioforge/crucible\": \"0.5.0\"\n  }\n}\n"
+        );
+    }
+
+    #[test]
+    fn any_mention_of_anvil_counts_and_a_longer_name_does_not() {
+        for source in [
+            "import { Dialog } from '@trioforge/anvilish';",
+            "import { Dialog } from '@trioforge/anvil-kit';",
+            "import { Dialog } from '@trioforge/crucible/ui';",
+        ] {
+            assert!(!names_anvil(source.as_bytes()), "{source}");
+        }
+        for source in [
+            "import { Dialog } from '@trioforge/anvil';",
+            "import type { AnvilAdapter } from \"@trioforge/anvil\";",
+            "export * from '@trioforge/anvil/out/dialog';",
+            "const anvil = require('@trioforge/anvil');",
+            "const quote = /\"/;\nimport { Dialog } from '@trioforge/anvil';",
+            "{ \"anvil\": { \"$path\": \"node_modules/@trioforge/anvil\" } }",
+            "// import { Dialog } from '@trioforge/anvil';",
+        ] {
+            assert!(names_anvil(source.as_bytes()), "{source}");
+        }
+    }
+
+    #[test]
+    fn anvil_is_removed_only_when_no_source_imports_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "{\r\n\t\"dependencies\": {\r\n\t\t\"@trioforge/anvil\": \"0.3.0\",\r\n\t\t\"@trioforge/crucible\": \"0.5.0\"\r\n\t}\r\n}\r\n";
+        let (edited, anvil) = without_anvil(dir.path(), text);
+        assert!(matches!(anvil, Anvil::Removed));
+        assert_eq!(edited, "{\r\n\t\"dependencies\": {\r\n\t\t\"@trioforge/crucible\": \"0.5.0\"\r\n\t}\r\n}\r\n");
+        let (unchanged, anvil) = without_anvil(dir.path(), &edited);
+        assert!(matches!(anvil, Anvil::Absent));
+        assert_eq!(unchanged, edited);
+
+        fs::create_dir_all(dir.path().join("src/client")).unwrap();
+        fs::write(dir.path().join("src/client/menu.tsx"), "import { Dialog } from \"@trioforge/anvil\";\n").unwrap();
+        let (kept, anvil) = without_anvil(dir.path(), text);
+        assert!(matches!(anvil, Anvil::Named(file) if file.ends_with("menu.tsx")));
+        assert_eq!(kept, text);
+        fs::create_dir_all(dir.path().join("node_modules/@trioforge/anvil")).unwrap();
+        fs::rename(dir.path().join("src/client/menu.tsx"), dir.path().join("node_modules/@trioforge/anvil/index.ts"))
+            .unwrap();
+        assert!(matches!(without_anvil(dir.path(), text).1, Anvil::Removed), "node_modules is not the game's source");
+
+        let project = dir.path().join("default.project.json");
+        fs::write(&project, "{ \"anvil\": { \"$path\": \"node_modules/@trioforge/anvil\" } }").unwrap();
+        let (kept, anvil) = without_anvil(dir.path(), text);
+        assert!(matches!(anvil, Anvil::Named(file) if file == project), "Rojo would fail on the missing folder");
+        assert_eq!(kept, text);
+        fs::remove_file(&project).unwrap();
+
+        fs::write(dir.path().join("src/client/menu.ts"), [0xff, 0xfe, b'i', 0]).unwrap();
+        assert!(matches!(without_anvil(dir.path(), text).1, Anvil::Removed), "a file that does not name it is no use");
+    }
+
+    #[test]
+    fn anvil_stays_while_a_linked_folder_names_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (game, shared) = (dir.path().join("game"), dir.path().join("shared-ui"));
+        fs::create_dir_all(game.join("src").join("client")).unwrap();
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join("menu.ts"), "import { Dialog } from \"@trioforge/anvil\";\n").unwrap();
+        let link = game.join("src").join("client").join("ui");
+        #[cfg(windows)]
+        let linked = Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&shared).output().unwrap().status;
+        #[cfg(unix)]
+        let linked = {
+            std::os::unix::fs::symlink(&shared, &link).unwrap();
+            ExitStatus::default()
+        };
+        assert!(linked.success());
+        // A link back to the game must not make the scan run forever.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&game, shared.join("back")).unwrap();
+        let text = "{\n\t\"dependencies\": {\n\t\t\"@trioforge/anvil\": \"0.3.0\"\n\t}\n}\n";
+        let (kept, anvil) = without_anvil(&game, text);
+        assert!(matches!(anvil, Anvil::Named(file) if file.ends_with("menu.ts")), "the compiler follows the link");
+        assert_eq!(kept, text);
+    }
+
+    #[test]
+    fn the_old_binary_beside_a_newer_shim_package_still_vouches_for_its_template() {
+        let current = serde_json::to_string(&snapshot("game")).unwrap();
+        let here = env!("CARGO_PKG_VERSION");
+        let newer = version("99.0.0");
+        assert!(old_template(&current, &newer, &pins(here, here)).is_ok());
+        assert!(old_template(&current, &newer, &pins(&format!("^{here}"), here)).is_ok());
+        for (crucible, runtime) in [(here, "99.0.0"), ("99.0.0", here), (">=0.0.1 || 1.x", here)] {
+            assert!(
+                old_template(&current, &newer, &pins(crucible, runtime))
+                    .is_err_and(|reason| reason.contains("but 99.0.0 was installed")),
+                "{crucible} {runtime}"
+            );
+        }
     }
 
     #[test]

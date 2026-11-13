@@ -71,7 +71,7 @@ fn a_failed_reinstall_off_roblox_ts_restores_package_json_and_exits_1_until_upgr
     assert!(stderr.contains("reinstall-output"), "{stderr}");
     assert!(
         stderr.contains(
-            "`npm install` failed. package.json is restored, so it still lists roblox-ts, typescript, @rbxts/compiler-types. Run `npm install` to return node_modules to it, then run `npx crucible upgrade` again to finish the move off roblox-ts"
+            "`npm install` failed. package.json is restored, so it still lists roblox-ts, typescript, @rbxts/compiler-types. To return node_modules to it, run `npm install`, then run `npx crucible upgrade` again to finish the move off roblox-ts"
         ),
         "{stderr}"
     );
@@ -138,4 +138,63 @@ fn an_untouched_gitignore_gains_dot_env_and_an_edited_one_is_left_alone() {
     let (kept, report) = apply_with_old_gitignore(&edited, old);
     assert_eq!(kept, edited);
     assert!(report.contains(".gitignore"), "{report}");
+}
+
+fn anvil_game(root: &Path) -> String {
+    let runtime: serde_json::Value =
+        serde_json::from_str(include_str!("../../../packages/crucible/package.json")).unwrap();
+    let peer = |name: &str| runtime["peerDependencies"][name].as_str().unwrap().to_owned();
+    let manifest = format!(
+        "{{\n\t\"name\": \"game\",\n\t\"private\": true,\n\t\"dependencies\": {{\n\t\t\"@rbxts/charm\": \"{}\",\n\t\t\"@rbxts/charm-sync\": \"{}\",\n\t\t\"@trioforge/anvil\": \"0.3.0\",\n\t\t\"@trioforge/crucible\": \"{VERSION}\"\n\t}},\n\t\"devDependencies\": {{\n\t\t\"@trioforge/crucible-cli\": \"{VERSION}\"\n\t}}\n}}\n",
+        peer("@rbxts/charm"),
+        peer("@rbxts/charm-sync"),
+    );
+    fs::write(root.join("package.json"), &manifest).unwrap();
+    for package in ["crucible-cli", "crucible"] {
+        let dir = root.join("node_modules/@trioforge").join(package);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("package.json"), format!("{{\"version\":\"{VERSION}\"}}")).unwrap();
+    }
+    manifest
+}
+
+#[test]
+fn upgrade_drops_anvil_once_no_source_imports_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (root, bin) = (dir.path().join("game"), dir.path().join("bin"));
+    fs::create_dir_all(root.join("src/client")).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    npm_exiting(&bin, 0);
+    let manifest = anvil_game(&root);
+    let menu = root.join("src/client/menu.tsx");
+    fs::write(&menu, "import { Dialog } from \"@trioforge/anvil\";\n").unwrap();
+
+    let kept = crucible(&root, &bin, &["upgrade", VERSION]);
+    let stdout = text(&kept.stdout);
+    assert_eq!(kept.status.code(), Some(0), "{stdout}\n{}", text(&kept.stderr));
+    assert_eq!(
+        stdout,
+        format!(
+            "crucible is already at {VERSION}.\n\n{} still names @trioforge/anvil, whose exports moved to @trioforge/crucible/ui. Move its imports and delete any Rojo mapping of it, then remove @trioforge/anvil from package.json. `npx crucible docs ui` explains the move.\n",
+            Path::new("src").join("client").join("menu.tsx").display()
+        )
+    );
+    assert_eq!(fs::read_to_string(root.join("package.json")).unwrap(), manifest, "the source is never rewritten");
+    assert_eq!(fs::read_to_string(&menu).unwrap(), "import { Dialog } from \"@trioforge/anvil\";\n");
+
+    fs::write(&menu, "export const menu = 1;\n").unwrap();
+    let dropped = crucible(&root, &bin, &["__upgrade-apply", VERSION, VERSION, VERSION]);
+    let stdout = text(&dropped.stdout);
+    assert_eq!(dropped.status.code(), Some(0), "{stdout}\n{}", text(&dropped.stderr));
+    assert!(
+        stdout.contains(
+            "\nUpdated dependencies:\n  package.json no longer lists @trioforge/anvil, whose exports moved to @trioforge/crucible/ui\n  ran `npm install`\n"
+        ),
+        "{stdout}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("package.json")).unwrap(),
+        manifest.replace("\n\t\t\"@trioforge/anvil\": \"0.3.0\",", ""),
+        "only the anvil entry changes"
+    );
 }

@@ -25,7 +25,9 @@ fn creates_default_and_explicit_targets_without_installing() {
         for stack in ["@rbxts/charm", "@rbxts/charm-sync", "@rbxts/vide"] {
             assert_eq!(package["dependencies"][stack], runtime["peerDependencies"][stack], "{stack}");
         }
-        assert_eq!(package["dependencies"]["@rbxts/vide-charm"], sample["dependencies"]["@rbxts/vide-charm"]);
+        for pinned in ["@rbxts/vide-charm", "@rbxts/ripple", "@rbxts/vide-ripple"] {
+            assert_eq!(package["dependencies"][pinned], sample["dependencies"][pinned], "{pinned}");
+        }
         assert_eq!(package["devDependencies"]["@trioforge/crucible-cli"], env!("CARGO_PKG_VERSION"));
         for file in [
             "tsconfig.json",

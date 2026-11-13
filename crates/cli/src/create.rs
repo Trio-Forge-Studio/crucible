@@ -197,8 +197,10 @@ pub fn tokens(name: &str) -> Vec<(&'static str, String)> {
         ("__RBXTS_TYPES__", "@rbxts/types", &sample, "devDependencies"),
         ("__CHARM__", "@rbxts/charm", &sample, "dependencies"),
         ("__CHARM_SYNC__", "@rbxts/charm-sync", &sample, "dependencies"),
+        ("__RIPPLE__", "@rbxts/ripple", &sample, "dependencies"),
         ("__VIDE__", "@rbxts/vide", &sample, "dependencies"),
         ("__VIDE_CHARM__", "@rbxts/vide-charm", &sample, "dependencies"),
+        ("__VIDE_RIPPLE__", "@rbxts/vide-ripple", &sample, "dependencies"),
     ] {
         tokens.push((
             token,

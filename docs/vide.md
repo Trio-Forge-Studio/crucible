@@ -2,7 +2,7 @@
 
 Render UI with Vide, and read Charm values in components with `@rbxts/vide-charm`.
 
-A game renders UI with `@rbxts/vide` and reads Charm values in components with `useAtom` from `@rbxts/vide-charm`. The game lists Charm, Vide and `vide-charm` in its own `dependencies`, as a game made with `crucible create` does. Crucible's `ui` entry, which `crucible docs ui` describes, is the only Crucible entry that imports Vide, and no entry imports `vide-charm`.
+A game renders UI with `@rbxts/vide` and reads Charm values in components with `useAtom` from `@rbxts/vide-charm`. The game lists Charm, Vide, `vide-charm`, Ripple and `vide-ripple` in its own `dependencies`, as a game made with `crucible create` does. Crucible's `ui` entry, which `crucible docs ui` describes, is the only Crucible entry that imports Vide, and no entry imports `vide-charm`.
 
 ```ts
 import Vide from "@rbxts/vide";
@@ -70,6 +70,23 @@ export function RoundLabel() {
 - A write from a `receive` handler or a `start` hook updates the source at once.
 - A write from a hook Crucible batches, such as `onEnable`, updates it after the hook returns.
 - A replicated declaration updates when the client applies the server's frame.
+
+## Animate a value
+
+`useSpring(initial, options?)` from `@rbxts/vide-ripple` returns a getter and a Ripple spring. Bind the getter to a property, and move the spring with `setGoal`. The spring stops when the component's scope is cleaned up. `useTween` and `useMotion` work the same way with a tween and a motion.
+
+```tsx
+import Vide, { effect } from "@rbxts/vide";
+import { useSpring } from "@rbxts/vide-ripple";
+
+export function Panel(props: { open: () => boolean }) {
+	const [transparency, spring] = useSpring(1, { tension: 250 });
+	effect(() => spring.setGoal(props.open() ? 0 : 1));
+	return <frame BackgroundTransparency={transparency} />;
+}
+```
+
+`vide-ripple` loads the Ripple and Vide folders next to it in the place, as `vide-charm` does. It also re-exports all of `@rbxts/ripple`, such as `createSpring` for a spring outside a component.
 
 ## Lifetime
 

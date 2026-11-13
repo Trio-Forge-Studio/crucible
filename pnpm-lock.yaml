@@ -193,12 +193,18 @@ importers:
       '@rbxts/charm-sync':
         specifier: 0.4.1
         version: 0.4.1
+      '@rbxts/ripple':
+        specifier: 0.10.2
+        version: 0.10.2
       '@rbxts/vide':
         specifier: 0.6.1
         version: 0.6.1
       '@rbxts/vide-charm':
         specifier: 0.4.1
         version: 0.4.1(@rbxts/vide@0.6.1)
+      '@rbxts/vide-ripple':
+        specifier: 0.10.2
+        version: 0.10.2(@rbxts/vide@0.6.1)
       '@trioforge/crucible':
         specifier: workspace:*
         version: link:../../packages/crucible
@@ -555,11 +561,19 @@ packages:
   '@rbxts/charm@0.11.1':
     resolution: {integrity: sha512-+o37xMtGYk3LJ9DYo5Y6kpzGWpZ6R5e1bIWWm/zsu/vY6njJHeMvHZGx/RJa94CrkdHRrhDSkKqlGN+b9KuPuA==}
 
+  '@rbxts/ripple@0.10.2':
+    resolution: {integrity: sha512-IakL24BomX5BX0CZSMjDSZdCUNwRbTA6GP+H62qgXQymql3h9MLjit4Jsaz9+NLrKAZfNKSfajMREr/fJkNEdw==}
+
   '@rbxts/types@1.0.959':
     resolution: {integrity: sha512-UyqSEnNsAZsL+3z1smoOFBHXmqXRhMb8hy8sL2IST/C78C96uXop4qYSaBifXjKMye/tckB7j8ILZEmdOD88nQ==}
 
   '@rbxts/vide-charm@0.4.1':
     resolution: {integrity: sha512-mSqf915Swn1FqIIcNIRKTVdtwnHYRHY1Y3wGFRi0Zp0RnwGIty18KA2xAsGfuCaOuRvE+qyXgpt75WbeAyM8cQ==}
+    peerDependencies:
+      '@rbxts/vide': '*'
+
+  '@rbxts/vide-ripple@0.10.2':
+    resolution: {integrity: sha512-4ttXkNjwphV5ZaEC5d3fZzXsCjLVmoB+JDibK4FzuSqUSCfSzTZGMEHVi8nRD+kzJFn/hX8vi12J91koXp84WQ==}
     peerDependencies:
       '@rbxts/vide': '*'
 
@@ -1375,11 +1389,18 @@ snapshots:
 
   '@rbxts/charm@0.11.1': {}
 
+  '@rbxts/ripple@0.10.2': {}
+
   '@rbxts/types@1.0.959': {}
 
   '@rbxts/vide-charm@0.4.1(@rbxts/vide@0.6.1)':
     dependencies:
       '@rbxts/charm': 0.11.1
+      '@rbxts/vide': 0.6.1
+
+  '@rbxts/vide-ripple@0.10.2(@rbxts/vide@0.6.1)':
+    dependencies:
+      '@rbxts/ripple': 0.10.2
       '@rbxts/vide': 0.6.1
 
   '@rbxts/vide@0.6.1': {}

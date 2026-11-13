@@ -67,7 +67,7 @@ A failure exits 1 before anything is written. It names each copy and declared ra
 
 Run `npx @trioforge/crucible-cli create my-game` to write a game into `./my-game` and install its dependencies. An optional path selects another directory, such as `npx @trioforge/crucible-cli create my-game games/my-game`. The target must be absent or empty. Invalid names and occupied targets exit 2 without writing files. Names and path components cannot end in a dot or space or use Windows device names, including names with extensions such as `con.txt`. A target below an existing file also exits 2.
 
-The game pins the CLI, the runtime, and `@trioforge/compiler-types` at the CLI version. It lists `@rbxts/charm`, `@rbxts/vide` and `@rbxts/vide-charm` in `dependencies` at the versions the CLI was released with, and includes the Roblox types, Vite+, side entry scripts, a TypeScript 7 tsconfig that compiles JSX for Vide, and a Rojo project. Rojo maps the compiled `src/shared` folder to `ReplicatedStorage.TS`, so both sides can import modules in it. The mapping is optional, so a game without the folder still builds. Template files use MIT-0. No roblox-ts, TypeScript, Rojo, or Rokit install is needed.
+The game pins the CLI, the runtime, and `@trioforge/compiler-types` at the CLI version. It lists `@rbxts/charm`, `@rbxts/charm-sync`, `@rbxts/vide`, `@rbxts/vide-charm`, `@rbxts/ripple` and `@rbxts/vide-ripple` in `dependencies` at the versions the CLI was released with, and includes the Roblox types, Vite+, side entry scripts, a TypeScript 7 tsconfig that compiles JSX for Vide, and a Rojo project. Rojo maps the compiled `src/shared` folder to `ReplicatedStorage.TS`, so both sides can import modules in it. The mapping is optional, so a game without the folder still builds. Template files use MIT-0. No roblox-ts, TypeScript, Rojo, or Rokit install is needed.
 
 The command detects npm, pnpm, Yarn, or Bun from `npm_config_user_agent`, with npm as the default. Yarn projects include `.yarnrc.yml` with `nodeLinker: node-modules`, because the compiler and the Rojo project read packages from `node_modules`. `--no-install` writes files without running install. Install failures exit 1 and leave the project available for a manual retry. Progress and install output go to stderr. Success prints the project path to stdout.
 
@@ -165,12 +165,14 @@ npx crucible upgrade 0.2.0
 - The latest version comes from `npm view @trioforge/crucible-cli version` in the game's root, so the registry and credentials in `.npmrc` apply. A game where either package is already newer, such as a prerelease, exits 0 and changes nothing.
 - Both packages move to the same exact version in `package.json`, and so does `@trioforge/compiler-types` when the game pins it. Only their version strings change, so the file keeps its formatting and line endings. A `workspace:`, `file:`, `link:`, `npm:` alias, Git, URL, path, or tag spec exits 2, because only a registry version or range can be rewritten. Any npm range is accepted, such as `^0.1.0 || ^0.2.0`, `>=0.1.0 <0.2.0`, or `0.1.0 - 0.2.0`.
 - The game's package manager installs them. The nearest lockfile in the game's root or a parent directory picks the manager, so a workspace member installs with its workspace's manager: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, or `package-lock.json`. Without one, `npm_config_user_agent` picks it, with npm as the default. pnpm runs with `--no-frozen-lockfile` and Yarn Berry with `--no-immutable`, because under CI both refuse a changed `package.json` by default.
+- On Windows the `crucible` shim runs the upgrade from a copy of the binary in the temporary folder and deletes the copy afterwards. The install replaces `node_modules/@trioforge/crucible-cli-win32-x64`, and Windows cannot delete a binary while it runs. The shim of 0.5.0 and older runs the binary in place, so [an upgrade from those versions](#upgrading-from-050-or-older-on-windows) can need a step.
 - A version older than either installed package exits 2 unless you pass `--allow-downgrade`. When both pins and both installed packages are already at the version, it exits 0 after reconciling runtime peers. If `package.json` still lists `roblox-ts` or `@rbxts/compiler-types`, it finishes [the move off roblox-ts](#upgrading-from-roblox-ts) without reinstalling crucible. Otherwise it installs again, so a retry after a failed install finishes the job.
 - After install, both installed packages and the installed binary must report the new version, or the command exits 1 with the versions it found.
 - The template owns `tsconfig.json`, `default.project.json`, `vite.config.ts`, `.gitignore`, `.gitattributes`, `LICENSE`, and the `## Crucible` section of `AGENTS.md`. A file or section that still matches the old version's template takes the new version's content and keeps the file's line endings. One that differs is listed and left alone. A deleted one is listed and not recreated. A part the new template no longer includes is listed for you to delete. The comparison ignores CRLF line endings. `package.json` belongs to the game, and the upgrade changes only the entries this section and [Upgrading from roblox-ts](#upgrading-from-roblox-ts) name. `crucible.toml` and `src` are never changed.
-- Before the version install, upgrade reads the target runtime's `peerDependencies` with `npm view` in the game's root and reconciles the game's Charm and Charm Sync pins, so an incompatible old peer cannot block npm from installing the target runtime. The game's installed version runs this step, so an upgrade from 0.4.0 or older skips it. After the hand-off, the new binary reconciles its own peer table and bridge pin and installs any remaining changes using the detected package manager. It also reconciles Vide and `vide-charm` when the game imports `@trioforge/crucible/ui` or already lists either UI package; games without UI gain neither. A compatible exact version or the required range stays unchanged. `crucible create` uses the same version table. If peer installation fails, the manifest is restored; run the named install command and upgrade again.
+- Before the version install, upgrade reads the target runtime's `peerDependencies` with `npm view` in the game's root and reconciles the game's Charm and Charm Sync pins, so an incompatible old peer cannot block npm from installing the target runtime. The game's installed version runs this step, so an upgrade from 0.4.0 or older skips it. After the hand-off, the new binary reconciles its own peer table and bridge pin and installs any remaining changes using the detected package manager. It also reconciles Vide and `vide-charm` when the game imports `@trioforge/crucible/ui` or already lists either UI package; games without UI gain neither. A compatible exact version or the required range stays unchanged. A peer the game lacks goes where the package manager sorts it: before the first entry of its group whose name sorts after it, with that entry's indentation and line ending. `crucible create` uses the same version table. If peer installation fails, the manifest is restored; run the named command and upgrade again.
+- The new binary removes `@trioforge/anvil` from `package.json` when no code file and no `*.project.json` file in the game names it, and installs with the peers. It reads `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` and `.cjs` files, follows linked folders, and skips `node_modules`, `out`, `build`, `target` and folders whose name starts with a dot. Any mention counts, a comment included, because removing a package the game still uses breaks its build. Its exports moved to `@trioforge/crucible/ui`, and a game that kept it would load a second copy of the primitives on another reactive core. When a file still names it, the package stays, and the report names that file and says to move the imports and delete the Rojo mapping, as `npx crucible docs ui` explains under Move from `@trioforge/anvil`. The upgrade never edits source files.
 - `LICENSE` is never written, because changing a game's license text has legal effect. When the new template's license differs, an untouched `LICENSE` is listed for you to review.
-- The new version decides what changed. After install, the old version hands its template to the new binary, which compares and writes the files and prints the report. If the old template is unknown, every owned part that differs from the new template is listed and none is written, and every docs topic is listed. The old template is unknown when `package.json` pinned a version that excludes the installed one before the upgrade, when the old version describes its template in a format the new one does not know, or when the template it sent came from a different version than the one installed.
+- The new version decides what changed. After install, the old version hands its template to the new binary, which compares and writes the files and prints the report. If the old template is unknown, every owned part that differs from the new template is listed and none is written, and every docs topic is listed. The old template is unknown when `package.json` pinned a version that excludes the installed one before the upgrade, when the old version describes its template in a format the new one does not know, or when the template it sent came from a different version than the one installed and the old pins do not both name that version. A failed install on Windows can leave the new `@trioforge/crucible-cli` beside the old binary, and the pins still name the old version, so a retry keeps the old template.
 
 The template's `.gitattributes` sets `* text=auto eol=lf`, so a Windows checkout gets LF files and the game's `vp check` passes. Files checked out before the game had it keep their line endings until they are checked out again.
 
@@ -195,38 +197,62 @@ Games made by `crucible create` 0.3.0 and earlier build with roblox-ts. The old 
 
 The report asks for a missing `types`, `rootDir`, or `skipLibCheck` only when it read every tsconfig in the chain, because a base it cannot read can supply them, and it names the place's own tsconfig for each. It asks only in a game moving off roblox-ts, because a newer game chose its own settings. After the changes, run `npm run check`.
 
-The 0.3.0 binary starts the upgrade, so two of its limits need a step first.
+The 0.3.0 binary starts the upgrade, so one of its limits needs a step first. On Windows, also read [Upgrading from 0.5.0 or older on Windows](#upgrading-from-050-or-older-on-windows).
 
-On Windows with Yarn, Yarn cannot replace `crucible.exe` while it runs, so `npx crucible upgrade` fails with `EPERM` and leaves `node_modules/@trioforge/crucible-cli` empty. Run a copy of the binary from outside `node_modules` instead. It hands off to the new version as usual. In Command Prompt:
+When every package is in `devDependencies` and `package.json` has no `dependencies` field, 0.3.0 exits 1 with "cannot update package.json automatically". Add `"dependencies": {}` to `package.json`, then run `npx crucible upgrade`. You can delete the empty field afterwards.
 
-```console
-copy node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe %TEMP%\crucible-0.3.0.exe
-%TEMP%\crucible-0.3.0.exe upgrade
-```
+### Upgrading from 0.5.0 or older on Windows
 
-In PowerShell:
+The game's installed version starts the upgrade, and up to 0.5.0 its shim runs the binary inside `node_modules/@trioforge/crucible-cli-win32-x64`, the folder the install replaces. Windows cannot delete a running binary, so the result depends on the package manager:
+
+| Package manager | `npx crucible upgrade` from 0.5.0 or older |
+| --- | --- |
+| npm | Succeeds. npm warns that it could not remove `node_modules/@trioforge/.crucible-cli-win32-x64-<random>`, which holds the old binary. The next `crucible` command deletes it. |
+| pnpm with its default isolated layout | Succeeds. |
+| pnpm 12.15 or later with `nodeLinker: hoisted` | Succeeds. pnpm warns that it left the old binary in `node_modules/@trioforge/crucible-cli-win32-x64_pacquet-stage_<numbers>`. The next `crucible` command deletes it. |
+| pnpm 12.14 or earlier with `nodeLinker: hoisted` | Fails with `os error 5`. Run `npx crucible upgrade <version>` again. |
+| Yarn 1 | Fails with `EPERM`. Run `yarn crucible upgrade <version>` again. |
+| Yarn 2 or later | Fails with `EPERM` and removes `@trioforge/crucible-cli`. Run a copy of the binary, as below. |
+| Bun | Succeeds. |
+
+The failed pnpm or Yarn 1 install has already installed the new `@trioforge/crucible-cli`, whose shim runs the old binary from a copy, so the second run finishes the upgrade and still knows the old template. Do not run the install that the first run's message names. For pnpm it changes nothing, but `yarn install` and `pnpm install --force` put the old shim back, and the second run then fails the same way.
+
+Otherwise, run a copy of the binary from outside `node_modules`. It works before a first run too. It hands off to the new version as usual. With Yarn 2 or later after a failed run, first delete `node_modules/.yarn-state.yml` and run `yarn install --no-immutable`, because a plain install does not put the removed shim back. In PowerShell:
 
 ```powershell
-Copy-Item node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe "$env:TEMP\crucible-0.3.0.exe"
-& "$env:TEMP\crucible-0.3.0.exe" upgrade
+Copy-Item node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe "$env:TEMP\crucible-old.exe"
+& "$env:TEMP\crucible-old.exe" upgrade 0.5.1
 ```
 
 In Git Bash:
 
 ```sh
-cp node_modules/@trioforge/crucible-cli-win32-x64/crucible.exe "$TEMP/crucible-0.3.0.exe"
-"$TEMP/crucible-0.3.0.exe" upgrade
+cp node_modules/@trioforge/crucible-cli-win32-x64/crucible.exe "$TEMP/crucible-old.exe"
+"$TEMP/crucible-old.exe" upgrade 0.5.1
 ```
 
-If the upgrade already failed this way, `yarn install --no-immutable` alone does not relink the CLI. Delete `node_modules/.yarn-state.yml`, run `yarn install --no-immutable`, then run the copy.
+In Command Prompt:
 
-When every package is in `devDependencies` and `package.json` has no `dependencies` field, 0.3.0 exits 1 with "cannot update package.json automatically". Add `"dependencies": {}` to `package.json`, then run `npx crucible upgrade`. You can delete the empty field afterwards.
+```console
+copy node_modules\@trioforge\crucible-cli-win32-x64\crucible.exe %TEMP%\crucible-old.exe
+%TEMP%\crucible-old.exe upgrade 0.5.1
+```
 
 ### When install fails
 
-A failed install restores `package.json` and exits 1. `node_modules` can still hold a mix of versions, so the message names the install command that returns it to the restored pins, such as `npm install` or `pnpm install --no-frozen-lockfile`. Run it, then upgrade again. If the restore itself fails, the message names the temporary file beside `package.json` that holds the original.
+A failed install restores `package.json` and exits 1. `node_modules` can still hold a mix of versions, so the message names the command that returns it to the restored pins:
 
-The new version's binary runs a second install when it moves the game off roblox-ts. When that install fails, it restores `package.json` to the new version with the roblox-ts packages still listed, prints the report of the template files it already refreshed, and exits 1. Run the install command the message names, then run `npx crucible upgrade` again. Crucible is then already at the new version, so the upgrade only finishes the move. An upgrade started from 0.3.0 also prints that the template was not refreshed, because that binary cannot tell this failure from a failed refresh. The report above that line lists what was refreshed.
+| Package manager | Command |
+| --- | --- |
+| npm | `npm install` |
+| pnpm | `pnpm install --force --no-frozen-lockfile` |
+| Yarn 1 | `yarn install` |
+| Yarn 2 or later | Delete `node_modules/.yarn-state.yml`, then `yarn install --no-immutable` |
+| Bun | `bun install` |
+
+pnpm and Yarn 2 keep their own record of `node_modules`, and after a failed install that record can describe packages that were never put in place, so a plain install reports nothing to do. Run the command, then upgrade again. If the restore itself fails, the message names the temporary file beside `package.json` that holds the original.
+
+The new version's binary runs a second install when it moves the game off roblox-ts. When that install fails, it restores `package.json` to the new version with the roblox-ts packages still listed, prints the report of the template files it already refreshed, and exits 1. Run the command the message names, then run `npx crucible upgrade` again. Crucible is then already at the new version, so the upgrade only finishes the move. An upgrade started from 0.3.0 also prints that the template was not refreshed, because that binary cannot tell this failure from a failed refresh. The report above that line lists what was refreshed.
 
 An interrupted install, such as a closed terminal, leaves `package.json` at the new version. Restore `package.json` from version control, run the install command, then upgrade again. Running `npx crucible upgrade <version>` straight away also finishes the install, but it can skip or only list template changes, because the old template is no longer known.
 
