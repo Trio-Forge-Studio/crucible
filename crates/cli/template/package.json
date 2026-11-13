@@ -11,8 +11,10 @@
 	"dependencies": {
 		"@rbxts/charm": "__CHARM__",
 		"@rbxts/charm-sync": "__CHARM_SYNC__",
+		"@rbxts/ripple": "__RIPPLE__",
 		"@rbxts/vide": "__VIDE__",
 		"@rbxts/vide-charm": "__VIDE_CHARM__",
+		"@rbxts/vide-ripple": "__VIDE_RIPPLE__",
 		"@trioforge/crucible": "__VERSION__"
 	},
 	"devDependencies": {

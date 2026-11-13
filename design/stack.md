@@ -32,6 +32,8 @@ Charm source lines refer to `@rbxts/charm` 0.11.1, file `src/init.luau`. Crucibl
 | `@rbxts/charm-sync` | Replicated value diffs and patches over Crucible's network | A required peer at exactly `0.4.1`, with a development copy for runtime builds. Crucible retains projection lifetimes, scheduling, budgets, revisions and fault handling. |
 | `@rbxts/vide` | UI rendering | A peer of the `@trioforge/crucible/ui` entry only. The root, server and client entries never import it. |
 | `@rbxts/vide-charm` | Reads Charm values from Vide | The game installs it. Crucible does not import it. |
+| `@rbxts/ripple` | Springs, tweens and motions | The game installs it. Crucible does not import it. |
+| `@rbxts/vide-ripple` | Animates Vide properties with Ripple | The game installs it. Crucible does not import it. |
 | `@trioforge/crucible` | Lifetimes, compiler ABI, data, network, the `ui` entry | The game installs it. |
 
 The game lists Charm and Charm Sync in its own `dependencies`, and adds Vide and `vide-charm` when it renders UI. `vide-charm` 0.4.1 declares `@rbxts/charm` `^0.11.1` as a dependency and `@rbxts/vide` as a peer (`vc/package/package.json`). Crucible does not re-export Charm, because a re-export gives every value function two import paths.
