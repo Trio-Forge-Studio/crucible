@@ -3,6 +3,7 @@ mod boot;
 mod data;
 mod declarations;
 mod facts;
+mod grants;
 mod lints;
 mod lower;
 mod network;
@@ -84,6 +85,7 @@ pub struct Crucible {
 pub(crate) struct State {
     facts: HashMap<SiteId, Fact>,
     network: network::Network,
+    grants: grants::Grants,
     #[cfg(feature = "test-support")]
     recorded: Vec<(String, Span, Fact)>,
 }
@@ -139,6 +141,12 @@ impl Extension for Crucible {
         }
         let Some(api) = self.api.as_mut() else { return };
         registration::Walk { cx, api, state: &mut self.state }.file(file);
+    }
+
+    fn finish_program(&mut self, cx: &mut ProgramCx<'_>) {
+        if let Some(api) = &self.api {
+            self.state.grants.finish(cx, api);
+        }
     }
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {

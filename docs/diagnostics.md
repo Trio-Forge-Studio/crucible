@@ -1,6 +1,6 @@
 # Diagnostics
 
-Find what each Crucible compile error from CRU001 to CRU038 means and how to fix it.
+Find what each Crucible compile error from CRU001 to CRU039 means and how to fix it.
 
 Crucible's compiler checks game code while `crucible build` compiles it, so a game made from the template reports these errors in `npm run build` and `npm run check`. The editor's TypeScript service does not run these rules, so it never reports them. Code that type-checks in the editor can still fail the build.
 
@@ -40,6 +40,7 @@ Several rules depend on the file's side. The side is the nearest folder named `s
 | CRU026 | A profile store field does not use a handle method name. |
 | CRU027 | A profile store call runs on the side it reads or writes. |
 | CRU038 | Game code takes `effect`, `scope` and `onCleanup` from Crucible, not from Charm. |
+| CRU039 | A place that grants products grants each product of `crucible:experience` exactly once. |
 
 ## CRU001
 
@@ -482,3 +483,13 @@ import { effect, onCleanup } from "@trioforge/crucible";
 ```
 
 The rule follows each name through the type checker to Charm's declaration, so a barrel such as `export * from "@rbxts/charm"` does not hide the call. It reports an import or re-export at its specifier, a read such as `charm.effect(...)` or `charm[key](...)` at the read, and a destructuring such as `const { effect } = charm`, `({ effect } = charm)` or a parameter `{ effect }: typeof charm` at the destructured name. It reads a key from its type, so a constant or a union of string literals that holds `effect` counts. It judges the declaration the checker resolves for each read, not where the value came from, so a value that carries Charm through a variable, a property, a parameter, a cast or a spread is reported too. A lint cannot tell Charm from a value of your own whose type takes Charm's lifetime functions from its module type, such as one typed `Pick<typeof charm, "effect">`, so the rule reports that value where it is read or destructured. The type alone is fine. To fix it, give the value a function type of your own, such as `(run: () => void) => () => void`. It does not report a barrel's `export *`, which also passes on Charm's other calls. It reports the game file that takes a lifetime call from the barrel instead. When one game file re-exports a lifetime call by name, the rule reports that re-export, and not each file that imports it. Type-only imports, `atom`, `computed`, `batch` and Charm's other calls are fine. Packages under `node_modules`, such as `@rbxts/vide-charm`, may import Charm's lifetime calls, but a game file that takes one from such a package is reported. The rule applies to every program that has `@trioforge/crucible` installed in a `node_modules` folder of its package's folder or a folder above it, whether or not a file imports Crucible. It also applies to a program that reaches Crucible another way, such as through `paths` in its tsconfig. A program that neither has Crucible installed nor reaches it is exempt.
+
+## CRU039
+
+```text
+CRU039: Product coin-pack is granted here and at src/server/shop.ts:8. A purchase runs one grant, so grant each product once.
+CRU039: Product coin-pack has no grant. src/crucible-experience.d.ts:6 declares it as Products.CoinPack. This place grants other products at src/server/shop.ts:8, so a purchase of coin-pack would be refused. Grant it once with a profile store's grant(Products.CoinPack, ...).
+CRU039: This grant's product is a handle whose key the compiler cannot see, so Crucible cannot check that each product has one grant. Pass a handle of crucible:experience, such as Products.CoinPack.
+```
+
+A place that grants any developer product must grant each product `crucible:experience` declares exactly once. Crucible's data module answers Roblox's `ProcessReceipt` for every product once a place grants one, so a product without a grant there has its purchases refused, and a second grant would fail the server at boot. The rule reads each grant's handle through the type checker: a grant that takes a union of handles, such as one in a loop over `[Products.A, Products.B]`, counts once for each, and a grant whose handle is typed `ProductHandle` with no key is reported, because the rule cannot tell which product it grants. A grant that takes a product ID is not counted. A place that grants nothing is exempt: Roblox offers its purchases again in a server that handles them. To fix it, add the missing grant or remove the second one.

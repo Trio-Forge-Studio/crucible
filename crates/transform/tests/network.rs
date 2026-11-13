@@ -3124,3 +3124,100 @@ fn the_fd_catalogue_lowers_all_fifty_payloads_and_the_typed_wire_tree() {
     assert!(actual["Admin.FullRecord"][1].contains("JobsCompleted"));
     assert!(actual["Admin.FullRecord"][1].contains("PlayTime"));
 }
+
+fn experience_game() -> Game {
+    let game = Game::new();
+    game.write("src/crucible-experience.d.ts", &fixture("experience/crucible-experience.d.ts"));
+    game.write(
+        "src/shared/store.ts",
+        "import { profileStore } from \"@trioforge/crucible\";\nexport const PlayerData = profileStore(\"FD.Players\", { template: { coins: 0 } });\n",
+    );
+    game
+}
+
+fn shop(class: &str, grants: &[&str]) -> String {
+    let fields: String = grants
+        .iter()
+        .enumerate()
+        .map(|(i, product)| format!("\treadonly g{i} = PlayerData.grant({product}, (_, data) => data);\n"))
+        .collect();
+    format!(
+        "import {{ Subsystem }} from \"@trioforge/crucible\";\nimport {{ Products }} from \"crucible:experience\";\nimport {{ PlayerData }} from \"../shared/store\";\nexport class {class} extends Subsystem {{\n{fields}}}\n"
+    )
+}
+
+#[test]
+fn cru039_passes_a_place_that_grants_each_product_once_or_none() {
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack", "Products.GemPack", "1234"]));
+    none(&reports_of(&game));
+    let game = experience_game();
+    game.write(
+        "src/server/shop.ts",
+        "import { Products } from \"crucible:experience\";\nexport const coins = Products.CoinPack.id;\n",
+    );
+    none(&reports_of(&game));
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["(1 > 0 ? Products.CoinPack : Products.GemPack)"]));
+    none(&reports_of(&game));
+}
+
+#[test]
+fn cru039_names_a_second_grant_of_a_product_and_where_the_first_is() {
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack", "Products.GemPack"]));
+    game.write("src/server/skins.ts", &shop("Skins", &["Products.CoinPack"]));
+    let reports = reports_of(&game);
+    assert_eq!(messages(&reports, "src/server/shop.ts"), Vec::<String>::new());
+    assert_eq!(
+        messages(&reports, "src/server/skins.ts"),
+        ["CRU039: Product coin-pack is granted here and at src/server/shop.ts:5. A purchase runs one grant, so grant \
+          each product once."]
+    );
+}
+
+#[test]
+fn cru039_names_a_product_a_granting_place_never_grants() {
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["Products.CoinPack"]));
+    let facts = game.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)));
+    let found: Vec<_> =
+        facts.diagnostics.iter().filter(|d| d.code == 90039).map(|d| (d.path.clone(), &d.message)).collect();
+    assert_eq!(
+        found,
+        [(
+            None,
+            &"CRU039: Product gem-pack has no grant. src/crucible-experience.d.ts:8 declares it as Products.GemPack. This \
+              place grants other products at src/server/shop.ts:5, so a purchase of gem-pack would be refused. Grant it \
+              once with a profile store's grant(Products.GemPack, ...)."
+                .to_owned()
+        )]
+    );
+    let game = experience_game();
+    game.write("src/server/shop.ts", &shop("Shop", &["1234"]));
+    let facts = game.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)));
+    let found: Vec<_> = facts.diagnostics.iter().filter(|d| d.code == 90039).map(|d| d.message.as_str()).collect();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].contains("This place grants products only by ID"), "{found:?}");
+}
+
+#[test]
+fn cru039_rejects_a_grant_whose_handle_has_no_key() {
+    let game = experience_game();
+    game.write(
+        "src/server/shop.ts",
+        &shop(
+            "Shop",
+            &[
+                "Products.CoinPack",
+                "Products.GemPack",
+                "(Products.CoinPack as import(\"@trioforge/crucible\").ProductHandle)",
+            ],
+        ),
+    );
+    assert_eq!(
+        messages(&reports_of(&game), "src/server/shop.ts"),
+        ["CRU039: This grant's product is a handle whose key the compiler cannot see, so Crucible cannot check that \
+          each product has one grant. Pass a handle of crucible:experience, such as Products.CoinPack."]
+    );
+}

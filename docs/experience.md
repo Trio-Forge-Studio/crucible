@@ -95,6 +95,7 @@ export class Shop extends Subsystem {
 - The build puts the handles in the place as a module next to the shallowest folder of the `outDir` that the Rojo project maps under `ReplicatedStorage`, so the server and the client both read it. A build fails when the project maps none.
 - `crucible build --env <name>` binds each handle to the ID `crucible.lock` records for that environment. It fails when the lock holds no ID for a key that is neither retired nor untracked, and names `crucible provision <name>`, so a place for an environment never ships a product it cannot sell. It also fails when the lock records the environment in another universe. `crucible publish <env>` builds this way.
 - `crucible build` without `--env` binds no ID, so the game compiles before anything is provisioned. Reading a handle's `id` in that place throws an error that names the key, as does a retired key that was never provisioned in the environment. A grant reads it when its Subsystem is made, so the server fails at boot rather than with ID 0.
+- A place that grants any product must grant each product `Products` declares exactly once, or the build fails with CRU039, which names the key and the files. A place that grants none, such as a place where nothing is sold, leaves `ProcessReceipt` unset, and Roblox offers its purchases again in a server that handles them.
 
 ## Retire, untrack and rename
 

@@ -79,6 +79,9 @@ impl Walk<'_, '_> {
             return;
         }
         let Some(StoreCall { store, member }) = self.store_call(call) else { return };
+        if member == Some("grant") {
+            self.grant(call);
+        }
         let client = matches!(member, None | Some("loaded")) && call.arguments().is_empty();
         let required = if client { Side::Client } else { Side::Server };
         if self.file_side(file) == Some(required) {
