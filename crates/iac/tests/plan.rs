@@ -747,8 +747,19 @@ fn after_an_unknown_outcome_a_run_adopts_only_the_declared_name_and_stops_on_a_n
     assert_eq!(problems.len(), 1, "{problems:#?}");
     for part in [
         "Since that intent, the universe gained 1001 (\"Renamed on Roblox\"), which does not carry the declared name \"VIP\"",
-        "record it with `crucible adopt staging pass vip <id>`",
+        "someone made it by hand",
+        "If it is passes.vip's, record it with `crucible adopt staging pass vip <id>`",
         "run `crucible adopt staging pass vip --none`",
+    ] {
+        assert!(problems[0].contains(part), "{}", problems[0]);
+    }
+
+    let someone = || listed(1003, "Someone's", Some(299), true);
+    let problems = messages(plan_with(vec![renamed(), someone(), old()], &intent("7")).unwrap_err());
+    for part in [
+        "gained 1001 (\"Renamed on Roblox\"), 1003 (\"Someone's\"), which do not carry",
+        "someone made them by hand",
+        "If one is passes.vip's, record it with",
     ] {
         assert!(problems[0].contains(part), "{}", problems[0]);
     }

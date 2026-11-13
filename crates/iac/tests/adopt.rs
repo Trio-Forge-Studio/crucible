@@ -33,6 +33,9 @@ moved_from = "old"
 name = "Gone"
 price = 4
 retired = true
+
+[badges.medal]
+name = "Medal"
 "#;
 
 fn id(value: u64) -> Id {
@@ -118,6 +121,10 @@ impl Case {
     }
 
     fn adopt(&mut self, key: &str, value: u64) -> (Result<Applied, Refused>, Disk) {
+        self.adopt_as(Kind::Product, key, value)
+    }
+
+    fn adopt_as(&mut self, kind: Kind, key: &str, value: u64) -> (Result<Applied, Refused>, Disk) {
         let manifest = Manifest::parse(CONFIG).unwrap();
         let experience = Experience::new(&manifest).unwrap();
         let inputs = Inputs {
@@ -129,7 +136,7 @@ impl Case {
             observed: None,
         };
         let mut disk = Disk::default();
-        let result = adopt(&inputs, &self.lock, Kind::Product, key, id(value), &mut self.roblox, &mut disk);
+        let result = adopt(&inputs, &self.lock, kind, key, id(value), &mut self.roblox, &mut disk);
         (result, disk)
     }
 
@@ -209,6 +216,21 @@ fn adopt_refuses_what_roblox_rules_out() {
 }
 
 #[test]
+fn adopt_says_a_badge_it_cannot_read_may_belong_to_another_universe() {
+    let mut case = Case::new(vec![]);
+    match case.adopt_as(Kind::Badge, "medal", 7) {
+        (Err(Refused::Rule(message)), disk) => {
+            assert!(disk.lock.is_none() && disk.journal.is_none(), "a refusal writes nothing");
+            assert!(
+                message.starts_with("universe 1 has no badge 7. Roblox reads a badge by ID in any universe"),
+                "{message}"
+            );
+        }
+        (other, _) => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn adopt_writes_the_lock_then_clears_the_key_s_intents() {
     let mut case = Case::new(vec![product(5, "Renamed"), product(6, "Beta")]);
     case.roblox.alone = vec![product(8, "Alpha")];
@@ -270,4 +292,9 @@ fn adopt_none_clears_an_unresolved_intent_and_names_what_was_passed_over() {
     let (done, disk) = case.forget("nope");
     assert_eq!(done.unwrap().1, [], "an undeclared key's intent can go too");
     assert_eq!(disk.journal.unwrap().intents, []);
+
+    let sent = Intent { before: None, ..intent("alpha", "Old", &[]) };
+    case.journal = journal(vec![sent]);
+    let (done, _) = case.forget("alpha");
+    assert_eq!(done.unwrap().1, [id(7)], "an intent without IDs passes over only what carries the name it sent");
 }
