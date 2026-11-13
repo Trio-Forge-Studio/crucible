@@ -1,7 +1,7 @@
 use crucible_iac::journal::Journal;
 use crucible_iac::lock::Lock;
 use crucible_iac::model::{Experience, Fields, Kind, Lifecycle, Problem, content_hash};
-use crucible_iac::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan, StepIntent, differs, plan};
+use crucible_iac::plan::{Action, Change, Field, Id, Inputs, Listed, Observed, Plan, StepIntent, differs, plan};
 use crucible_project::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -730,6 +730,44 @@ fn what_roblox_lists_decides_each_adopt_check() {
         ),
         "{}",
         problems[0]
+    );
+}
+
+#[test]
+fn an_adopt_names_the_update_it_sends() {
+    let project = Project::new(CONFIG);
+    let changes = |plan: &Plan, key: &str| {
+        let step = plan.steps.iter().find(|step| step.key == key).unwrap();
+        (step.action, step.changes.clone(), step.fields.clone())
+    };
+    let mut observed = matching();
+    describe(&mut observed);
+    let plan = project.plan_seen("staging", None, None, Some(&observed)).unwrap();
+    assert_eq!(changes(&plan, "coin-pack"), (Action::Adopt, vec![Change::Icon], vec![]), "a declared icon is sent");
+    assert_eq!(changes(&plan, "vip"), (Action::Adopt, vec![], vec![]));
+    assert_eq!(changes(&plan, "first-delivery"), (Action::Adopt, vec![], vec![]));
+
+    let products = observed.listed.get_mut(&Kind::Product).unwrap();
+    products[0].description = String::new();
+    products[0].price = Some(49);
+    products[0].on = false;
+    observed.listed.get_mut(&Kind::Badge).unwrap()[0].on = false;
+    let plan = project.plan_seen("staging", None, None, Some(&observed)).unwrap();
+    assert_eq!(
+        changes(&plan, "coin-pack"),
+        (Action::Adopt, vec![Change::Details, Change::Icon], vec![Field::Description, Field::Price, Field::Sale])
+    );
+    assert_eq!(changes(&plan, "first-delivery"), (Action::Adopt, vec![Change::Details], vec![Field::Enabled]));
+    assert_eq!(plan.summary[&Action::Adopt], 3, "an adopt that updates is still one adopt");
+
+    let lock = project.applied("staging");
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
+    assert_eq!(changes(&plan, "first-delivery"), (Action::Update, vec![Change::Details], vec![Field::Enabled]));
+    let offline = Project::new(&CONFIG.replace("price = 299", "price = 300")).plan("staging", Some(&lock), None);
+    assert_eq!(
+        changes(&offline.unwrap(), "vip"),
+        (Action::Update, vec![Change::Details], vec![]),
+        "no list, no fields"
     );
 }
 

@@ -1,7 +1,7 @@
 use crucible_iac::journal::{self, Journal};
 use crucible_iac::lock::{self, Lock};
 use crucible_iac::model::{Experience, Problem};
-use crucible_iac::plan::{Action, Inputs, Observed, Plan, plan, undeclared};
+use crucible_iac::plan::{Action, Change, Inputs, Observed, Plan, Step, plan, undeclared};
 use crucible_project::Manifest;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -185,7 +185,10 @@ pub(crate) fn render(plans: &[Plan]) -> String {
             .steps
             .iter()
             .map(|step| {
-                let mut detail: Vec<String> = step.changes.iter().map(|change| label(&json!(change))).collect();
+                let mut detail: Vec<String> = step.changes.iter().map(|change| describe(step, *change)).collect();
+                if step.action == Action::Adopt && !detail.is_empty() {
+                    detail[0] = format!("then update {}", detail[0]);
+                }
                 if let Some(old) = &step.moved_from {
                     detail.push(format!("from {old}"));
                 }
@@ -224,8 +227,19 @@ pub(crate) fn render(plans: &[Plan]) -> String {
             text += line.trim_end();
             text.push('\n');
         }
-        let counts: Vec<String> =
-            plan.summary.iter().map(|(action, count)| format!("{count} {}", label(&json!(action)))).collect();
+        let counts: Vec<String> = plan
+            .summary
+            .iter()
+            .map(|(action, count)| {
+                let mut text = format!("{count} {}", label(&json!(action)));
+                let changed = |step: &&Step| step.action == *action && !step.changes.is_empty();
+                let updated = plan.steps.iter().filter(changed).count();
+                if *action == Action::Adopt && updated > 0 {
+                    text += &format!(" ({updated} then updated)");
+                }
+                text
+            })
+            .collect();
         text += &format!("  {}.\n", if counts.is_empty() { "Nothing declared".into() } else { counts.join(", ") });
         for warning in &plan.warnings {
             text += &format!("  Warning: {warning}\n");
@@ -236,6 +250,16 @@ pub(crate) fn render(plans: &[Plan]) -> String {
         text.push('\n');
     }
     text.trim_end().to_owned()
+}
+
+/// A change, with the fields that differ from what Roblox lists when the step names them.
+fn describe(step: &Step, change: Change) -> String {
+    let text = label(&json!(change));
+    if change != Change::Details || step.fields.is_empty() {
+        return text;
+    }
+    let fields: Vec<String> = step.fields.iter().map(|field| label(&json!(field))).collect();
+    format!("{text} ({})", fields.join(", "))
 }
 
 fn label(value: &Value) -> String {

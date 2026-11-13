@@ -118,6 +118,48 @@ fn provision_adopts_by_name_creates_the_rest_and_records_each_id() {
 }
 
 #[test]
+fn an_adopt_shows_the_update_it_sends_with_the_fields_that_differ() {
+    let dir = project();
+    let config = CONFIG.replace("price = 49\n", "description = \"100 coins.\"\nprice = 49\n");
+    std::fs::write(dir.path().join("crucible.toml"), config).unwrap();
+    let server = MockServer::start();
+    let mut listed = product(77);
+    listed["priceInformation"]["defaultPriceInRobux"] = json!(10);
+    listed["isForSale"] = json!(false);
+    lists(&server, vec![listed], vec![badge(88)]);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let steps = document(&out)["plan"]["steps"].clone();
+    assert_eq!(steps[0]["action"], "adopt");
+    assert_eq!(steps[0]["changes"], json!(["details"]));
+    assert_eq!(steps[0]["fields"], json!(["description", "price", "sale"]));
+    assert_eq!((steps[1]["action"].clone(), steps[1].get("changes")), (json!("adopt"), None), "a matching adopt");
+
+    let update = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/developer-products/v2/universes/1/developer-products/77")
+            .body_includes("name=\"description\"\r\n\r\n100 coins.\r\n")
+            .body_includes("name=\"price\"\r\n\r\n49\r\n")
+            .body_includes("name=\"isForSale\"\r\n\r\ntrue\r\n");
+        then.status(200);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    update.assert_calls(1);
+    assert_eq!(
+        text(&out.stdout),
+        "staging (universe 1)\n\
+         \x20 adopt  product coin-pack     Products.CoinPack     77  then update details (description, price, sale)\n\
+         \x20 adopt  badge first-delivery  Badges.FirstDelivery  88\n\
+         \x20 2 adopt (1 then updated).\n\
+         adopt product coin-pack 77\n\
+         update product coin-pack 77\n\
+         adopt badge first-delivery 88\n\
+         Provisioned staging. Commit crucible.lock.\n"
+    );
+}
+
+#[test]
 fn a_lost_create_keeps_its_intent_and_the_next_run_asks_whose_a_renamed_one_is() {
     let dir = project();
     let server = MockServer::start();

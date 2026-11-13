@@ -24,7 +24,8 @@ pub enum Action {
     /// No ID in the lock: provision adopts the one resource with this name, or creates it. With what Roblox holds, no
     /// resource matched, so provision creates it.
     Create,
-    /// The adopt check found one resource, whose ID provision records in the lock instead of creating one.
+    /// The adopt check found one resource, whose ID provision records in the lock instead of creating one. Provision
+    /// then updates it to the declaration, so its `changes` say what that update sends.
     Adopt,
     /// The journal holds an intent and the lock no ID: an earlier create's outcome is unknown, and provision looks
     /// for the resource before it does anything else. It adopts one with the declared name, and stops on one new since
@@ -50,6 +51,19 @@ pub enum Change {
     Key,
 }
 
+/// A field of a product, a pass or a badge that differs from what Roblox lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Field {
+    Name,
+    Description,
+    Price,
+    /// Whether a product or a pass is for sale.
+    Sale,
+    /// Whether a badge is enabled.
+    Enabled,
+}
+
 /// The journal's intent for a step's resource.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StepIntent {
@@ -70,6 +84,10 @@ pub struct Step {
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<Change>,
+    /// The fields that differ from what Roblox lists, when provision listed the resource. The lock fingerprints the
+    /// fields it applied, so an offline plan cannot name them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<Field>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -213,6 +231,7 @@ pub fn plan(
             action: if changed { Action::Update } else { Action::NoOp },
             id: Some(inputs.env.universe.to_string()),
             changes: if changed { vec![Change::Details] } else { vec![] },
+            fields: vec![],
             moved_from: None,
             intent: None,
             note: None,
@@ -312,6 +331,7 @@ pub fn plan(
                     action: Action::NoOp,
                     id: Some(entry.id.to_string()),
                     changes: vec![],
+                    fields: vec![],
                     moved_from: None,
                     intent: intent.map(|at| StepIntent { name: intents[at].name.clone(), resolved: true }),
                     note: Some("retired and no longer declared; the lock keeps its ID".into()),
@@ -643,6 +663,7 @@ fn step(
         action: Action::NoOp,
         id: entry.map(|entry| entry.id.to_string()),
         changes: vec![],
+        fields: vec![],
         moved_from,
         intent: intent.map(|intent| StepIntent { name: intent.name.clone(), resolved: entry.is_some() }),
         note: None,
@@ -681,6 +702,16 @@ fn step(
                     (Some(id), None, _) => {
                         step.action = Action::Adopt;
                         step.id = Some(id.to_string());
+                        let listed = inputs.observed.and_then(|observed| observed.bound(kind, *id).ok());
+                        let fields = resource.fields.as_ref().expect("a managed resource has its fields");
+                        step.fields = listed.map_or_else(Vec::new, |listed| differences(fields, listed));
+                        if !step.fields.is_empty() {
+                            step.changes.push(Change::Details);
+                        }
+                        // The lock holds no icon hash yet, so the adopt's update uploads a declared icon.
+                        if icon.is_some() {
+                            step.changes.push(Change::Icon);
+                        }
                     }
                     (Some(_), Some(_), _) => return Err(ambiguous(inputs, resource, &found.adopt)),
                 }
@@ -688,7 +719,8 @@ fn step(
         }
         (Lifecycle::Managed, Some(entry)) => {
             let fields = resource.fields.as_ref().expect("a managed resource has its fields");
-            if entry.fingerprint != fields.fingerprint() || remote.is_some_and(|remote| differs(fields, remote)) {
+            step.fields = remote.map_or_else(Vec::new, |remote| differences(fields, remote));
+            if entry.fingerprint != fields.fingerprint() || !step.fields.is_empty() {
                 step.changes.push(Change::Details);
             }
             if icon.is_some() && entry.icon != icon {
@@ -710,14 +742,30 @@ fn step(
 
 /// Whether Roblox's resource differs from what the config declares for a managed key.
 pub fn differs(fields: &Fields, remote: &Listed) -> bool {
-    match fields {
-        Fields::Priced { name, description, price } => {
-            *name != remote.name || *description != remote.description || remote.price != Some(*price) || !remote.on
-        }
-        Fields::Badge { name, description, enabled } => {
-            *name != remote.name || *description != remote.description || remote.on != *enabled
-        }
+    !differences(fields, remote).is_empty()
+}
+
+/// The fields of Roblox's resource that differ from what the config declares for a managed key, in the order an update
+/// sends them.
+pub fn differences(fields: &Fields, remote: &Listed) -> Vec<Field> {
+    let (name, description, price, on, state) = match fields {
+        Fields::Priced { name, description, price } => (name, description, Some(*price), true, Field::Sale),
+        Fields::Badge { name, description, enabled } => (name, description, None, *enabled, Field::Enabled),
+    };
+    let mut differ = Vec::new();
+    if *name != remote.name {
+        differ.push(Field::Name);
     }
+    if *description != remote.description {
+        differ.push(Field::Description);
+    }
+    if price.is_some() && remote.price != price {
+        differ.push(Field::Price);
+    }
+    if remote.on != on {
+        differ.push(state);
+    }
+    differ
 }
 
 /// Whether the adopt check of `resource` looks at `listed`, which no lock entry holds: it has the declared name or,
