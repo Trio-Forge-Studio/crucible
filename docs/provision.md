@@ -35,6 +35,8 @@ Before a create, provision writes an intent to `.crucible/journal/<env>.json`: t
 | the create | finds the resource by its name, or by an ID the intent did not know, and adopts it. |
 | the lock | sees the ID in the lock and clears the intent. |
 
+When Roblox refuses a create, with exit 3, 4 or 7, nothing was made: provision clears the intent, then stops, and the next run creates the resource. A crash between the refusal and that write leaves the intent, which the next run handles as a create whose answer was lost.
+
 When a create's answer is lost, the run stops with exit 5 and keeps the intent. The next run looks for the resource under the declared name and any ID the intent did not know, whatever its name now is, so a create renamed on Roblox meanwhile is still found. While an intent is unresolved, no other intent is written, so every new ID belongs to it.
 
 A badge is the exception. Roblox's public badge list can lag behind a create, so provision does not settle a badge's lost create from the list. It stops and names the badge: look for it in the experience's badges on Roblox, then run `crucible adopt` with its ID, or remove the intent from the journal if it is not there.
@@ -48,7 +50,7 @@ A badge is the exception. Roblox's public badge list can lag behind a create, so
 | A badge's create may have landed. | Adopt the badge, or remove the intent if there is none. |
 | The lock names an ID Roblox does not have. | If the resource is gone, delete its `[env.<env>.<kind>.<key>]` table from `crucible.lock`. Provision never replaces a resource on its own, because the lock may come from another universe. |
 | A list leaves out an ID the lock names that Roblox returns by itself. | Run provision again later. Provision trusts the list to find a resource before it creates one. |
-| Roblox rejects a badge create past the five it makes free each day, because provision offers to pay nothing. | Run provision again the next day. The plan warns when more than five badges may need creating. |
+| Roblox rejects a badge create past the five it makes free each day, because provision offers to pay nothing. | Run provision again the next day. The rejected create leaves no intent, so that run creates the badge. The plan warns when more than five badges may need creating. |
 
 The plan's stops change nothing. Exit codes follow `crucible oc`, plus exit 1 for a file that cannot be read or written:
 

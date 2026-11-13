@@ -167,11 +167,11 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
     let applied = run.applied().to_vec();
     match stopped {
         None => Report { plan: Some(plan), applied, error: None },
-        Some(Stop::Remote { kind, key, failure }) => {
+        Some(Stop::Remote { kind, key, failure, intent }) => {
             let mut report = remote(Some(plan), applied, failure, Some(&source));
-            if let Some((code, error)) = &mut report.error {
+            if let Some((_, error)) = &mut report.error {
                 error["resource"] = json!(format!("{} {key}", kind.noun()));
-                if *code == 5 {
+                if intent {
                     error["hint"] = json!(format!(
                         "The create of {} {key} may have landed. Its intent stays in {}, and the next provision looks \
                          for the resource before it creates anything",

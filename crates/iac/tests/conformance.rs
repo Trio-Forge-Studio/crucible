@@ -50,6 +50,8 @@ enum Fault {
     LostBefore,
     /// Roblox answered with a failure: 5xx on a read or an update, a rejection on a create.
     Refused,
+    /// A create fails with this code and makes nothing. Any other call fails as `Refused` does.
+    Rejected(u8),
 }
 
 #[derive(Debug, Clone)]
@@ -146,7 +148,7 @@ fn unavailable() -> Failure {
 
 impl Remote for Fake<'_> {
     fn list(&mut self, kind: Kind) -> Result<Vec<Listed>, Failure> {
-        if self.0.fault() == Fault::Refused {
+        if matches!(self.0.fault(), Fault::Refused | Fault::Rejected(_)) {
             return Err(unavailable());
         }
         self.0.unknown.borrow_mut().retain(|(of, _)| *of != kind);
@@ -162,7 +164,7 @@ impl Remote for Fake<'_> {
     }
 
     fn get(&mut self, kind: Kind, id: Id) -> Result<Option<Listed>, Failure> {
-        if self.0.fault() == Fault::Refused {
+        if matches!(self.0.fault(), Fault::Refused | Fault::Rejected(_)) {
             return Err(unavailable());
         }
         let remote = self.0.remote.borrow();
@@ -229,6 +231,7 @@ impl Remote for Fake<'_> {
                 Err(Failure::unknown("the answer was lost"))
             }
             Fault::Refused => Err(Failure::new(4, "rejected", "HTTP 400")),
+            Fault::Rejected(code) => Err(Failure::new(code, "rejected", "Roblox made nothing")),
         }
     }
 
@@ -259,7 +262,7 @@ impl Remote for Fake<'_> {
         }
         match fault {
             Fault::None => Ok(()),
-            Fault::Refused => Err(unavailable()),
+            Fault::Refused | Fault::Rejected(_) => Err(unavailable()),
             _ => Err(Failure::unknown("the answer was lost")),
         }
     }
@@ -409,7 +412,7 @@ fn resolve(world: &World) {
     let experience = Experience::new(&manifest).unwrap();
     let env = &manifest.envs[ENV];
     for (kind, key) in KEYS {
-        if world.bound(kind, key).is_some() {
+        if world.bound(kind, key).is_some() || !world.want.borrow().contains_key(&(kind, key.to_owned())) {
             continue;
         }
         let owned =
@@ -603,7 +606,13 @@ impl StateMachineTest for Conformance {
                 *world.faults.borrow_mut() = faults.into();
                 match provision(&world, crash_after) {
                     Outcome::Failed(failure) => assert_eq!(failure.code, 7, "only a read fails before the plan"),
-                    Outcome::Stopped(Stop::Remote { failure, .. }) => assert!(matches!(failure.code, 4 | 5 | 7)),
+                    Outcome::Stopped(Stop::Remote { kind, key, failure, intent }) => {
+                        assert!(matches!(failure.code, 4 | 5 | 7));
+                        if !intent {
+                            let journal = world.journal();
+                            assert!(journal.is_none_or(|journal| journal.get(kind, &key).is_none()), "{kind:?} {key}");
+                        }
+                    }
                     Outcome::Stopped(stop) => panic!("{stop:?}"),
                     Outcome::Done | Outcome::Problems(_) | Outcome::Crashed => {}
                 }
@@ -697,4 +706,66 @@ fn a_resource_gone_from_roblox_stops_the_run_and_is_never_made_again() {
     }
     assert!(world.remote.borrow().is_empty(), "nothing was created again");
     let _ = journal::path(ENV);
+}
+
+fn world_with(want: &[(Kind, &str, &str)]) -> World {
+    let world = World::default();
+    *world.want.borrow_mut() =
+        want.iter().map(|(kind, key, name)| ((*kind, (*key).to_owned()), (*name).to_owned())).collect();
+    world
+}
+
+fn provision_with(world: &World, faults: &[Fault]) -> Outcome {
+    *world.faults.borrow_mut() = faults.iter().copied().collect();
+    let outcome = provision(world, None);
+    world.faults.borrow_mut().clear();
+    check(world);
+    outcome
+}
+
+/// A create Roblox refused made nothing, so it leaves no intent, and a product a teammate makes by hand before the next
+/// run is not taken for it.
+#[test]
+fn a_refused_create_clears_its_intent_and_the_next_run_leaves_a_hand_made_product_alone() {
+    for code in [2, 3, 4, 7] {
+        let world = world_with(&[(Kind::Product, "a", "N1")]);
+        match provision_with(&world, &[Fault::None, Fault::Rejected(code)]) {
+            Outcome::Stopped(Stop::Remote { failure, intent: false, .. }) => assert_eq!(failure.code, code),
+            other => panic!("code {code}: {other:?}"),
+        }
+        assert!(world.journal().is_none(), "code {code}: the refused create's intent is cleared");
+        let stranger = world.make(Kind::Product, "Teammate's starter pack", None, Some(99), true);
+        assert!(matches!(provision_with(&world, &[]), Outcome::Done), "code {code}");
+        let bound = world.bound(Kind::Product, "a").unwrap();
+        assert_ne!(bound, stranger, "code {code}: a is bound to the hand-made product");
+        let remote = world.remote.borrow();
+        let hand = remote.iter().find(|resource| resource.id == stranger.get()).unwrap();
+        assert_eq!((hand.name.as_str(), hand.price), ("Teammate's starter pack", Some(99)), "code {code}");
+    }
+}
+
+/// A create whose answer was lost keeps its intent, whatever code the failure carries beyond the refusals.
+#[test]
+fn a_create_that_may_have_landed_keeps_its_intent() {
+    for code in [5, 6, 8] {
+        let world = world_with(&[(Kind::Product, "a", "N1")]);
+        match provision_with(&world, &[Fault::None, Fault::Rejected(code)]) {
+            Outcome::Stopped(Stop::Remote { intent: true, .. }) => {}
+            other => panic!("code {code}: {other:?}"),
+        }
+        assert!(world.journal().is_some_and(|journal| journal.get(Kind::Product, "a").is_some()), "code {code}");
+    }
+}
+
+/// Roblox refuses a badge create past the day's free ones, because provision offers to pay nothing. The next day's run
+/// creates it with no edit to any file.
+#[test]
+fn a_paid_badge_roblox_refused_is_created_the_next_day() {
+    let world = world_with(&[(Kind::Badge, "c", "B1")]);
+    assert!(matches!(provision_with(&world, &[Fault::None, Fault::Rejected(4)]), Outcome::Stopped(_)));
+    assert!(world.remote.borrow().is_empty());
+    let outcome = provision_with(&world, &[]);
+    assert!(matches!(outcome, Outcome::Done), "{outcome:?}");
+    assert!(world.bound(Kind::Badge, "c").is_some());
+    assert_eq!(world.remote.borrow().len(), 1);
 }

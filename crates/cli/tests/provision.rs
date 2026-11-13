@@ -160,6 +160,37 @@ fn a_lost_create_keeps_its_intent_and_the_next_run_adopts_it() {
 }
 
 #[test]
+fn a_badge_create_refused_for_its_cost_clears_its_intent_and_the_next_day_creates_it() {
+    let dir = project();
+    let server = MockServer::start();
+    let (mut products, mut badges) = lists(&server, vec![product(77)], vec![]);
+    let mut refused = server.mock(|when, then| {
+        when.method(Method::POST).path("/legacy-badges/v1/universes/1/badges");
+        then.status(400).json_body(json!({"errors": [{"code": 0, "message": "Insufficient Robux"}]}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(4), "{}", text(&out.stdout));
+    let first = document(&out);
+    assert_eq!(first["error"]["resource"], "badge first-delivery");
+    assert!(first["error"].get("hint").is_none(), "nothing may have landed: {first}");
+    assert!(!dir.path().join(".crucible/journal/staging.json").exists(), "the refused create leaves no intent");
+
+    products.delete();
+    badges.delete();
+    refused.delete();
+    lists(&server, vec![product(77)], vec![]);
+    let create = server.mock(|when, then| {
+        when.method(Method::POST).path("/legacy-badges/v1/universes/1/badges");
+        then.status(200).json_body(badge(88));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    create.assert_calls(1);
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.badges.first-delivery]\nid = 88\n"), "{lock}");
+}
+
+#[test]
 fn a_dry_run_lists_and_plans_and_writes_nothing() {
     let dir = project();
     let server = MockServer::start();

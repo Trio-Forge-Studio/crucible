@@ -12,8 +12,9 @@
 //! 3. An update or a retire writes to Roblox, then to the lock. Its writes are absolute, so a crash between repeats it.
 //! 4. A create writes its intent, with the name it sends and the IDs the run knows, then sends the create, then writes
 //!    the ID to the lock, then clears the intent. No intent is written while another is unresolved, so every resource
-//!    the run did not know is the intent's own. An unknown outcome stops the run with the intent kept, and the next
-//!    run's adopt check resolves it. Nothing sends a create twice for one intent.
+//!    the run did not know is the intent's own or one made by hand. An unknown outcome stops the run with the intent
+//!    kept, and the next run's adopt check resolves it. A create Roblox certainly refused clears its intent, then stops
+//!    the run. Nothing sends a create twice for one intent.
 
 use crate::journal::{Intent, Journal};
 use crate::lock::{Entry, EnvLock, Lock, Status};
@@ -32,7 +33,7 @@ pub trait Remote {
     fn list(&mut self, kind: Kind) -> Result<Vec<Listed>, Failure>;
     /// One resource, or `None` when Roblox answers that it has no such resource.
     fn get(&mut self, kind: Kind, id: Id) -> Result<Option<Listed>, Failure>;
-    /// A failure with code 5 means the create may have landed.
+    /// A failure for which `may_have_landed` holds leaves the create's outcome unknown.
     fn create(&mut self, kind: Kind, fields: &Fields, icon: Option<&Image>) -> Result<Id, Failure>;
     fn update(&mut self, kind: Kind, id: Id, patch: &Patch) -> Result<(), Failure>;
 }
@@ -51,6 +52,14 @@ impl Patch {
     fn is_empty(&self) -> bool {
         *self == Patch::default()
     }
+}
+
+/// Whether a failed create may have made the resource. `Transport::run` fails an unsafe write with code 5 once an
+/// attempt got a 2xx or a 5xx, or its request left the machine and the answer was lost. It fails with 3 on a 401 or a
+/// 403, 4 on another 4xx, 7 on a 429 or a request that never left, and 2 on a request it could not build, and in each
+/// of those Roblox made nothing. Any other code is taken as unknown.
+pub fn may_have_landed(failure: &Failure) -> bool {
+    !matches!(failure.code, 2 | 3 | 4 | 7)
 }
 
 /// Where the lock and the journal live.
@@ -134,11 +143,13 @@ pub struct Applied {
 /// Why a run stopped before its plan was applied.
 #[derive(Debug)]
 pub enum Stop {
-    /// Roblox refused or failed a call. A create's failure with code 5 left its intent in the journal.
+    /// Roblox refused or failed a call. `intent` is true when it was a create that may have landed, whose intent stays in
+    /// the journal. A create Roblox refused had its intent cleared before the stop.
     Remote {
         kind: Kind,
         key: String,
         failure: Failure,
+        intent: bool,
     },
     Write {
         path: PathBuf,
@@ -351,7 +362,12 @@ impl Run {
                 self.applied.push(Applied { kind: kind.noun(), key, action, id });
             }
             Effect::Update { kind, key, id, patch } => {
-                remote.update(kind, id, &patch).map_err(|failure| Stop::Remote { kind, key, failure })?;
+                remote.update(kind, id, &patch).map_err(|failure| Stop::Remote {
+                    kind,
+                    key,
+                    failure,
+                    intent: false,
+                })?;
             }
             Effect::Intend { kind, key, name } => {
                 let env = self.lock.env(&self.env);
@@ -369,11 +385,19 @@ impl Run {
             }
             Effect::Create { kind, key, fields, icon } => {
                 let image = icon.as_ref().map(|(image, _)| image);
-                let id = remote.create(kind, &fields, image).map_err(|failure| Stop::Remote {
-                    kind,
-                    key: key.clone(),
-                    failure,
-                })?;
+                let id = match remote.create(kind, &fields, image) {
+                    Ok(id) => id,
+                    Err(failure) => {
+                        // A crash before this write leaves the intent of a create that made nothing, which the next
+                        // run's adopt check handles as it handles a create lost before it landed.
+                        let intent = may_have_landed(&failure);
+                        if !intent {
+                            self.journal.remove(kind, &key);
+                            self.save_journal(store)?;
+                        }
+                        return Err(Stop::Remote { kind, key, failure, intent });
+                    }
+                };
                 self.known.entry(kind).or_default().insert(id);
                 let entry = Entry {
                     id,
