@@ -190,6 +190,10 @@ test(
 			join(game, "src", "client", "greeting.tsx"),
 			'import Vide from "@rbxts/vide";\n\nexport function Greeting() {\n\treturn (\n\t\t<>\n\t\t\t<textlabel Text="Hello" />\n\t\t</>\n\t);\n}\n',
 		);
+		writeFileSync(
+			join(game, "src", "client", "fade.tsx"),
+			'import Vide from "@rbxts/vide";\nimport { useSpring } from "@rbxts/vide-ripple";\n\nexport function Fade() {\n\tconst [transparency, spring] = useSpring(1);\n\tspring.setGoal(0);\n\treturn <frame BackgroundTransparency={transparency} />;\n}\n',
+		);
 		const checked = run("npm", ["run", "check"], game);
 		assert.equal(checked.status, 0, `${checked.stdout}\n${checked.stderr}`);
 		assert.match(checked.stdout, /vp check/);
@@ -198,6 +202,11 @@ test(
 			readFileSync(join(game, "out", "client", "greeting.luau"), "utf8"),
 			/Vide\.jsx\(Vide\.Fragment/,
 			"a component that imports Vide only for JSX passes the check and builds",
+		);
+		assert.match(
+			readFileSync(join(game, "out", "client", "fade.luau"), "utf8"),
+			/"vide-ripple"/,
+			"a component that springs a property through vide-ripple passes the check and builds",
 		);
 		assert.ok(
 			readFileSync(join(game, "build", "start.rbxl"))

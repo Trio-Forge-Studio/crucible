@@ -6,8 +6,10 @@
 	},
 	"dependencies": {
 		"@rbxts/charm": "0.11.1",
+		"@rbxts/ripple": "0.10.2",
 		"@rbxts/vide": "0.6.1",
 		"@rbxts/vide-charm": "0.4.1",
+		"@rbxts/vide-ripple": "0.10.2",
 		"@trioforge/crucible": "workspace:*",
 		"@rbxts/charm-sync": "0.4.1"
 	},
