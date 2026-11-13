@@ -515,6 +515,17 @@ fn an_unanswered_introspection_does_not_stop_deploy() {
 }
 
 #[test]
+fn no_scope_check_skips_the_introspection() {
+    let game = Game::new(Some(TWO));
+    let server = Server::new(vec![Response::json(json!({"versionNumber":3}))]);
+    let out = game.deploy(&server.origin, &["production", "--place", "start", "--no-scope-check"]);
+    assert_eq!(code(&out), 0, "{}", document(&out));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1, "only the upload");
+    assert!(requests[0].head.contains("/universes/v1/10/places/30/versions"), "{}", requests[0].head);
+}
+
+#[test]
 fn crucible_publish_names_crucible_deploy() {
     let game = Game::new(Some(TWO));
     let out = game.binary("http://127.0.0.1:1").args(["publish", "production"]).output().unwrap();

@@ -427,9 +427,47 @@ fn a_key_without_the_read_scopes_stops_provision_before_its_first_list() {
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     let document = document(&out);
     assert_eq!(document["error"]["missingScopes"], json!(["developer-product:read"]), "{document}");
-    assert!(document["error"]["message"].as_str().unwrap().contains("the key lacks developer-product:read"));
+    let message = document["error"]["message"].as_str().unwrap();
+    assert!(message.contains("the key lacks developer-product:read"), "{message}");
+    assert!(message.contains("rerun with --no-scope-check"), "{message}");
+    assert_eq!(
+        (document["error"]["requiredScopes"][0]["name"].as_str(), document["error"]["scopeMetadata"].as_str()),
+        (Some("developer-product:read"), Some("declared")),
+        "the error names the scopes it checked: {document}"
+    );
     products.assert_calls(0);
     badges.assert_calls(0);
+}
+
+#[test]
+fn no_scope_check_skips_the_introspection() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    let introspection = introspection(&server, json!([]), true);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--no-scope-check", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    introspection.assert_calls(0);
+    products.assert_calls(1);
+}
+
+#[test]
+fn an_introspection_that_does_not_answer_within_ten_seconds_is_a_note() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect");
+        then.status(200).delay(std::time::Duration::from_secs(60)).json_body(json!({}));
+    });
+    let started = std::time::Instant::now();
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    let took = started.elapsed();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(30), "took {took:?}");
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("Could not check the key's scopes within 10 s: request deadline passed"), "{stderr}");
+    products.assert_calls(1);
 }
 
 #[test]

@@ -24,6 +24,9 @@ pub struct Args {
     /// Write request details to stderr.
     #[arg(long)]
     pub verbose: bool,
+    /// Do not check the key's scopes first. A call that lacks a scope then fails by itself.
+    #[arg(long)]
+    pub no_scope_check: bool,
 }
 
 struct Notes<'a>(&'a Output);
@@ -131,13 +134,18 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
     };
     let lock = project.lock.as_ref().and_then(|lock| lock.env(env));
-    let key = match crate::scopes::introspect(&transport, output) {
-        Ok(key) => key,
-        Err(failure) => return remote(None, vec![], failure, Some(&source)),
+    let key = if args.no_scope_check {
+        None
+    } else {
+        match crate::scopes::introspect(&transport, output) {
+            Ok(key) => key,
+            Err(failure) => return remote(None, vec![], failure, Some(&source)),
+        }
     };
     let reads = listed_kinds(&project.experience, declared, lock, project.journals.get(env));
-    if let Err(failure) = crate::scopes::require(key.as_ref(), &crucible_iac::oc::scopes(&reads, &[])) {
-        return remote(None, vec![], failure, Some(&source));
+    let needed = crucible_iac::oc::scopes(&reads, &[]);
+    if let Err(failure) = crate::scopes::require(key.as_ref(), &needed) {
+        return scoped(None, vec![], failure, Some(&source), Some(needed));
     }
     let mut roblox = Roblox { transport: &transport, universe: declared.universe };
     let observed = match observe(&project.experience, declared, lock, project.journals.get(env), &mut roblox) {
@@ -169,8 +177,9 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
             return Report { plan: Some(plan), ..failed(&failure) };
         }
     };
-    if let Err(failure) = crate::scopes::require(key.as_ref(), &crucible_iac::oc::scopes(&[], &run.writes())) {
-        return remote(Some(plan), vec![], failure, Some(&source));
+    let needed = crucible_iac::oc::scopes(&[], &run.writes());
+    if let Err(failure) = crate::scopes::require(key.as_ref(), &needed) {
+        return scoped(Some(plan), vec![], failure, Some(&source), Some(needed));
     }
     let mut files = Files { root: root.to_owned() };
     let stopped = loop {
@@ -433,7 +442,18 @@ fn remote(
     failure: crucible_oc::outcome::Failure,
     source: Option<&auth::KeySource>,
 ) -> Report {
-    let auth = crucible_oc::Auth::ApiKey { scopes: None };
+    scoped(plan, applied, failure, source, None)
+}
+
+/// `remote`, for a failure of the scope check, whose `requiredScopes` are the scopes the run needs.
+fn scoped(
+    plan: Option<Plan>,
+    applied: Vec<Applied>,
+    failure: crucible_oc::outcome::Failure,
+    source: Option<&auth::KeySource>,
+    needed: Option<Vec<crucible_oc::Scope>>,
+) -> Report {
+    let auth = crucible_oc::Auth::ApiKey { scopes: needed };
     let failure = auth::decorate(failure, &auth, source);
     Report { plan, applied, error: Some((failure.code, failure.error)), passed: vec![] }
 }

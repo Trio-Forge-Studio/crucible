@@ -176,6 +176,8 @@ pub struct Op<T, S> {
     parse: fn(&Value) -> Parsed<T>,
     /// The reply field that holds the ID of what a create made, which a failure keeps so a caller can adopt it.
     id_field: Option<&'static str>,
+    /// When the transport gives up on the call, retries and waits included.
+    until: Option<Instant>,
     retry: PhantomData<S>,
 }
 
@@ -199,6 +201,11 @@ impl<T, S: Retry> Op<T, S> {
 
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Gives up at `at`: no attempt or wait runs past it, and the call then fails as unavailable.
+    pub fn deadline(self, at: Instant) -> Self {
+        Self { until: Some(at), ..self }
     }
 
     fn failed(&self, mut failure: Failure, acted: bool) -> Failure {
@@ -286,7 +293,7 @@ impl<T, S: Retry> Request for Op<T, S> {
     }
 
     fn until(&self) -> Option<Instant> {
-        None
+        self.until
     }
 }
 
@@ -345,7 +352,20 @@ fn op<T, S>(
     parse: fn(&Value) -> Parsed<T>,
 ) -> Op<T, S> {
     let response = Payload::Json { shape: () };
-    Op { name, method, origin, path, query: vec![], auth, response, body, parse, id_field: None, retry: PhantomData }
+    Op {
+        name,
+        method,
+        origin,
+        path,
+        query: vec![],
+        auth,
+        response,
+        body,
+        parse,
+        id_field: None,
+        until: None,
+        retry: PhantomData,
+    }
 }
 
 /// A write whose reply nothing reads, so any 2xx is its success, whatever the body holds.

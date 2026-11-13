@@ -81,7 +81,7 @@ Run `npm run check` to lint, check formatting, compile, and build `build/start.r
 
 `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
 
-`--dry-run` runs the same checks and builds the selected places, and sends no upload request.
+`--dry-run` runs the same checks and builds the selected places, and sends no upload request. `--no-scope-check` skips the check of the key's scopes.
 
 The key comes from `CRUCIBLE_OC_API_KEY` in the environment, or from `.env` at the game's root, as [Configure a key](oc.md#configure-a-key) describes. A missing or invalid key fails without trying another. `--verbose` writes redacted request diagnostics to stderr. `version_type` defaults to `Saved`; set `Published` in the environment to publish the new versions.
 
@@ -103,7 +103,7 @@ After a partial failure, never rerun the environment without `--place`, because 
 
 Credential, scope and build failures have the same progress object, with `failed` null and all selected places in `notAttempted`. A refused check of the files returns the usual `{"error":{"kind":"usage","message":"..."}}` before reading the key, with `steps` or `problems` when the plan caused it.
 
-A successful dry run exits 0 with no published receipts. `auth` is the `crucible whoami` result, or `null` when the introspection failed. All selected places remain unattempted.
+A successful dry run exits 0 with no published receipts. `auth` is the `crucible whoami` result, or `null` when the introspection failed or `--no-scope-check` skipped it. All selected places remain unattempted.
 
 ```json
 {"environment":"production","dryRun":true,"published":[],"failed":null,"notAttempted":["arena","start"],"auth":{"keySource":"CRUCIBLE_OC_API_KEY","name":"deploy-key","enabled":true,"expired":false,"scopes":["universe-places:write"]}}
@@ -153,7 +153,7 @@ Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc 
 
 ## crucible provision
 
-`npx crucible provision <env>` lists the products, passes and badges in the environment's universe, prints the plan, and applies it: it adopts an existing resource by its name, creates the rest, updates what differs, and records each ID in `crucible.lock`. `--dry-run` lists and plans and writes nothing. `npx crucible adopt <env> <kind> <key> <id>` records one resource for a key when a run stopped on two candidates or on a badge whose create may have landed. Both read the Open Cloud key like `crucible oc`. Run `npx crucible docs provision` for the steps, the journal, the stops and the exit codes.
+`npx crucible provision <env>` lists the products, passes and badges in the environment's universe, prints the plan, and applies it: it adopts an existing resource by its name, creates the rest, updates what differs, and records each ID in `crucible.lock`. `--dry-run` lists and plans and writes nothing, and `--no-scope-check` skips the check of the key's scopes. `npx crucible adopt <env> <kind> <key> <id>` records one resource for a key when a run stopped on two candidates or on a badge whose create may have landed. Both read the Open Cloud key like `crucible oc`. Run `npx crucible docs provision` for the steps, the journal, the stops and the exit codes.
 
 ## crucible upgrade
 

@@ -26,6 +26,9 @@ pub struct Args {
     /// Write request and response details to stderr.
     #[arg(long)]
     pub verbose: bool,
+    /// Do not check the key's scopes first. An upload that lacks a scope then fails by itself.
+    #[arg(long)]
+    pub no_scope_check: bool,
 }
 
 /// What `crucible publish`, which 0.6.0 replaced with `crucible deploy`, answers.
@@ -122,7 +125,9 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
     let early = |failure: Failure| failure.with("deploy", progress(&published, None, &targets));
     let (source, key) = crate::load_key(root).map_err(|failure| early(auth::decorate(failure, &primary.auth, None)))?;
     output.redact_also(&key);
-    let introspected = {
+    let introspected = if args.no_scope_check {
+        None
+    } else {
         let transport = crate::provision::transport(&key, output)
             .map_err(|failure| early(auth::decorate(failure, &primary.auth, Some(&source))))?;
         let introspected = crate::scopes::introspect(&transport, output)

@@ -872,3 +872,22 @@ fn a_universe_read_returns_the_settings_its_reply_states() {
     let failure = transport.run(&universes::get(id(1))).unwrap_err();
     assert_eq!((failure.code, failure.error["field"].as_str()), (7, Some("privateServerPriceRobux")));
 }
+
+#[test]
+fn a_deadline_bounds_every_attempt_and_wait_and_a_passed_one_sends_nothing() {
+    let server = MockServer::start();
+    let key = Secret::from_string("k".into());
+    let slow = server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect");
+        then.status(200).delay(Duration::from_secs(20)).json_body(json!({}));
+    });
+    let transport = transport(&server, &key);
+    let started = Instant::now();
+    let failure = transport.run(&api_keys::introspect().deadline(started + Duration::from_secs(1))).unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+    assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some("request deadline passed")));
+    slow.assert_calls(1);
+    let failure = transport.run(&api_keys::introspect().deadline(Instant::now())).unwrap_err();
+    assert_eq!(failure.code, 7);
+    slow.assert_calls(1);
+}
