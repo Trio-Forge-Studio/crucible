@@ -230,13 +230,16 @@ impl<'a> Transport<'a> {
                 Verdict::Retry { after_seconds, history: next } => {
                     history = next;
                     let delay = self.timing.retry_delay.unwrap_or(Duration::from_secs(after_seconds.into()));
+                    if remaining().is_some_and(|remaining| remaining <= delay) {
+                        return Err(Failure::unavailable("request deadline passed"));
+                    }
                     let attempts = op.retry.map_or(DEFAULT_ATTEMPTS, |r| r.attempts);
                     self.sink.event(Event::Note(&format!(
                         "{reason}, retrying in {} s (attempt {} of {attempts})",
                         delay.as_secs_f64(),
                         history.attempts + 1
                     )));
-                    self.clock.sleep(remaining().map_or(delay, |remaining| delay.min(remaining)));
+                    self.clock.sleep(delay);
                 }
                 Verdict::Fail(failure) => return Err(failure),
             }
@@ -444,6 +447,36 @@ mod tests {
                 "HTTP 503, retrying in 4 s (attempt 3 of 3)",
             ]
         );
+    }
+
+    #[test]
+    fn a_retry_the_deadline_leaves_no_time_for_fails_without_its_note() {
+        struct Until(Get, Instant);
+        impl Request for Until {
+            fn operation(&self) -> Operation<'_> {
+                self.0.operation()
+            }
+            fn build(&self, origin: &str) -> Result<ureq::http::Request<Vec<u8>>, Failure> {
+                self.0.build(origin)
+            }
+            fn until(&self) -> Option<Instant> {
+                Some(self.1)
+            }
+        }
+        let server = httpmock::MockServer::start();
+        let m = server.mock(|_, t| {
+            t.status(503);
+        });
+        let recorder = Recorder::default();
+        let transport =
+            Transport::new(Some(server.base_url()), None, timing(), None, Box::new(&recorder), Box::new(&recorder))
+                .unwrap();
+        let call = Until(Get(Auth::None), Instant::now() + Duration::from_secs(3));
+        let failure = transport.send(&call).err().unwrap();
+        assert_eq!((failure.code, failure.error["message"].as_str()), (7, Some("request deadline passed")));
+        m.assert_calls(2);
+        assert_eq!(*recorder.slept.borrow(), [Duration::from_secs(1)], "the 4 s wait would pass the deadline");
+        assert_eq!(recorder.notes.borrow()[1..], ["HTTP 503, retrying in 1 s (attempt 2 of 3)"]);
     }
 
     #[test]
