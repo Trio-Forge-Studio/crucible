@@ -8,7 +8,7 @@ Each `crucible oc` command writes one JSON document to stdout. Progress goes to 
 
 ## Configure a key
 
-A game has one Open Cloud key. `crucible oc`, `crucible publish`, and `crucible whoami` read it from `CRUCIBLE_OC_API_KEY`. Keys never belong in command arguments.
+A game has one Open Cloud key. `crucible oc`, `crucible publish`, `crucible provision`, `crucible adopt`, and `crucible whoami` read it from `CRUCIBLE_OC_API_KEY`. Keys never belong in command arguments.
 
 In CI, set `CRUCIBLE_OC_API_KEY` in the command's environment. Locally, put it in a `.env` file at the project root, which is the directory you run `crucible` from.
 
@@ -109,6 +109,8 @@ Use `-` instead of a file to read UTF-8 Luau from stdin. Scripts are limited to 
 | 8 | `pending` | Accepted work is unfinished or a later poll or receipt check failed. | Run `error.resume`. |
 
 An unsafe request answered with 429, or one that never left the process, is sent once and exits 7. The caller decides whether to repeat it. Read and idempotent operations retry 429, 5xx, and transport failures up to three attempts. Their default delays are 1 and 4 seconds. `Retry-After` in seconds takes precedence up to 300 seconds. A larger value stops retries and appears in `error.retryAfter`. Place publishing uses its overlay policy.
+
+`crucible provision` and `crucible adopt` send products, passes and badges through the same rules. A create is unsafe, so a lost answer exits 5 and provision never sends that create again. An update is idempotent and retries. A list is read to its last page or fails, because provision reads a resource the list leaves out as one to create. A read by ID that Roblox answers with 404 means the resource does not exist. Every other failure keeps its exit code.
 
 Once an unsafe request gets a 2xx, every later failure maps to 6 for remote failure, 8 with GET-only recovery when the resource is known, or 5 with a Creations check when it is not. Repeating the original write is unsafe. GET-only resumes retain codes 3, 4, and 7. A classified failure keeps its exit code if stdout cannot be written.
 

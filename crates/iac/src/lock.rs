@@ -1,6 +1,6 @@
 //! `crucible.lock` records what Roblox assigned, by environment, then kind, then key, and the universe each
-//! environment's entries belong to. This module reads it. A lock that fails to parse or has a newer format is an error
-//! and never reads as empty, because an empty lock means "create everything".
+//! environment's entries belong to. This module reads it, edits it and writes it back whole. A lock that fails to parse
+//! or has a newer format is an error and never reads as empty, because an empty lock means "create everything".
 
 use crate::model::Kind;
 use serde::Deserialize;
@@ -79,6 +79,11 @@ impl fmt::Display for LockError {
 }
 
 impl Lock {
+    /// The lock of a project nothing was provisioned for yet.
+    pub fn empty() -> Self {
+        Self { version: FORMAT, env: BTreeMap::new() }
+    }
+
     pub fn parse(text: &str) -> Result<Self, LockError> {
         #[derive(Deserialize)]
         struct Format {
@@ -112,6 +117,63 @@ impl Lock {
     pub fn envs(&self) -> &BTreeMap<String, EnvLock> {
         &self.env
     }
+
+    /// The environment's tables, made empty for `universe` when the lock has none.
+    pub fn env_mut(&mut self, name: &str, universe: NonZeroU64) -> &mut EnvLock {
+        self.env.entry(name.to_owned()).or_insert_with(|| EnvLock {
+            universe: Spanned::new(0..0, universe),
+            universe_line: 0,
+            experience: None,
+            products: BTreeMap::new(),
+            passes: BTreeMap::new(),
+            badges: BTreeMap::new(),
+        })
+    }
+
+    /// The whole file, in one canonical layout, so a provision's change to it reads as a small diff.
+    pub fn render(&self) -> String {
+        let mut text = format!("version = {FORMAT}\n");
+        for (name, env) in &self.env {
+            let name = bare(name);
+            text += &format!("\n[env.{name}]\nuniverse = {}\n", env.universe());
+            if let Some(applied) = &env.experience {
+                text += &format!("\n[env.{name}.experience]\nfingerprint = {}\n", quote(&applied.fingerprint));
+            }
+            for kind in Kind::ALL {
+                for (key, entry) in env.entries(kind) {
+                    text += &format!(
+                        "\n[env.{name}.{}.{}]\nid = {}\nfingerprint = {}\n",
+                        kind.table(),
+                        bare(key),
+                        entry.id,
+                        quote(&entry.fingerprint)
+                    );
+                    if let Some(icon) = &entry.icon {
+                        text += &format!("icon = {}\n", quote(icon));
+                    }
+                    let status = match entry.status {
+                        Status::Managed => "managed",
+                        Status::Retired => "retired",
+                    };
+                    text += &format!("status = \"{status}\"\n");
+                }
+            }
+        }
+        text
+    }
+}
+
+fn quote(text: &str) -> String {
+    toml::Value::String(text.to_owned()).to_string()
+}
+
+/// A key as a bare TOML key when it can be one. Keys `crucible.toml` accepts always can.
+fn bare(key: &str) -> String {
+    if !key.is_empty() && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        key.to_owned()
+    } else {
+        quote(key)
+    }
 }
 
 impl EnvLock {
@@ -129,6 +191,14 @@ impl EnvLock {
             Kind::Product => &self.products,
             Kind::Pass => &self.passes,
             Kind::Badge => &self.badges,
+        }
+    }
+
+    pub fn entries_mut(&mut self, kind: Kind) -> &mut BTreeMap<String, Entry> {
+        match kind {
+            Kind::Product => &mut self.products,
+            Kind::Pass => &mut self.passes,
+            Kind::Badge => &mut self.badges,
         }
     }
 
@@ -177,6 +247,41 @@ status = "retired"
         assert_eq!(staging.entries(Kind::Badge)["first-delivery"].id.get(), 2124000000000000, "IDs stay exact");
         assert!(staging.entries(Kind::Pass).is_empty());
         assert_eq!(lock.env("production"), None);
+    }
+
+    #[test]
+    fn a_rendered_lock_reads_back_the_same() {
+        let lock = Lock::parse(LOCK).unwrap();
+        let text = lock.render();
+        assert_eq!(Lock::parse(&text).unwrap().render(), text);
+        assert_eq!(
+            Lock::parse(&text).unwrap().env("staging").unwrap().entries(Kind::Badge),
+            lock.env("staging").unwrap().entries(Kind::Badge)
+        );
+        let mut edited = Lock::empty();
+        let universe = NonZeroU64::new(7).unwrap();
+        let entry = Entry {
+            id: NonZeroU64::new(u64::from(u32::MAX) * 4).unwrap(),
+            fingerprint: "sha256:\"x\"".into(),
+            icon: None,
+            status: Status::Retired,
+        };
+        edited.env_mut("Stage_2", universe).entries_mut(Kind::Pass).insert("vip".into(), entry.clone());
+        let read = Lock::parse(&edited.render()).unwrap();
+        assert_eq!(read.env("Stage_2").unwrap().universe(), universe);
+        assert_eq!(read.env("Stage_2").unwrap().entries(Kind::Pass)["vip"], entry);
+        assert_eq!(Lock::parse(&Lock::empty().render()).unwrap(), Lock::empty());
+        assert!(edited.render().contains("\n[env.Stage_2.passes.vip]\n"), "{}", edited.render());
+    }
+
+    #[test]
+    fn a_key_is_bare_only_when_toml_allows_it() {
+        for key in ["vip", "coin-pack", "Stage_2", "9"] {
+            assert_eq!(bare(key), key);
+        }
+        for (key, quoted) in [("", "\"\""), ("a b", "\"a b\""), ("a.b", "\"a.b\""), ("é", "\"é\"")] {
+            assert_eq!(bare(key), quoted);
+        }
     }
 
     #[test]

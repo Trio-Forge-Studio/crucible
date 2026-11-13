@@ -464,20 +464,31 @@ fn a_badge_create_sends_an_icon_only_when_it_has_one() {
 fn a_badge_is_read_by_id_from_the_public_endpoint_without_a_key() {
     let server = MockServer::start();
     let key = Secret::from_string("test-key".into());
+    let mut reply = badge_json();
+    reply["awardingUniverse"] = json!({"id": 11, "name": "Fragile Delivery", "rootPlaceId": 12});
     let mock = server.mock(|when, then| {
         when.method(Method::GET).path("/v1/badges/2124000000000000").header_missing("x-api-key");
-        then.status(200).json_body(badge_json());
+        then.status(200).json_body(reply);
     });
-    let badge = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap();
+    let awarded = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap();
     mock.assert_calls(1);
-    let expected = crucible_oc::ops::Badge {
+    let badge = crucible_oc::ops::Badge {
         id: id(2124000000000000),
         name: "First delivery".into(),
         description: "Deliver.".into(),
         enabled: true,
         icon: Some(9),
     };
-    assert_eq!(badge, expected);
+    assert_eq!(awarded, crucible_oc::ops::AwardedBadge { badge, universe: id(11) });
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/badges/2124000000000000");
+        then.status(200).json_body(badge_json());
+    });
+    let failure = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap_err();
+    assert_eq!(failure.code, 7, "a read whose reply lacks the awarding universe fails");
+    assert_eq!(failure.error["field"], "awardingUniverse.id");
 }
 
 #[test]
@@ -614,4 +625,129 @@ fn updates_send_their_parts_to_the_resource_they_name() {
     pass.assert_calls(1);
     product.assert_calls(1);
     icon_mock.assert_calls(1);
+}
+
+/// A server that reads each request whole, keeps it, and closes the connection without an answer, as when a reply is
+/// lost after the request reached Roblox.
+struct Silent {
+    origin: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+}
+
+impl Silent {
+    fn start() -> Self {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 4096];
+                while let Ok(read @ 1..) = stream.read(&mut buffer) {
+                    bytes.extend_from_slice(&buffer[..read]);
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    let Some(head) = text.find("\r\n\r\n") else { continue };
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(str::to_owned))
+                        .map_or(0, |length| length.trim().parse::<usize>().unwrap());
+                    if bytes.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                kept.lock().unwrap().push(bytes);
+            }
+        });
+        Self { origin, requests }
+    }
+
+    fn transport<'a>(&self, key: &'a Secret) -> Transport<'a> {
+        let timing = Timing {
+            poll_interval: Duration::ZERO,
+            deadline: Duration::from_secs(60),
+            retry_delay: Some(Duration::ZERO),
+        };
+        Transport::new(Some(self.origin.clone()), Some(key), timing, None, Box::new(Quiet), Box::new(NoWait)).unwrap()
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().iter().map(|bytes| String::from_utf8_lossy(bytes).into_owned()).collect()
+    }
+}
+
+#[test]
+fn a_write_whose_answer_is_lost_is_unknown_and_only_an_update_is_sent_again() {
+    let key = Secret::from_string("test-key".into());
+    let server = Silent::start();
+    let update = Details { price: Some(5), ..Details::default() };
+    let failure = server.transport(&key).run(&products::update(id(1), id(2), &update)).unwrap_err();
+    assert_eq!((failure.code, failure.error["kind"].as_str()), (5, Some("outcome_unknown")), "{}", failure.error);
+    assert_eq!(failure.error["operation"], "developer-products.update");
+    assert_eq!(server.requests().len(), 3, "an update writes absolute values, so the transport repeats it");
+
+    let server = Silent::start();
+    let failure = server.transport(&key).run(&products::create(id(1), &update)).unwrap_err();
+    assert_eq!((failure.code, failure.error["kind"].as_str()), (5, Some("outcome_unknown")), "{}", failure.error);
+    assert_eq!(server.requests().len(), 1, "a create is never sent twice");
+}
+
+#[test]
+fn every_multipart_part_is_one_the_registry_names() {
+    let registry: Value =
+        serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).expect("the registry is JSON");
+    let parts_of = |name: &str| -> Vec<String> {
+        let entry = registry["ops"].as_array().unwrap().iter().find(|entry| entry["name"] == name).unwrap();
+        let parts = entry["body"]["media"]["parts"].as_array().unwrap();
+        parts.iter().map(|part| part["name"].as_str().unwrap().to_owned()).collect()
+    };
+    let key = Secret::from_string("test-key".into());
+    let full = Details {
+        name: Some("Coin pack".into()),
+        description: Some("100 coins.".into()),
+        price: Some(49),
+        for_sale: Some(true),
+        icon: Some(icon()),
+    };
+    type Send = fn(&Transport<'_>, &Details);
+    let sends: [(&str, &[&str], Send); 6] = [
+        ("developer-products.create", &["name", "description", "price", "isForSale", "imageFile"], |t, d| {
+            t.run(&products::create(id(1), d)).unwrap_err();
+        }),
+        ("developer-products.update", &["name", "description", "price", "isForSale", "imageFile"], |t, d| {
+            t.run(&products::update(id(1), id(2), d)).unwrap_err();
+        }),
+        ("game-passes.create", &["name", "description", "price", "isForSale", "imageFile"], |t, d| {
+            t.run(&passes::create(id(1), d)).unwrap_err();
+        }),
+        ("game-passes.update", &["name", "description", "price", "isForSale", "imageFile"], |t, d| {
+            t.run(&passes::update(id(1), id(2), d)).unwrap_err();
+        }),
+        ("badges.create", &["name", "description", "isActive", "expectedCost", "files"], |t, _| {
+            t.run(&badges::create(id(1), "B", "D", true, Some(icon()))).unwrap_err();
+        }),
+        ("publish.overwrite-badge-icon", &["Files"], |t, _| {
+            t.run(&badges::overwrite_icon(id(2), icon())).unwrap_err();
+        }),
+    ];
+    for (name, expected, send) in sends {
+        let server = Silent::start();
+        send(&server.transport(&key), &full);
+        let request = server.requests().remove(0);
+        let sent: Vec<&str> = request
+            .split("Content-Disposition: form-data; name=\"")
+            .skip(1)
+            .map(|part| &part[..part.find('"').unwrap()])
+            .collect();
+        assert_eq!(sent, expected, "{name}");
+        let known = parts_of(name);
+        for part in sent {
+            assert!(
+                known.iter().any(|known| known == part),
+                "{name} sends the part {part:?}, which the registry lacks"
+            );
+        }
+    }
 }

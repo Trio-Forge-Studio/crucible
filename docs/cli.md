@@ -8,7 +8,7 @@ Run `crucible` commands and read their output and exit codes.
 
 ## Output and exit codes
 
-Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc`, `crucible publish`, and `crucible whoami` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`.
+Commands print text. The result goes to stdout, and progress and errors go to stderr. No command prompts for input. `crucible oc`, `crucible publish`, and `crucible whoami` print one JSON document per command instead of text and have their own exit codes, described in `crucible docs oc`. `crucible provision` and `crucible adopt` use those exit codes too, and print one JSON document with `--json`.
 
 | Exit | Meaning |
 | --- | --- |
@@ -116,6 +116,10 @@ Run `npx crucible docs oc` for keys, commands, and exit codes. `npx crucible oc 
 ## crucible plan
 
 `npx crucible plan [<env>]` prints what `crucible provision` would do to the products, passes and badges `crucible.toml` declares, in one environment or in all of them. It reads `crucible.toml`, `crucible.lock` and `.crucible/journal/<env>.json`, makes no network call and writes nothing. `--json` prints one document instead of text. It exits 0 when the plan prints, 2 when a file is invalid or the plan breaks a provisioning rule, and 1 when a file cannot be read. Run `npx crucible docs experience` for the declarations, the actions and the rules.
+
+## crucible provision
+
+`npx crucible provision <env>` lists the products, passes and badges in the environment's universe, prints the plan, and applies it: it adopts an existing resource by its name, creates the rest, updates what differs, and records each ID in `crucible.lock`. `--dry-run` lists and plans and writes nothing. `npx crucible adopt <env> <kind> <key> <id>` records one resource for a key when a run stopped on two candidates or on a badge whose create may have landed. Both read the Open Cloud key like `crucible oc`. Run `npx crucible docs provision` for the steps, the journal, the stops and the exit codes.
 
 ## crucible publish
 

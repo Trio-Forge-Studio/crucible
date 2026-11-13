@@ -24,7 +24,7 @@ name = "adopt-trusts-the-typed-id"
 why = "`crucible adopt` writes the ID it is given without reading the resource."
 breaks = "LockNamesExisting"
 find = '''
-    /\ i \in Candidates(k)
+    /\ i \in Sought(k)
 '''
 replace = '''
 '''
@@ -88,24 +88,13 @@ replace = '''
 
 [[mutant]]
 name = "two-keys-one-name"
-why = "crucible.toml lets two keys of one kind share a display name, so one key adopts the other's resource."
-breaks = "LockNamesExisting"
+why = "crucible.toml lets two keys of one kind share a display name, so a resource with that name is a candidate of both and every run stops."
+breaks = "FaultFreeBinds"
 find = '''
 Distinct(w) == \A k, j \in Keys : k # j => w[k] # w[j]
 '''
 replace = '''
 Distinct(w) == TRUE
-'''
-
-[[mutant]]
-name = "adopt-check-ignores-the-sent-name"
-why = "The intent does not record the name it sent, so a rename after a lost create hides the resource and a second one is created."
-breaks = "AtMostOne"
-find = '''
-Sought(k) == {want[k]} \cup (IF journal[k] = None THEN {} ELSE {journal[k]})
-'''
-replace = '''
-Sought(k) == {want[k]}
 '''
 
 [[mutant]]
@@ -120,36 +109,6 @@ replace = '''
 '''
 
 [[mutant]]
-name = "plan-allows-a-sent-name"
-why = "The plan lets a key take the name another key's intent sent, so that key adopts the other's resource."
-breaks = "LockNamesExisting"
-find = '''
-    /\ ~Refused
-'''
-replace = '''
-'''
-
-[[mutant]]
-name = "adopt-ignores-other-intents"
-why = "`crucible adopt` accepts a resource whose name another key's intent sent."
-breaks = "LockNamesExisting"
-find = '''
-    /\ \A j \in Keys \ {k} : i \notin Match(journal[j])
-'''
-replace = '''
-'''
-
-[[mutant]]
-name = "rename-on-roblox-while-an-intent-is-unresolved"
-why = "Assumption A5 fails: someone renames, on Roblox, the resource a create made before its answer was lost, so the next run finds nothing under the names it seeks and creates a second one."
-breaks = "AtMostOne"
-find = '''
-    /\ ~Unresolved
-'''
-replace = '''
-'''
-
-[[mutant]]
 name = "refuse-every-run"
 why = "The plan refuses every run, so nothing is ever provisioned. Converges still holds, because a refused run is a stuck one."
 breaks = "FaultFreeBinds"
@@ -158,4 +117,61 @@ Refused == \E k, j \in Keys : k # j /\ lock[j] = 0 /\ journal[j] = want[k]
 '''
 replace = '''
 Refused == TRUE
+'''
+
+[[mutant]]
+name = "adopt-check-ignores-new-ids"
+why = "The adopt check after an unknown outcome looks only for the declared name, so a create renamed on Roblox after its answer was lost is not found and is made again."
+breaks = "AtMostOne"
+find = '''
+New(k) == IF journal[k] = None THEN {} ELSE Ids \ before[k]
+'''
+replace = '''
+New(k) == {}
+'''
+
+[[mutant]]
+name = "intent-while-another-is-unresolved"
+why = "An intent is written and its create sent while another key's create may have landed, so that resource is new to the intent."
+breaks = "NoBlindCreate"
+find = '''
+    /\ journal[k] = None
+    /\ ~OtherPending(k)
+'''
+replace = '''
+    /\ journal[k] = None
+'''
+
+[[mutant]]
+name = "adopt-by-id-takes-a-shared-candidate"
+why = "`crucible adopt` accepts a resource that another key without a lock entry would adopt."
+breaks = "LockNamesExisting"
+find = '''
+    /\ \A j \in Keys \ {k} : lock[j] = 0 => i \notin Sought(j)
+'''
+replace = '''
+'''
+
+[[mutant]]
+name = "a-refused-create-keeps-its-intent"
+why = "A create Roblox refused keeps its intent, so a resource someone makes by hand afterwards stops every run, though nothing was created."
+breaks = "Converges"
+find = '''
+    /\ journal' = [journal EXCEPT ![reply.key] = None]
+    /\ rejected' = rejected \cup {reply.key}
+'''
+replace = '''
+    /\ journal' = journal
+    /\ rejected' = rejected \cup {reply.key}
+'''
+
+[[mutant]]
+name = "adopt-a-new-id-of-another-name"
+why = "After an unknown outcome, a run adopts a resource new since the intent that carries another name, which may be one someone made by hand."
+breaks = "BoundRightly"
+find = '''
+Candidates(k) == Match(want[k]) \ Locked
+'''
+replace = '''
+Candidates(k) == Sought(k)
 '''

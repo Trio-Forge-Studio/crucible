@@ -295,6 +295,8 @@ mod fd {
         let crucible = crucible_binary(root)?;
         let copy = Temporary::new("crucible-golden-fd")?;
         copy_sources(checkout, &copy.0)?;
+        // FD's build lists its sources with `git ls-files`, and the copy leaves `.git` out.
+        run::git(&copy.0, &["init", "--quiet"])?;
         run::status(run::tool("pnpm").args(["install", "--frozen-lockfile"]).current_dir(&copy.0))?;
         use_local_crucible(&copy.0, &crucible)?;
         run::status(Command::new("node").args(["scripts/place.mjs", "compile"]).current_dir(&copy.0))?;

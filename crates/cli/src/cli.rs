@@ -14,6 +14,8 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 pub enum Command {
+    /// Record a resource Roblox already holds as a key's in crucible.lock, after checking that it can be the key's.
+    Adopt(crate::provision::AdoptArgs),
     /// Compile each place in crucible.toml with Crucible's compiler, then build it with Rojo.
     Build(crate::build::Args),
     /// Create a game and install its dependencies.
@@ -32,6 +34,9 @@ pub enum Command {
     Oc(Oc),
     /// Show what crucible provision would do in each environment, from crucible.toml, crucible.lock and the journal.
     Plan(crate::plan::Args),
+    /// Make the products, passes and badges on Roblox match crucible.toml in one environment, and record their IDs in
+    /// crucible.lock.
+    Provision(crate::provision::Args),
     /// Build and publish the places in a crucible.toml environment. One JSON document.
     Publish(crate::publish::Args),
     /// Upgrade crucible and @trioforge/crucible, then refresh template files this project has not edited.
