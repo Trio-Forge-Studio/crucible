@@ -3,7 +3,7 @@ use crate::create::{FILES, package_manager, package_manager_command, render, tok
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::ops::Range;
@@ -824,9 +824,15 @@ fn imports_ui(source: &str) -> bool {
     imports(source, |specifier| specifier == entry)
 }
 
-fn imports_anvil(source: &str) -> bool {
-    imports(source, |specifier| {
-        specifier.strip_prefix(ANVIL).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+// Removing a package the game still uses breaks its build, and keeping one it does not costs a line of the report,
+// so any mention counts: an import this scan cannot parse, a Rojo mapping, or a comment.
+fn names_anvil(bytes: &[u8]) -> bool {
+    let name = ANVIL.as_bytes();
+    bytes.windows(name.len()).enumerate().any(|(at, window)| {
+        window == name
+            && !bytes
+                .get(at + name.len())
+                .is_some_and(|next| next.is_ascii_alphanumeric() || matches!(next, b'-' | b'_'))
     })
 }
 
@@ -889,19 +895,31 @@ fn uses_ui(root: &Path) -> bool {
 }
 
 fn any_source(root: &Path, extensions: &[&str], imports: fn(&str) -> bool) -> bool {
-    let Ok(entries) = fs::read_dir(root) else { return false };
-    entries.flatten().any(|entry| {
+    let wanted = |path: &Path| {
+        path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| extensions.contains(&ext))
+            && fs::read_to_string(path).is_ok_and(|source| imports(&source))
+    };
+    find_file(root, &mut HashSet::new(), &wanted).is_some()
+}
+
+// The compiler and Rojo follow a linked folder, so this does too. `seen` ends a link that leads back into itself.
+fn find_file(folder: &Path, seen: &mut HashSet<PathBuf>, wanted: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    if !seen.insert(fs::canonicalize(folder).ok()?) {
+        return None;
+    }
+    let mut entries: Vec<_> = fs::read_dir(folder).ok()?.flatten().collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    entries.into_iter().find_map(|entry| {
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if name.starts_with('.') || matches!(name.as_ref(), "node_modules" | "out" | "build" | "target") {
-            return false;
+            return None;
         }
-        if path.is_dir() && !entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
-            return any_source(&path, extensions, imports);
+        if path.is_dir() {
+            return find_file(&path, seen, wanted);
         }
-        path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| extensions.contains(&ext))
-            && fs::read_to_string(path).is_ok_and(|source| imports(&source))
+        wanted(&path).then_some(path)
     })
 }
 
@@ -938,9 +956,10 @@ fn reconcile_dependencies(root: &Path, manager: Manager) -> Result<Dependencies,
                 .updated
                 .push(format!("package.json no longer lists {ANVIL}, whose exports moved to {RUNTIME}/ui"));
         }
-        Anvil::Imported => {
+        Anvil::Named(file) => {
+            let file = file.strip_prefix(root).unwrap_or(&file).display();
             dependencies.left = Some(format!(
-                "This game imports {ANVIL}, whose exports moved to {RUNTIME}/ui. Move those imports, then remove {ANVIL} from package.json. `npx crucible docs ui` explains the move."
+                "{file} still names {ANVIL}, whose exports moved to {RUNTIME}/ui. Move its imports and delete any Rojo mapping of it, then remove {ANVIL} from package.json. `npx crucible docs ui` explains the move."
             ));
         }
         Anvil::Unedited => {
@@ -973,7 +992,7 @@ fn reconcile_dependencies(root: &Path, manager: Manager) -> Result<Dependencies,
 enum Anvil {
     Absent,
     Removed,
-    Imported,
+    Named(PathBuf),
     Unedited,
 }
 
@@ -983,8 +1002,14 @@ fn without_anvil(root: &Path, text: &str) -> (String, Anvil) {
     if !GROUPS.iter().any(|group| manifest[group].get(ANVIL).is_some()) {
         return (text.to_owned(), Anvil::Absent);
     }
-    if any_source(root, &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"], imports_anvil) {
-        return (text.to_owned(), Anvil::Imported);
+    let names = |path: &Path| {
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let code = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+            .contains(&path.extension().and_then(|ext| ext.to_str()).unwrap_or_default());
+        (code || name.ends_with(".project.json")) && fs::read(path).map_or(true, |bytes| names_anvil(&bytes))
+    };
+    if let Some(file) = find_file(root, &mut HashSet::new(), &names) {
+        return (text.to_owned(), Anvil::Named(file));
     }
     let mut expected = manifest;
     match remove_packages(text, &mut expected, &[ANVIL])
@@ -1988,22 +2013,24 @@ mod tests {
     }
 
     #[test]
-    fn anvil_imports_count_only_in_code() {
+    fn any_mention_of_anvil_counts_and_a_longer_name_does_not() {
         for source in [
-            "// import { Dialog } from '@trioforge/anvil';",
-            "const name = '@trioforge/anvil';",
             "import { Dialog } from '@trioforge/anvilish';",
+            "import { Dialog } from '@trioforge/anvil-kit';",
             "import { Dialog } from '@trioforge/crucible/ui';",
         ] {
-            assert!(!imports_anvil(source), "{source}");
+            assert!(!names_anvil(source.as_bytes()), "{source}");
         }
         for source in [
             "import { Dialog } from '@trioforge/anvil';",
             "import type { AnvilAdapter } from \"@trioforge/anvil\";",
             "export * from '@trioforge/anvil/out/dialog';",
             "const anvil = require('@trioforge/anvil');",
+            "const quote = /\"/;\nimport { Dialog } from '@trioforge/anvil';",
+            "{ \"anvil\": { \"$path\": \"node_modules/@trioforge/anvil\" } }",
+            "// import { Dialog } from '@trioforge/anvil';",
         ] {
-            assert!(imports_anvil(source), "{source}");
+            assert!(names_anvil(source.as_bytes()), "{source}");
         }
     }
 
@@ -2021,12 +2048,47 @@ mod tests {
         fs::create_dir_all(dir.path().join("src/client")).unwrap();
         fs::write(dir.path().join("src/client/menu.tsx"), "import { Dialog } from \"@trioforge/anvil\";\n").unwrap();
         let (kept, anvil) = without_anvil(dir.path(), text);
-        assert!(matches!(anvil, Anvil::Imported));
+        assert!(matches!(anvil, Anvil::Named(file) if file.ends_with("menu.tsx")));
         assert_eq!(kept, text);
         fs::create_dir_all(dir.path().join("node_modules/@trioforge/anvil")).unwrap();
         fs::rename(dir.path().join("src/client/menu.tsx"), dir.path().join("node_modules/@trioforge/anvil/index.ts"))
             .unwrap();
         assert!(matches!(without_anvil(dir.path(), text).1, Anvil::Removed), "node_modules is not the game's source");
+
+        let project = dir.path().join("default.project.json");
+        fs::write(&project, "{ \"anvil\": { \"$path\": \"node_modules/@trioforge/anvil\" } }").unwrap();
+        let (kept, anvil) = without_anvil(dir.path(), text);
+        assert!(matches!(anvil, Anvil::Named(file) if file == project), "Rojo would fail on the missing folder");
+        assert_eq!(kept, text);
+        fs::remove_file(&project).unwrap();
+
+        fs::write(dir.path().join("src/client/menu.ts"), [0xff, 0xfe, b'i', 0]).unwrap();
+        assert!(matches!(without_anvil(dir.path(), text).1, Anvil::Removed), "a file that does not name it is no use");
+    }
+
+    #[test]
+    fn anvil_stays_while_a_linked_folder_names_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (game, shared) = (dir.path().join("game"), dir.path().join("shared-ui"));
+        fs::create_dir_all(game.join("src").join("client")).unwrap();
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join("menu.ts"), "import { Dialog } from \"@trioforge/anvil\";\n").unwrap();
+        let link = game.join("src").join("client").join("ui");
+        #[cfg(windows)]
+        let linked = Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&shared).output().unwrap().status;
+        #[cfg(unix)]
+        let linked = {
+            std::os::unix::fs::symlink(&shared, &link).unwrap();
+            ExitStatus::default()
+        };
+        assert!(linked.success());
+        // A link back to the game must not make the scan run forever.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&game, shared.join("back")).unwrap();
+        let text = "{\n\t\"dependencies\": {\n\t\t\"@trioforge/anvil\": \"0.3.0\"\n\t}\n}\n";
+        let (kept, anvil) = without_anvil(&game, text);
+        assert!(matches!(anvil, Anvil::Named(file) if file.ends_with("menu.ts")), "the compiler follows the link");
+        assert_eq!(kept, text);
     }
 
     #[test]

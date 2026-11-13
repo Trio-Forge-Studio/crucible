@@ -175,7 +175,8 @@ fn upgrade_drops_anvil_once_no_source_imports_it() {
     assert_eq!(
         stdout,
         format!(
-            "crucible is already at {VERSION}.\n\nThis game imports @trioforge/anvil, whose exports moved to @trioforge/crucible/ui. Move those imports, then remove @trioforge/anvil from package.json. `npx crucible docs ui` explains the move.\n"
+            "crucible is already at {VERSION}.\n\n{} still names @trioforge/anvil, whose exports moved to @trioforge/crucible/ui. Move its imports and delete any Rojo mapping of it, then remove @trioforge/anvil from package.json. `npx crucible docs ui` explains the move.\n",
+            Path::new("src").join("client").join("menu.tsx").display()
         )
     );
     assert_eq!(fs::read_to_string(root.join("package.json")).unwrap(), manifest, "the source is never rewritten");
