@@ -1,6 +1,6 @@
 # Experience
 
-Declare developer products, game passes and badges in `crucible.toml`, and plan their provisioning offline with `crucible plan`.
+Declare developer products, game passes and badges in `crucible.toml`, reach them from game code through typed handles, and plan their provisioning offline with `crucible plan`.
 
 `crucible plan` reads the declarations, `crucible.lock` and the provisioning journal, and prints what `crucible provision` would do in each environment. It makes no network call and writes nothing. `crucible provision` applies the plan and writes the lock and the journal, as `npx crucible docs provision` describes.
 
@@ -63,6 +63,38 @@ enabled = false
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.
 - `[env.<name>.products.<key>]` and `[env.<name>.passes.<key>]` may change only `price`, and `[env.<name>.badges.<key>]` only `enabled`. An overlay for a key that is not declared is an error, so a typo cannot create a resource.
 - Every table rejects keys it does not know. A file that does not parse fails with the file and the line, such as `crucible.toml:14: invalid type: string "49", expected u64`. A rule the tables break also names the key, such as `crucible.toml:24: products.coin-pack.price: a price of 0 does not take a product off sale. Set retired = true to take it off sale`.
+
+## Use the handles in game code
+
+Game code names a product, a pass or a badge by its key, through `crucible:experience`, and never writes a Roblox ID.
+
+```ts
+import { profileStore, Subsystem } from "@trioforge/crucible";
+import { Badges, Passes, Products } from "crucible:experience";
+
+const PlayerData = profileStore("Game.Shop", { template: { coins: 0 } });
+
+export class Shop extends Subsystem {
+	private readonly coinPack = PlayerData.grant(Products.CoinPack, (_player, data) => ({
+		...data,
+		coins: data.coins + 100,
+	}));
+
+	award(player: Player) {
+		game.GetService("BadgeService").AwardBadge(player.UserId, Badges.FirstPickup.id);
+	}
+
+	offerVip(player: Player) {
+		game.GetService("MarketplaceService").PromptGamePassPurchase(player, Passes.Vip.id);
+	}
+}
+```
+
+- `crucible build` writes `src/crucible-experience.d.ts`, which declares `crucible:experience` with `Products`, `Passes` and `Badges`. Each key becomes a handle named in PascalCase, so `coin-pack` is `Products.CoinPack`, typed `ProductHandle<"coin-pack">`. An untracked key has no handle. The file holds no ID, so it is the same in every environment: commit it. The build writes it when `crucible.toml` declares a product, a pass or a badge, or when the file exists, and rewrites it whenever its bytes differ from what `crucible.toml` gives, so do not edit it. It writes the file whole through a rename, and leaves it alone when nothing changed.
+- `ProductHandle`, `PassHandle` and `BadgeHandle` come from `@trioforge/crucible`. A handle has the `key` and the `id` of its resource. A profile store's `grant` takes a product handle. Crucible has no call of its own to award a badge or check a pass: Roblox's calls, such as `BadgeService.AwardBadge`, `MarketplaceService.PromptGamePassPurchase` and `MarketplaceService.PromptProductPurchase`, take the handle's `id`.
+- The build puts the handles in the place as a module next to the shallowest folder of the `outDir` that the Rojo project maps under `ReplicatedStorage`, so the server and the client both read it. A build fails when the project maps none.
+- `crucible build --env <name>` binds each handle to the ID `crucible.lock` records for that environment. It fails when the lock holds no ID for a key that is neither retired nor untracked, and names `crucible provision <name>`, so a place for an environment never ships a product it cannot sell. It also fails when the lock records the environment in another universe. `crucible publish <env>` builds this way.
+- `crucible build` without `--env` binds no ID, so the game compiles before anything is provisioned. Reading a handle's `id` in that place throws an error that names the key, as does a retired key that was never provisioned in the environment. A grant reads it when its Subsystem is made, so the server fails at boot rather than with ID 0.
 
 ## Retire, untrack and rename
 

@@ -153,6 +153,25 @@ return {
 		w.place:Destroy()
 	end,
 
+	["compiled sample buying the coin pack grants it through its crucible:experience handle"] = function()
+		local w = newWorld({ [ANN] = { 12, ANN_PICKUPS } })
+		connect(w, "Ann", ANN)
+		local experience = shared(w.server, "crucible-experience")
+		spec.eq(experience.Products.CoinPack.id, 1001, "the handle holds the sample environment's ID")
+		local bought = w:run(function()
+			return w.marketplace.ProcessReceipt({
+				PlayerId = ANN,
+				PurchaseId = "coin-pack-1",
+				ProductId = experience.Products.CoinPack.id,
+				CurrencySpent = 49,
+			})
+		end)
+		w:settle(2)
+		spec.eq(bought.value, roblox.Enum.ProductPurchaseDecision.PurchaseGranted, "the purchase was granted")
+		spec.eq(stored(w, ANN).payload.coins, 112, "the grant added the pack's coins")
+		w.place:Destroy()
+	end,
+
 	["compiled sample the profile survives a leave and a rejoin"] = function()
 		local w = newWorld()
 		local ann = connect(w, "Ann", ANN)

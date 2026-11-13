@@ -2,7 +2,7 @@
 	"name": "@trioforge/crucible-sample-game",
 	"private": true,
 	"scripts": {
-		"build": "cargo run --quiet --locked --manifest-path ../../Cargo.toml --bin crucible -- build --output ../../build/sample-game.rbxl"
+		"build": "cargo run --quiet --locked --manifest-path ../../Cargo.toml --bin crucible -- build --env sample --output ../../build/sample-game.rbxl"
 	},
 	"dependencies": {
 		"@rbxts/charm": "0.11.1",

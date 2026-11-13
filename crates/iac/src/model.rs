@@ -346,6 +346,11 @@ impl Experience {
         self.settings.as_ref()
     }
 
+    /// Every declared resource, before an environment's overlay, so with no `fields`.
+    pub fn resources(&self) -> impl Iterator<Item = &Resource> {
+        self.resources.iter().map(|(resource, _)| resource)
+    }
+
     pub fn resolve(&self, env: &Env) -> Vec<Resource> {
         self.resources
             .iter()

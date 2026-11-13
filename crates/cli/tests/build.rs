@@ -202,6 +202,7 @@ fn without_manifest_builds_start_from_the_root_files() {
         assert_eq!(fs::read(game.path("include").join(name)).unwrap(), vendored(name), "{name} is roblox-ts's copy");
     }
     assert!(!game.path("out/transformer.sha256").exists(), "the build keeps no transformer receipt");
+    assert!(!game.path("src/crucible-experience.d.ts").exists(), "a game with no experience gets no declaration");
 }
 
 #[test]
@@ -1265,4 +1266,139 @@ fn reactive_alias_and_workspace_entries_keep_their_range() {
     game.json("package.json", &json!({"name":"probe-game", "version":"0.0.0", "dependencies":{"@rbxts/charm":other}}));
     let output = game.build(&[]);
     assert_eq!(code(&output), 0, "an alias of another package names another source: {}", text(&output.stderr));
+}
+
+const EXPERIENCE: &str = "[places.start]\nproject = \"default.project.json\"\n\n[env.staging]\nuniverse = 10772177432\nplace = 1\n\n[products.coin-pack]\nname = \"Coin pack\"\nprice = 49\n\n[badges.first-pickup]\nname = \"First pickup\"\n";
+const DECLARATION: &str = "src/crucible-experience.d.ts";
+const BINDINGS: &str = "out/shared/crucible-experience.luau";
+
+/// A game that declares a product and a badge, with a stand-in for the runtime's handle types.
+fn experience_game() -> Game {
+    let game = Game::template_layout();
+    let manifest: Value =
+        serde_json::from_str(&fs::read_to_string(repo().join("packages/crucible/package.json")).unwrap()).unwrap();
+    game.json(
+        "node_modules/@trioforge/crucible/package.json",
+        &json!({ "name": "@trioforge/crucible", "types": "index.d.ts", "crucibleAbi": manifest["crucibleAbi"] }),
+    );
+    game.write(
+        "node_modules/@trioforge/crucible/index.d.ts",
+        "export interface ProductHandle<K extends string = string> { readonly key: K; readonly id: number }\n\
+         export interface PassHandle<K extends string = string> { readonly key: K; readonly id: number }\n\
+         export interface BadgeHandle<K extends string = string> { readonly key: K; readonly id: number }\n",
+    );
+    game.write("crucible.toml", EXPERIENCE);
+    game.write(
+        "src/server/main.server.ts",
+        "import { Badges, Products } from \"crucible:experience\";\nprint(Products.CoinPack.key, Badges.FirstPickup.key);\n",
+    );
+    game
+}
+
+#[test]
+fn a_build_writes_the_experience_declaration_and_binds_no_id_without_an_environment() {
+    let game = experience_game();
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    let declaration = game.read(DECLARATION);
+    for line in [
+        "declare module \"crucible:experience\" {\n",
+        "\t\treadonly CoinPack: ProductHandle<\"coin-pack\">;\n",
+        "\texport const Passes: {};\n",
+        "\t\treadonly FirstPickup: BadgeHandle<\"first-pickup\">;\n",
+    ] {
+        assert!(declaration.contains(line), "{line:?} in\n{declaration}");
+    }
+    let bindings = game.read(BINDINGS);
+    assert!(bindings.contains("-- crucible:experience for no environment"), "{bindings}");
+    assert!(bindings.contains("\t\tCoinPack = unbound(\"coin-pack\", "), "{bindings}");
+    assert!(
+        game.read("out/server/main.server.luau")
+            .contains("TS.import(script, game:GetService(\"ReplicatedStorage\"), \"TS\", \"crucible-experience\")"),
+        "the game imports the bindings through the place"
+    );
+
+    let written = fs::metadata(game.path(DECLARATION)).unwrap().modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert_eq!(code(&game.build(&[])), 0);
+    assert_eq!(fs::metadata(game.path(DECLARATION)).unwrap().modified().unwrap(), written, "same bytes, no write");
+    game.write(DECLARATION, "declare module \"crucible:experience\" { export const Products: { readonly Gold: 1 } }\n");
+    assert_eq!(code(&game.build(&[])), 0);
+    assert_eq!(game.read(DECLARATION), declaration, "a hand-edited declaration is rewritten");
+}
+
+#[test]
+fn a_build_for_an_environment_binds_the_lock_s_ids_or_names_provision() {
+    let game = experience_game();
+    let out = game.build(&["--env", "staging"]);
+    assert_eq!(code(&out), 2);
+    assert_eq!(
+        text(&out.stderr),
+        "crucible build: this build cannot bind crucible:experience:\n  crucible.toml:8: products.coin-pack: \
+         crucible.lock holds no ID for it in staging, so a build for staging cannot bind Products.CoinPack. Run \
+         crucible provision staging, commit crucible.lock, and build again\n  crucible.toml:12: badges.first-pickup: \
+         crucible.lock holds no ID for it in staging, so a build for staging cannot bind Badges.FirstPickup. Run \
+         crucible provision staging, commit crucible.lock, and build again\n"
+    );
+    assert!(!game.path("out").exists() && !game.path(DECLARATION).exists(), "nothing was written");
+    game.write(
+        "crucible.lock",
+        "version = 1\n\n[env.staging]\nuniverse = 10772177432\n\n[env.staging.products.coin-pack]\nid = 3301234567\n\
+         fingerprint = \"sha256:a\"\nstatus = \"managed\"\n\n[env.staging.badges.first-pickup]\nid = 2124000000000000\n\
+         fingerprint = \"sha256:b\"\nstatus = \"managed\"\n",
+    );
+    let out = game.build(&["--env", "staging"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    let bindings = game.read(BINDINGS);
+    assert!(bindings.contains("\t\tCoinPack = bound(\"coin-pack\", 3301234567),\n"), "{bindings}");
+    assert!(bindings.contains("\t\tFirstPickup = bound(\"first-pickup\", 2124000000000000),\n"), "{bindings}");
+    let out = game.build(&["--env", "production"]);
+    assert_eq!(code(&out), 2);
+    assert_eq!(text(&out.stderr), "crucible build: unknown environment production. Environments: staging\n");
+}
+
+#[test]
+fn a_place_that_maps_no_output_folder_under_replicated_storage_cannot_hold_the_bindings() {
+    let game = experience_game();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("TS");
+    project["tree"]["ServerScriptService"]["Shared"] = json!({ "$path": "out/shared" });
+    game.json("default.project.json", &project);
+    game.write(
+        "src/server/main.server.ts",
+        "import { Products } from \"crucible:experience\";\nprint(Products.CoinPack.key);\n",
+    );
+    fs::remove_dir_all(game.path("src/shared")).unwrap();
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 1);
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("maps no folder of ")
+            && stderr.contains(" under ReplicatedStorage, where crucible:experience goes. Map one, such as out/shared"),
+        "{stderr}"
+    );
+}
+
+#[test]
+#[ignore = "needs lune on PATH"]
+fn an_unbound_handle_throws_naming_its_key_when_its_id_is_read() {
+    let game = experience_game();
+    assert_eq!(code(&game.build(&[])), 0);
+    game.write(
+        "read.luau",
+        "local experience = require(\"./out/shared/crucible-experience\")\nassert(experience.Products.CoinPack.key == \"coin-pack\")\n\
+         local ok, message = pcall(function() return experience.Products.CoinPack.id end)\nassert(not ok)\nprint(message)\n\
+         assert(not pcall(function() experience.Products.CoinPack.key = \"x\" end), \"frozen\")\n",
+    );
+    // Rokit finds lune through the repository's rokit.toml.
+    let out = Command::new("lune").arg("run").arg(game.path("read.luau")).current_dir(repo()).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(
+        text(&out.stdout).contains(
+            "product coin-pack has no Roblox ID in this place, because crucible build ran without --env. Build with \
+             crucible build --env <environment>"
+        ),
+        "{}",
+        text(&out.stdout)
+    );
 }

@@ -20,6 +20,11 @@ export function typecheck(files, options = {}) {
 				path.join(scratch, "src", side),
 				"junction",
 			);
+		// crucible build generates it, and the sample's shop imports the module it declares.
+		fs.copyFileSync(
+			path.join(repo, "examples/sample-game/src/crucible-experience.d.ts"),
+			path.join(scratch, "src/crucible-experience.d.ts"),
+		);
 		const names = [];
 		for (const [name, code] of files) {
 			const file = path.join(scratch, "src", path.relative(path.join(repo, "examples/sample-game/src"), name));
@@ -32,7 +37,7 @@ export function typecheck(files, options = {}) {
 			JSON.stringify({
 				extends: path.join(repo, "examples/sample-game/tsconfig.json"),
 				compilerOptions: { noEmit: true, rootDir: scratch, ...options },
-				files: names,
+				files: [...names, path.join(scratch, "src/crucible-experience.d.ts")],
 				include: [],
 			}),
 		);

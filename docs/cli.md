@@ -28,6 +28,7 @@ Run `npx crucible build` from the game's root. It compiles every place in `cruci
 - Each place compiles in its own process, so a build's peak memory is that of its largest place.
 - `--place <name>` builds only that place. Repeat it to build several.
 - `--output <file>` writes the place file elsewhere. It needs exactly one place.
+- `--env <name>` binds `crucible:experience` to that environment's IDs in `crucible.lock`, as `npx crucible docs experience` describes under "Use the handles in game code". `crucible publish <env>` builds with its environment.
 - Exit 0 means every place built. Exit 1 means `crucible.toml` could not be read, a place failed to compile or write, or Rojo failed. Exit 2 means a usage error or an invalid `crucible.toml`, reported before anything compiles.
 
 `crucible.toml` lives at the game's root. It holds ids, never keys. Without the file, or without `[places]`, the game has one place, `start`, built from `tsconfig.json`, `default.project.json`, and the `include` folder at the root.

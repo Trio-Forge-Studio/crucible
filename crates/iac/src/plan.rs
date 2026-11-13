@@ -425,7 +425,7 @@ fn count(n: usize, noun: &str) -> String {
 }
 
 /// IDs from another universe would read as resources this one already has, so nothing would be created in it.
-fn another_universe(env: &str, lock: &EnvLock, universe: NonZeroU64) -> Problem {
+pub(crate) fn another_universe(env: &str, lock: &EnvLock, universe: NonZeroU64) -> Problem {
     let locked = lock.universe();
     Problem {
         file: lock::FILE.into(),

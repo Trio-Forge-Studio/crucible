@@ -1,0 +1,19 @@
+version = 1
+
+[env.sample]
+universe = 1
+
+[env.sample.products.coin-pack]
+id = 1001
+fingerprint = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+status = "managed"
+
+[env.sample.passes.vip]
+id = 2001
+fingerprint = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+status = "managed"
+
+[env.sample.badges.first-pickup]
+id = 3001
+fingerprint = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+status = "managed"
