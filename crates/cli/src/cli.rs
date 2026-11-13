@@ -20,8 +20,8 @@ pub enum Command {
     Build(crate::build::Args),
     /// Create a game and install its dependencies.
     Create(crate::create::Args),
-    /// Check that crucible.lock records everything an environment declares, then build and publish its places. One
-    /// JSON document.
+    /// Check that crucible.lock records every product, pass and badge an environment declares, then build and publish
+    /// its places. One JSON document.
     Deploy(crate::deploy::Args),
     /// Read a Crucible guide. Without a topic, list the topics. Prints Markdown unless both stdin and stdout are a terminal.
     Docs {

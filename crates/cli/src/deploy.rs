@@ -66,13 +66,13 @@ fn preflight(root: &Path, project: &Project, env: &str, output: &Output) -> Resu
     };
     let (settings, pending): (Vec<_>, Vec<_>) =
         plan.steps.iter().filter(|step| step.action != Action::NoOp).partition(|step| step.kind == "experience");
-    if !settings.is_empty() {
-        output.note(&format!(
-            "Warning: crucible.lock does not record the experience settings crucible.toml declares for {env}, so \
-             Roblox may not hold them. Deploy goes on; run `crucible provision {env}` to write them."
-        ));
-    }
     if pending.is_empty() {
+        if !settings.is_empty() {
+            output.note(&format!(
+                "Warning: crucible.lock does not record the experience settings crucible.toml declares for {env}, so \
+                 Roblox may not hold them. Deploy goes on; run `crucible provision {env}` to write them."
+            ));
+        }
         return Ok(());
     }
     let list: Vec<String> = pending
@@ -80,8 +80,8 @@ fn preflight(root: &Path, project: &Project, env: &str, output: &Output) -> Resu
         .map(|step| format!("{} {} {}", json!(step.action).as_str().unwrap_or_default(), step.kind, step.key))
         .collect();
     let mut message = format!(
-        "crucible.lock does not record everything crucible.toml declares for {env}: {}. Run `crucible provision \
-         {env}`, commit crucible.lock, then deploy",
+        "crucible.lock does not record every product, pass and badge crucible.toml declares for {env}: {}. Run \
+         `crucible provision {env}`, commit crucible.lock, then deploy",
         list.join(", ")
     );
     if pending.iter().any(|step| step.action == Action::AdoptCheck) {

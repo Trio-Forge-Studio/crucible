@@ -469,6 +469,8 @@ fn deploy_refuses_what_provision_has_not_recorded_before_any_request() {
         assert_eq!(steps, actions, "{d}");
         assert!(server.requests().is_empty(), "{listed}: deploy refuses before it reads the key");
         assert!(!game.0.path().join("build").exists());
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("experience settings"), "a refusal does not warn about the settings: {stderr}");
     }
 }
 
