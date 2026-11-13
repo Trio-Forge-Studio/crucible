@@ -29,6 +29,7 @@ const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 const CLI: &str = "@trioforge/crucible-cli";
 const RUNTIME: &str = "@trioforge/crucible";
 const COMPILER_TYPES: &str = "@trioforge/compiler-types";
+const ANVIL: &str = "@trioforge/anvil";
 const RELEASED_WITH_CLI: [&str; 3] = [CLI, RUNTIME, COMPILER_TYPES];
 const GROUPS: [&str; 2] = ["dependencies", "devDependencies"];
 const ROBLOX_TS_TOOLCHAIN: [&str; 3] = ["roblox-ts", "typescript", "@rbxts/compiler-types"];
@@ -216,25 +217,19 @@ fn upgrade(root: &Path, args: Args) -> Result<(), Error> {
     match plan(&pins, &installed, &target, args.version.is_some(), args.allow_downgrade)? {
         Plan::Current if on_roblox_ts(&manifest) => {
             let mut report = format!("crucible is already at {target}.\n");
-            let peers = reconcile_peers(root, manager)?;
-            if !peers.is_empty() {
-                report += "\nUpdated runtime peers:\n";
-                report.extend(peers.iter().map(|line| format!("  {line}\n")));
-            }
+            reconcile_dependencies(root, manager)?.report(&mut report);
             let migration = move_off_roblox_ts(root, &target, manager);
             migration.report(&mut report);
             return Report::new(report, migration, manager).print();
         }
         Plan::Current => {
-            let peers = reconcile_peers(root, manager)?;
-            println!("crucible is already at {target}.");
-            if !peers.is_empty() {
-                println!("\nUpdated runtime peers:");
-                for line in peers {
-                    println!("  {line}");
-                }
-                println!("\nRun `{} run check` next.", manager.program());
+            let mut report = format!("crucible is already at {target}.\n");
+            let dependencies = reconcile_dependencies(root, manager)?;
+            dependencies.report(&mut report);
+            if !dependencies.updated.is_empty() {
+                report += &format!("\nRun `{} run check` next.\n", manager.program());
             }
+            print!("{report}");
             return Ok(());
         }
         Plan::NewerThanLatest(newest) => {
@@ -425,15 +420,15 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
         .map(|(topic, _)| topic.as_str())
         .collect();
     let manager = detect_manager(root, &std::env::var("npm_config_user_agent").unwrap_or_default());
-    let peers = if manifest["dependencies"].get(RUNTIME).is_some() || manifest["devDependencies"].get(RUNTIME).is_some()
-    {
-        reconcile_peers(root, manager)
-    } else {
-        Ok(Vec::new())
-    };
-    let (peers, migration) = match peers {
-        Ok(peers) => (peers, move_off_roblox_ts(root, &to, manager)),
-        Err(error) => (Vec::new(), Migration { failed: Some(error.to_string()), ..Migration::default() }),
+    let dependencies =
+        if manifest["dependencies"].get(RUNTIME).is_some() || manifest["devDependencies"].get(RUNTIME).is_some() {
+            reconcile_dependencies(root, manager)
+        } else {
+            Ok(Dependencies::default())
+        };
+    let (dependencies, migration) = match dependencies {
+        Ok(dependencies) => (dependencies, move_off_roblox_ts(root, &to, manager)),
+        Err(error) => (Dependencies::default(), Migration { failed: Some(error.to_string()), ..Migration::default() }),
     };
 
     let mut report = if *from == to {
@@ -441,13 +436,13 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
     } else {
         format!("Upgraded crucible and {RUNTIME} from {from} to {to}.\n")
     };
+    dependencies.report(&mut report);
     let mut list = |heading: &str, labels: &[String]| {
         if !labels.is_empty() {
             report += &format!("\n{heading}\n");
             report.extend(labels.iter().map(|label| format!("  {label}\n")));
         }
     };
-    list("Updated runtime peers:", &peers);
     list("Refreshed from the new template:", &written);
     list(
         if old.is_some() {
@@ -826,6 +821,16 @@ fn insert_sorted(text: &str, group: &str, package: &str, version: &str) -> Optio
 
 fn imports_ui(source: &str) -> bool {
     let entry = format!("{}/{}", crucible_abi::PACKAGE, crucible_abi::UI);
+    imports(source, |specifier| specifier == entry)
+}
+
+fn imports_anvil(source: &str) -> bool {
+    imports(source, |specifier| {
+        specifier.strip_prefix(ANVIL).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
+}
+
+fn imports(source: &str, matches: impl Fn(&str) -> bool) -> bool {
     let bytes = source.as_bytes();
     let mut at = 0;
     let mut importing = false;
@@ -851,7 +856,7 @@ fn imports_ui(source: &str) -> bool {
                 }
                 at += 1;
             }
-            if importing && source.get(start..at) == Some(entry.as_str()) {
+            if importing && source.get(start..at).is_some_and(&matches) {
                 return true;
             }
             at = (at + 1).min(bytes.len());
@@ -880,6 +885,10 @@ fn imports_ui(source: &str) -> bool {
 }
 
 fn uses_ui(root: &Path) -> bool {
+    any_source(root, &["ts", "tsx"], imports_ui)
+}
+
+fn any_source(root: &Path, extensions: &[&str], imports: fn(&str) -> bool) -> bool {
     let Ok(entries) = fs::read_dir(root) else { return false };
     entries.flatten().any(|entry| {
         let path = entry.path();
@@ -889,22 +898,64 @@ fn uses_ui(root: &Path) -> bool {
             return false;
         }
         if path.is_dir() && !entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
-            return uses_ui(&path);
+            return any_source(&path, extensions, imports);
         }
-        matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx"))
-            && fs::read_to_string(path).is_ok_and(|source| imports_ui(&source))
+        path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| extensions.contains(&ext))
+            && fs::read_to_string(path).is_ok_and(|source| imports(&source))
     })
 }
 
-fn reconcile_peers(root: &Path, manager: Manager) -> Result<Vec<String>, Error> {
+#[derive(Default)]
+struct Dependencies {
+    updated: Vec<String>,
+    left: Option<String>,
+}
+
+impl Dependencies {
+    fn report(&self, report: &mut String) {
+        if !self.updated.is_empty() {
+            *report += "\nUpdated dependencies:\n";
+            report.extend(self.updated.iter().map(|line| format!("  {line}\n")));
+        }
+        if let Some(left) = &self.left {
+            *report += &format!("\n{left}\n");
+        }
+    }
+}
+
+fn reconcile_dependencies(root: &Path, manager: Manager) -> Result<Dependencies, Error> {
     let (text, _) = read_manifest(root)?;
-    let edited = peer_manifest(root, &text)?;
+    let peers = peer_manifest(root, &text)?;
+    let (edited, anvil) = without_anvil(root, &peers);
+    let mut dependencies = Dependencies::default();
+    if peers != text {
+        dependencies.updated.push("package.json now lists the runtime's required peers".into());
+    }
+    match anvil {
+        Anvil::Absent => {}
+        Anvil::Removed => {
+            dependencies
+                .updated
+                .push(format!("package.json no longer lists {ANVIL}, whose exports moved to {RUNTIME}/ui"));
+        }
+        Anvil::Imported => {
+            dependencies.left = Some(format!(
+                "This game imports {ANVIL}, whose exports moved to {RUNTIME}/ui. Move those imports, then remove {ANVIL} from package.json. `npx crucible docs ui` explains the move."
+            ));
+        }
+        Anvil::Unedited => {
+            dependencies.left = Some(format!(
+                "Remove {ANVIL} from package.json, because its exports moved to {RUNTIME}/ui. crucible upgrade cannot edit it in place. Then run `{}`.",
+                manager.install_line()
+            ));
+        }
+    }
     if edited == text {
-        return Ok(Vec::new());
+        return Ok(dependencies);
     }
     let path = root.join("package.json");
     write_atomic(&path, &edited).map_err(|error| Error::Failed(format!("cannot write {}: {error}", path.display())))?;
-    eprintln!("crucible upgrade: running `{}` for the runtime's peers", manager.install_line());
+    eprintln!("crucible upgrade: running `{}` for the dependencies it updated", manager.install_line());
     if let Err(error) = run_install(root, manager) {
         let restored = match restore(&path, &text) {
             Ok(()) => "package.json is restored".to_owned(),
@@ -915,7 +966,33 @@ fn reconcile_peers(root: &Path, manager: Manager) -> Result<Vec<String>, Error> 
             manager.recovery()
         )));
     }
-    Ok(vec!["package.json now lists the runtime's required peers".into(), format!("ran `{}`", manager.install_line())])
+    dependencies.updated.push(format!("ran `{}`", manager.install_line()));
+    Ok(dependencies)
+}
+
+enum Anvil {
+    Absent,
+    Removed,
+    Imported,
+    Unedited,
+}
+
+// A game that kept the retired package would load a second copy of the primitives on another reactive core.
+fn without_anvil(root: &Path, text: &str) -> (String, Anvil) {
+    let manifest: serde_json::Value = serde_json::from_str(text).expect("manifest was parsed");
+    if !GROUPS.iter().any(|group| manifest[group].get(ANVIL).is_some()) {
+        return (text.to_owned(), Anvil::Absent);
+    }
+    if any_source(root, &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"], imports_anvil) {
+        return (text.to_owned(), Anvil::Imported);
+    }
+    let mut expected = manifest;
+    match remove_packages(text, &mut expected, &[ANVIL])
+        .filter(|edited| serde_json::from_str::<serde_json::Value>(edited).ok().as_ref() == Some(&expected))
+    {
+        Some(edited) => (edited, Anvil::Removed),
+        None => (text.to_owned(), Anvil::Unedited),
+    }
 }
 
 fn quoted(text: &str) -> String {
@@ -1049,9 +1126,20 @@ fn move_toolchain(root: &Path, to: &Version, manager: Manager, migration: &mut M
 
 fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], added: Option<&str>) -> Option<String> {
     let mut expected = manifest.clone();
+    let mut result = remove_packages(text, &mut expected, dropped)?;
+    if let Some(version) = added {
+        let group = GROUPS.into_iter().find(|group| expected[group].get(CLI).is_some())?;
+        result = insert_sorted(&result, group, COMPILER_TYPES, version)?;
+        expected[group][COMPILER_TYPES] = version.into();
+    }
+    (serde_json::from_str::<serde_json::Value>(&result).ok()? == expected).then_some(result)
+}
+
+// Removes each package from `text` and from `expected`, which the caller compares with the edited text.
+fn remove_packages(text: &str, expected: &mut serde_json::Value, packages: &[&str]) -> Option<String> {
     let mut result = text.to_owned();
     for group in GROUPS {
-        for package in dropped {
+        for package in packages {
             let Some(spec) = expected.get_mut(group).and_then(|packages| packages.as_object_mut()?.remove(*package))
             else {
                 continue;
@@ -1061,12 +1149,7 @@ fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], ad
             }
         }
     }
-    if let Some(version) = added {
-        let group = GROUPS.into_iter().find(|group| expected[group].get(CLI).is_some())?;
-        result = insert_sorted(&result, group, COMPILER_TYPES, version)?;
-        expected[group][COMPILER_TYPES] = version.into();
-    }
-    (serde_json::from_str::<serde_json::Value>(&result).ok()? == expected).then_some(result)
+    Some(result)
 }
 
 fn remove_entry(text: &mut String, entry: Entry) {
@@ -1902,6 +1985,48 @@ mod tests {
             updated,
             "{\n  \"dependencies\": {\n    \"@rbxts/charm\": \"0.11.1\",\n    \"@rbxts/charm-sync\": \"0.4.1\",\n    \"@rbxts/services\": \"1.5.5\",\n    \"@trioforge/crucible\": \"0.5.0\"\n  }\n}\n"
         );
+    }
+
+    #[test]
+    fn anvil_imports_count_only_in_code() {
+        for source in [
+            "// import { Dialog } from '@trioforge/anvil';",
+            "const name = '@trioforge/anvil';",
+            "import { Dialog } from '@trioforge/anvilish';",
+            "import { Dialog } from '@trioforge/crucible/ui';",
+        ] {
+            assert!(!imports_anvil(source), "{source}");
+        }
+        for source in [
+            "import { Dialog } from '@trioforge/anvil';",
+            "import type { AnvilAdapter } from \"@trioforge/anvil\";",
+            "export * from '@trioforge/anvil/out/dialog';",
+            "const anvil = require('@trioforge/anvil');",
+        ] {
+            assert!(imports_anvil(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn anvil_is_removed_only_when_no_source_imports_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "{\r\n\t\"dependencies\": {\r\n\t\t\"@trioforge/anvil\": \"0.3.0\",\r\n\t\t\"@trioforge/crucible\": \"0.5.0\"\r\n\t}\r\n}\r\n";
+        let (edited, anvil) = without_anvil(dir.path(), text);
+        assert!(matches!(anvil, Anvil::Removed));
+        assert_eq!(edited, "{\r\n\t\"dependencies\": {\r\n\t\t\"@trioforge/crucible\": \"0.5.0\"\r\n\t}\r\n}\r\n");
+        let (unchanged, anvil) = without_anvil(dir.path(), &edited);
+        assert!(matches!(anvil, Anvil::Absent));
+        assert_eq!(unchanged, edited);
+
+        fs::create_dir_all(dir.path().join("src/client")).unwrap();
+        fs::write(dir.path().join("src/client/menu.tsx"), "import { Dialog } from \"@trioforge/anvil\";\n").unwrap();
+        let (kept, anvil) = without_anvil(dir.path(), text);
+        assert!(matches!(anvil, Anvil::Imported));
+        assert_eq!(kept, text);
+        fs::create_dir_all(dir.path().join("node_modules/@trioforge/anvil")).unwrap();
+        fs::rename(dir.path().join("src/client/menu.tsx"), dir.path().join("node_modules/@trioforge/anvil/index.ts"))
+            .unwrap();
+        assert!(matches!(without_anvil(dir.path(), text).1, Anvil::Removed), "node_modules is not the game's source");
     }
 
     #[test]
