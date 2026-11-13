@@ -31,15 +31,15 @@ Before a create, provision writes an intent to `.crucible/journal/<env>.json`: t
 
 | Crash after | The next run |
 | --- | --- |
-| the intent | finds nothing the create could have made, drops the intent, and creates. |
-| the create | finds the resource by its name, or by an ID the intent did not know, and adopts it. |
+| the intent | finds nothing the create could have made, drops the intent, and creates. If a resource was made by hand under another name meanwhile, it stops and asks, as after a lost answer. |
+| the create | finds the resource by its declared name and adopts it. If it was renamed on Roblox meanwhile, it stops and asks. |
 | the lock | sees the ID in the lock and clears the intent. |
 
 When Roblox refuses a create, with exit 3, 4 or 7, nothing was made: provision clears the intent, then stops, and the next run creates the resource. A crash between the refusal and that write leaves the intent, which the next run handles as a create whose answer was lost.
 
-When a create's answer is lost, the run stops with exit 5 and keeps the intent. The next run looks for the resource under the declared name and any ID the intent did not know, whatever its name now is, so a create renamed on Roblox meanwhile is still found. While an intent is unresolved, no other intent is written, so every new ID belongs to it.
+When a create's answer is lost, the run stops with exit 5 and keeps the intent. The next run looks for the resource under the declared name and at every ID the intent did not know, whatever its name now is. While an intent is unresolved, no other intent is written, so each new ID is the create or a resource someone made by hand. Provision adopts on its own only a resource with the declared name. A new ID with another name may be the create renamed on Roblox or a teammate's product, and nothing provision reads tells them apart, so the run stops, names each one, and writes nothing. If one is the key's, record it with `crucible adopt <env> <kind> <key> <id>`. If none is, run `crucible adopt <env> <kind> <key> --none`, and the next run creates the resource. A key renamed in `crucible.toml` after a lost create stops the same way, because its create carries the old name.
 
-A badge is the exception. Roblox's public badge list can lag behind a create, so provision does not settle a badge's lost create from the list. It stops and names the badge: look for it in the experience's badges on Roblox, then run `crucible adopt` with its ID, or remove the intent from the journal if it is not there.
+A badge is the exception. Roblox's public badge list can lag behind a create, so provision does not settle a badge's lost create from the list. It stops and names the badge: look for it in the experience's badges on Roblox, then run `crucible adopt` with its ID, or `crucible adopt <env> badge <key> --none` if it is not there.
 
 ## When provision stops
 
@@ -47,7 +47,8 @@ A badge is the exception. Roblox's public badge list can lag behind a create, so
 | --- | --- |
 | Two resources have a key's declared name. | Run `crucible adopt <env> <kind> <key> <id>` with the one that is the key's, or rename the other on Roblox. |
 | One resource is a candidate of two keys. | Adopt it for the key it belongs to. |
-| A badge's create may have landed. | Adopt the badge, or remove the intent if there is none. |
+| A create may have landed, and the universe holds resources new since its intent that carry another name. | Adopt the one that is the key's, or run `crucible adopt <env> <kind> <key> --none` if none is. |
+| A badge's create may have landed. | Adopt the badge, or run `crucible adopt <env> badge <key> --none` if there is none. |
 | The lock names an ID Roblox does not have. | If the resource is gone, delete its `[env.<env>.<kind>.<key>]` table from `crucible.lock`. Provision never replaces a resource on its own, because the lock may come from another universe. |
 | A list leaves out an ID the lock names that Roblox returns by itself. | Run provision again later. Provision trusts the list to find a resource before it creates one. |
 | Roblox rejects a badge create past the five it makes free each day, because provision offers to pay nothing. | Run provision again the next day. The rejected create leaves no intent, so that run creates the badge. The plan warns when more than five badges may need creating. |
@@ -73,6 +74,12 @@ npx crucible adopt staging product coin-pack 3301234567
 ```
 
 `crucible adopt <env> <kind> <key> <id>` records an existing resource as a key's in `crucible.lock` and clears the key's intent. It lists the kind and reads the resource, then refuses unless the key is declared and managed, the lock holds no ID for it, no other key holds the ID, the resource carries the key's declared name or is new since the key's intent, and no other key without an ID would adopt it too. It writes the lock, then the journal. `--json` prints `{"applied": [...]}`, or an `error` with the exit codes above.
+
+```console
+npx crucible adopt staging product coin-pack --none
+```
+
+`crucible adopt <env> <kind> <key> --none` says that no resource on Roblox is the create the key's intent records, and clears the intent. Run it after you have looked at the resources the stop named. It lists the kind and refuses unless the journal holds an intent for the key, the lock holds no ID for it, and no resource carries the key's declared name, which the next run would adopt. It works for a key `crucible.toml` no longer declares, too. It prints the IDs you passed over, in `passedOver` with `--json`, and the next provision creates the resource.
 
 ## Assumptions
 

@@ -321,9 +321,8 @@ fn an_intent_no_step_can_carry_stops_the_plan() {
             "{path}: products.gem-pack: the journal holds an intent to create product gem-pack as \"Gem pack\", and \
              crucible.lock holds no ID for it, so the create may have landed in universe 10772177432. crucible.toml \
              declares no products.gem-pack. If it was renamed, set moved_from = \"gem-pack\" on the new key, one of \
-             products.coin-pack. Declare it again until provision resolves the intent, or resolve it yourself: remove \
-             the intent from {path} if universe 10772177432 has no product named \"Gem pack\", or record the one it \
-             has with `crucible adopt staging product gem-pack <id>`"
+             products.coin-pack. Declare it again until provision resolves the intent, or, if universe 10772177432 \
+             holds no product its create made, run `crucible adopt staging product gem-pack --none`"
         )]
     );
     let lock = Project::new(CONFIG).applied("staging");
@@ -389,9 +388,9 @@ fn a_name_another_key_s_unresolved_intent_sent_stops_the_plan() {
         [format!(
             "crucible.toml:{line}: passes.gold.name: \"Gold\" is the name the journal's intent for passes.vip sent, and \
              crucible.lock holds no ID for it, so its create may have landed under that name and the adopt check could \
-             bind passes.gold to it. Give passes.gold another name until provision resolves that intent, or remove the \
-             intent from {} if no pass has that name, or resolve it with `crucible adopt staging pass vip <id>`",
-            crucible_iac::journal::path("staging").display()
+             bind passes.gold to it. Give passes.gold another name until provision resolves that intent: record \
+             passes.vip's pass with `crucible adopt staging pass vip <id>`, or run `crucible adopt staging pass vip \
+             --none` if its create never landed"
         )]
     );
     let lock = project.applied("staging");
@@ -730,34 +729,49 @@ fn what_roblox_lists_decides_each_adopt_check() {
 }
 
 #[test]
-fn after_an_unknown_outcome_the_adopt_check_takes_an_id_the_intent_s_run_did_not_know() {
+fn after_an_unknown_outcome_a_run_adopts_only_the_declared_name_and_stops_on_a_new_id_with_another() {
     let project = Project::new(CONFIG);
     let intent = |before: &str| {
         format!(
             r#"{{"version":1,"universe":10772177432,"intents":[{{"kind":"pass","key":"vip","name":"VIP","before":[{before}]}}]}}"#
         )
     };
-    let mut observed = matching();
-    observed
-        .listed
-        .insert(Kind::Pass, vec![listed(1001, "Renamed on Roblox", Some(299), true), listed(7, "Old", None, false)]);
-    let plan = project.plan_seen("staging", None, Some(&intent("7")), Some(&observed)).unwrap();
-    assert_eq!(intent_of(&plan, "vip"), (Action::Adopt, Some("1001".into())), "a renamed create is found by its ID");
+    let plan_with = |passes: Vec<Listed>, journal: &str| {
+        let mut observed = matching();
+        observed.listed.insert(Kind::Pass, passes);
+        project.plan_seen("staging", None, Some(journal), Some(&observed))
+    };
+    let renamed = || listed(1001, "Renamed on Roblox", Some(299), true);
+    let old = || listed(7, "Old", None, false);
+    let problems = messages(plan_with(vec![renamed(), old()], &intent("7")).unwrap_err());
+    assert_eq!(problems.len(), 1, "{problems:#?}");
+    for part in [
+        "Since that intent, the universe gained 1001 (\"Renamed on Roblox\"), which does not carry the declared name \"VIP\"",
+        "record it with `crucible adopt staging pass vip <id>`",
+        "run `crucible adopt staging pass vip --none`",
+    ] {
+        assert!(problems[0].contains(part), "{}", problems[0]);
+    }
 
-    let plan = project.plan_seen("staging", None, Some(&intent("7, 1001")), Some(&observed)).unwrap();
+    let declared = || listed(1002, "VIP", Some(299), true);
+    let problems = messages(plan_with(vec![renamed(), declared(), old()], &intent("7")).unwrap_err());
+    assert!(problems[0].contains("gained 1001"), "a new ID of another name stops the run beside the declared name");
+    let plan = plan_with(vec![declared(), old()], &intent("7")).unwrap();
+    assert_eq!(intent_of(&plan, "vip"), (Action::Adopt, Some("1002".into())));
+
+    let plan = plan_with(vec![renamed(), old()], &intent("7, 1001")).unwrap();
     let step = plan.steps.iter().find(|step| step.key == "vip").unwrap();
     assert_eq!(
         (step.action, step.note.as_deref()),
         (Action::Create, Some("Roblox lists nothing the earlier create could have made"))
     );
 
-    let without_ids = journal(&[("pass", "vip", "Renamed on Roblox")]);
-    let plan = project.plan_seen("staging", None, Some(&without_ids), Some(&observed)).unwrap();
-    assert_eq!(
-        intent_of(&plan, "vip"),
-        (Action::Adopt, Some("1001".into())),
-        "an intent without IDs seeks its sent name"
-    );
+    let sent_another = journal(&[("pass", "vip", "Renamed on Roblox")]);
+    let problems = messages(plan_with(vec![renamed(), old()], &sent_another).unwrap_err());
+    assert!(problems[0].contains("gained 1001"), "an intent without IDs stops on its sent name: {}", problems[0]);
+    let sent_declared = journal(&[("pass", "vip", "VIP")]);
+    let plan = plan_with(vec![declared(), old()], &sent_declared).unwrap();
+    assert_eq!(intent_of(&plan, "vip"), (Action::Adopt, Some("1002".into())));
 }
 
 fn intent_of(plan: &Plan, key: &str) -> (Action, Option<String>) {
@@ -774,11 +788,12 @@ fn a_resource_two_adopt_checks_find_stops_the_plan() {
     let mut observed = matching();
     observed.listed.insert(Kind::Pass, vec![listed(1001, "Gold", Some(299), true)]);
     let problems = messages(project.plan_seen("staging", None, Some(journal), Some(&observed)).unwrap_err());
-    assert_eq!(problems.len(), 1, "{problems:#?}");
+    assert_eq!(problems.len(), 2, "{problems:#?}");
+    assert!(problems[0].contains("passes.vip: the journal holds an intent"), "{}", problems[0]);
     assert!(
-        problems[0].contains("the adopt checks of passes.gold and passes.vip both find pass 1001"),
+        problems[1].contains("the adopt checks of passes.gold and passes.vip both find pass 1001"),
         "{}",
-        problems[0]
+        problems[1]
     );
 }
 

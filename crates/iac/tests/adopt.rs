@@ -2,7 +2,7 @@ use crucible_iac::journal::{Intent, Journal};
 use crucible_iac::lock::{Entry, Lock, Status};
 use crucible_iac::model::{Experience, Fields, Kind};
 use crucible_iac::plan::{Action, Id, Inputs, Listed};
-use crucible_iac::provision::{Applied, Patch, Refused, Remote, Store, adopt};
+use crucible_iac::provision::{Applied, Patch, Refused, Remote, Store, adopt, forget};
 use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
 use crucible_project::Manifest;
@@ -133,6 +133,32 @@ impl Case {
         (result, disk)
     }
 
+    fn forget(&mut self, key: &str) -> (Result<(Applied, Vec<Id>), Refused>, Disk) {
+        let manifest = Manifest::parse(CONFIG).unwrap();
+        let experience = Experience::new(&manifest).unwrap();
+        let inputs = Inputs {
+            experience: &experience,
+            env_name: "staging",
+            env: &manifest.envs["staging"],
+            lock: self.lock.env("staging"),
+            journal: self.journal.as_ref(),
+            observed: None,
+        };
+        let mut disk = Disk::default();
+        let result = forget(&inputs, Kind::Product, key, &mut self.roblox, &mut disk);
+        (result, disk)
+    }
+
+    fn refused_forget(&mut self, key: &str) -> String {
+        match self.forget(key) {
+            (Err(Refused::Rule(message)), disk) => {
+                assert!(disk.lock.is_none() && disk.journal.is_none(), "a refusal writes nothing");
+                message
+            }
+            (other, _) => panic!("{other:?}"),
+        }
+    }
+
     fn refused(&mut self, key: &str, value: u64) -> String {
         match self.adopt(key, value) {
             (Err(Refused::Rule(message)), disk) => {
@@ -215,4 +241,33 @@ fn adopt_writes_the_lock_then_clears_the_key_s_intents() {
     let (applied, disk) = case.adopt("alpha", 8);
     assert_eq!(applied.unwrap().id, "8", "a resource the list leaves out is read by its ID");
     assert!(disk.journal.is_none(), "no journal, no journal write");
+}
+
+#[test]
+fn adopt_none_clears_an_unresolved_intent_and_names_what_was_passed_over() {
+    let mut case = Case::new(vec![product(5, "Someone's"), product(6, "Beta"), product(7, "Old")]);
+    assert_eq!(case.refused_forget("alpha"), "the journal holds no intent for products.alpha in staging");
+
+    case.journal = journal(vec![intent("old", "Moved", &[7]), intent("beta", "Beta", &[5, 6, 7])]);
+    case.lock = locked(&[("old", 7)], 1);
+    assert_eq!(
+        case.refused_forget("moved"),
+        "crucible.lock holds product 7 for products.moved, so its create landed, and provision clears the intent"
+    );
+    case.lock = Lock::empty();
+    let message = case.refused_forget("beta");
+    assert!(message.starts_with("product 6 carries products.beta's declared name \"Beta\""), "{message}");
+    assert!(message.contains("run `crucible adopt staging product beta 6`"), "{message}");
+
+    let (done, disk) = case.forget("moved");
+    let (applied, passed) = done.unwrap();
+    assert_eq!((applied.key.as_str(), applied.action, applied.id.as_str()), ("moved", Action::Forget, ""));
+    assert_eq!(passed, [id(5), id(6)], "the IDs new since the intent of the key it moved from");
+    assert_eq!(disk.journal.unwrap().intents, [intent("beta", "Beta", &[5, 6, 7])], "only the key's intent goes");
+    assert!(disk.lock.is_none(), "it writes no lock");
+
+    case.journal = journal(vec![intent("nope", "Nope", &[5, 6, 7])]);
+    let (done, disk) = case.forget("nope");
+    assert_eq!(done.unwrap().1, [], "an undeclared key's intent can go too");
+    assert_eq!(disk.journal.unwrap().intents, []);
 }

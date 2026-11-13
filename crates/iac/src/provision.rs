@@ -531,16 +531,7 @@ pub fn adopt(
 ) -> Result<Applied, Refused> {
     let rule = |message: String| Refused::Rule(message);
     let (table, noun) = (kind.table(), kind.noun());
-    let universe = inputs.env.universe;
-    let elsewhere =
-        inputs.lock.map(EnvLock::universe).into_iter().chain(inputs.journal.map(|journal| journal.universe));
-    if let Some(other) = elsewhere.into_iter().find(|other| *other != universe) {
-        return Err(rule(format!(
-            "crucible.lock or the journal records {} in universe {other}, and crucible.toml names universe {universe}. \
-             Run `crucible plan {}` for what to do",
-            inputs.env_name, inputs.env_name
-        )));
-    }
+    same_universe(inputs)?;
     let resources = inputs.experience.resolve(inputs.env);
     let declared: Vec<&Resource> = resources.iter().filter(|resource| resource.kind == kind).collect();
     let resource = declared
@@ -610,6 +601,80 @@ pub fn adopt(
             .map_err(|error| Refused::Write { path: crate::journal::path(inputs.env_name), error })?;
     }
     Ok(Applied { kind: noun, key: key.to_owned(), action: Action::Adopt, id: id.to_string() })
+}
+
+fn same_universe(inputs: &Inputs<'_>) -> Result<(), Refused> {
+    let universe = inputs.env.universe;
+    let elsewhere =
+        inputs.lock.map(EnvLock::universe).into_iter().chain(inputs.journal.map(|journal| journal.universe));
+    match elsewhere.into_iter().find(|other| *other != universe) {
+        Some(other) => Err(Refused::Rule(format!(
+            "crucible.lock or the journal records {} in universe {other}, and crucible.toml names universe {universe}. \
+             Run `crucible plan {}` for what to do",
+            inputs.env_name, inputs.env_name
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// `crucible adopt <env> <kind> <key> --none`: clears the key's unresolved intent, and the intent of the key it moved
+/// from, after a person has looked and found none of the resources the adopt check would see to be its create. It
+/// refuses while the lock holds the key's ID, because the create landed and provision clears the intent, and while a
+/// resource carries the key's declared name, because the next run would adopt it. Returns what it did and the IDs the
+/// adopt check would have seen, which the person passed over.
+pub fn forget(
+    inputs: &Inputs<'_>,
+    kind: Kind,
+    key: &str,
+    remote: &mut dyn Remote,
+    store: &mut dyn Store,
+) -> Result<(Applied, Vec<Id>), Refused> {
+    let rule = |message: String| Refused::Rule(message);
+    let (table, noun, env) = (kind.table(), kind.noun(), inputs.env_name);
+    same_universe(inputs)?;
+    let resources = inputs.experience.resolve(inputs.env);
+    let resource = resources.iter().find(|resource| resource.kind == kind && resource.key == key);
+    let moved_from = resource.and_then(|resource| resource.moved_from.as_ref());
+    let ours = |intent: &Intent| intent.kind == kind && (intent.key == key || moved_from == Some(&intent.key));
+    let intents: Vec<&Intent> =
+        inputs.journal.map_or(&[][..], |journal| &journal.intents).iter().filter(|i| ours(i)).collect();
+    if intents.is_empty() {
+        return Err(rule(format!("the journal holds no intent for {table}.{key} in {env}")));
+    }
+    let empty = BTreeMap::new();
+    let entries = inputs.lock.map_or(&empty, |lock| lock.entries(kind));
+    if let Some(entry) = entries.get(key).or_else(|| moved_from.and_then(|old| entries.get(old))) {
+        return Err(rule(format!(
+            "crucible.lock holds {noun} {} for {table}.{key}, so its create landed, and provision clears the intent",
+            entry.id
+        )));
+    }
+    let locked: BTreeSet<Id> = entries.values().map(|entry| entry.id).collect();
+    let listed = remote.list(kind).map_err(Refused::Remote)?;
+    let unbound = listed.iter().filter(|listed| !locked.contains(&listed.id));
+    let mut passed = Vec::new();
+    for listed in unbound {
+        if let Some(resource) = resource.filter(|resource| resource.lifecycle == Lifecycle::Managed)
+            && resource.fields.as_ref().is_some_and(|fields| fields.name() == listed.name)
+        {
+            return Err(rule(format!(
+                "{noun} {} carries {table}.{key}'s declared name {:?}, so the next provision would adopt it. If it is \
+                 {table}.{key}'s, run `crucible adopt {env} {noun} {key} {}`. If it is not, rename it on Roblox first",
+                listed.id, listed.name, listed.id
+            )));
+        }
+        let new = |intent: &&Intent| match &intent.before {
+            Some(before) => !before.contains(&listed.id),
+            None => listed.name == intent.name,
+        };
+        if intents.iter().any(new) {
+            passed.push(listed.id);
+        }
+    }
+    let mut journal = inputs.journal.cloned().expect("the journal holds the intent");
+    journal.intents.retain(|intent| !ours(intent));
+    store.save_journal(env, &journal).map_err(|error| Refused::Write { path: crate::journal::path(env), error })?;
+    Ok((Applied { kind: noun, key: key.to_owned(), action: Action::Forget, id: String::new() }, passed))
 }
 
 #[cfg(test)]

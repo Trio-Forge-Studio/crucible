@@ -1,7 +1,8 @@
 //! What `crucible provision <env>` does, from the config, the lock, the journal and, when provision has listed them,
 //! the resources Roblox holds. It makes no network call. Without what Roblox holds, as `crucible plan` runs it, a create
 //! is always preceded by provision's adopt check and an update is a change of the inputs the lock fingerprinted. With
-//! it, the adopt check is decided: one candidate is adopted, none is created, and two stop the plan. Every intent in the
+//! it, the adopt check is decided: one candidate is adopted, none is created, and two stop the plan, as does a resource
+//! new since the key's intent that carries another name than the declared one. Every intent in the
 //! journal shows on the step of its resource, or stops the plan with a problem that names it, because an intent nobody
 //! sees is a create nobody resolves.
 
@@ -25,8 +26,11 @@ pub enum Action {
     /// The adopt check found one resource, whose ID provision records in the lock instead of creating one.
     Adopt,
     /// The journal holds an intent and the lock no ID: an earlier create's outcome is unknown, and provision looks
-    /// for the resource, under the declared name and the name the intent sent, before it does anything else.
+    /// for the resource before it does anything else. It adopts one with the declared name, and stops on one new since
+    /// the intent that carries another name.
     AdoptCheck,
+    /// `crucible adopt <env> <kind> <key> --none` cleared the key's intent: Roblox holds nothing the create made.
+    Forget,
     Update,
     Retire,
     Untrack,
@@ -197,12 +201,13 @@ pub fn plan(
                         &resource.key,
                         format!(
                             "the journal holds intents for {table}.{} and {table}.{}, and moved_from makes them one \
-                             resource. Remove the one whose create never landed, or resolve one with `crucible adopt \
-                             {} {} <key> <id>`",
+                             resource. Record the one that landed with `crucible adopt {env} {noun} {key} <id>`, or \
+                             run `crucible adopt {env} {noun} {key} --none` if neither did",
                             intent.map_or("", |(_, intent)| &intent.key),
                             other.key,
-                            inputs.env_name,
-                            kind.noun(),
+                            env = inputs.env_name,
+                            noun = kind.noun(),
+                            key = resource.key,
                             table = kind.table(),
                         ),
                     ));
@@ -215,7 +220,7 @@ pub fn plan(
             let candidates = match (inputs.observed, entry, resource.lifecycle) {
                 (Some(observed), None, Lifecycle::Managed) => {
                     let found = candidates(observed, kind, entries, resource, intent);
-                    sought.push((&resource.key, found.clone()));
+                    sought.push((&resource.key, found.adopt.iter().chain(found.strangers.keys()).copied().collect()));
                     Some(found)
                 }
                 _ => None,
@@ -485,11 +490,9 @@ fn unattached(
 ) -> Problem {
     let (kind, key, name) = (intent.kind, &intent.key, &intent.name);
     let (table, noun, universe) = (kind.table(), kind.noun(), inputs.env.universe);
-    let path = journal::path(inputs.env_name).display().to_string();
     let mut message = format!("the journal holds an intent to create {noun} {key} as {name:?}, ");
     let yourself = format!(
-        "or resolve it yourself: remove the intent from {path} if universe {universe} has no {noun} named {name:?}, \
-         or record the one it has with `crucible adopt {} {noun} {key} <id>`",
+        "or, if universe {universe} holds no {noun} its create made, run `crucible adopt {} {noun} {key} --none`",
         inputs.env_name
     );
     let lifecycle = declared.iter().find(|resource| resource.key == *key).map(|resource| resource.lifecycle);
@@ -546,9 +549,9 @@ fn sent_name_taken(env: &str, resource: &Resource, intent: &Intent) -> Option<Pr
         format!(
             "{name:?} is the name the journal's intent for {table}.{other} sent, and crucible.lock holds no ID for it, \
              so its create may have landed under that name and the adopt check could bind {table}.{key} to it. Give \
-             {table}.{key} another name until provision resolves that intent, or remove the intent from {} if no \
-             {noun} has that name, or resolve it with `crucible adopt {env} {noun} {other} <id>`",
-            journal::path(env).display()
+             {table}.{key} another name until provision resolves that intent: record {table}.{other}'s {noun} with \
+             `crucible adopt {env} {noun} {other} <id>`, or run `crucible adopt {env} {noun} {other} --none` if its \
+             create never landed"
         ),
     ))
 }
@@ -559,7 +562,7 @@ fn step(
     entry: Option<&Entry>,
     moved_from: Option<String>,
     intent: Option<&Intent>,
-    candidates: Option<&BTreeSet<Id>>,
+    candidates: Option<&Found>,
     read: &mut dyn FnMut(&Path) -> std::io::Result<Vec<u8>>,
 ) -> Result<Step, Problem> {
     let kind = resource.kind;
@@ -610,10 +613,13 @@ fn step(
         (Lifecycle::Managed, None) => {
             step.action = if intent.is_some() { Action::AdoptCheck } else { Action::Create };
             if let Some(found) = candidates {
-                let mut ids = found.iter();
+                let mut ids = found.adopt.iter();
                 match (ids.next(), ids.next(), intent) {
                     (_, _, Some(intent)) if kind == Kind::Badge => {
                         return Err(unresolved_badge(inputs, resource, intent));
+                    }
+                    (_, _, Some(intent)) if !found.strangers.is_empty() => {
+                        return Err(strangers(inputs, resource, intent, &found.strangers));
                     }
                     (None, _, intent) => {
                         step.action = Action::Create;
@@ -625,7 +631,7 @@ fn step(
                         step.action = Action::Adopt;
                         step.id = Some(id.to_string());
                     }
-                    (Some(_), Some(_), _) => return Err(ambiguous(inputs, resource, found)),
+                    (Some(_), Some(_), _) => return Err(ambiguous(inputs, resource, &found.adopt)),
                 }
             }
         }
@@ -663,14 +669,26 @@ pub fn differs(fields: &Fields, remote: &Listed) -> bool {
     }
 }
 
-/// Whether the adopt check of `resource` takes `listed`, which no lock entry holds: it has the declared name or, while
-/// the key has an intent, an ID the intent's run did not know, or the name an intent written without IDs sent.
+/// Whether the adopt check of `resource` looks at `listed`, which no lock entry holds: it has the declared name or,
+/// while the key has an intent, an ID the intent's run did not know, or the name an intent written without IDs sent.
+/// `crucible adopt` takes any of them. A run adopts only one with the declared name, because a new ID with another name
+/// may be the create renamed on Roblox, or a resource someone made by hand, and only a person can tell which.
 pub fn is_candidate(listed: &Listed, resource: &Resource, intent: Option<&Intent>) -> bool {
-    resource.fields.as_ref().is_some_and(|fields| fields.name() == listed.name)
+    has_declared_name(listed, resource)
         || intent.is_some_and(|intent| match &intent.before {
             Some(before) => !before.contains(&listed.id),
             None => listed.name == intent.name,
         })
+}
+
+fn has_declared_name(listed: &Listed, resource: &Resource) -> bool {
+    resource.fields.as_ref().is_some_and(|fields| fields.name() == listed.name)
+}
+
+/// What a key's adopt check found: the resources a run may adopt, and the others it looked at, by ID with their names.
+struct Found {
+    adopt: BTreeSet<Id>,
+    strangers: BTreeMap<Id, String>,
 }
 
 fn candidates(
@@ -679,16 +697,18 @@ fn candidates(
     entries: &BTreeMap<String, Entry>,
     resource: &Resource,
     intent: Option<&Intent>,
-) -> BTreeSet<Id> {
+) -> Found {
     let locked: BTreeSet<Id> = entries.values().map(|entry| entry.id).collect();
-    observed
-        .listed
-        .get(&kind)
-        .into_iter()
-        .flatten()
-        .filter(|listed| !locked.contains(&listed.id) && is_candidate(listed, resource, intent))
-        .map(|listed| listed.id)
-        .collect()
+    let mut found = Found { adopt: BTreeSet::new(), strangers: BTreeMap::new() };
+    let listed = observed.listed.get(&kind).into_iter().flatten();
+    for listed in listed.filter(|listed| !locked.contains(&listed.id) && is_candidate(listed, resource, intent)) {
+        if has_declared_name(listed, resource) {
+            found.adopt.insert(listed.id);
+        } else {
+            found.strangers.insert(listed.id, listed.name.clone());
+        }
+    }
+    found
 }
 
 fn ambiguous(inputs: &Inputs<'_>, resource: &Resource, found: &BTreeSet<Id>) -> Problem {
@@ -708,6 +728,30 @@ fn ambiguous(inputs: &Inputs<'_>, resource: &Resource, found: &BTreeSet<Id>) -> 
     )
 }
 
+/// Resources new since the key's intent, or with the name an intent without IDs sent, that do not carry the declared
+/// name. One may be the create, renamed on Roblox, or someone made it by hand, so provision takes none on its own.
+fn strangers(inputs: &Inputs<'_>, resource: &Resource, intent: &Intent, found: &BTreeMap<Id, String>) -> Problem {
+    let (table, noun, key, env) = (resource.kind.table(), resource.kind.noun(), &resource.key, inputs.env_name);
+    let declared = resource.fields.as_ref().map_or("", Fields::name);
+    let listed: Vec<String> = found.iter().map(|(id, name)| format!("{id} ({name:?})")).collect();
+    let (them, one) = if found.len() == 1 { ("it", "it is") } else { ("them", "one is") };
+    Problem::at(
+        resource.line,
+        format!("{table}.{key}"),
+        format!(
+            "the journal holds an intent to create {noun} {key} as {:?}, and crucible.lock holds no ID for it, so the \
+             create may have landed in universe {}. Since that intent, the universe gained {}, which {} not carry the \
+             declared name {declared:?}. The create may have been renamed on Roblox, or someone made {them} by hand, \
+             so provision adopts none on its own. If {one} {table}.{key}'s, record it with `crucible adopt {env} {noun} \
+             {key} <id>`. If none is, run `crucible adopt {env} {noun} {key} --none`, and provision creates it",
+            intent.name,
+            inputs.env.universe,
+            listed.join(", "),
+            if found.len() == 1 { "does" } else { "do" },
+        ),
+    )
+}
+
 /// The public badge list can lag behind a create, so it can leave out a badge whose answer was lost while it shows
 /// another with the name, and provision leaves a badge's unknown outcome to someone who has looked.
 fn unresolved_badge(inputs: &Inputs<'_>, resource: &Resource, intent: &Intent) -> Problem {
@@ -719,11 +763,11 @@ fn unresolved_badge(inputs: &Inputs<'_>, resource: &Resource, intent: &Intent) -
             "the journal holds an intent to create badge {key} as {:?}, and crucible.lock holds no ID for it, so the \
              create may have landed in universe {}. The public badge list can lag behind a create, so provision does \
              not settle a badge's create on its own. Look for it in the experience's badges on Roblox. If it is there, \
-             run `crucible adopt {} badge {key} <id>`. If it is not, remove the intent from {} and run provision again",
+             run `crucible adopt {env} badge {key} <id>`. If it is not, run `crucible adopt {env} badge {key} --none` \
+             and provision again",
             intent.name,
             inputs.env.universe,
-            inputs.env_name,
-            journal::path(inputs.env_name).display(),
+            env = inputs.env_name,
         ),
     )
 }

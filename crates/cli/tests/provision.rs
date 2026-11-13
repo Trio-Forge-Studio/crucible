@@ -69,6 +69,11 @@ fn lists(server: &MockServer, products: Vec<Value>, badges: Vec<Value>) -> (http
     (products, badges)
 }
 
+fn journal(dir: &Path, text: &str) {
+    std::fs::create_dir_all(dir.join(".crucible").join("journal")).unwrap();
+    std::fs::write(dir.join(".crucible").join("journal").join("staging.json"), text).unwrap();
+}
+
 #[test]
 fn provision_adopts_by_name_creates_the_rest_and_records_each_id() {
     let dir = project();
@@ -113,7 +118,7 @@ fn provision_adopts_by_name_creates_the_rest_and_records_each_id() {
 }
 
 #[test]
-fn a_lost_create_keeps_its_intent_and_the_next_run_adopts_it() {
+fn a_lost_create_keeps_its_intent_and_the_next_run_asks_whose_a_renamed_one_is() {
     let dir = project();
     let server = MockServer::start();
     let (mut products, mut badges) = lists(&server, vec![], vec![badge(88)]);
@@ -142,6 +147,16 @@ fn a_lost_create_keeps_its_intent_and_the_next_run_adopts_it() {
     let renamed = json!({"productId": 99, "name": "Renamed on Roblox", "description": "", "isForSale": true,
                          "priceInformation": {"defaultPriceInRobux": 49}});
     lists(&server, vec![renamed], vec![badge(88)]);
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stdout));
+    let stderr = text(&out.stderr);
+    for part in ["gained 99 (\"Renamed on Roblox\")", "`crucible adopt staging product coin-pack <id>`"] {
+        assert!(stderr.contains(part), "{stderr}");
+    }
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(!lock.contains("id = 99"), "a stopped plan binds nothing: {lock}");
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "product", "coin-pack", "99"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let update = server.mock(|when, then| {
         when.method(Method::PATCH)
             .path("/developer-products/v2/universes/1/developer-products/99")
@@ -153,8 +168,7 @@ fn a_lost_create_keeps_its_intent_and_the_next_run_adopts_it() {
     update.assert_calls(1);
     assert_eq!(
         document(&out)["applied"],
-        json!([{"kind": "product", "key": "coin-pack", "action": "adopt", "id": "99"},
-               {"kind": "product", "key": "coin-pack", "action": "update", "id": "99"}])
+        json!([{"kind": "product", "key": "coin-pack", "action": "update", "id": "99"}])
     );
     assert!(!dir.path().join(".crucible/journal/staging.json").exists());
 }
@@ -188,6 +202,40 @@ fn a_badge_create_refused_for_its_cost_clears_its_intent_and_the_next_day_create
     create.assert_calls(1);
     let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
     assert!(lock.contains("[env.staging.badges.first-delivery]\nid = 88\n"), "{lock}");
+}
+
+#[test]
+fn adopt_none_clears_an_intent_whose_create_never_landed_and_provision_creates_it() {
+    let dir = project();
+    journal(
+        dir.path(),
+        r#"{"version":1,"universe":1,"intents":[{"kind":"product","key":"coin-pack","name":"Coin pack","before":[]}]}"#,
+    );
+    let server = MockServer::start();
+    let stranger = json!({"productId": 5, "name": "Teammate's pack", "description": "", "isForSale": true,
+                          "priceInformation": {"defaultPriceInRobux": 99}});
+    lists(&server, vec![stranger], vec![badge(88)]);
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stdout));
+    assert!(text(&out.stderr).contains("`crucible adopt staging product coin-pack --none`"), "{}", text(&out.stderr));
+
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "product", "coin-pack", "--none", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stdout));
+    assert_eq!(
+        document(&out),
+        json!({"applied": [{"kind": "product", "key": "coin-pack", "action": "forget", "id": ""}], "passedOver": [5]})
+    );
+    assert!(!dir.path().join(".crucible/journal/staging.json").exists());
+    let create = server.mock(|when, then| {
+        when.method(Method::POST).path("/developer-products/v2/universes/1/developer-products");
+        then.status(200).json_body(product(6));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    create.assert_calls(1);
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "product", "coin-pack", "--none"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("the journal holds no intent for products.coin-pack"), "{}", text(&out.stderr));
 }
 
 #[test]

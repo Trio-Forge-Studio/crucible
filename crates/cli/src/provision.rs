@@ -3,7 +3,7 @@ use crate::plan::{Failure, Project, render};
 use crucible_iac::model::Kind;
 use crucible_iac::oc::Roblox;
 use crucible_iac::plan::{Plan, plan, undeclared};
-use crucible_iac::provision::{Applied, Files, Refused, Run, Stop, observe};
+use crucible_iac::provision::{Applied, Files, Refused, Run, Stop, forget, observe};
 use crucible_oc::auth;
 use crucible_oc::transport::{Event, Sink, SystemClock, Timing, Transport};
 use serde_json::{Value, json};
@@ -43,6 +43,8 @@ struct Report {
     plan: Option<Plan>,
     applied: Vec<Applied>,
     error: Option<(u8, Value)>,
+    /// The IDs `crucible adopt --none` found and the developer passed over.
+    passed: Vec<std::num::NonZeroU64>,
 }
 
 pub fn main(args: Args) -> ExitCode {
@@ -103,7 +105,7 @@ fn failed(failure: &Failure) -> Report {
     let problems = &failure.problems;
     let kind = if failure.code == 2 { "usage" } else { "io" };
     let error = json!({ "kind": kind, "message": failure.message, "problems": problems });
-    Report { plan: None, applied: vec![], error: Some((failure.code, error)) }
+    Report { plan: None, applied: vec![], error: Some((failure.code, error)), passed: vec![] }
 }
 
 fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
@@ -146,7 +148,7 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
         }
     };
     if args.dry_run {
-        return Report { plan: Some(plan), applied: vec![], error: None };
+        return Report { plan: Some(plan), applied: vec![], error: None, passed: vec![] };
     }
     let empty = crucible_iac::lock::Lock::empty();
     let mut run = match Run::new(&inputs, &plan, project.lock.as_ref().unwrap_or(&empty), read) {
@@ -166,7 +168,7 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
     };
     let applied = run.applied().to_vec();
     match stopped {
-        None => Report { plan: Some(plan), applied, error: None },
+        None => Report { plan: Some(plan), applied, error: None, passed: vec![] },
         Some(Stop::Remote { kind, key, failure, intent }) => {
             let mut report = remote(Some(plan), applied, failure, Some(&source));
             if let Some((_, error)) = &mut report.error {
@@ -193,7 +195,12 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
                  bug in crucible; nothing was sent for {key}",
                 kind.noun()
             );
-            Report { plan: Some(plan), applied, error: Some((1, json!({ "kind": "io", "message": message }))) }
+            Report {
+                plan: Some(plan),
+                applied,
+                error: Some((1, json!({ "kind": "io", "message": message }))),
+                passed: vec![],
+            }
         }
     }
 }
@@ -225,7 +232,11 @@ pub struct AdoptArgs {
     /// The key in crucible.toml.
     pub key: String,
     /// The Roblox ID of the resource that is the key's.
-    pub id: std::num::NonZeroU64,
+    #[arg(required_unless_present = "none", conflicts_with = "none")]
+    pub id: Option<std::num::NonZeroU64>,
+    /// Clear the key's unresolved intent instead: you looked, and no resource on Roblox is the create it records.
+    #[arg(long)]
+    pub none: bool,
     /// Print one JSON document instead of text.
     #[arg(long)]
     pub json: bool,
@@ -243,6 +254,9 @@ pub fn adopt_main(args: AdoptArgs) -> ExitCode {
     let code = report.error.as_ref().map_or(0, |(code, _)| *code);
     let written = if args.json {
         let mut document = json!({ "applied": report.applied });
+        if args.none && report.error.is_none() {
+            document["passedOver"] = json!(report.passed);
+        }
         if let Some((_, error)) = report.error {
             document["error"] = error;
         }
@@ -252,6 +266,23 @@ pub fn adopt_main(args: AdoptArgs) -> ExitCode {
             Some((_, error)) => {
                 output.note(error["message"].as_str().unwrap_or_default());
                 Ok(())
+            }
+            None if args.none => {
+                let applied = &report.applied[0];
+                let passed = match report.passed.as_slice() {
+                    [] => String::new(),
+                    ids => format!(
+                        " You passed over {}.",
+                        ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+                    ),
+                };
+                output.text(&format!(
+                    "forget {} {}\nCleared its intent from {}.{passed} Run `crucible provision {}`, which creates it.\n",
+                    applied.kind,
+                    applied.key,
+                    crucible_iac::journal::path(&args.env).display(),
+                    args.env
+                ))
             }
             None => output.text(&format!(
                 "adopt {} {} {}\nRecorded in crucible.lock. Commit it, then run `crucible provision {}`.\n",
@@ -272,6 +303,11 @@ fn adopt(root: &Path, args: &AdoptArgs, output: &mut Output) -> Report {
     };
     let env = args.env.as_str();
     let Some(declared) = project.manifest.envs.get(env) else { return failed(&project.unknown(env)) };
+    let kind = match args.kind {
+        KindArg::Product => Kind::Product,
+        KindArg::Pass => Kind::Pass,
+        KindArg::Badge => Kind::Badge,
+    };
     let (source, key) = match crate::load_key(root) {
         Ok(found) => found,
         Err(failure) => return remote(None, vec![], failure, None),
@@ -281,25 +317,18 @@ fn adopt(root: &Path, args: &AdoptArgs, output: &mut Output) -> Report {
         Ok(transport) => transport,
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
     };
-    let kind = match args.kind {
-        KindArg::Product => Kind::Product,
-        KindArg::Pass => Kind::Pass,
-        KindArg::Badge => Kind::Badge,
-    };
     let mut roblox = Roblox { transport: &transport, universe: declared.universe };
     let empty = crucible_iac::lock::Lock::empty();
     let lock = project.lock.as_ref().unwrap_or(&empty);
     let mut files = Files { root: root.to_owned() };
-    match crucible_iac::provision::adopt(
-        &project.inputs(env, None),
-        lock,
-        kind,
-        &args.key,
-        args.id,
-        &mut roblox,
-        &mut files,
-    ) {
-        Ok(applied) => Report { plan: None, applied: vec![applied], error: None },
+    let inputs = project.inputs(env, None);
+    let done = match args.id {
+        Some(id) => crucible_iac::provision::adopt(&inputs, lock, kind, &args.key, id, &mut roblox, &mut files)
+            .map(|applied| (applied, vec![])),
+        None => forget(&inputs, kind, &args.key, &mut roblox, &mut files),
+    };
+    match done {
+        Ok((applied, passed)) => Report { plan: None, applied: vec![applied], error: None, passed },
         Err(Refused::Rule(message)) => failed(&Failure::usage(message)),
         Err(Refused::Remote(failure)) => remote(None, vec![], failure, Some(&source)),
         Err(Refused::Write { path, error }) => {
@@ -316,5 +345,5 @@ fn remote(
 ) -> Report {
     let auth = crucible_oc::Auth::ApiKey { scopes: None };
     let failure = auth::decorate(failure, &auth, source);
-    Report { plan, applied, error: Some((failure.code, failure.error)) }
+    Report { plan, applied, error: Some((failure.code, failure.error)), passed: vec![] }
 }

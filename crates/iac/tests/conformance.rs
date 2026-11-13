@@ -11,7 +11,7 @@ use crucible_iac::journal::{self, Journal};
 use crucible_iac::lock::Lock;
 use crucible_iac::model::{Experience, Fields, Kind, Problem};
 use crucible_iac::plan::{Action, Id, Inputs, Listed, plan, undeclared};
-use crucible_iac::provision::{Patch, Remote, Run, Stop, Store, adopt, observe};
+use crucible_iac::provision::{Patch, Remote, Run, Stop, Store, adopt, forget, observe};
 use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
 use crucible_project::Manifest;
@@ -445,18 +445,33 @@ fn resolve(world: &World) {
                 }
             }
             None => {
-                // Nothing was made for the key: drop its intent, and rename hand-made resources that share its name.
-                if let Some(mut journal) = world.journal() {
-                    journal.remove(kind, key);
-                    Files(world).save_journal(ENV, &journal).unwrap();
-                }
+                // Nothing was made for the key: rename hand-made resources that share its name, all of them while the
+                // key has an intent, because `crucible adopt --none` refuses while one does, then run it.
+                let intent = world.journal().is_some_and(|journal| journal.get(kind, key).is_some());
                 let name = world.want.borrow()[&(kind, key.to_owned())].clone();
-                let mut remote = world.remote.borrow_mut();
-                let hand: Vec<usize> = (0..remote.len())
-                    .filter(|&at| remote[at].kind == kind && remote[at].name == name && remote[at].owner.is_none())
-                    .collect();
-                for at in hand.into_iter().skip(1) {
-                    remote[at].name = format!("hand {}", remote[at].id);
+                {
+                    let mut remote = world.remote.borrow_mut();
+                    let hand: Vec<usize> = (0..remote.len())
+                        .filter(|&at| remote[at].kind == kind && remote[at].name == name && remote[at].owner.is_none())
+                        .collect();
+                    for at in hand.into_iter().skip(usize::from(!intent)) {
+                        remote[at].name = format!("hand {}", remote[at].id);
+                    }
+                }
+                if intent {
+                    let lock = world.lock();
+                    let journal = world.journal();
+                    let inputs = Inputs {
+                        experience: &experience,
+                        env_name: ENV,
+                        env,
+                        lock: lock.env(ENV),
+                        journal: journal.as_ref(),
+                        observed: None,
+                    };
+                    if let Err(refused) = forget(&inputs, kind, key, &mut Fake(world), &mut Files(world)) {
+                        world.violate(format!("crucible adopt --none refused {kind:?} {key}: {refused:?}"));
+                    }
                 }
             }
         }
@@ -768,4 +783,34 @@ fn a_paid_badge_roblox_refused_is_created_the_next_day() {
     assert!(matches!(outcome, Outcome::Done), "{outcome:?}");
     assert!(world.bound(Kind::Badge, "c").is_some());
     assert_eq!(world.remote.borrow().len(), 1);
+}
+
+/// A run that crashed after writing an intent may have sent its create. A product someone then makes by hand, under
+/// another name, is new since the intent, so the next run stops and asks, and `crucible adopt --none` lets it create.
+#[test]
+fn after_a_crash_a_hand_made_product_of_another_name_waits_for_a_person() {
+    let world = world_with(&[(Kind::Product, "a", "N1")]);
+    assert!(matches!(provision(&world, Some(1)), Outcome::Crashed));
+    assert!(world.journal().is_some_and(|journal| journal.get(Kind::Product, "a").is_some()));
+    let stranger = world.make(Kind::Product, "Something else", None, Some(5), true);
+    match provision_with(&world, &[]) {
+        Outcome::Problems(problems) => {
+            assert_eq!(problems.len(), 1, "{problems:#?}");
+            for part in ["gained 1000 (\"Something else\")", "`crucible adopt staging product a --none`"] {
+                assert!(problems[0].message.contains(part), "{}", problems[0]);
+            }
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(world.bound(Kind::Product, "a"), None);
+    resolve(&world);
+    assert!(matches!(provision_with(&world, &[]), Outcome::Done));
+    assert_ne!(world.bound(Kind::Product, "a"), Some(stranger));
+    let remote = world.remote.borrow();
+    assert_eq!(
+        (remote[0].name.as_str(), remote[0].price),
+        ("Something else", Some(5)),
+        "the hand-made one is untouched"
+    );
+    assert_eq!(remote.len(), 2);
 }
