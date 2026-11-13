@@ -334,6 +334,9 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, exper
         }
         Err(failure) => {
             eprint!("{}", relative_to_cwd(&failure.to_string()));
+            if !modules.is_empty() && crate::experience::misses_declaration(&failure) {
+                eprintln!("error: {}", crate::experience::include_declaration(&tsconfig));
+            }
             ExitCode::FAILURE
         }
     }

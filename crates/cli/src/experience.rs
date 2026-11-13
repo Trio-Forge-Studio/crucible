@@ -2,6 +2,7 @@
 //! gives each place's compile the bindings of the environment it builds for.
 
 use crate::build::Error;
+use crucible_compiler::Failure;
 use crucible_iac::bindings::{self, Build};
 use crucible_iac::lock::{self, Lock};
 use crucible_iac::model::{Experience, Kind, Lifecycle, Problem};
@@ -71,6 +72,33 @@ pub fn refuse_ungranted<'g>(manifest: &Manifest, granted: impl IntoIterator<Item
             }),
         )),
     }
+}
+
+/// Whether the compile failed because the program cannot see the declaration of `crucible:experience`.
+pub fn misses_declaration(failure: &Failure) -> bool {
+    let missing = format!("'{}'", bindings::SPECIFIER);
+    matches!(failure, Failure::Check(diagnostics)
+        if diagnostics.iter().any(|d| d.code == CANNOT_FIND_MODULE && d.message.contains(&missing)))
+}
+
+/// TypeScript's error for an import it cannot resolve.
+const CANNOT_FIND_MODULE: i32 = 2307;
+
+/// What to add to a tsconfig whose files leave out the declaration, as a path from the tsconfig's folder.
+pub fn include_declaration(tsconfig: &Path) -> String {
+    let absolute = |path: &Path| normalize(&std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
+    let from = absolute(tsconfig.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+    let to = absolute(Path::new(bindings::DECLARATION));
+    let common = from.components().zip(to.components()).take_while(|(a, b)| a == b).count();
+    let mut parts: Vec<String> = from.components().skip(common).map(|_| "..".to_owned()).collect();
+    parts.extend(to.components().skip(common).map(|part| part.as_os_str().to_string_lossy().into_owned()));
+    format!(
+        "{} does not include {}, which crucible build writes to declare {}. Add \"{}\" to its include",
+        tsconfig.display().to_string().replace('\\', "/"),
+        bindings::DECLARATION,
+        bindings::SPECIFIER,
+        parts.join("/")
+    )
 }
 
 fn environment<'m>(manifest: &'m Manifest, name: &'m str) -> Result<(&'m str, &'m crucible_project::Env), Error> {

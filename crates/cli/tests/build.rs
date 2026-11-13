@@ -1514,3 +1514,31 @@ fn a_game_whose_places_grant_none_of_its_products_fails_and_names_each_one() {
     assert!(!stderr.contains("old-pack"), "a retired product needs no grant: {stderr}");
     assert!(!game.path("out").exists() && !game.path("build").exists(), "nothing was written");
 }
+
+#[test]
+fn a_place_whose_tsconfig_leaves_out_the_declaration_is_told_which_file_to_include() {
+    let game = experience_game();
+    game.config(|c| c["include"] = json!(["src/server", "src/shared"]));
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 1);
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("error TS2307: Cannot find module 'crucible:experience'"), "{stderr}");
+    assert!(
+        stderr.contains(
+            "error: tsconfig.json does not include src/crucible-experience.d.ts, which crucible build writes to declare \
+             crucible:experience. Add \"src/crucible-experience.d.ts\" to its include\n"
+        ),
+        "{stderr}"
+    );
+
+    game.json("config/tsconfig.json", &json!({ "extends": "../tsconfig.json", "include": ["../src/server"] }));
+    game.write("crucible.toml", &EXPERIENCE.replace("project = ", "tsconfig = \"config/tsconfig.json\"\nproject = "));
+    let stderr = text(&game.build(&[]).stderr);
+    assert!(
+        stderr.contains(
+            "error: config/tsconfig.json does not include src/crucible-experience.d.ts, which crucible build writes to \
+             declare crucible:experience. Add \"../src/crucible-experience.d.ts\" to its include\n"
+        ),
+        "{stderr}"
+    );
+}
