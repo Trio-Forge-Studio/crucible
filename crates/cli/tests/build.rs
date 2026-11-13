@@ -1379,9 +1379,38 @@ fn a_place_that_maps_no_output_folder_under_replicated_storage_cannot_hold_the_b
     let stderr = text(&out.stderr);
     assert!(
         stderr.contains("maps no folder of ")
-            && stderr.contains(" under ReplicatedStorage, where crucible:experience goes. Map one, such as out/shared"),
+            && stderr.contains(
+                " under ReplicatedStorage, where crucible:experience goes. Map one, such as out/shared. A project that \
+                 maps each file by itself, such as one Rogen generates, still needs one folder mapping under \
+                 ReplicatedStorage inside out, where the build puts the handles module: add a node such as \
+                 \"Crucible\": { \"$path\": \"out/crucible\" } under its ReplicatedStorage"
+            ),
         "{stderr}"
     );
+}
+
+#[test]
+fn a_project_that_maps_each_file_by_itself_is_told_the_one_folder_mapping_the_handles_need() {
+    let game = experience_game();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("TS");
+    project["tree"]["ReplicatedStorage"]["Greeting"] = json!({ "$path": "out/shared/greeting.luau" });
+    project["tree"]["ServerScriptService"]["TS"] =
+        json!({ "$className": "Folder", "Main": { "$path": "out/server/main.server.luau" } });
+    game.json("default.project.json", &project);
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 1);
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("add a node such as \"Crucible\": { \"$path\": \"out/crucible\" } under its ReplicatedStorage"),
+        "{stderr}"
+    );
+
+    project["tree"]["ReplicatedStorage"]["Crucible"] = json!({ "$path": "out/crucible" });
+    game.json("default.project.json", &project);
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.path("out/crucible/crucible-experience.luau").exists(), "the handles go in the one mapped folder");
 }
 
 #[test]
