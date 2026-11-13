@@ -142,7 +142,7 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 
 ```text
 staging (universe 10772177432)
-  update  experience settings                       10772177432  details, private_server_price = 100, voice_chat = false
+  update  experience settings                      10772177432  details, private_server_price = 100, voice_chat = false
   create  product coin-pack    Products.CoinPack
   create  pass vip             Passes.Vip
   create  badge first-pickup   Badges.FirstPickup
