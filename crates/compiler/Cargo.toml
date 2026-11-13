@@ -26,3 +26,4 @@ test-support = []
 # Tests and examples build with dev-dependencies, so this turns test-support on for them and for nothing else.
 [dev-dependencies]
 crucible-compiler = { path = ".", features = ["test-support"] }
+proptest = "1"

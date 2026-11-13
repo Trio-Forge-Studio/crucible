@@ -32,6 +32,8 @@ strip = true
 
 [profile.dev.package]
 fancy-regex.opt-level = 3
+proptest.opt-level = 3
+rand_chacha.opt-level = 3
 regex-automata.opt-level = 3
 regex-syntax.opt-level = 3
 syntect.opt-level = 3
