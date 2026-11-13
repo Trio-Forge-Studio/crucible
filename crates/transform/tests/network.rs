@@ -3251,7 +3251,7 @@ fn cru039_lets_a_place_grant_a_retired_product_once_or_not_at_all() {
 }
 
 #[test]
-fn cru039_says_which_grants_it_cannot_read_when_they_go_through_a_helper() {
+fn cru039_reports_only_the_grant_it_cannot_read_when_it_goes_through_a_helper() {
     let game = experience_game();
     game.write(
         "src/server/shop.ts",
@@ -3260,16 +3260,10 @@ fn cru039_says_which_grants_it_cannot_read_when_they_go_through_a_helper() {
     let facts = game.analyze().unwrap_or_else(|d| panic!("the game type-checks:\n{}", lines(&d)));
     let found: Vec<_> =
         facts.diagnostics.iter().filter(|d| d.code == 90039).map(|d| (d.line, d.message.as_str())).collect();
-    let (unkeyed, missing): (Vec<_>, Vec<_>) =
-        found.iter().partition(|(_, message)| message.contains("whose key the compiler cannot see"));
-    assert_eq!((unkeyed.len(), missing.len()), (1, 2), "{found:?}");
-    for &(line, message) in missing {
-        assert_eq!(line, 4, "at the helper's grant: {message}");
-        assert!(
-            message.contains(". This place's grants take handles whose keys the compiler cannot see, so a purchase"),
-            "{message}"
-        );
-    }
+    assert_eq!(found.len(), 1, "only the grant the developer can fix, not a missing grant per product: {found:?}");
+    let (line, message) = found[0];
+    assert_eq!(line, 4, "at the helper's grant: {message}");
+    assert!(message.contains("whose key the compiler cannot see"), "{message}");
 }
 
 #[test]

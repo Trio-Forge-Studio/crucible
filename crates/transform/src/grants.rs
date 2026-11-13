@@ -86,15 +86,15 @@ impl Grants {
     }
 
     /// Reports each product the program declares and never grants at the program's first grant, once it grants any.
+    /// A grant whose key the compiler cannot see is already an error, and fixing it may grant any product.
     pub(crate) fn finish(&self, cx: &mut ProgramCx<'_>, api: &Api) {
-        let Some(first) = self.first else { return };
+        let Some(first) = self.first.filter(|_| !self.unkeyed) else { return };
         for (key, handle, declared) in declared_products(cx, api) {
             if self.by_key.contains_key(&key) || handle.retired {
                 continue;
             }
             let granted: Vec<_> = self.by_key.values().flatten().map(String::as_str).collect();
             let elsewhere = match granted.as_slice() {
-                [] if self.unkeyed => "This place's grants take handles whose keys the compiler cannot see".to_owned(),
                 [] => "This place grants products only by ID".to_owned(),
                 _ => format!("This place grants other products at {}", granted.join(", ")),
             };
