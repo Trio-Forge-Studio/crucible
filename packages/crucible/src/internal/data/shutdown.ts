@@ -7,11 +7,11 @@ import {
 	SHUTDOWN_FALLBACK_SECONDS,
 } from "./limits";
 import type { DataEngine } from "./profiles";
-import { Phase } from "./session";
+import { abandoned, Phase } from "./session";
 
 function pending(engine: DataEngine): boolean {
 	for (const runtime of engine.profiles)
-		for (const [, session] of runtime.sessions) if (session.phase !== Phase.Ended) return true;
+		for (const [, session] of runtime.sessions) if (session.authority.phase !== Phase.Ended) return true;
 	return false;
 }
 
@@ -31,8 +31,9 @@ export function shutdownData(engine: DataEngine, subsystem?: Subsystem) {
 	engine.receipts.close();
 	for (const runtime of engine.profiles)
 		for (const [, session] of runtime.sessions) {
-			if (session.phase === Phase.Loading) session.abandoned = true;
-			else if (session.phase === Phase.Active && session.revision > session.confirmed) runtime.flush(session);
+			const state = session.authority;
+			if (state.phase === Phase.Loading) session.authority = abandoned(state);
+			else if (state.phase === Phase.Active && session.revision > session.confirmed) runtime.flush(session);
 		}
 	engine.wake();
 	const others = () => (subsystem === undefined ? 0 : (shutdownProgress(subsystem)?.pending ?? 0));
@@ -40,7 +41,7 @@ export function shutdownData(engine: DataEngine, subsystem?: Subsystem) {
 	engine.finalPhase = true;
 	for (const runtime of engine.profiles)
 		for (const [, session] of runtime.sessions)
-			if (session.phase === Phase.Active) runtime.release(session, "shutdown");
+			if (session.authority.phase === Phase.Active) runtime.release(session, "shutdown");
 	while (bootClock() < settleAt && pending(engine)) port.wait(0);
 	engine.settled = true;
 	engine.wake();

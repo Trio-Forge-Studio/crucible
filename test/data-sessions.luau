@@ -106,14 +106,14 @@ local function onlyTheRelease(queue)
 	local old = session(a, pa)
 	queue(a, pa)
 	backend:advance(bound - 1 - backend.now)
-	assert(old.writing ~= nil and not old.releaseWanted, "a renewal or save is queued before the safe bound")
+	assert(old.writing ~= nil and not old.authority.releasing, "a renewal or save is queued before the safe bound")
 	backend:advance(1.05)
-	spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+	spec.eq(old.authority.by, "authority", "sealed because the safe bound passed")
 	backend:advance(bound + 0.25 - backend.now)
 	recover(backend)
 	backend:advance(3)
 	spec.eq(committedAfter(backend, a, bound), 1, "one commit after the safe bound")
-	spec.eq(old.released, "committed", "and it is the release")
+	spec.eq(old.authority.released, "committed", "and it is the release")
 	spec.eq(stored(backend).lease, nil, "the lease is released, never extended after the seal")
 end
 
@@ -126,11 +126,11 @@ local function onlyTheReleaseJustAfter(queue)
 	local old = session(a, pa)
 	queue(a, pa)
 	backend:advance(bound + 0.05 - backend.now)
-	spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+	spec.eq(old.authority.by, "authority", "sealed because the safe bound passed")
 	recover(backend)
 	backend:advance(3)
 	spec.eq(committedAfter(backend, a, bound), 1, "one commit after the safe bound")
-	spec.eq(old.released, "committed", "and it is the release")
+	spec.eq(old.authority.released, "committed", "and it is the release")
 	spec.eq(stored(backend).lease, nil, "the lease is released, never extended after the seal")
 end
 
@@ -207,7 +207,7 @@ return {
 		retry.release()
 		backend:advance(0.5)
 		spec.eq(sess.confirmed, 1, "the already confirmed only what it found")
-		spec.eq(sess.durable.R, nil, "R is not durable")
+		spec.eq((sess:durable("R") or nil), nil, "R is not durable")
 		spec.eq(waiting.done, false, "a save of revision 2 keeps waiting")
 		assert(#next.parked == 1, "the next operation carries R and has not committed")
 		a.crash()
@@ -223,7 +223,7 @@ return {
 		end
 		spec.eq(lb.value, true, "rejoined elsewhere")
 		local fresh = session(b, pb)
-		spec.eq(fresh.durable.R, nil, "R was never acknowledged, so a redelivery grants once")
+		spec.eq((fresh:durable("R") or nil), nil, "R was never acknowledged, so a redelivery grants once")
 		spec.eq(fresh.revision, 0, "revision 0 is the loaded record")
 		spec.eq(fresh.confirmed, NONE, "nothing confirmed for the new token")
 	end,
@@ -250,7 +250,7 @@ return {
 		backend:advance(0.5)
 		spec.eq(waiting.value, "ok", "ok once the next operation committed revision 2")
 		spec.eq(stored(backend).commit.revision, 2, "disk holds revision 2")
-		spec.eq(sess.durable.R, true, "the staged id is durable once a confirmed envelope holds it")
+		spec.eq((sess:durable("R") or nil), true, "the staged id is durable once a confirmed envelope holds it")
 	end,
 	["rule 37 R1 a new session's first save with an update waits for its own commit"] = function()
 		for _, update in { true, false } do
@@ -771,7 +771,7 @@ return {
 		local old = session(a, pa)
 		local bound = lastCommitted(backend, a).at + a.limits.LOCAL_AUTHORITY_SECONDS
 		backend:advance(bound - backend.now + 1)
-		spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+		spec.eq(old.authority.by, "authority", "sealed because the safe bound passed")
 		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "kicked at the safe bound")
 		spec.eq(stored(backend).lease.token, old.token, "the lease is still the sealed session's")
 		backend:advance(4)
@@ -779,7 +779,7 @@ return {
 		backend:advance(10)
 		local release = lastCommitted(backend, a)
 		assert(release.at > bound, `the release was sent {release.at - bound} s after the safe bound`)
-		spec.eq(old.released, "committed", "the release committed")
+		spec.eq(old.authority.released, "committed", "the release committed")
 		local envelope = stored(backend)
 		spec.eq(envelope.lease, nil, "the lease is released")
 		spec.eq(envelope.payload.coins, 41, "with the sealed session's newest revision")
@@ -795,7 +795,7 @@ return {
 		-- B's wall clock runs 30 s ahead, so B takes A's lease while A's release may still try (rule 25's step).
 		b.wallOffset += 30
 		backend:advance(bound - backend.now + 1)
-		spec.eq(old.sealedBy, "authority", "sealed because the safe bound passed")
+		spec.eq(old.authority.by, "authority", "sealed because the safe bound passed")
 		local pb = b.join(USER)
 		local lb = b.run(function()
 			return b.store:load(pb, "join")
@@ -810,7 +810,7 @@ return {
 			tried = tried or (call.at > bound + 2 and call.outcome ~= nil and call.outcome.kind == "ok")
 		end
 		assert(tried, "the sealed session's release was attempted after the newer owner acquired")
-		spec.eq(old.released, "fenced", "the release cancelled against the newer owner")
+		spec.eq(old.authority.released, "fenced", "the release cancelled against the newer owner")
 		local envelope = stored(backend)
 		spec.eq(envelope.lease.token, taken.lease.token, "the newer owner keeps the lease")
 		spec.eq(envelope.epoch, taken.epoch, "nothing was written over the newer owner")
@@ -833,13 +833,13 @@ return {
 	end,
 	["rule 26 K17 a release recovered 0.3 s before its lease expires still commits"] = function()
 		local backend, _, old = releaseRecovered(-0.3)
-		spec.eq(old.released, "committed", "the release committed")
+		spec.eq(old.authority.released, "committed", "the release committed")
 		spec.eq(stored(backend).lease, nil, "the lease is released")
 		spec.eq(stored(backend).payload.coins, 41, "with the sealed revision")
 	end,
 	["rule 26 K17 a release recovered 0.3 s after its lease expires had given up"] = function()
 		local backend, a, old, expiry = releaseRecovered(0.3)
-		spec.eq(old.released, "given up", "the release gave up")
+		spec.eq(old.authority.released, "given up", "the release gave up")
 		spec.eq(stored(backend).lease.token, old.token, "the lease was left to expire")
 		for _, call in backend:callsTo({ server = a.id }) do
 			assert(call.at < expiry, `a call was sent {call.at - expiry} s after the lease expired`)

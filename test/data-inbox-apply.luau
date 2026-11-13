@@ -60,7 +60,7 @@ local function staleMark(reason: string)
 	spec.eq(live.generation, generation + 2, "the retry raised the generation again")
 	spec.eq(live.attempts, 0, "and reset the attempts")
 	backend:advance(80)
-	spec.eq(session.sealedBy, "authority", "the old session lost authority")
+	spec.eq(session.authority.by, "authority", "the old session lost authority")
 	clear(backend)
 	local calls = 0
 	a.store.inbox:receive(D2.lenient("grant"), function(_, data)
@@ -117,13 +117,13 @@ local function releaseRoute()
 	spec.eq(live.generation, 2, "live at generation 2")
 	spec.eq(live.attempts, 0, "with no attempts")
 	backend:advance(70.5 - backend.now)
-	spec.eq(old.sealedBy, "authority", "A sealed when its safe bound passed")
+	spec.eq(old.authority.by, "authority", "A sealed when its safe bound passed")
 	spec.eq(old.marks[id].generation, 0, "and still holds the mark from generation 0")
 	spec.eq(inbox(backend)[1].generation, 2, "nothing reached the disk while A's requests failed")
 	backend:advance(75 - backend.now)
 	clear(backend)
 	backend:advance(15)
-	spec.eq(old.released, "committed", "the release committed")
+	spec.eq(old.authority.released, "committed", "the release committed")
 	local release
 	for _, call in backend:callsTo({ server = a.id }) do
 		if call.committed then
@@ -516,7 +516,7 @@ return {
 			return { coins = 9, gems = 0 }
 		end)
 		backend:advance(80)
-		spec.eq(D2.session(a, player).sealedBy, "authority", "the session lost authority")
+		spec.eq(D2.session(a, player).authority.by, "authority", "the session lost authority")
 		clear(backend)
 		a.leave(player)
 		local again = a.join(D2.USER)
