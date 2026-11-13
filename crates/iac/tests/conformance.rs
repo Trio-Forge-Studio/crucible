@@ -86,6 +86,8 @@ struct World {
     violations: RefCell<Vec<String>>,
     /// The resources the current run sent an update to.
     updated: RefCell<Vec<(Kind, Id)>>,
+    /// Tables added to the config after the declared keys.
+    extra: RefCell<String>,
 }
 
 impl World {
@@ -98,7 +100,7 @@ impl World {
                 text += "price = 10\n";
             }
         }
-        text
+        text + &self.extra.borrow()
     }
 
     fn lock(&self) -> Lock {
@@ -813,4 +815,21 @@ fn after_a_crash_a_hand_made_product_of_another_name_waits_for_a_person() {
         "the hand-made one is untouched"
     );
     assert_eq!(remote.len(), 2);
+}
+
+/// A retired key whose resource Roblox no longer has sends nothing, and the run records it retired.
+#[test]
+fn a_retired_key_whose_resource_is_gone_sends_nothing() {
+    let world = world_with(&[(Kind::Product, "a", "N1")]);
+    assert!(matches!(provision_with(&world, &[]), Outcome::Done));
+    world.want.borrow_mut().clear();
+    *world.extra.borrow_mut() = "\n[products.a]\nname = \"N1\"\nprice = 10\nretired = true\n".into();
+    world.remote.borrow_mut().clear();
+    for run in 0..2 {
+        let outcome = provision(&world, None);
+        assert!(matches!(outcome, Outcome::Done), "run {run}: {outcome:?}");
+        assert_eq!(*world.updated.borrow(), [], "run {run}: no update goes to a resource that is gone");
+    }
+    let entry = world.lock().env(ENV).unwrap().entries(Kind::Product)["a"].clone();
+    assert_eq!(entry.status, crucible_iac::lock::Status::Retired);
 }

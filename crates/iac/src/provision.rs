@@ -288,7 +288,9 @@ impl Run {
                         Action::Untrack => changes.push(record(resource, from, None, Action::Untrack)),
                         Action::Retire => {
                             let patch = Patch { on: Some(false), ..Patch::default() };
-                            if remote.is_none_or(|remote| remote.on) {
+                            // A retire of a resource Roblox no longer has would fail on every run. The plan accepts
+                            // it gone, so only the lock records it retired.
+                            if remote.is_some_and(|remote| remote.on) {
                                 changes.push(Effect::Update { kind, key: resource.key.clone(), id: entry.id, patch });
                             }
                             let retired = Entry { status: Status::Retired, ..entry.clone() };
