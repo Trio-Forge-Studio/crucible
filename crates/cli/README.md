@@ -18,7 +18,7 @@ cargo build --release --locked --package crucible
 
 ## npm packages
 
-The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package holds a Node shim and the `crucible` bin. npm reserves the unscoped `crucible` name, so the CLI ships in the `@trioforge` scope. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-darwin-arm64`, `@trioforge/crucible-cli-win32-x64`, and `@trioforge/crucible-cli-linux-x64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package.
+The CLI ships on npm the way oxlint does. The `@trioforge/crucible-cli` package holds a Node shim and the `crucible` bin. npm reserves the unscoped `crucible` name, so the CLI ships in the `@trioforge` scope. Each supported platform has its own package with the binary: `@trioforge/crucible-cli-darwin-arm64`, `@trioforge/crucible-cli-win32-x64`, and `@trioforge/crucible-cli-linux-x64`. The shim lists them as optional dependencies, so npm and pnpm install only the one that matches the machine's `os` and `cpu`. The shim runs that binary with the same arguments and exits with its code. If the platform package is missing, the shim exits 1 and names the package. On Windows it runs `upgrade` from a copy of the binary in the temporary folder, because the upgrade's install replaces the platform package and Windows cannot delete a running binary. It also deletes the old binaries that npm and pnpm moved aside beside the platform package when an older shim ran the upgrade in place.
 
 `crates/cli/npm/stage.mjs` writes the packages from built binaries. Every package takes its version from `[workspace.package]` in `Cargo.toml`. The runtime, CLI, and npm packages use the root MIT license. The Cargo crates remain unpublished on crates.io.
 
@@ -87,7 +87,7 @@ Run `pnpm build` from the repository root first. The npm package test packs the 
 
 `npx crucible upgrade` runs the game's installed, older binary. It resolves the version, bumps `package.json`, and installs. Then it hands off to the newly installed binary, which compares the old template with its own, writes the files, and prints the report. The reconcile rules live in the newer binary, so a fix to them reaches games still on an older version. The install step stays in the old binary, so a fix to how a released version installs reaches only later upgrades.
 
-The npm package test stages the current binary at the CLI version and again at the next patch version, serves both from a local registry in a worker thread (`npm/test-registry.mjs`, which passes other packages through to npmjs), creates a game at the first version, upgrades it, and runs its `check`. The next version reuses the binary, so its shim reports the next version and rewrites the old snapshot it receives to stand in for a changed template and docs. The test also drives a failed install and its retry, and a pnpm game under `CI=true`.
+The npm package test stages the current binary at the CLI version and again at the next patch version, serves both from a local registry in a worker thread (`npm/test-registry.mjs`, which passes other packages through to npmjs), creates a game at the first version, upgrades it, and runs its `check`. The next version reuses the binary, so its shim reports the next version and rewrites the old snapshot it receives to stand in for a changed template and docs. The test also drives a failed install and its retry, and a pnpm game with the hoisted layout under `CI=true`. It checks that each upgrade leaves no old binary beside the platform package.
 
 ## Upgrade hand-off contract
 
@@ -103,7 +103,7 @@ Every released binary keeps this contract with every other, because an old binar
 
    `owned` lists every file the old binary's template owns. `content` is the whole rendered file, and `section` is the heading of the part it owns, or `null` for the whole file. The reading binary cuts sections with its own rules. `docs` maps each topic name to the lowercase hex SHA-256 of the topic's Markdown bytes, exactly as `crucible docs <topic> --plain` prints them.
 4. The new binary inherits the old binary's stdout and stderr. It prints the report on stdout and diagnostics on stderr. Exit 0 means the report is complete, and any other exit means the refresh did not finish. With no exit within 120 seconds, the old binary kills the process tree. On any failure the old binary exits 1 and says the template was not refreshed.
-5. The new binary treats the old template as unknown, which lists differing files and writes none, when the snapshot's format is higher than its own, when the snapshot's `version` differs from `<old version>`, or when either old spec is a range it can evaluate that excludes `<old version>`.
+5. The new binary treats the old template as unknown, which lists differing files and writes none, when the snapshot's format is higher than its own, when the snapshot's `version` differs from `<old version>` and the two old specs are not both ranges it can evaluate that include the snapshot's `version`, or when either old spec is a range it can evaluate that excludes the snapshot's `version`.
 
 Skew rules for the snapshot:
 
