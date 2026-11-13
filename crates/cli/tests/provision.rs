@@ -390,3 +390,74 @@ fn a_failed_settings_update_names_the_settings_and_writes_no_fingerprint() {
     let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
     assert!(!lock.contains("[env.staging.experience]"), "{lock}");
 }
+
+fn introspection(server: &MockServer, scopes: Value, enabled: bool) -> httpmock::Mock<'_> {
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect").json_body(json!({"apiKey": "test-key"}));
+        then.status(200).json_body(json!({"name": "ci", "enabled": enabled, "expired": false, "scopes": scopes}));
+    })
+}
+
+#[test]
+fn a_key_without_the_read_scopes_stops_provision_before_its_first_list() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, badges) = lists(&server, vec![], vec![]);
+    introspection(&server, json!([{"name": "universe-places", "operations": ["write"]}]), true);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(document["error"]["missingScopes"], json!(["developer-product:read"]), "{document}");
+    assert!(document["error"]["message"].as_str().unwrap().contains("the key lacks developer-product:read"));
+    products.assert_calls(0);
+    badges.assert_calls(0);
+}
+
+#[test]
+fn a_key_without_the_write_scopes_stops_provision_after_listing_and_before_any_write() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    introspection(&server, json!([{"name": "developer-product", "operations": ["read"]}]), true);
+    let create = server.mock(|when, then| {
+        when.method(Method::POST);
+        then.status(200).json_body(product(77));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(
+        document["error"]["missingScopes"],
+        json!(["developer-product:write", "legacy-universe.badge:manage-and-spend-robux"]),
+        "{document}"
+    );
+    assert_eq!(document["applied"], json!([]));
+    products.assert_calls(1);
+    create.assert_calls(0);
+    assert!(!dir.path().join(".crucible/journal/staging.json").exists(), "no intent was written");
+
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "a dry run writes nothing, so it needs only the read scopes");
+}
+
+#[test]
+fn a_disabled_key_stops_provision_and_an_unanswered_introspection_does_not() {
+    let dir = project();
+    let server = MockServer::start();
+    let (products, _) = lists(&server, vec![], vec![]);
+    let mut disabled = introspection(&server, json!([]), false);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    assert_eq!(document(&out)["error"]["message"], "the key is disabled or expired");
+    products.assert_calls(0);
+
+    disabled.delete();
+    server.mock(|when, then| {
+        when.method(Method::POST).path("/api-keys/v1/introspect");
+        then.status(403);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("Could not check the key's scopes"), "{}", text(&out.stderr));
+    products.assert_calls(1);
+}

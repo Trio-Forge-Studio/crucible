@@ -25,7 +25,7 @@ use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::io::{self, Write};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 /// Roblox, as provision reaches it. `crucible_oc`'s typed operations implement it in `oc`, and tests fake it.
@@ -115,8 +115,26 @@ fn sync_folder(folder: &Path) {
     let _ = folder;
 }
 
-/// Lists each kind the environment declares or its lock or journal holds, and reads by ID each lock ID a list lacks,
-/// so the plan can tell a resource that is gone from one the list left out.
+/// The kinds `observe` lists: each kind the environment declares or its lock or journal holds.
+pub fn listed_kinds(
+    experience: &Experience,
+    env: &crucible_project::Env,
+    lock: Option<&EnvLock>,
+    journal: Option<&Journal>,
+) -> Vec<Kind> {
+    let declared = experience.resolve(env);
+    Kind::ALL
+        .into_iter()
+        .filter(|&kind| {
+            declared.iter().any(|resource| resource.kind == kind)
+                || lock.is_some_and(|lock| !lock.entries(kind).is_empty())
+                || journal.is_some_and(|journal| journal.intents.iter().any(|intent| intent.kind == kind))
+        })
+        .collect()
+}
+
+/// Lists each of `listed_kinds`, and reads by ID each lock ID a list lacks, so the plan can tell a resource that is
+/// gone from one the list left out.
 pub fn observe(
     experience: &Experience,
     env: &crucible_project::Env,
@@ -124,16 +142,9 @@ pub fn observe(
     journal: Option<&Journal>,
     remote: &mut dyn Remote,
 ) -> Result<Observed, Failure> {
-    let declared = experience.resolve(env);
     let mut observed = Observed::default();
-    for kind in Kind::ALL {
+    for kind in listed_kinds(experience, env, lock, journal) {
         let locked = lock.map(|lock| lock.entries(kind));
-        let needed = declared.iter().any(|resource| resource.kind == kind)
-            || locked.is_some_and(|entries| !entries.is_empty())
-            || journal.is_some_and(|journal| journal.intents.iter().any(|intent| intent.kind == kind));
-        if !needed {
-            continue;
-        }
         let listed = remote.list(kind)?;
         for entry in locked.into_iter().flat_map(|entries| entries.values()) {
             if !listed.iter().any(|listed| listed.id == entry.id) {
@@ -178,6 +189,19 @@ pub enum Stop {
         key: String,
         other: String,
     },
+}
+
+/// A write a run will send to Roblox, for the scopes it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Write {
+    Create(Kind),
+    /// An update of a resource. A badge's details and its icon go through two operations.
+    Update {
+        kind: Kind,
+        details: bool,
+        icon: bool,
+    },
+    Settings,
 }
 
 enum Effect {
@@ -357,6 +381,26 @@ impl Run {
             known,
             applied: Vec::new(),
         })
+    }
+
+    /// The writes the run has left to send, in order.
+    pub fn writes(&self) -> Vec<Write> {
+        self.queue
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Create { kind, .. } => Some(Write::Create(*kind)),
+                Effect::Update { kind, patch, .. } => Some(Write::Update {
+                    kind: *kind,
+                    details: patch.name.is_some()
+                        || patch.description.is_some()
+                        || patch.price.is_some()
+                        || patch.on.is_some(),
+                    icon: patch.icon.is_some(),
+                }),
+                Effect::Settings(_) => Some(Write::Settings),
+                _ => None,
+            })
+            .collect()
     }
 
     /// What the run has done so far.

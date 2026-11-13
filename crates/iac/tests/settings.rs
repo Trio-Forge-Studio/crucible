@@ -131,3 +131,26 @@ fn a_failed_settings_update_stops_the_run_and_leaves_the_lock_as_it_was() {
     let (sent, ended) = provision(&mut disk, &mut roblox, "voice_chat = true\n");
     assert_eq!((sent.len(), ended.unwrap()), (1, vec![Action::Update]));
 }
+
+#[test]
+fn a_run_that_writes_settings_lists_the_write_and_one_that_sends_nothing_does_not() {
+    use crucible_iac::provision::Write;
+    for (table, writes) in [("voice_chat = true\n", vec![Write::Settings]), ("", vec![])] {
+        let manifest = Manifest::parse(&format!("{PLACES}\n[experience]\n{table}")).unwrap();
+        let experience = Experience::new(&manifest).unwrap();
+        let mut read = |_: &Path| -> io::Result<Vec<u8>> { unreachable!("nothing has an icon") };
+        let env = &manifest.envs["staging"];
+        let observed = observe(&experience, env, None, None, &mut Roblox::default()).unwrap();
+        let inputs = Inputs {
+            experience: &experience,
+            env_name: "staging",
+            env,
+            lock: None,
+            journal: None,
+            observed: Some(&observed),
+        };
+        let plan = plan(&inputs, &mut read).unwrap();
+        let run = Run::new(&inputs, &plan, &Lock::empty(), &mut read).unwrap();
+        assert_eq!(run.writes(), writes, "{table:?}");
+    }
+}

@@ -2,7 +2,8 @@
 
 use crate::model::{Fields, Kind, ResolvedSettings};
 use crate::plan::{Id, Listed};
-use crate::provision::{Patch, Remote};
+use crate::provision::{Patch, Remote, Write};
+use crucible_oc::Scope;
 use crucible_oc::ops::{
     self, BadgeDetails, Details, Image, Sellable, UniverseSettings, badges, passes, products, universes,
 };
@@ -12,6 +13,60 @@ use crucible_oc::transport::Transport;
 pub struct Roblox<'t, 'a> {
     pub transport: &'t Transport<'a>,
     pub universe: Id,
+}
+
+/// The scopes the calls need that list and read `reads` and send `writes`, as `crucible-oc`'s operations declare them,
+/// each once and in order. A public badge read needs none.
+pub fn scopes(reads: &[Kind], writes: &[Write]) -> Vec<Scope> {
+    let id = Id::MIN;
+    let mut scopes = Vec::new();
+    for kind in reads {
+        match kind {
+            Kind::Product => {
+                scopes.extend(products::list(id).scopes());
+                scopes.extend_from_slice(products::get(id, id).scopes());
+            }
+            Kind::Pass => {
+                scopes.extend(passes::list(id).scopes());
+                scopes.extend_from_slice(passes::get(id, id).scopes());
+            }
+            Kind::Badge => {
+                scopes.extend(badges::list_public(id).scopes());
+                scopes.extend_from_slice(badges::get_public(id).scopes());
+            }
+        }
+    }
+    let details = Details::default();
+    for write in writes {
+        match *write {
+            Write::Create(Kind::Product) => scopes.extend_from_slice(products::create(id, &details).scopes()),
+            Write::Create(Kind::Pass) => scopes.extend_from_slice(passes::create(id, &details).scopes()),
+            Write::Create(Kind::Badge) => scopes.extend_from_slice(badges::create(id, "", "", true, None).scopes()),
+            Write::Update { kind: Kind::Product, .. } => {
+                scopes.extend_from_slice(products::update(id, id, &details).scopes());
+            }
+            Write::Update { kind: Kind::Pass, .. } => {
+                scopes.extend_from_slice(passes::update(id, id, &details).scopes())
+            }
+            Write::Update { kind: Kind::Badge, details, icon } => {
+                if details {
+                    scopes.extend_from_slice(badges::update(id, &BadgeDetails::default()).scopes());
+                }
+                if icon {
+                    let image = Image { file_name: String::new(), content_type: String::new(), bytes: vec![] };
+                    scopes.extend_from_slice(badges::overwrite_icon(id, image).scopes());
+                }
+            }
+            Write::Settings => {
+                let settings = UniverseSettings { voice_chat: Some(true), ..UniverseSettings::default() };
+                let op = universes::update(id, &settings).expect("a setting is set");
+                scopes.extend_from_slice(op.scopes());
+            }
+        }
+    }
+    scopes.sort();
+    scopes.dedup();
+    scopes
 }
 
 fn sellable(item: Sellable) -> Listed {

@@ -10,7 +10,11 @@ npx crucible provision staging
 git add crucible.lock && git commit -m "chore(experience): provision staging"
 ```
 
-It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon and `universe:write` to write experience settings. Badges are listed through Roblox's public badge endpoint, which needs no key. Run one provision per environment at a time: the lock is a file, and nothing stops two machines from both creating a resource.
+It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon and `universe:write` to write experience settings. Badges are listed through Roblox's public badge endpoint, which needs no key.
+
+Before its first list, provision posts the key to Roblox's key introspection endpoint. It stops with exit 3 when the key is disabled or expired, or lacks a scope the lists need. After it plans, and before its first write, it stops with exit 3 when the key lacks a scope the plan's writes need, such as `legacy-badge:manage` only when a badge icon changes. `error.missingScopes` lists each missing scope. `--dry-run` writes nothing, so it checks only the read scopes. The check is advisory: when the introspection itself fails, provision prints why on stderr and goes on, and a call that lacks a scope fails by itself.
+
+Run one provision per environment at a time: the lock is a file, and nothing stops two machines from both creating a resource.
 
 ## What a run does
 
@@ -66,7 +70,7 @@ The plan's stops change nothing. Exit codes follow `crucible oc`, plus exit 1 fo
 | 0 | The plan was applied, or printed with `--dry-run`. |
 | 1 | A file could not be read or written, or provision caught a bug in itself before it sent the create, with `error.kind` `internal`. |
 | 2 | A file is invalid, the environment is unknown, or the plan stops. `error.problems` lists each cause with its `file`, `key` and `line`. |
-| 3 | The key is missing, or Roblox refused it. |
+| 3 | The key is missing, disabled, expired or lacks a scope the run needs, or Roblox refused it. |
 | 4 | Roblox rejected a request. |
 | 5 | A create or an update may have landed. `error.resource` names it. Run provision again: it looks before it writes. |
 | 7 | Roblox was unavailable. Nothing was left unknown. |

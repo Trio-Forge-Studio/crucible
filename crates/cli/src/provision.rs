@@ -3,7 +3,7 @@ use crate::plan::{Failure, Project, render};
 use crucible_iac::model::Kind;
 use crucible_iac::oc::Roblox;
 use crucible_iac::plan::{Plan, plan, undeclared};
-use crucible_iac::provision::{Applied, Files, Refused, Run, Stop, forget, observe};
+use crucible_iac::provision::{Applied, Files, Refused, Run, Stop, forget, listed_kinds, observe};
 use crucible_oc::auth;
 use crucible_oc::transport::{Event, Sink, SystemClock, Timing, Transport};
 use serde_json::{Value, json};
@@ -130,8 +130,16 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
         Ok(transport) => transport,
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
     };
-    let mut roblox = Roblox { transport: &transport, universe: declared.universe };
     let lock = project.lock.as_ref().and_then(|lock| lock.env(env));
+    let key = match crate::scopes::introspect(&transport, output) {
+        Ok(key) => key,
+        Err(failure) => return remote(None, vec![], failure, Some(&source)),
+    };
+    let reads = listed_kinds(&project.experience, declared, lock, project.journals.get(env));
+    if let Err(failure) = crate::scopes::require(key.as_ref(), &crucible_iac::oc::scopes(&reads, &[])) {
+        return remote(None, vec![], failure, Some(&source));
+    }
+    let mut roblox = Roblox { transport: &transport, universe: declared.universe };
     let observed = match observe(&project.experience, declared, lock, project.journals.get(env), &mut roblox) {
         Ok(observed) => observed,
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
@@ -155,6 +163,9 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
             return Report { plan: Some(plan), ..failed(&failure) };
         }
     };
+    if let Err(failure) = crate::scopes::require(key.as_ref(), &crucible_iac::oc::scopes(&[], &run.writes())) {
+        return remote(Some(plan), vec![], failure, Some(&source));
+    }
     let mut files = Files { root: root.to_owned() };
     let stopped = loop {
         match run.step(&mut roblox, &mut files) {

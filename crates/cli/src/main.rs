@@ -12,6 +12,7 @@ mod plan;
 mod provision;
 mod publish;
 mod reactive_packages;
+mod scopes;
 mod upgrade;
 mod whoami;
 
