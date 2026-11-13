@@ -35,7 +35,7 @@ Before a create, provision writes an intent to `.crucible/journal/<env>.json`: t
 | the create | finds the resource by its declared name and adopts it. If it was renamed on Roblox meanwhile, it stops and asks. |
 | the lock | sees the ID in the lock and clears the intent. |
 
-When Roblox refuses a create, with exit 3, 4 or 7, nothing was made: provision clears the intent, then stops, and the next run creates the resource. A crash between the refusal and that write leaves the intent, which the next run handles as a create whose answer was lost.
+When Roblox refuses a create, with exit 2, 3, 4 or 7, provision takes it that nothing was made: provision clears the intent, then stops, and the next run creates the resource. A crash between the refusal and that write leaves the intent, which the next run handles as a create whose answer was lost.
 
 When a create's answer is lost, the run stops with exit 5 and keeps the intent. The next run looks for the resource under the declared name and at every ID the intent did not know, whatever its name now is. While an intent is unresolved, no other intent is written, so each new ID is the create or a resource someone made by hand. Provision adopts on its own only a resource with the declared name. A new ID with another name may be the create renamed on Roblox or a teammate's product, and nothing provision reads tells them apart, so the run stops, names each one, and writes nothing. If one is the key's, record it with `crucible adopt <env> <kind> <key> <id>`. If none is, run `crucible adopt <env> <kind> <key> --none`, and the next run creates the resource. A key renamed in `crucible.toml` after a lost create stops the same way, because its create carries the old name.
 
@@ -79,7 +79,7 @@ npx crucible adopt staging product coin-pack 3301234567
 npx crucible adopt staging product coin-pack --none
 ```
 
-`crucible adopt <env> <kind> <key> --none` says that no resource on Roblox is the create the key's intent records, and clears the intent. Run it after you have looked at the resources the stop named. It lists the kind and refuses unless the journal holds an intent for the key, the lock holds no ID for it, and no resource carries the key's declared name, which the next run would adopt. It works for a key `crucible.toml` no longer declares, too. It prints the IDs you passed over, in `passedOver` with `--json`, and the next provision creates the resource.
+`crucible adopt <env> <kind> <key> --none` says that no resource on Roblox is the create the key's intent records, and clears the intent. Run it after you have looked at the resources the stop named. It lists the kind and refuses unless the journal holds an intent for the key, the lock holds no ID for it, and no resource carries the key's declared name, which the next run would adopt. It works for a key `crucible.toml` no longer declares, too. It prints the IDs you passed over, in `passedOver` with `--json`, and the next provision creates the resource. If one of them was the key's create, perhaps renamed on Roblox since, that run makes a second resource, so adopt it instead.
 
 Before either form writes, it plans as provision would once it is written. It refuses, with exit 2 and `error.problems`, when that plan would still stop, such as on an intent of another key or on an environment `crucible.toml` no longer declares.
 

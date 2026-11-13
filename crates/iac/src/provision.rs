@@ -99,16 +99,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)?;
     file.as_file().sync_all()?;
     file.persist(path).map_err(|error| error.error)?;
-    sync_folder(folder)
+    sync_folder(folder);
+    Ok(())
 }
 
 /// On Unix a rename survives a power loss only once its folder is flushed too. Windows cannot open a folder to flush.
-fn sync_folder(folder: &Path) -> io::Result<()> {
+/// The rename has happened by now, and some file systems refuse to flush a folder, so a failure here is not an error.
+fn sync_folder(folder: &Path) {
     #[cfg(unix)]
-    std::fs::File::open(folder)?.sync_all()?;
+    let _ = std::fs::File::open(folder).and_then(|folder| folder.sync_all());
     #[cfg(not(unix))]
     let _ = folder;
-    Ok(())
 }
 
 /// Lists each kind the environment declares or its lock or journal holds, and reads by ID each lock ID a list lacks,

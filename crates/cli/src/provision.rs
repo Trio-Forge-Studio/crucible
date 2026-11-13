@@ -283,7 +283,7 @@ pub fn adopt_main(args: AdoptArgs) -> ExitCode {
                 let passed = match report.passed.as_slice() {
                     [] => String::new(),
                     ids => format!(
-                        " You passed over {}.",
+                        " You passed over {}. If one of them was its create, the next run makes a second one.",
                         ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
                     ),
                 };

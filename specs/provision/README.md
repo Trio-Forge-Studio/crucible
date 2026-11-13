@@ -42,7 +42,7 @@ The lock records the universe each environment's entries belong to, and `crucibl
 
 ## Assumptions
 
-- **A1.** A create lands before its answer reaches the client, or never lands, and the list endpoint shows every landed create. Roblox documents neither. The mutant `list-misses-recent-creates` drops the second half, and TLC then finds a duplicate in nine states, whatever the journal holds.
+- **A1.** A create lands before its answer reaches the client, or never lands, and the list endpoint shows every landed create. A create that Roblox answers with a 4xx status made nothing, which is why a refused create clears its intent. Roblox documents none of the three. The mutant `list-misses-recent-creates` drops the second half, and TLC then finds a duplicate in nine states, whatever the journal holds.
 - **A2.** One provisioner runs per environment, as rule 6 states. Nothing checks it.
 - **A3.** A lost lock entry names a resource that still carries its key's declared name, and the key keeps that name until provision adopts the resource again. A lost entry is found only by its name, so nothing can find a resource whose entry and name are both gone. `Rename`, `RenameOnRoblox` and `DropLockEntry` encode it.
 - **A4.** When a run stops on two candidates or on a resource new since an intent, the developer passes `crucible adopt` the one provision created for the key, if it created one, and runs `crucible adopt --none` only if provision created none. `AdoptById` and `DropIntent` encode it.
@@ -51,7 +51,7 @@ An earlier model needed a fifth: nobody renames a resource on Roblox while an in
 
 The model leaves out changes on Roblox while a run is in progress, updates of fields other than the name, retirement and key renames with `moved_from`, which are idempotent writes to a resource the lock already names, and the deletion of a resource, which Open Cloud cannot do for these kinds. A retired key whose resource is gone sends nothing. Provision stops when the lock names an ID Roblox no longer has, and never creates the resource again on its own. Badge cost is a refused create: `expectedCost: 0` makes Roblox refuse a paid badge, which clears the intent like any refused create, so the next day's run creates it. Kinds are independent: each has its own list, and a name is unique only within a kind.
 
-Badges take a stricter path than the model. Roblox lists badges through a public endpoint that may lag behind a create, which is A1 failing, so an unresolved badge intent always stops the run and asks the developer to adopt the badge or remove the intent. That only removes steps from the model's runs, and the conformance test's fake has a badge list that lags behind a lost create to check it.
+Badges take a stricter path than the model. Roblox lists badges through a public endpoint that may lag behind a create, which is A1 failing, so an unresolved badge intent always stops the run and asks the developer to adopt the badge or clear the intent with `crucible adopt --none`. That only removes steps from the model's runs, and the conformance test's fake has a badge list that lags behind a lost create to check it.
 
 ## Each property catches its bug
 
