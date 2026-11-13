@@ -10,7 +10,7 @@ npx crucible provision staging
 git add crucible.lock && git commit -m "chore(experience): provision staging"
 ```
 
-Then `npx crucible deploy staging` builds and publishes the places, as `npx crucible docs deploy` describes. Deploy refuses while the plan still has something for provision to do.
+Then `npx crucible deploy staging` builds and publishes the places, as `npx crucible docs deploy` describes. Deploy refuses while the plan still has a product, pass or badge step for provision to do, and only warns about experience settings provision has not written.
 
 It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon and `universe:write` to write experience settings. Badges are listed through Roblox's public badge endpoint, which needs no key.
 

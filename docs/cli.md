@@ -77,7 +77,7 @@ Run `npm run check` to lint, check formatting, compile, and build `build/start.r
 
 ## crucible deploy
 
-`npx crucible deploy production` checks that `crucible.lock` records everything `crucible.toml` declares for `[env.production]`, then builds the game and uploads every place to the ids in `[env.production]`. It never creates or changes a product, a pass, a badge or an experience setting: run `npx crucible provision production` and commit `crucible.lock` first. Run `npx crucible docs deploy` for the checks, their order and the release flow. `crucible publish`, which 0.6.0 replaced, prints a usage error that names `crucible deploy` and exits 2.
+`npx crucible deploy production` checks that `crucible.lock` records every product, pass and badge `crucible.toml` declares for `[env.production]`, and warns when it does not record the experience settings yet, then builds the game and uploads every place to the ids in `[env.production]`. It never creates or changes a product, a pass, a badge or an experience setting: run `npx crucible provision production` and commit `crucible.lock` first. Run `npx crucible docs deploy` for the checks, their order and the release flow. `crucible publish`, which 0.6.0 replaced, prints a usage error that names `crucible deploy` and exits 2.
 
 `--place <name>` selects a place and can repeat. Duplicate selections upload once. Places run in byte order by name. All selected places build before the first upload. The command stops at the first failed upload and does not roll back earlier uploads.
 

@@ -48,8 +48,9 @@ pub fn main(args: Args) -> ExitCode {
 }
 
 /// Refuses unless `crucible.toml`, `crucible.lock` and the journal are valid and the environment's offline plan has
-/// nothing left to do, so every declared resource and setting is on Roblox and recorded in the committed lock.
-fn preflight(root: &Path, project: &Project, env: &str) -> Result<(), Failure> {
+/// nothing left to do for a product, a pass or a badge, so each is on Roblox and recorded in the committed lock. Pending
+/// experience settings only warn: no game code reads them, and a refused settings update must not block a release.
+fn preflight(root: &Path, project: &Project, env: &str, output: &Output) -> Result<(), Failure> {
     let mut problems = undeclared(&project.manifest.envs, project.lock.as_ref(), &project.journals);
     let plan = plan(&project.inputs(env, None), &mut |path: &Path| std::fs::read(root.join(path)));
     let plan = match plan {
@@ -60,7 +61,14 @@ fn preflight(root: &Path, project: &Project, env: &str) -> Result<(), Failure> {
             return Err(rules(problems));
         }
     };
-    let pending: Vec<_> = plan.steps.iter().filter(|step| step.action != Action::NoOp).collect();
+    let (settings, pending): (Vec<_>, Vec<_>) =
+        plan.steps.iter().filter(|step| step.action != Action::NoOp).partition(|step| step.kind == "experience");
+    if !settings.is_empty() {
+        output.note(&format!(
+            "Warning: crucible.lock does not record the experience settings crucible.toml declares for {env}, so \
+             Roblox may not hold them. Deploy goes on; run `crucible provision {env}` to write them."
+        ));
+    }
     if pending.is_empty() {
         return Ok(());
     }
@@ -105,7 +113,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
             env.places.keys().cloned().collect::<Vec<_>>().join(", ")
         )));
     }
-    preflight(root, &project, &args.env)?;
+    preflight(root, &project, &args.env, output)?;
     let targets: Vec<_> =
         env.places.keys().filter(|name| args.places.is_empty() || args.places.contains(name)).collect();
     let mut published = Vec::new();

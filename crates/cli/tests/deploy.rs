@@ -432,7 +432,7 @@ fn deploy_refuses_what_provision_has_not_recorded_before_any_request() {
     let intent = r#"{"version":1,"universe":10,"intents":[{"kind":"badge","key":"first-delivery","name":"First delivery","before":[]}]}"#;
     let cases: [(&str, Option<&str>, &str, &[&str]); 4] = [
         (&unprovisioned, None, "create product coin-pack, create badge first-delivery", &["create", "create"]),
-        (&settings, Some("lock"), "update experience settings", &["update"]),
+        (&settings, Some("lock-without-badge-no-intent"), "create badge first-delivery", &["create"]),
         (&unprovisioned, Some("lock-without-badge"), "adopt-check badge first-delivery", &["adopt-check"]),
         (&unprovisioned, Some("lock-without-badge-no-intent"), "create badge first-delivery", &["create"]),
     ];
@@ -470,6 +470,20 @@ fn deploy_refuses_what_provision_has_not_recorded_before_any_request() {
         assert!(server.requests().is_empty(), "{listed}: deploy refuses before it reads the key");
         assert!(!game.0.path().join("build").exists());
     }
+}
+
+#[test]
+fn pending_experience_settings_only_warn_and_deploy_goes_on() {
+    let game = Game::new(Some(TWO));
+    provisioned(&game, false);
+    fs::write(game.0.path().join("crucible.toml"), format!("{TWO}{DECLARED}[experience]\nvoice_chat=false\n")).unwrap();
+    let server = Server::new(vec![granted(), Response::json(json!({"versionNumber":3}))]);
+    let out = game.deploy(&server.origin, &["production", "--place", "start"]);
+    assert_eq!(code(&out), 0, "{}", document(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("does not record the experience settings"), "{stderr}");
+    assert!(stderr.contains("run `crucible provision production`"), "{stderr}");
+    assert_eq!(server.requests().len(), 2, "the introspection, then the upload");
 }
 
 #[test]

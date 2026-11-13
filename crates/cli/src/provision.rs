@@ -198,7 +198,8 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
                 error["resource"] = json!("experience settings");
                 error["hint"] = json!(
                     "Provision writes the experience settings last, so every product, pass and badge step was \
-                     applied, and crucible.lock records it: commit it. The next provision sends the settings again"
+                     applied, and crucible.lock records it: commit it. The next provision sends the settings again, and \
+                     until then `crucible deploy` warns about them and goes on"
                 );
             }
             report
