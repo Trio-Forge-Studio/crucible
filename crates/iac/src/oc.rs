@@ -21,6 +21,9 @@ fn badge(item: ops::Badge) -> Listed {
 }
 
 /// A 404 says Roblox has no such resource. Every other failure stays a failure.
+///
+/// Roblox reads a badge by its ID whatever universe awards it, so a badge of another universe reads as none, and
+/// neither `crucible adopt` nor provision takes it.
 fn found<T>(result: Result<T, Failure>) -> Result<Option<T>, Failure> {
     match result {
         Ok(item) => Ok(Some(item)),
@@ -44,7 +47,9 @@ impl Remote for Roblox<'_, '_> {
         Ok(match kind {
             Kind::Product => found(self.transport.run(&products::get(universe, id)))?.map(sellable),
             Kind::Pass => found(self.transport.run(&passes::get(universe, id)))?.map(sellable),
-            Kind::Badge => found(self.transport.run(&badges::get_public(id)))?.map(badge),
+            Kind::Badge => found(self.transport.run(&badges::get_public(id)))?
+                .filter(|awarded| awarded.universe == universe)
+                .map(|awarded| badge(awarded.badge)),
         })
     }
 

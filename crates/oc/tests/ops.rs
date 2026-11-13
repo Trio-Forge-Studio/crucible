@@ -464,20 +464,31 @@ fn a_badge_create_sends_an_icon_only_when_it_has_one() {
 fn a_badge_is_read_by_id_from_the_public_endpoint_without_a_key() {
     let server = MockServer::start();
     let key = Secret::from_string("test-key".into());
+    let mut reply = badge_json();
+    reply["awardingUniverse"] = json!({"id": 11, "name": "Fragile Delivery", "rootPlaceId": 12});
     let mock = server.mock(|when, then| {
         when.method(Method::GET).path("/v1/badges/2124000000000000").header_missing("x-api-key");
-        then.status(200).json_body(badge_json());
+        then.status(200).json_body(reply);
     });
-    let badge = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap();
+    let awarded = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap();
     mock.assert_calls(1);
-    let expected = crucible_oc::ops::Badge {
+    let badge = crucible_oc::ops::Badge {
         id: id(2124000000000000),
         name: "First delivery".into(),
         description: "Deliver.".into(),
         enabled: true,
         icon: Some(9),
     };
-    assert_eq!(badge, expected);
+    assert_eq!(awarded, crucible_oc::ops::AwardedBadge { badge, universe: id(11) });
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/badges/2124000000000000");
+        then.status(200).json_body(badge_json());
+    });
+    let failure = transport(&server, &key).run(&badges::get_public(id(2124000000000000))).unwrap_err();
+    assert_eq!(failure.code, 7, "a read whose reply lacks the awarding universe fails");
+    assert_eq!(failure.error["field"], "awardingUniverse.id");
 }
 
 #[test]

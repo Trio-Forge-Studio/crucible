@@ -564,6 +564,13 @@ pub fn adopt(
         Some(found) => found,
         None => match remote.get(kind, id).map_err(Refused::Remote)? {
             Some(found) => found,
+            None if kind == Kind::Badge => {
+                return Err(rule(format!(
+                    "universe {} has no badge {id}. Roblox reads a badge by ID in any universe, and provision takes \
+                     none that belongs to another universe, so check that {id} is a badge of this experience",
+                    inputs.env.universe
+                )));
+            }
             None => return Err(rule(format!("universe {} has no {noun} {id}", inputs.env.universe))),
         },
     };

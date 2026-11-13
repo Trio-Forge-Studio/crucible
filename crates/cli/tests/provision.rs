@@ -239,6 +239,28 @@ fn adopt_none_clears_an_intent_whose_create_never_landed_and_provision_creates_i
 }
 
 #[test]
+fn adopt_refuses_a_badge_another_universe_awards() {
+    let dir = project();
+    journal(
+        dir.path(),
+        r#"{"version":1,"universe":1,"intents":[{"kind":"badge","key":"first-delivery","name":"First delivery","before":[]}]}"#,
+    );
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![]);
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/badges/555");
+        then.status(200).json_body(json!({"id": 555, "name": "Someone else's badge", "description": "",
+            "enabled": false, "awardingUniverse": {"id": 999, "name": "Other game", "rootPlaceId": 3}}));
+    });
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "badge", "first-delivery", "555", "--json"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stdout));
+    let message = document(&out)["error"]["message"].as_str().unwrap().to_owned();
+    assert!(message.contains("universe 1 has no badge 555"), "{message}");
+    assert!(message.contains("provision takes none that belongs to another universe"), "{message}");
+    assert!(!dir.path().join("crucible.lock").exists(), "nothing was written");
+}
+
+#[test]
 fn a_dry_run_lists_and_plans_and_writes_nothing() {
     let dir = project();
     let server = MockServer::start();

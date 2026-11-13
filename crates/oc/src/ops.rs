@@ -80,6 +80,13 @@ pub struct Badge {
     pub icon: Option<u64>,
 }
 
+/// A badge read by its ID, which Roblox answers for a badge of any universe, with the universe that awards it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AwardedBadge {
+    pub badge: Badge,
+    pub universe: Id,
+}
+
 struct Page<T> {
     items: Vec<T>,
     next: Option<String>,
@@ -643,8 +650,11 @@ pub mod badges {
     }
 
     /// The pinned registry has no badge read by ID, so this reads the documented public endpoint, which needs no key.
-    pub fn get_public(badge_id: Id) -> Op<Badge, Read> {
-        op("badges.get-public", "GET", BADGES, format!("/v1/badges/{badge_id}"), Auth::None, Body::Empty, badge)
+    /// It answers for a badge of any universe, so the reply must name the awarding universe.
+    pub fn get_public(badge_id: Id) -> Op<AwardedBadge, Read> {
+        op("badges.get-public", "GET", BADGES, format!("/v1/badges/{badge_id}"), Auth::None, Body::Empty, |value| {
+            Ok(AwardedBadge { badge: badge(value)?, universe: id(value, "awardingUniverse.id")? })
+        })
     }
 
     /// Badges have no API-key list. This documented public endpoint needs no key, so it sends none.

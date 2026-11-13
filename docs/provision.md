@@ -73,7 +73,7 @@ A failure after some actions keeps them: `applied` lists what was written, and t
 npx crucible adopt staging product coin-pack 3301234567
 ```
 
-`crucible adopt <env> <kind> <key> <id>` records an existing resource as a key's in `crucible.lock` and clears the key's intent. It lists the kind and reads the resource, then refuses unless the key is declared and managed, the lock holds no ID for it, no other key holds the ID, the resource carries the key's declared name or is new since the key's intent, and no other key without an ID would adopt it too. It writes the lock, then the journal. `--json` prints `{"applied": [...]}`, or an `error` with the exit codes above.
+`crucible adopt <env> <kind> <key> <id>` records an existing resource as a key's in `crucible.lock` and clears the key's intent. It lists the kind and reads the resource, then refuses unless the key is declared and managed, the lock holds no ID for it, no other key holds the ID, the resource carries the key's declared name or is new since the key's intent, and no other key without an ID would adopt it too. A badge's read by ID answers for any universe, so a badge another universe awards counts as none. It writes the lock, then the journal. `--json` prints `{"applied": [...]}`, or an `error` with the exit codes above.
 
 ```console
 npx crucible adopt staging product coin-pack --none

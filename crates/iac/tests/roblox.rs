@@ -79,7 +79,7 @@ fn each_kind_is_listed_and_read_through_its_own_endpoint() {
     });
     server.mock(|when, then| {
         when.method(Method::GET).path("/v1/badges/8");
-        then.status(200).json_body(badge(8));
+        then.status(200).json_body(awarded(badge(8), 1));
     });
     let key = Secret::from_string("test-key".into());
     let transport = transport(&server, &key);
@@ -91,6 +91,32 @@ fn each_kind_is_listed_and_read_through_its_own_endpoint() {
     assert_eq!(roblox.get(Kind::Product, id(6)).unwrap(), Some(listed(6, "Coin pack", "Coins.", None, true)));
     assert_eq!(roblox.get(Kind::Pass, id(7)).unwrap(), Some(listed(7, "VIP", "Double coins.", Some(250), false)));
     assert_eq!(roblox.get(Kind::Badge, id(8)).unwrap(), Some(listed(8, "First delivery", "Deliver.", None, false)));
+}
+
+fn awarded(mut badge: Value, universe: u64) -> Value {
+    badge["awardingUniverse"] = json!({"id": universe, "name": "A game", "rootPlaceId": 2});
+    badge
+}
+
+/// Roblox reads a badge by its ID in any universe, so one another universe awards reads as none, and a reply that does
+/// not say which universe awards it is a failure.
+#[test]
+fn a_badge_another_universe_awards_reads_as_none() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/badges/555");
+        then.status(200).json_body(awarded(badge(555), 999));
+    });
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/v1/badges/556");
+        then.status(200).json_body(badge(556));
+    });
+    let key = Secret::from_string("test-key".into());
+    let transport = transport(&server, &key);
+    let mut roblox = Roblox { transport: &transport, universe: id(1) };
+    assert_eq!(roblox.get(Kind::Badge, id(555)).unwrap(), None);
+    let failure = roblox.get(Kind::Badge, id(556)).unwrap_err();
+    assert_eq!((failure.code, failure.error["field"].as_str()), (7, Some("awardingUniverse.id")));
 }
 
 #[test]
