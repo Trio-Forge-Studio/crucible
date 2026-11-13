@@ -38,11 +38,18 @@ const compile = (...args) =>
 		...args,
 	]);
 compile("packages/crucible/tsconfig.json", out);
+// crucible build wrote the sample's crucible:experience bindings, after the compiler's header line.
+const bindings = path.join(run, "crucible-experience.luau");
+const built = fs.readFileSync(path.join(repo, "examples/sample-game/out/shared/crucible-experience.luau"), "utf8");
+fs.writeFileSync(bindings, built.slice(built.indexOf("\n") + 1));
 compile(
 	"examples/sample-game/tsconfig.json",
 	game,
 	"examples/sample-game/default.project.json",
 	"examples/sample-game/include",
+	"crucible:experience",
+	"shared/crucible-experience.luau",
+	bindings,
 );
 
 (function copyDeclarations(dir) {

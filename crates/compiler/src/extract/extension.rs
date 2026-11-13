@@ -33,6 +33,20 @@ impl ProgramCx<'_> {
         self.x.facts.diagnostics.push(Diagnostic { path: None, line: 0, column: 0, code, message: message.into() });
     }
 
+    /// Reports an error at `at`, which fails the compile. It is for a finding about the whole program, which no single
+    /// file's extraction can make. `code` is TypeScript's error number, or 0.
+    pub fn report_at(&mut self, at: Node, code: i32, message: impl Into<String>) {
+        let file = at.file();
+        let position = file.position(at.span().start);
+        self.x.facts.diagnostics.push(Diagnostic {
+            path: Some(file.path()),
+            line: position.line,
+            column: position.column,
+            code,
+            message: message.into(),
+        });
+    }
+
     /// Every file of the program, declarations included, in the program's order.
     pub fn files(&self) -> Vec<File> {
         self.x.packages.program.source_files().iter().map(|&f| File::new(f)).collect()

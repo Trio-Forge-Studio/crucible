@@ -277,6 +277,91 @@ return {
 		w:finish()
 	end,
 
+	["57 a grant takes a product handle and grants the product its id names"] = function()
+		local w = newWorld(function(s, d)
+			s.service("Skins", function(self)
+				self.claim = d.PlayerData:grant(table.freeze({ key = "coin-pack", id = PRODUCT }), function(_, data)
+					return plus(data, "xp", 10)
+				end)
+			end)
+		end)
+		w:advance(0.05)
+		local ann = w:player("Ann", 4120)
+		local held = purchase(w, "buy-1")
+		w:settle(2)
+		spec.eq(held.value, "GRANTED", "the handle's product was granted")
+		spec.eq(w.server.d.PlayerData(ann.player).xp(), 10, "the grant's change")
+		w:finish()
+	end,
+
+	["6 57 a handle with no id fails boot with its own error, and a value that is neither is refused"] = function()
+		local unbound = setmetatable({ key = "coin-pack" }, {
+			__index = function(_, field)
+				if field == "id" then
+					error("product coin-pack has no Roblox ID in this place", 2)
+				end
+				return nil
+			end,
+		})
+		local w = newWorld(function(s, d)
+			s.service("Skins", function(self)
+				self.claim = d.PlayerData:grant(unbound, function(_, data)
+					return data
+				end)
+			end)
+		end, { mustBoot = false })
+		assert(not w.booted, "boot failed")
+		spec.has(w.bootError, "product coin-pack has no Roblox ID in this place", "the handle's message")
+		local g = newWorld(function(s, d)
+			s.service("Skins", function(self)
+				self.claim = d.PlayerData:grant({ key = "coin-pack" }, function(_, data)
+					return data
+				end)
+			end)
+		end, { mustBoot = false })
+		assert(not g.booted, "boot failed")
+		spec.has(g.bootError, "FD.Players.grant takes a product handle or a product id", "a table without an id")
+	end,
+
+	["57 104 a grant of a retired product the environment never had claims nothing and its id still throws"] = function()
+		local absent = table.freeze(setmetatable({ key = "old-pack", absent = true }, {
+			__index = function(_, field)
+				if field == "id" then
+					error("retired product old-pack has no Roblox ID in crucible.lock for fresh", 2)
+				end
+				return nil
+			end,
+		}))
+		local w = newWorld(function(s, d)
+			s.service("Skins", function(self)
+				self.old = d.PlayerData:grant(absent, function(_, data)
+					return data
+				end)
+				self.again = d.PlayerData:grant(absent, function(_, data)
+					return data
+				end)
+			end)
+		end)
+		w:advance(0.05)
+		spec.eq(w.marketplace.ProcessReceipt, nil, "no product was claimed, so the game may own ProcessReceipt")
+		local ok, message = pcall(function()
+			return absent.id
+		end)
+		assert(not ok, "reading the id throws")
+		spec.has(
+			message,
+			"retired product old-pack has no Roblox ID in crucible.lock for fresh",
+			"the handle's message"
+		)
+		local g = newWorld(function(s, d)
+			s.service("Skins", function(self)
+				self.old = d.PlayerData:grant(absent, 7)
+			end)
+		end, { mustBoot = false })
+		assert(not g.booted, "boot failed")
+		spec.has(g.bootError, "FD.Players.grant takes a function", "the claim is still checked")
+	end,
+
 	["57 104 without a grant claim ProcessReceipt stays unset"] = function()
 		local w = newWorld()
 		w:advance(0.05)

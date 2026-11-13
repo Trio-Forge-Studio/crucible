@@ -8,8 +8,9 @@ mod declaration;
 pub use declaration::declaration;
 
 /// Raised by any change a compiled game would notice: a function, parameter, record field, schema builder or check
-/// that is added, removed, renamed, moved or retyped.
-pub const VERSION: u32 = 1;
+/// that is added, removed, renamed, moved or retyped. Version 2 adds the `crucible:experience` handles, which a runtime's
+/// `grant` must read, so a compiler that checks grants by handle never compiles against a runtime that has none.
+pub const VERSION: u32 = 2;
 
 /// The field of the runtime's `package.json` that records the ABI version the runtime implements.
 pub const MANIFEST_FIELD: &str = "crucibleAbi";

@@ -1,6 +1,6 @@
 # Experience
 
-Declare developer products, game passes and badges in `crucible.toml`, and plan their provisioning offline with `crucible plan`.
+Declare developer products, game passes and badges in `crucible.toml`, reach them from game code through typed handles, and plan their provisioning offline with `crucible plan`.
 
 `crucible plan` reads the declarations, `crucible.lock` and the provisioning journal, and prints what `crucible provision` would do in each environment. It makes no network call and writes nothing. `crucible provision` applies the plan and writes the lock and the journal, as `npx crucible docs provision` describes.
 
@@ -38,15 +38,15 @@ icon = "assets/icons/coin-pack.png"
 name = "VIP"
 price = 299
 
-[badges.first-delivery]
-name = "First delivery"
-description = "Deliver your first parcel."
-icon = "assets/badges/first-delivery.png"
+[badges.first-pickup]
+name = "First pickup"
+description = "Collect your first coin."
+icon = "assets/badges/first-pickup.png"
 
 [env.staging.products.coin-pack]
 price = 1
 
-[env.staging.badges.first-delivery]
+[env.staging.badges.first-pickup]
 enabled = false
 ```
 
@@ -67,6 +67,50 @@ enabled = false
 - A product or a pass needs a `name` and a `price` in Robux. A badge needs a `name`, and `enabled` defaults to true. `description` defaults to empty. `icon` is a path relative to the project root.
 - `[env.<name>.products.<key>]` and `[env.<name>.passes.<key>]` may change only `price`, and `[env.<name>.badges.<key>]` only `enabled`. An overlay for a key that is not declared is an error, so a typo cannot create a resource.
 - Every table rejects keys it does not know. A file that does not parse fails with the file and the line, such as `crucible.toml:14: invalid type: string "49", expected u64`. A rule the tables break also names the key, such as `crucible.toml:24: products.coin-pack.price: a price of 0 does not take a product off sale. Set retired = true to take it off sale`.
+
+## Use the handles in game code
+
+Game code names a product, a pass or a badge by its key, through `crucible:experience`, and never writes a Roblox ID. A profile store is an exported `const` of a shared module, as `npx crucible docs profile-stores` describes:
+
+```ts
+// src/shared/profile.ts
+import { profileStore } from "@trioforge/crucible";
+
+export const PlayerData = profileStore("Game.Players", { template: { coins: 0 } });
+```
+
+The server grants a product through that store, and passes the other handles' IDs to Roblox:
+
+```ts
+// src/server/shop.ts
+import { Subsystem } from "@trioforge/crucible";
+import { Badges, Passes, Products } from "crucible:experience";
+import { PlayerData } from "../shared/profile";
+
+export class Shop extends Subsystem {
+	private readonly coinPack = PlayerData.grant(Products.CoinPack, (_player, data) => ({
+		...data,
+		coins: data.coins + 100,
+	}));
+
+	award(player: Player) {
+		game.GetService("BadgeService").AwardBadge(player.UserId, Badges.FirstPickup.id);
+	}
+
+	offerVip(player: Player) {
+		game.GetService("MarketplaceService").PromptGamePassPurchase(player, Passes.Vip.id);
+	}
+}
+```
+
+- `crucible build` writes `src/crucible-experience.d.ts`, which declares `crucible:experience` with `Products`, `Passes` and `Badges`. Each key becomes a handle named in PascalCase, so `coin-pack` is `Products.CoinPack`, typed `ProductHandle<"coin-pack">`. An untracked key has no handle. The file holds no ID, so it is the same in every environment: commit it. The build writes it when `crucible.toml` declares a product, a pass or a badge, or when the file exists, and rewrites it whenever its bytes differ from what `crucible.toml` gives, so do not edit it. It writes the file whole through a rename, and leaves it alone when nothing changed. Each place's tsconfig must include the file. A tsconfig whose `include` names only some folders, or another source folder, leaves it out, and the build then fails with TS2307 for `crucible:experience` and names the path to add to that tsconfig's `include`.
+- `ProductHandle`, `RetiredProductHandle`, `PassHandle` and `BadgeHandle` come from `@trioforge/crucible`. A handle has the `key` and the `id` of its resource. A profile store's `grant` takes a product handle. Crucible has no call of its own to award a badge or check a pass: Roblox's calls, such as `BadgeService.AwardBadge`, `MarketplaceService.PromptGamePassPurchase` and `MarketplaceService.PromptProductPurchase`, take the handle's `id`.
+- The build puts the handles in the place as a module, `crucible-experience.luau`, inside the shallowest folder of the `outDir` that the Rojo project maps under `ReplicatedStorage`, so the server and the client both read it. A build fails when the project maps none.
+- `crucible build --env <name>` binds each handle to the ID `crucible.lock` records for that environment. It fails when the lock holds no ID for a key that is neither retired nor untracked, and names `crucible provision <name>`, so a place for an environment never ships a product it cannot sell. It also fails when the lock records the environment in another universe. `crucible deploy <env>` builds this way.
+- `crucible build` without `--env` binds no ID, so the game compiles before anything is provisioned. Reading a handle's `id` in that place throws an error that names the key. A grant reads it when its Subsystem is made, so the server fails at boot rather than with ID 0.
+- A retired product is off sale, but a purchase made before it retired can still send a receipt, so it keeps its handle, typed `RetiredProductHandle`. In an environment whose lock holds no ID for it, the product never existed, so its handle is absent: a grant of it claims nothing and does not throw, because no receipt can name it, and reading its `id` throws an error that names the key and the environment. A retired pass or badge with no ID is absent the same way. A key that is neither retired nor untracked and has no ID still fails `crucible build --env`. Keep a retired product's grant until the receipts of its earlier purchases have drained, because a place that grants products answers a receipt for a product with no grant `NotProcessedYet`.
+- A place that grants any product must grant each product `Products` declares exactly once, and a retired product once or not at all, or the build fails with CRU039, which names the key and the files. A product has one grant call site, so to grant it differently by case, branch inside the grant's function, not around two grant calls. A place that grants none, such as a place where nothing is sold, leaves `ProcessReceipt` unset, and Roblox offers its purchases again in a server that handles them.
+- Once it has compiled every place, `crucible build` fails when no place grants a product that is neither retired nor untracked, and names each one, because a player could buy it and never receive it. So a game that declares products and grants none fails too. A game that answers receipts itself, by assigning `MarketplaceService.ProcessReceipt` in a place it builds, is exempt, because its own callback answers every product. It reads each product's `id` from its handle, and CRU025 rejects the assignment in a place that also grants through a profile store. A build of some places with `--place` skips this check, because a place it leaves out may grant them.
 
 ## Retire, untrack and rename
 
@@ -98,10 +142,10 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 
 ```text
 staging (universe 10772177432)
-  update  experience settings                         10772177432  details, private_server_price = 100, voice_chat = false
-  create  product coin-pack     Products.CoinPack
-  create  pass vip              Passes.Vip
-  create  badge first-delivery  Badges.FirstDelivery
+  update  experience settings                       10772177432  details, private_server_price = 100, voice_chat = false
+  create  product coin-pack    Products.CoinPack
+  create  pass vip             Passes.Vip
+  create  badge first-pickup   Badges.FirstPickup
   3 create, 1 update.
   Provision adopts the one existing resource with a create's name instead of creating it.
 ```
@@ -157,7 +201,7 @@ Each environment's plan uses only that environment's lock tables and journal, so
 {
   "version": 1,
   "universe": 10772177432,
-  "intents": [{ "kind": "badge", "key": "first-delivery", "name": "First delivery", "before": [2124000000000000] }]
+  "intents": [{ "kind": "badge", "key": "first-pickup", "name": "First pickup", "before": [2124000000000000] }]
 }
 ```
 

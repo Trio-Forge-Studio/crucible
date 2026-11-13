@@ -2,7 +2,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use crucible_compiler::{InstanceMap, Target};
+use crucible_compiler::{InstanceMap, Target, VirtualModule};
 use crucible_transform::{Attribute, Check, Class, ClassKind, Dependency};
 use support::{Analysis, repo};
 
@@ -101,7 +101,12 @@ fn sample_game_checks_and_every_site_is_answered() {
 #[test]
 fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
     let (instances, include) = sample_place();
-    let target = Target::Game { instances: &instances, include: &include, modules: &[] };
+    let experience = VirtualModule {
+        specifier: "crucible:experience",
+        path: "shared/crucible-experience.luau",
+        source: "return { Products = { CoinPack = { key = \"coin-pack\", id = 1001 } } }\n",
+    };
+    let target = Target::Game { instances: &instances, include: &include, modules: &[experience] };
     let modules = crucible_transform::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
         .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))
         .modules;
@@ -118,8 +123,10 @@ fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
             "server/systems/controller.luau",
             "server/systems/event.luau",
             "server/systems/member.luau",
+            "server/systems/shop.luau",
             "server/systems/store.luau",
             "server/systems/wallet.luau",
+            "shared/crucible-experience.luau",
             "shared/messages.luau",
             "shared/profile.luau",
             "shared/state.luau",
@@ -127,7 +134,7 @@ fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
     );
     let source = |path: &str| &modules.iter().find(|m| m.path == path).unwrap().source;
     let runtime = "local TS = require(game:GetService(\"ReplicatedStorage\"):WaitForChild(\"rbxts_include\"):WaitForChild(\"RuntimeLib\"))";
-    for module in &modules {
+    for module in modules.iter().filter(|m| m.path != experience.path) {
         assert!(module.source.contains(runtime), "{} requires the runtime library:\n{}", module.path, module.source);
     }
     assert!(

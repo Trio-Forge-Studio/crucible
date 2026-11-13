@@ -53,6 +53,9 @@ pub enum Command {
         project: PathBuf,
         /// The folder the project maps for the runtime library.
         include: PathBuf,
+        /// A file that holds the Luau of crucible:experience.
+        #[arg(long)]
+        experience: Option<PathBuf>,
     },
     /// Build one Rojo project. crucible build runs this in a child process.
     #[command(name = crate::build::ROJO_BUILD, hide = true)]

@@ -1,7 +1,7 @@
 {
 	"name": "@trioforge/crucible",
 	"version": "0.5.1",
-	"crucibleAbi": 1,
+	"crucibleAbi": 2,
 	"license": "MIT",
 	"main": "out/init.luau",
 	"types": "out/index.d.ts",

@@ -384,8 +384,7 @@ fn unreadable_manifest_is_a_json_usage_error() {
     assert!(!game.0.path().join("build").exists());
 }
 
-const DECLARED: &str =
-    "[products.coin-pack]\nname='Coin pack'\nprice=49\n[badges.first-delivery]\nname='First delivery'\n";
+const DECLARED: &str = "[passes.vip]\nname='VIP'\nprice=49\n[badges.first-delivery]\nname='First delivery'\n";
 
 /// The lock `crucible provision production` writes for `TWO` with `DECLARED`, so the offline plan has nothing to do.
 fn provisioned(game: &Game, settings: bool) {
@@ -426,12 +425,35 @@ fn a_provisioned_environment_deploys() {
 }
 
 #[test]
+fn deploy_builds_with_its_environment_and_uploads_nothing_when_that_build_fails() {
+    let game = Game::new(Some(TWO));
+    provisioned(&game, false);
+    let (toml, lock) = (game.0.path().join("crucible.toml"), game.0.path().join("crucible.lock"));
+    let product = "[products.coin-pack]\nname='Coin pack'\nprice=49\n";
+    fs::write(&toml, format!("{}{product}", fs::read_to_string(&toml).unwrap())).unwrap();
+    let manifest = crucible_project::Manifest::parse(&fs::read_to_string(&toml).unwrap()).unwrap();
+    let experience = crucible_iac::model::Experience::new(&manifest).unwrap();
+    let coin = experience.resolve(&manifest.envs["production"]).into_iter().find(|r| r.key == "coin-pack").unwrap();
+    let entry = format!(
+        "\n[env.production.products.coin-pack]\nid = 99\nfingerprint = \"{}\"\nstatus = \"managed\"\n",
+        coin.fields.as_ref().unwrap().fingerprint()
+    );
+    fs::write(&lock, format!("{}{entry}", fs::read_to_string(&lock).unwrap())).unwrap();
+    let server = Server::new(vec![granted()]);
+    let out = game.deploy(&server.origin, &["production"]);
+    assert_ne!(code(&out), 0, "{}", document(&out));
+    let message = document(&out)["error"]["message"].as_str().unwrap().to_owned();
+    assert!(message.contains("no place grants Products.CoinPack"), "{message}");
+    assert_eq!(server.requests().len(), 1, "no place was uploaded");
+}
+
+#[test]
 fn deploy_refuses_what_provision_has_not_recorded_before_any_request() {
     let unprovisioned = format!("{TWO}{DECLARED}");
     let settings = format!("{TWO}{DECLARED}[experience]\nvoice_chat=false\n");
     let intent = r#"{"version":1,"universe":10,"intents":[{"kind":"badge","key":"first-delivery","name":"First delivery","before":[]}]}"#;
     let cases: [(&str, Option<&str>, &str, &[&str]); 4] = [
-        (&unprovisioned, None, "create product coin-pack, create badge first-delivery", &["create", "create"]),
+        (&unprovisioned, None, "create pass vip, create badge first-delivery", &["create", "create"]),
         (&settings, Some("lock-without-badge-no-intent"), "create badge first-delivery", &["create"]),
         (&unprovisioned, Some("lock-without-badge"), "adopt-check badge first-delivery", &["adopt-check"]),
         (&unprovisioned, Some("lock-without-badge-no-intent"), "create badge first-delivery", &["create"]),
