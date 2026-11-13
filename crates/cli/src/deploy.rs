@@ -1,6 +1,8 @@
 use crate::cli::{DEFAULT_DEADLINE, DEFAULT_POLL_INTERVAL};
 use crate::exec::Executor;
 use crate::output::Output;
+use crate::plan::Project;
+use crucible_iac::plan::{Action, plan, undeclared};
 use crucible_oc::auth;
 use crucible_oc::outcome::{Acceptance, Failure};
 use crucible_oc::transport::Timing;
@@ -18,13 +20,17 @@ pub struct Args {
     /// Publish only this place. Repeat to publish several.
     #[arg(long = "place", value_name = "NAME")]
     pub places: Vec<String>,
-    /// Build and check the key's scopes without uploading.
+    /// Run the checks and build without uploading.
     #[arg(long)]
     pub dry_run: bool,
     /// Write request and response details to stderr.
     #[arg(long)]
     pub verbose: bool,
 }
+
+/// What `crucible publish`, which 0.6.0 replaced with `crucible deploy`, answers.
+pub const PUBLISH_REPLACED: &str =
+    "crucible publish is now crucible deploy. Run `crucible deploy <env>`, which `crucible docs deploy` describes";
 
 pub fn main(args: Args) -> ExitCode {
     let mut output = Output::new(args.verbose);
@@ -41,13 +47,48 @@ pub fn main(args: Args) -> ExitCode {
     ExitCode::from(code)
 }
 
-fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
-    let manifest = crate::build::manifest(root).map_err(|error| Failure::usage(error.to_string()))?;
-    if !root.join(crucible_project::FILE).exists() {
-        return Err(Failure::usage(
-            "publish requires crucible.toml. Example:\n[env.production]\nuniverse = 1234\nplace = 5678\n",
-        ));
+/// Refuses unless `crucible.toml`, `crucible.lock` and the journal are valid and the environment's offline plan has
+/// nothing left to do, so every declared resource and setting is on Roblox and recorded in the committed lock.
+fn preflight(root: &Path, project: &Project, env: &str) -> Result<(), Failure> {
+    let mut problems = undeclared(&project.manifest.envs, project.lock.as_ref(), &project.journals);
+    let plan = plan(&project.inputs(env, None), &mut |path: &Path| std::fs::read(root.join(path)));
+    let plan = match plan {
+        Ok(plan) if problems.is_empty() => plan,
+        Ok(_) => return Err(rules(problems)),
+        Err(found) => {
+            problems.extend(found);
+            return Err(rules(problems));
+        }
+    };
+    let pending: Vec<_> = plan.steps.iter().filter(|step| step.action != Action::NoOp).collect();
+    if pending.is_empty() {
+        return Ok(());
     }
+    let list: Vec<String> = pending
+        .iter()
+        .map(|step| format!("{} {} {}", json!(step.action).as_str().unwrap_or_default(), step.kind, step.key))
+        .collect();
+    let mut message = format!(
+        "crucible.lock does not record everything crucible.toml declares for {env}: {}. Run `crucible provision \
+         {env}`, commit crucible.lock, then deploy",
+        list.join(", ")
+    );
+    if pending.iter().any(|step| step.action == Action::AdoptCheck) {
+        message += ". An adopt-check is a create whose outcome the journal has not settled";
+    }
+    Err(Failure::usage(message).with("steps", json!(pending)))
+}
+
+fn rules(problems: Vec<crucible_iac::model::Problem>) -> Failure {
+    Failure::usage("the plan breaks the provisioning rules").with("problems", json!(problems))
+}
+
+fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
+    let project = Project::load(root, "deploy").map_err(|found| {
+        let failure = Failure::usage(found.message);
+        if found.problems.is_empty() { failure } else { failure.with("problems", json!(found.problems)) }
+    })?;
+    let manifest = &project.manifest;
     let env = manifest.envs.get(&args.env).ok_or_else(|| {
         if manifest.envs.is_empty() {
             return Failure::usage(format!("unknown environment {}. No environments are configured", args.env));
@@ -64,16 +105,29 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
             env.places.keys().cloned().collect::<Vec<_>>().join(", ")
         )));
     }
+    preflight(root, &project, &args.env)?;
     let targets: Vec<_> =
         env.places.keys().filter(|name| args.places.is_empty() || args.places.contains(name)).collect();
     let mut published = Vec::new();
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
     let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
-    let preflight = |failure: Failure| failure.with("publish", progress(&published, None, &targets));
-    let (source, key) =
-        crate::load_key(root).map_err(|failure| preflight(auth::decorate(failure, &primary.auth, None)))?;
+    let early = |failure: Failure| failure.with("deploy", progress(&published, None, &targets));
+    let (source, key) = crate::load_key(root).map_err(|failure| early(auth::decorate(failure, &primary.auth, None)))?;
     output.redact_also(&key);
-    let execute = |file: Option<(&String, std::path::PathBuf)>, output: &mut Output| {
+    let introspected = {
+        let transport = crate::provision::transport(&key, output)
+            .map_err(|failure| early(auth::decorate(failure, &primary.auth, Some(&source))))?;
+        let introspected = crate::scopes::introspect(&transport, output)
+            .and_then(|introspected| {
+                crate::scopes::require(introspected.as_ref(), primary.auth.required_scopes().unwrap_or_default())?;
+                Ok(introspected)
+            })
+            .map_err(|failure| early(auth::decorate(failure, &primary.auth, Some(&source))))?;
+        introspected.map(|key| {
+            json!({"keySource":source.label(),"name":key.name,"enabled":key.enabled,"expired":key.expired,"scopes":key.scopes()})
+        })
+    };
+    let execute = |name: &String, file: std::path::PathBuf, output: &mut Output| {
         let acceptance = RefCell::new(Acceptance::default());
         let result = (|| {
             let executor = Executor::new(
@@ -88,42 +142,36 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 output,
                 &acceptance,
             )?;
-            match file {
-                None => crate::whoami::check(&executor, &source, Some(primary)),
-                Some((name, file)) => crate::flows::publish::run(
-                    &executor,
-                    crate::flows::publish::Args {
-                        file,
-                        universe: env.universe.to_string(),
-                        place: env.places[name].to_string(),
-                        version_type: match env.version_type {
-                            VersionType::Saved => crate::flows::publish::VersionType::Saved,
-                            VersionType::Published => crate::flows::publish::VersionType::Published,
-                        },
+            crate::flows::publish::run(
+                &executor,
+                crate::flows::publish::Args {
+                    file,
+                    universe: env.universe.to_string(),
+                    place: env.places[name].to_string(),
+                    version_type: match env.version_type {
+                        VersionType::Saved => crate::flows::publish::VersionType::Saved,
+                        VersionType::Published => crate::flows::publish::VersionType::Published,
                     },
-                ),
-            }
+                },
+            )
         })();
         acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, &primary.auth, Some(&source)))
     };
-    let built = crate::build::build(root, &manifest, &args.places, None).map_err(|error| {
+    let built = crate::build::build(root, manifest, &args.places, None).map_err(|error| {
         let failure = match error {
             crate::build::Error::Usage(message) => Failure::usage(message),
             crate::build::Error::Failed(message) => Failure::unavailable(message),
         };
-        failure.with("publish", progress(&published, None, &targets))
+        failure.with("deploy", progress(&published, None, &targets))
     })?;
     if args.dry_run {
-        let check =
-            execute(None, output).map_err(|failure| failure.with("publish", progress(&published, None, &targets)))?;
         let mut document = progress(&published, None, &targets);
-        document["auth"] = check;
+        document["auth"] = introspected.unwrap_or(Value::Null);
         return Ok(document);
     }
     let mut remaining = built.into_iter();
     while let Some((name, file)) = remaining.next() {
-        let result = execute(Some((&name, file)), output);
-        match result {
+        match execute(&name, file, output) {
             Ok(mut receipt) => {
                 receipt["name"] = json!(name);
                 published.push(receipt);
@@ -132,7 +180,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 let remaining: Vec<_> = remaining.map(|(name, _)| name).collect();
                 let names: Vec<_> = remaining.iter().collect();
                 let mut state = progress(&published, Some(&name), &names);
-                let mut next = vec!["crucible".to_owned(), "publish".to_owned(), args.env.clone()];
+                let mut next = vec!["crucible".to_owned(), "deploy".to_owned(), args.env.clone()];
                 if args.verbose {
                     next.push("--verbose".to_owned());
                 }
@@ -145,7 +193,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                         "Check the failed place's versions before re-uploading it. Never rerun the environment without --place after a partial failure."
                     );
                 }
-                return Err(failure.with("publish", state));
+                return Err(failure.with("deploy", state));
             }
         }
     }

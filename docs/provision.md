@@ -10,6 +10,8 @@ npx crucible provision staging
 git add crucible.lock && git commit -m "chore(experience): provision staging"
 ```
 
+Then `npx crucible deploy staging` builds and publishes the places, as `npx crucible docs deploy` describes. Deploy refuses while the plan still has something for provision to do.
+
 It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon and `universe:write` to write experience settings. Badges are listed through Roblox's public badge endpoint, which needs no key.
 
 Before its first list, provision posts the key to Roblox's key introspection endpoint. It stops with exit 3 when the key is disabled or expired, or lacks a scope the lists need. After it plans, and before its first write, it stops with exit 3 when the key lacks a scope the plan's writes need, such as `legacy-badge:manage` only when a badge icon changes. `error.missingScopes` lists each missing scope. `--dry-run` writes nothing, so it checks only the read scopes. The check is advisory: when the introspection itself fails, provision prints why on stderr and goes on, and a call that lacks a scope fails by itself.

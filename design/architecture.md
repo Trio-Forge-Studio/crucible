@@ -212,7 +212,7 @@ A missing lock is a first deploy. A lock that fails to parse, or has a newer for
 | --- | --- | --- | --- | --- |
 | `crucible plan <env>` | no | no | no | no |
 | `crucible provision <env>` | yes | yes | no | no |
-| `crucible deploy <env>` | yes, updates only | no | yes, with that environment's bindings | yes, in declared `order` |
+| `crucible deploy <env>` | yes, place versions only | no | yes, with that environment's bindings | yes, in declared `order` |
 | `crucible build [--env <name>]` | no | no | yes | no |
 
 `deploy` fails before any write when a declared resource has no ID in the lock for that environment. That is how a release from a tag can never mint a product. A maintainer runs `crucible provision production` on purpose and commits the lock change. `deploy` replaces `crucible publish`, whose callers move in the same change.

@@ -220,7 +220,10 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
     }
 }
 
-fn transport<'a>(key: &'a auth::Secret, output: &'a Output) -> Result<Transport<'a>, crucible_oc::outcome::Failure> {
+pub(crate) fn transport<'a>(
+    key: &'a auth::Secret,
+    output: &'a Output,
+) -> Result<Transport<'a>, crucible_oc::outcome::Failure> {
     let timing =
         Timing { deadline: Duration::from_secs(300), poll_interval: Duration::from_secs(2), retry_delay: None };
     let origin = std::env::var("CRUCIBLE_OC_ORIGIN").ok();

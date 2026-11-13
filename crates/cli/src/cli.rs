@@ -20,6 +20,9 @@ pub enum Command {
     Build(crate::build::Args),
     /// Create a game and install its dependencies.
     Create(crate::create::Args),
+    /// Check that crucible.lock records everything an environment declares, then build and publish its places. One
+    /// JSON document.
+    Deploy(crate::deploy::Args),
     /// Read a Crucible guide. Without a topic, list the topics. Prints Markdown unless both stdin and stdout are a terminal.
     Docs {
         /// The topic to open or print.
@@ -37,8 +40,6 @@ pub enum Command {
     /// Make the products, passes and badges on Roblox match crucible.toml in one environment, and record their IDs in
     /// crucible.lock.
     Provision(crate::provision::Args),
-    /// Build and publish the places in a crucible.toml environment. One JSON document.
-    Publish(crate::publish::Args),
     /// Upgrade crucible and @trioforge/crucible, then refresh template files this project has not edited.
     Upgrade(crate::upgrade::Args),
     /// Check the Open Cloud key and list the scopes it grants. One JSON document.

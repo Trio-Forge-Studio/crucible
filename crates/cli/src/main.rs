@@ -3,6 +3,7 @@ mod call;
 mod child;
 mod cli;
 mod create;
+mod deploy;
 mod discover;
 mod docs;
 mod exec;
@@ -10,7 +11,6 @@ mod flows;
 mod output;
 mod plan;
 mod provision;
-mod publish;
 mod reactive_packages;
 mod scopes;
 mod upgrade;
@@ -34,15 +34,19 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).expect("embedded registry is valid")
 });
 fn main() -> ExitCode {
+    if std::env::args_os().nth(1).is_some_and(|command| command == "publish") {
+        let _ = Output::new(false).document(&Failure::usage(deploy::PUBLISH_REPLACED).document(), true);
+        return ExitCode::from(2);
+    }
     let cli = match Cli::try_parse() {
         Ok(Cli { command: Command::Adopt(args) }) => return provision::adopt_main(args),
         Ok(Cli { command: Command::Build(args) }) => return build::main(args),
         Ok(Cli { command: Command::Create(args) }) => return create::main(args),
+        Ok(Cli { command: Command::Deploy(args) }) => return deploy::main(args),
         Ok(Cli { command: Command::Docs { topic, plain } }) => return docs::run(topic.as_deref(), plain),
         Ok(Cli { command: Command::Oc(cli) }) => cli,
         Ok(Cli { command: Command::Plan(args) }) => return plan::main(args),
         Ok(Cli { command: Command::Provision(args) }) => return provision::main(args),
-        Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::Upgrade(args) }) => return upgrade::main(args),
         Ok(Cli { command: Command::Whoami(args) }) => return whoami::main(args),
         Ok(Cli { command: Command::Compile { tsconfig, project, include } }) => {
@@ -55,7 +59,7 @@ fn main() -> ExitCode {
         Err(error) => {
             if !matches!(
                 std::env::args_os().nth(1).as_deref().and_then(std::ffi::OsStr::to_str),
-                Some("oc" | "publish" | "whoami")
+                Some("oc" | "deploy" | "whoami")
             ) {
                 error.exit();
             }
