@@ -79,6 +79,10 @@ impl Walk<'_, '_> {
 }
 
 impl Grants {
+    pub(crate) fn keys(&self) -> Vec<String> {
+        self.by_key.keys().cloned().collect()
+    }
+
     /// Reports each product the program declares and never grants at the program's first grant, once it grants any.
     pub(crate) fn finish(&self, cx: &mut ProgramCx<'_>, api: &Api) {
         let Some(first) = self.first else { return };

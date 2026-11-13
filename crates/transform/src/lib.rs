@@ -62,6 +62,14 @@ pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure>
     crucible_compiler::compile_with(tsconfig, target, &mut [&mut Crucible::default()])
 }
 
+/// `compile`, and the key of each product the program grants through its handle. A place that grants nothing passes
+/// CRU039, so `crucible build` checks across its places that some place grants each product.
+pub fn compile_granting(tsconfig: &Path, target: Target<'_>) -> Result<(Compiled, Vec<String>), Failure> {
+    let mut crucible = Crucible::default();
+    let compiled = crucible_compiler::compile_with(tsconfig, target, &mut [&mut crucible])?;
+    Ok((compiled, crucible.state.grants.keys()))
+}
+
 #[cfg(feature = "test-support")]
 pub fn analyze(
     tsconfig: &Path,

@@ -4,8 +4,9 @@
 use crate::build::Error;
 use crucible_iac::bindings::{self, Build};
 use crucible_iac::lock::{self, Lock};
-use crucible_iac::model::{Experience, Problem};
+use crucible_iac::model::{Experience, Kind, Lifecycle, Problem};
 use crucible_project::Manifest;
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 /// Writes `src/crucible-experience.d.ts` when `crucible.toml` declares a product, a pass or a badge, or the file
@@ -38,6 +39,38 @@ fn bind(path: &Path, experience: &Experience, build: Build<'_>) -> Result<Option
     write_if_changed(path, bindings::declaration(experience).as_bytes())
         .map_err(|error| Error::Failed(format!("cannot write {}: {error}", bindings::DECLARATION)))?;
     Ok(Some(source))
+}
+
+/// Fails when no place of the game grants a product that is neither retired nor untracked, because Roblox would charge
+/// for it and no server would grant it. `granted` holds the keys every place's compile granted through their handles.
+pub fn refuse_ungranted<'g>(manifest: &Manifest, granted: impl IntoIterator<Item = &'g String>) -> Result<(), Error> {
+    let granted: BTreeSet<&str> = granted.into_iter().map(String::as_str).collect();
+    let experience = Experience::new(manifest)
+        .map_err(|problems| broken("crucible.toml breaks the experience rules:", &problems))?;
+    let problems: Vec<Problem> = experience
+        .resources()
+        .filter(|resource| resource.kind == Kind::Product && resource.lifecycle == Lifecycle::Managed)
+        .filter(|resource| !granted.contains(resource.key.as_str()))
+        .map(|resource| {
+            let handle = resource.handle();
+            Problem::at(
+                resource.line,
+                format!("{}.{}", Kind::Product.table(), resource.key),
+                format!(
+                    "no place grants {handle}, so a player could buy it and never receive it. Grant it once with a \
+                     profile store's grant({handle}, ...) in a place that sells it"
+                ),
+            )
+        })
+        .collect();
+    match problems.is_empty() {
+        true => Ok(()),
+        false => Err(Error::Failed(
+            problems.iter().fold("no place of this game grants these products:".to_owned(), |text, problem| {
+                text + &format!("\n  {problem}")
+            }),
+        )),
+    }
 }
 
 fn environment<'m>(manifest: &'m Manifest, name: &'m str) -> Result<(&'m str, &'m crucible_project::Env), Error> {

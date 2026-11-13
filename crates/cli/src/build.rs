@@ -101,7 +101,12 @@ pub fn build(
     }
     refuse_declared_out_dir_overlaps(root, manifest)?;
     let experience = crate::experience::prepare(root, manifest, env)?;
-    write(root, &compile_all(root, &selected, experience.as_deref())?)?;
+    let compiles = compile_all(root, &selected, experience.as_deref())?;
+    // A place that grants nothing is exempt from CRU039, so only the whole game shows a product nobody grants.
+    if experience.is_some() && selected.len() == manifest.places.len() {
+        crate::experience::refuse_ungranted(manifest, compiles.iter().flat_map(|shared| &shared.granted))?;
+    }
+    write(root, &compiles)?;
     let mut built = Vec::new();
     for (name, place) in selected {
         let path = match output {
@@ -118,6 +123,7 @@ pub fn build(
 struct SharedCompile<'m> {
     place: &'m Place,
     compiled: Compiled,
+    granted: Vec<String>,
 }
 
 fn compile_all<'m>(
@@ -130,9 +136,9 @@ fn compile_all<'m>(
         if compiles.iter().any(|shared| shared.place == place) {
             continue;
         }
-        let compiled =
+        let (compiled, granted) =
             compile(root, place, experience).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
-        compiles.push(SharedCompile { place, compiled });
+        compiles.push(SharedCompile { place, compiled, granted });
     }
     Ok(compiles)
 }
@@ -242,10 +248,12 @@ pub const COMPILE: &str = "__compile";
 struct ChildModules {
     out_dir: PathBuf,
     modules: Vec<(String, String)>,
+    /// The key of each product the place grants through its handle.
+    granted: Vec<String>,
 }
 
 // tsrs never frees a program, so each compile runs in its own process and a build's peak memory is its largest place.
-fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<Compiled, String> {
+fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Compiled, Vec<String>), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
     let mut command = Command::new(exe);
     command.arg(COMPILE).arg(&place.tsconfig).arg(&place.project).arg(&place.include);
@@ -275,7 +283,7 @@ fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<Compi
     let child: ChildModules =
         serde_json::from_slice(&json).map_err(|error| format!("cannot read the compiler's output: {error}"))?;
     let modules = child.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
-    Ok(Compiled { out_dir: child.out_dir, modules })
+    Ok((Compiled { out_dir: child.out_dir, modules }, child.granted))
 }
 
 pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, experience: Option<PathBuf>) -> ExitCode {
@@ -309,13 +317,13 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, exper
         .map(|(path, source)| VirtualModule { specifier: crucible_iac::bindings::SPECIFIER, path, source })
         .collect();
     let instances = InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files);
-    match crucible_transform::compile(
+    match crucible_transform::compile_granting(
         &tsconfig,
         Target::Game { instances: &instances, include: &include, modules: &modules },
     ) {
-        Ok(compiled) => {
+        Ok((compiled, granted)) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
-            let child = ChildModules { out_dir: compiled.out_dir, modules };
+            let child = ChildModules { out_dir: compiled.out_dir, modules, granted };
             match serde_json::to_writer(std::io::stdout().lock(), &child) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
