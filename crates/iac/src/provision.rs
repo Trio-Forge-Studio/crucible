@@ -15,8 +15,10 @@
 //!    the run did not know is the intent's own or one made by hand. An unknown outcome stops the run with the intent
 //!    kept, and the next run's adopt check resolves it. A create Roblox certainly refused clears its intent, then stops
 //!    the run. Nothing sends a create twice for one intent.
-//! 5. The experience settings update like a resource, and the lock records their fingerprint. They go last, so a
-//!    settings update Roblox refuses stops nothing a product, a pass or a badge needs.
+//! 5. The experience settings update last, so a settings update Roblox refuses stops nothing a product, a pass or a
+//!    badge needs. The update sends only the settings whose declared value differs from what Roblox's reply states, or
+//!    from the lock's value when the reply leaves a setting out, because a price write may cancel private server
+//!    subscriptions. The lock then records each value.
 
 use crate::journal::{Intent, Journal};
 use crate::lock::{Entry, EnvLock, Lock, Status};
@@ -233,8 +235,9 @@ enum Effect {
         patch: Patch,
     },
     Settings(ResolvedSettings),
-    /// One lock write that records the fingerprint of the settings the run applied.
-    RecordSettings(String),
+    /// One lock write that records the value of each setting the run wrote or found held, and keeps the value the lock
+    /// had for each setting `[experience]` no longer sets.
+    RecordSettings(ResolvedSettings),
     Intend {
         kind: Kind,
         key: String,
@@ -300,11 +303,12 @@ impl Run {
         if let Some(declared) = inputs.experience.settings()
             && plan.steps.iter().any(|step| step.kind == "experience" && step.action == Action::Update)
         {
-            let write = declared.unheld(observed.held_settings());
+            let (recorded, known) = crate::plan::known_settings(inputs);
+            let write = declared.unheld(&known);
             if !write.is_empty() {
                 settings.push(Effect::Settings(write));
             }
-            settings.push(Effect::RecordSettings(declared.fingerprint()));
+            settings.push(Effect::RecordSettings(declared.or(&recorded)));
         }
         for step in &plan.steps {
             let Some(resource) =
@@ -456,8 +460,8 @@ impl Run {
                 })?;
             }
             Effect::Settings(settings) => remote.update_settings(&settings).map_err(Stop::Settings)?,
-            Effect::RecordSettings(fingerprint) => {
-                self.lock.env_mut(&self.env, self.universe).experience = Some(crate::lock::Applied { fingerprint });
+            Effect::RecordSettings(settings) => {
+                self.lock.env_mut(&self.env, self.universe).experience = Some(settings);
                 self.save_lock(store)?;
                 let id = self.universe.to_string();
                 self.applied.push(Applied { kind: "experience", key: "settings".into(), action: Action::Update, id });

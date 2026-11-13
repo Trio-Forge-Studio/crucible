@@ -111,33 +111,33 @@ fn provision_of(
     (roblox.settings[before..].to_vec(), ended)
 }
 
-fn fingerprint(disk: &Disk) -> Option<String> {
-    disk.lock.as_ref()?.env("staging")?.experience.as_ref().map(|applied| applied.fingerprint.clone())
+fn recorded(disk: &Disk) -> Option<ResolvedSettings> {
+    disk.lock.as_ref()?.env("staging")?.experience.clone()
 }
 
 #[test]
-fn provision_writes_changed_settings_once_and_records_their_fingerprint() {
+fn provision_writes_changed_settings_once_and_records_their_values() {
     let (mut disk, mut roblox) = (Disk::default(), Roblox::default());
     let table = "private_server_price = 0\nvoice_chat = false\n";
     let (sent, ended) = provision(&mut disk, &mut roblox, table);
     assert_eq!(sent, [ResolvedSettings { private_server_price: Some(0), voice_chat: Some(false) }]);
     assert_eq!(ended.unwrap(), [Action::Update]);
-    let recorded = fingerprint(&disk).expect("the lock records the settings it applied");
+    assert_eq!(recorded(&disk), held(Some(0), Some(false)), "the lock records the settings it wrote");
 
     let (sent, ended) = provision(&mut disk, &mut roblox, table);
     assert_eq!((sent, ended.unwrap()), (vec![], vec![]), "a second run has nothing to write");
 
     let (sent, _) = provision(&mut disk, &mut roblox, "voice_chat = true\n");
     assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(true) }], "unset stays unset");
-    assert_ne!(fingerprint(&disk).unwrap(), recorded);
+    assert_eq!(recorded(&disk), held(Some(0), Some(true)), "the price no table sets keeps its value");
 }
 
 #[test]
-fn an_empty_experience_table_sends_nothing_and_is_recorded() {
+fn an_empty_experience_table_has_nothing_to_send_or_record() {
     let (mut disk, mut roblox) = (Disk::default(), Roblox::default());
     let (sent, ended) = provision(&mut disk, &mut roblox, "");
-    assert_eq!((sent, ended.unwrap()), (vec![], vec![Action::Update]));
-    assert!(fingerprint(&disk).is_some());
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![]));
+    assert_eq!(recorded(&disk), None);
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn a_failed_settings_update_stops_the_run_and_leaves_the_lock_as_it_was() {
     let (sent, ended) = provision(&mut disk, &mut roblox, "voice_chat = true\n");
     assert_eq!(sent.len(), 1);
     assert!(matches!(ended, Err(Stop::Settings(failure)) if failure.code == 5));
-    assert_eq!(fingerprint(&disk), None, "the next run sends the settings again");
+    assert_eq!(recorded(&disk), None, "the next run sends the settings again");
 
     roblox.fail = None;
     let (sent, ended) = provision(&mut disk, &mut roblox, "voice_chat = true\n");
@@ -212,13 +212,13 @@ fn provision_repairs_a_setting_roblox_holds_otherwise_and_writes_only_that_one()
     let (mut disk, mut roblox) = (Disk::default(), Roblox { held: held(Some(100), None), ..Roblox::default() });
     let (sent, _) = provision(&mut disk, &mut roblox, table);
     assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }], "100 is held");
-    let recorded = fingerprint(&disk).unwrap();
+    assert_eq!(recorded(&disk), held(Some(100), Some(false)));
 
     roblox.held = held(Some(100), Some(true));
     let (sent, ended) = provision(&mut disk, &mut roblox, table);
     assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }], "the lock matched");
     assert_eq!(ended.unwrap(), [Action::Update]);
-    assert_eq!(fingerprint(&disk).unwrap(), recorded, "the lock stays the record of the table");
+    assert_eq!(recorded(&disk), held(Some(100), Some(false)), "the lock still records what provision wrote");
 
     roblox.held = held(Some(100), Some(false));
     let (sent, ended) = provision(&mut disk, &mut roblox, table);
@@ -241,7 +241,7 @@ fn a_failed_read_of_the_settings_is_kept_and_the_plan_falls_back_to_the_lock() {
     assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }]);
     roblox.held = None;
     let (sent, ended) = provision(&mut disk, &mut roblox, table);
-    assert_eq!((sent, ended.unwrap()), (vec![], vec![]), "the lock records the table, so nothing is written");
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![]), "the lock records the value, so nothing is written");
 
     let manifest = Manifest::parse(&format!("{PLACES}\n[experience]\n{table}")).unwrap();
     let experience = Experience::new(&manifest).unwrap();
@@ -251,4 +251,30 @@ fn a_failed_read_of_the_settings_is_kept_and_the_plan_falls_back_to_the_lock() {
     let (sent, ended) = provision(&mut fresh, &mut roblox, table);
     assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }]);
     assert_eq!(ended.unwrap(), [Action::Update], "without the lock or the read, it writes every setting");
+}
+
+#[test]
+fn without_the_read_provision_sends_only_the_settings_whose_value_differs_from_the_lock() {
+    let (mut disk, mut roblox) = (Disk::default(), Roblox::default());
+    let (sent, _) = provision(&mut disk, &mut roblox, "private_server_price = 100\nvoice_chat = true\n");
+    assert_eq!(sent, [ResolvedSettings { private_server_price: Some(100), voice_chat: Some(true) }]);
+
+    let (sent, ended) = provision(&mut disk, &mut roblox, "private_server_price = 100\nvoice_chat = false\n");
+    assert_eq!(
+        sent,
+        [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }],
+        "a price write may cancel private server subscriptions, so an unchanged price is never sent"
+    );
+    assert_eq!(ended.unwrap(), [Action::Update]);
+    assert_eq!(recorded(&disk), held(Some(100), Some(false)));
+
+    let (sent, ended) = provision(&mut disk, &mut roblox, "voice_chat = false\n");
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![]));
+    let (sent, ended) = provision(&mut disk, &mut roblox, "private_server_price = 100\nvoice_chat = false\n");
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![]), "the lock kept the price while no table set it");
+
+    roblox.held = held(None, Some(true));
+    let (sent, ended) = provision(&mut disk, &mut roblox, "private_server_price = 100\nvoice_chat = true\n");
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![Action::Update]), "Roblox holds the new value already");
+    assert_eq!(recorded(&disk), held(Some(100), Some(true)));
 }

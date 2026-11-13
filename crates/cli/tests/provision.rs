@@ -361,7 +361,7 @@ fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
     assert!(stdout.contains("update experience settings 1\n"), "{stdout}");
     assert!(!stdout.contains("does not write"), "{stdout}");
     let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
-    assert!(lock.contains("[env.staging.experience]\nfingerprint = \"sha256:"), "{lock}");
+    assert!(lock.contains("[env.staging.experience]\nvoice_chat = true\n"), "{lock}");
 
     products.delete();
     badges.delete();
@@ -375,7 +375,7 @@ fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
 }
 
 #[test]
-fn a_refused_settings_update_comes_after_every_resource_step_and_writes_no_fingerprint() {
+fn a_refused_settings_update_comes_after_every_resource_step_and_records_no_settings() {
     let dir = project();
     std::fs::write(dir.path().join("crucible.toml"), format!("{CONFIG}\n[experience]\nprivate_server_price = 0\n"))
         .unwrap();
@@ -519,12 +519,11 @@ fn a_disabled_key_stops_provision_and_an_unanswered_introspection_does_not() {
     products.assert_calls(1);
 }
 
+/// A project whose `[experience]` holds `table`, and a lock that records `table` as the settings provision wrote.
 fn settings_lock(dir: &Path, table: &str) {
-    let manifest = crucible_project::Manifest::parse(&format!("{CONFIG}\n[experience]\n{table}")).unwrap();
-    let fingerprint = crucible_iac::model::Experience::new(&manifest).unwrap().settings().unwrap().fingerprint();
     std::fs::write(dir.join("crucible.toml"), format!("{CONFIG}\n[experience]\n{table}")).unwrap();
     let lock = format!(
-        "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.experience]\nfingerprint = {fingerprint:?}\n\n\
+        "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.experience]\n{table}\n\
          [env.staging.products.coin-pack]\nid = 77\nfingerprint = \"x\"\nstatus = \"managed\"\n"
     );
     std::fs::write(dir.join("crucible.lock"), lock).unwrap();

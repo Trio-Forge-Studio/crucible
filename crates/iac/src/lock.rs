@@ -2,7 +2,7 @@
 //! environment's entries belong to. This module reads it, edits it and writes it back whole. A lock that fails to parse
 //! or has a newer format is an error and never reads as empty, because an empty lock means "create everything".
 
-use crate::model::Kind;
+use crate::model::{Kind, ResolvedSettings};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -27,19 +27,14 @@ pub struct EnvLock {
     universe: Spanned<NonZeroU64>,
     #[serde(skip)]
     universe_line: usize,
-    pub experience: Option<Applied>,
+    /// The value of each experience setting the last provision wrote, or found Roblox already held.
+    pub experience: Option<ResolvedSettings>,
     #[serde(default)]
     products: BTreeMap<String, Entry>,
     #[serde(default)]
     passes: BTreeMap<String, Entry>,
     #[serde(default)]
     badges: BTreeMap<String, Entry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Applied {
-    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -136,8 +131,14 @@ impl Lock {
         for (name, env) in &self.env {
             let name = bare(name);
             text += &format!("\n[env.{name}]\nuniverse = {}\n", env.universe());
-            if let Some(applied) = &env.experience {
-                text += &format!("\n[env.{name}.experience]\nfingerprint = {}\n", quote(&applied.fingerprint));
+            if let Some(settings) = &env.experience {
+                text += &format!("\n[env.{name}.experience]\n");
+                if let Some(price) = settings.private_server_price {
+                    text += &format!("private_server_price = {price}\n");
+                }
+                if let Some(on) = settings.voice_chat {
+                    text += &format!("voice_chat = {on}\n");
+                }
             }
             for kind in Kind::ALL {
                 for (key, entry) in env.entries(kind) {
@@ -219,7 +220,7 @@ version = 1
 universe = 10772177432
 
 [env.staging.experience]
-fingerprint = "sha256:aa"
+private_server_price = 0
 
 [env.staging.products.coin-pack]
 id = 3301234567
@@ -238,7 +239,8 @@ status = "retired"
         let lock = Lock::parse(LOCK).unwrap();
         let staging = lock.env("staging").unwrap();
         assert_eq!((staging.universe().get(), staging.universe_line()), (10772177432, 5));
-        assert_eq!(staging.experience, Some(Applied { fingerprint: "sha256:aa".into() }));
+        let settings = ResolvedSettings { private_server_price: Some(0), voice_chat: None };
+        assert_eq!(staging.experience, Some(settings));
         let coin = &staging.entries(Kind::Product)["coin-pack"];
         assert_eq!(
             (coin.id.get(), coin.icon.as_deref(), coin.status),
@@ -267,7 +269,10 @@ status = "retired"
             status: Status::Retired,
         };
         edited.env_mut("Stage_2", universe).entries_mut(Kind::Pass).insert("vip".into(), entry.clone());
+        let settings = ResolvedSettings { private_server_price: Some(100), voice_chat: Some(false) };
+        edited.env_mut("Stage_2", universe).experience = Some(settings.clone());
         let read = Lock::parse(&edited.render()).unwrap();
+        assert_eq!(read.env("Stage_2").unwrap().experience, Some(settings));
         assert_eq!(read.env("Stage_2").unwrap().universe(), universe);
         assert_eq!(read.env("Stage_2").unwrap().entries(Kind::Pass)["vip"], entry);
         assert_eq!(Lock::parse(&Lock::empty().render()).unwrap(), Lock::empty());
@@ -310,6 +315,8 @@ status = "retired"
                 Some(5),
             ),
             ("version = 1\n[env.staging]\nuniverse = 1\nname = \"x\"\n", Some(4)),
+            ("version = 1\n[env.staging]\nuniverse = 1\n[env.staging.experience]\nfingerprint = \"x\"\n", Some(5)),
+            ("version = 1\n[env.staging]\nuniverse = 1\n[env.staging.experience]\nvoice_chat = 1\n", Some(5)),
             ("version = 1\n[env.staging]\nuniverse = 0\n", Some(3)),
             (
                 "version = 1\n[env.staging.products.coin-pack]\nid = 1\nfingerprint = \"x\"\nstatus = \"managed\"\n",

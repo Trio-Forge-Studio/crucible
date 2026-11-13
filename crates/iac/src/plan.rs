@@ -105,6 +105,17 @@ fn settings(declared: &ResolvedSettings, held: Option<&ResolvedSettings>) -> Vec
     settings
 }
 
+/// The settings `crucible.lock` records, and what the universe is known to hold: each setting Roblox's reply states,
+/// and the lock's value for each the reply leaves out or when the read failed.
+pub(crate) fn known_settings(inputs: &Inputs) -> (ResolvedSettings, ResolvedSettings) {
+    let recorded = inputs.lock.and_then(|lock| lock.experience.clone()).unwrap_or_default();
+    let known = match inputs.observed.and_then(Observed::held_settings) {
+        Some(held) => held.or(&recorded),
+        None => recorded.clone(),
+    };
+    (recorded, known)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Plan {
     pub environment: String,
@@ -192,10 +203,9 @@ pub fn plan(
     let mut attached = vec![false; intents.len()];
     let mut steps = Vec::new();
     if let Some(declared) = inputs.experience.settings() {
-        let applied = inputs.lock.and_then(|lock| lock.experience.as_ref());
+        let (recorded, known) = known_settings(inputs);
         let held = inputs.observed.and_then(Observed::held_settings);
-        let changed = applied.is_none_or(|applied| applied.fingerprint != declared.fingerprint())
-            || held.is_some_and(|held| !declared.drifted(held).is_empty());
+        let changed = !declared.unheld(&known).is_empty() || !declared.unheld(&recorded).is_empty();
         steps.push(Step {
             kind: "experience",
             key: "settings".into(),

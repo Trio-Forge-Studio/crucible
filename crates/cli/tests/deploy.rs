@@ -397,7 +397,7 @@ fn provisioned(game: &Game, settings: bool) {
     let mut lock = Lock::empty();
     let tables = lock.env_mut("production", env.universe);
     if let Some(settings) = experience.settings() {
-        tables.experience = Some(crucible_iac::lock::Applied { fingerprint: settings.fingerprint() });
+        tables.experience = Some(settings.clone());
     }
     for (at, resource) in experience.resolve(env).into_iter().enumerate() {
         let fingerprint = resource.fields.as_ref().unwrap().fingerprint();
