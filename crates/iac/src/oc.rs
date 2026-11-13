@@ -1,9 +1,11 @@
 //! `Remote` over `crucible-oc`'s typed operations in one universe.
 
-use crate::model::{Fields, Kind};
+use crate::model::{Fields, Kind, ResolvedSettings};
 use crate::plan::{Id, Listed};
 use crate::provision::{Patch, Remote};
-use crucible_oc::ops::{self, BadgeDetails, Details, Image, Sellable, badges, passes, products};
+use crucible_oc::ops::{
+    self, BadgeDetails, Details, Image, Sellable, UniverseSettings, badges, passes, products, universes,
+};
 use crucible_oc::outcome::Failure;
 use crucible_oc::transport::Transport;
 
@@ -99,6 +101,15 @@ impl Remote for Roblox<'_, '_> {
         match kind {
             Kind::Product => self.transport.run(&products::update(universe, id, &details)),
             _ => self.transport.run(&passes::update(universe, id, &details)),
+        }
+    }
+
+    fn update_settings(&mut self, settings: &ResolvedSettings) -> Result<(), Failure> {
+        let settings =
+            UniverseSettings { private_server_price: settings.private_server_price, voice_chat: settings.voice_chat };
+        match universes::update(self.universe, &settings) {
+            Some(op) => self.transport.run(&op),
+            None => Ok(()),
         }
     }
 }

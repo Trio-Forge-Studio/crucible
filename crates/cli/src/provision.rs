@@ -65,9 +65,6 @@ pub fn main(args: Args) -> ExitCode {
         if let Some(plan) = &report.plan {
             text += &render(std::slice::from_ref(plan));
             text.push('\n');
-            if plan.steps.iter().any(|step| step.kind == "experience") {
-                text += "  Provision does not write experience settings yet. They stay as they are on Roblox.\n";
-            }
         }
         for applied in &report.applied {
             let action = json!(applied.action);
@@ -181,6 +178,13 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
                         crucible_iac::journal::path(env).display()
                     ));
                 }
+            }
+            report
+        }
+        Some(Stop::Settings(failure)) => {
+            let mut report = remote(Some(plan), applied, failure, Some(&source));
+            if let Some((_, error)) = &mut report.error {
+                error["resource"] = json!("experience settings");
             }
             report
         }

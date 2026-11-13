@@ -333,3 +333,60 @@ fn provision_without_a_key_stops_before_any_call() {
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stdout));
     assert_eq!(document(&out)["error"]["kind"], "auth");
 }
+
+#[test]
+fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
+    let dir = project();
+    std::fs::write(dir.path().join("crucible.toml"), format!("{CONFIG}\n[experience]\nvoice_chat = true\n")).unwrap();
+    let lock = "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.products.coin-pack]\nid = 77\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n\n[env.staging.badges.first-delivery]\nid = 88\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n";
+    std::fs::write(dir.path().join("crucible.lock"), lock).unwrap();
+    let server = MockServer::start();
+    let (mut products, mut badges) = lists(&server, vec![product(77)], vec![badge(88)]);
+    let settings = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .header("x-api-key", "test-key")
+            .json_body(json!({"voiceChatEnabled": true}));
+        then.status(200).json_body(json!({"path": "universes/1", "voiceChatEnabled": true}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    settings.assert_calls(1);
+    let stdout = text(&out.stdout);
+    assert!(stdout.contains("  update  experience settings"), "{stdout}");
+    assert!(stdout.contains("update experience settings 1\n"), "{stdout}");
+    assert!(!stdout.contains("does not write"), "{stdout}");
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.experience]\nfingerprint = \"sha256:"), "{lock}");
+
+    products.delete();
+    badges.delete();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    settings.assert_calls(1);
+    assert_eq!(document(&out)["applied"], json!([]), "the lock records the settings it applied");
+}
+
+#[test]
+fn a_failed_settings_update_names_the_settings_and_writes_no_fingerprint() {
+    let dir = project();
+    std::fs::write(dir.path().join("crucible.toml"), format!("{CONFIG}\n[experience]\nprivate_server_price = 0\n"))
+        .unwrap();
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let settings = server.mock(|when, then| {
+        when.method(Method::PATCH).path("/cloud/v2/universes/1");
+        then.status(400).json_body(json!({"message": "bad"}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(4), "{}", text(&out.stderr));
+    settings.assert_calls(1);
+    let document = document(&out);
+    assert_eq!(document["error"]["resource"], "experience settings", "{document}");
+    let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(!lock.contains("[env.staging.experience]"), "{lock}");
+}

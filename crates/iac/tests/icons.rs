@@ -1,6 +1,6 @@
 use crucible_iac::journal::Journal;
 use crucible_iac::lock::Lock;
-use crucible_iac::model::{Experience, Fields, Kind};
+use crucible_iac::model::{Experience, Fields, Kind, ResolvedSettings};
 use crucible_iac::plan::{Id, Inputs, Listed, plan};
 use crucible_iac::provision::{Patch, Remote, Run, Store, observe};
 use crucible_oc::ops::Image;
@@ -43,6 +43,9 @@ impl Remote for Roblox {
         assert_eq!((icon.file_name.as_str(), icon.content_type.as_str()), ("coin.png", "image/png"));
         self.icons.push(icon.bytes.clone());
         Ok(())
+    }
+    fn update_settings(&mut self, _: &ResolvedSettings) -> Result<(), Failure> {
+        unreachable!("the config declares no settings")
     }
 }
 

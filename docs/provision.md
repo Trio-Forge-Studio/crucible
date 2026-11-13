@@ -2,7 +2,7 @@
 
 Create, adopt and update the products, passes and badges `crucible.toml` declares, and record their IDs in `crucible.lock`.
 
-`crucible provision <env>` makes the developer products, game passes and badges in one environment's universe match `crucible.toml`. It lists what the universe holds, plans with the same rules as `crucible plan`, prints the plan, and applies it without asking. It writes each ID Roblox assigns to `crucible.lock`, which you commit. Run `npx crucible docs experience` for the declarations, the plan and the lock.
+`crucible provision <env>` makes the developer products, game passes, badges and experience settings in one environment's universe match `crucible.toml`. It lists what the universe holds, plans with the same rules as `crucible plan`, prints the plan, and applies it without asking. It writes each ID Roblox assigns to `crucible.lock`, which you commit. Run `npx crucible docs experience` for the declarations, the plan and the lock.
 
 ```console
 npx crucible provision staging --dry-run
@@ -10,18 +10,24 @@ npx crucible provision staging
 git add crucible.lock && git commit -m "chore(experience): provision staging"
 ```
 
-It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon. Badges are listed through Roblox's public badge endpoint, which needs no key. Run one provision per environment at a time: the lock is a file, and nothing stops two machines from both creating a resource.
+It needs the game's Open Cloud key, read from `CRUCIBLE_OC_API_KEY` or `.env` as `npx crucible docs oc` describes, with `developer-product:read`, `developer-product:write`, `game-pass:read`, `game-pass:write`, `legacy-universe.badge:manage-and-spend-robux` and `legacy-universe.badge:write`, plus `legacy-badge:manage` to change a badge's icon and `universe:write` to write experience settings. Badges are listed through Roblox's public badge endpoint, which needs no key. Run one provision per environment at a time: the lock is a file, and nothing stops two machines from both creating a resource.
 
 ## What a run does
 
 1. It reads `crucible.toml`, `crucible.lock` and `.crucible/journal/<env>.json`, and stops on everything `crucible plan` stops on.
 2. It lists every product, pass and badge of the universe, to the last page. A list it cannot read whole stops the run, because a resource it did not see would be created again. It reads by ID each resource the lock names that a list left out.
 3. It plans. A key with no ID in the lock is adopted when exactly one resource has its declared name, and created when none has. A key with an ID is updated when its name, description, price, sale state, `enabled` state or icon differs from the declaration, on Roblox or in the lock.
-4. It prints the plan, then applies it: adopts first, then updates, retirements and untracks, then creates.
+4. It prints the plan, then applies it: adopts first, then the experience settings, then updates, retirements and untracks, then creates.
 
-`--dry-run` stops after step 3 and writes nothing. `--json` prints one document, `{"plan": ..., "applied": [...], "dryRun": false}`, with an `error` object when the run failed. Without `--json`, the plan and each applied action go to stdout, and errors to stderr. Experience settings, such as `private_server_price`, show in the plan, and provision does not write them yet.
+`--dry-run` stops after step 3 and writes nothing. `--json` prints one document, `{"plan": ..., "applied": [...], "dryRun": false}`, with an `error` object when the run failed. Without `--json`, the plan and each applied action go to stdout, and errors to stderr.
 
 Each action in `applied` is `adopt`, `create`, `update`, `retire` or `untrack`, with the kind, the key and the ID. An `update` sends only the fields that differ, and the icon when its file changed since the lock recorded it or the lock records none. A retire takes a product or a pass off sale or disables a badge, and repeats when someone puts it back on sale on Roblox. An untrack removes the key from the lock and leaves the resource on Roblox.
+
+## Experience settings
+
+`[experience]` sets `private_server_price` and `voice_chat`. When the table's fingerprint differs from the one `crucible.lock` records under `[env.<env>.experience]`, or the lock records none, provision sends one universe update with the settings the table sets and an update mask that names only them, so Roblox leaves the rest alone. It then records the fingerprint, and `applied` lists `{"kind": "experience", "key": "settings", "action": "update", "id": "<universe>"}`. An empty `[experience]` table sends nothing and records its fingerprint.
+
+Provision compares the settings with the lock, not with Roblox, so a setting changed in the Creator Dashboard stays changed until `[experience]` changes. The update writes absolute values, so a run that stops after it repeats it. When it fails, `error.resource` is `experience settings` and the lock keeps the old fingerprint.
 
 ## Creates and the journal
 

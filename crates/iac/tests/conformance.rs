@@ -11,7 +11,7 @@
 
 use crucible_iac::journal::{self, Journal};
 use crucible_iac::lock::Lock;
-use crucible_iac::model::{Experience, Fields, Kind, Problem};
+use crucible_iac::model::{Experience, Fields, Kind, Problem, ResolvedSettings};
 use crucible_iac::plan::{Action, Id, Inputs, Listed, plan, undeclared};
 use crucible_iac::provision::{Patch, Remote, Run, Stop, Store, adopt, forget, observe};
 use crucible_oc::ops::Image;
@@ -296,6 +296,10 @@ impl Remote for Fake<'_> {
             Fault::Refused | Fault::Rejected(_) => Err(unavailable()),
             _ => Err(Failure::unknown("the answer was lost")),
         }
+    }
+    fn update_settings(&mut self, _: &ResolvedSettings) -> Result<(), Failure> {
+        self.0.violate("an update of experience settings the model declares none of".into());
+        Ok(())
     }
 }
 

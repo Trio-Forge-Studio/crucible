@@ -1,6 +1,6 @@
 use crucible_iac::journal::{Intent, Journal};
 use crucible_iac::lock::{Entry, Lock, Status};
-use crucible_iac::model::{Experience, Fields, Kind};
+use crucible_iac::model::{Experience, Fields, Kind, ResolvedSettings};
 use crucible_iac::plan::{Action, Id, Inputs, Listed};
 use crucible_iac::provision::{Applied, Patch, Refused, Remote, Store, adopt, forget};
 use crucible_oc::ops::Image;
@@ -63,6 +63,9 @@ impl Remote for Roblox {
     }
     fn update(&mut self, _: Kind, _: Id, _: &Patch) -> Result<(), Failure> {
         unreachable!("adopt never updates")
+    }
+    fn update_settings(&mut self, _: &ResolvedSettings) -> Result<(), Failure> {
+        unreachable!("adopt never writes settings")
     }
 }
 

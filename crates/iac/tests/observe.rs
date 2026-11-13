@@ -1,6 +1,6 @@
 use crucible_iac::journal::{Intent, Journal};
 use crucible_iac::lock::Lock;
-use crucible_iac::model::{Experience, Fields, Kind};
+use crucible_iac::model::{Experience, Fields, Kind, ResolvedSettings};
 use crucible_iac::plan::{Id, Listed};
 use crucible_iac::provision::{Patch, Remote, observe};
 use crucible_oc::ops::Image;
@@ -37,6 +37,9 @@ impl Remote for Recorder {
         unreachable!("observe never writes")
     }
     fn update(&mut self, _: Kind, _: Id, _: &Patch) -> Result<(), Failure> {
+        unreachable!("observe never writes")
+    }
+    fn update_settings(&mut self, _: &ResolvedSettings) -> Result<(), Failure> {
         unreachable!("observe never writes")
     }
 }

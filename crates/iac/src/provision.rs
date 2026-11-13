@@ -10,6 +10,7 @@
 //!    shows every landed create, so that create never landed. After it, no intent is unresolved.
 //! 2. An adopt writes the ID to the lock, then clears the key's intent.
 //! 3. An update or a retire writes to Roblox, then to the lock. Its writes are absolute, so a crash between repeats it.
+//!    The experience settings update the same way, before the resources, and the lock records their fingerprint.
 //! 4. A create writes its intent, with the name it sends and the IDs the run knows, then sends the create, then writes
 //!    the ID to the lock, then clears the intent. No intent is written while another is unresolved, so every resource
 //!    the run did not know is the intent's own or one made by hand. An unknown outcome stops the run with the intent
@@ -18,7 +19,7 @@
 
 use crate::journal::{Intent, Journal};
 use crate::lock::{Entry, EnvLock, Lock, Status};
-use crate::model::{Experience, Fields, Kind, Lifecycle, Resource, content_hash};
+use crate::model::{Experience, Fields, Kind, Lifecycle, ResolvedSettings, Resource, content_hash};
 use crate::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan};
 use crucible_oc::ops::Image;
 use crucible_oc::outcome::Failure;
@@ -36,6 +37,8 @@ pub trait Remote {
     /// A failure for which `may_have_landed` holds leaves the create's outcome unknown.
     fn create(&mut self, kind: Kind, fields: &Fields, icon: Option<&Image>) -> Result<Id, Failure>;
     fn update(&mut self, kind: Kind, id: Id, patch: &Patch) -> Result<(), Failure>;
+    /// Writes the settings that are set and leaves the rest as they are. A run never calls it with none set.
+    fn update_settings(&mut self, settings: &ResolvedSettings) -> Result<(), Failure>;
 }
 
 /// The fields an update sets. `on` is the sale state of a product or a pass, or whether a badge is enabled.
@@ -162,6 +165,8 @@ pub enum Stop {
         failure: Failure,
         intent: bool,
     },
+    /// Roblox refused or failed the update of the experience settings. It writes absolute values, so a rerun repeats it.
+    Settings(Failure),
     Write {
         path: PathBuf,
         error: io::Error,
@@ -192,6 +197,9 @@ enum Effect {
         id: Id,
         patch: Patch,
     },
+    Settings(ResolvedSettings),
+    /// One lock write that records the fingerprint of the settings the run applied.
+    RecordSettings(String),
     Intend {
         kind: Kind,
         key: String,
@@ -254,6 +262,15 @@ impl Run {
             .map(|intent| (intent.kind, intent.key.clone()))
             .collect();
         let (mut adopts, mut changes, mut creates) = (Vec::new(), Vec::new(), Vec::new());
+        let settings = inputs.experience.settings();
+        if let Some(settings) = settings
+            && plan.steps.iter().any(|step| step.kind == "experience" && step.action == Action::Update)
+        {
+            if settings.private_server_price.is_some() || settings.voice_chat.is_some() {
+                changes.push(Effect::Settings(settings.clone()));
+            }
+            changes.push(Effect::RecordSettings(settings.fingerprint()));
+        }
         for step in &plan.steps {
             let Some(resource) =
                 resources.iter().find(|resource| resource.kind.noun() == step.kind && resource.key == step.key)
@@ -381,6 +398,13 @@ impl Run {
                     failure,
                     intent: false,
                 })?;
+            }
+            Effect::Settings(settings) => remote.update_settings(&settings).map_err(Stop::Settings)?,
+            Effect::RecordSettings(fingerprint) => {
+                self.lock.env_mut(&self.env, self.universe).experience = Some(crate::lock::Applied { fingerprint });
+                self.save_lock(store)?;
+                let id = self.universe.to_string();
+                self.applied.push(Applied { kind: "experience", key: "settings".into(), action: Action::Update, id });
             }
             Effect::Intend { kind, key, name } => {
                 let env = self.lock.env(&self.env);
