@@ -591,3 +591,27 @@ fn a_failed_read_of_the_settings_is_a_note_and_provision_compares_them_with_the_
     assert_eq!(document["plan"]["steps"][0]["action"], "no-op", "{document}");
     assert_eq!(document["plan"]["steps"][0]["settings"], json!([{"key": "voice_chat", "value": false}]));
 }
+
+#[test]
+fn a_price_change_needs_the_product_write_scope_before_any_update() {
+    let dir = project();
+    let lock = "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.products.coin-pack]\nid = 77\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n\n[env.staging.badges.first-delivery]\nid = 88\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n";
+    std::fs::write(dir.path().join("crucible.lock"), lock).unwrap();
+    let server = MockServer::start();
+    let mut cheap = product(77);
+    cheap["priceInformation"]["defaultPriceInRobux"] = json!(10);
+    lists(&server, vec![cheap], vec![badge(88)]);
+    introspection(&server, json!([{"name": "developer-product", "operations": ["read"]}]), true);
+    let update = server.mock(|when, then| {
+        when.method(Method::PATCH);
+        then.status(200);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(document["error"]["missingScopes"], json!(["developer-product:write"]), "{document}");
+    update.assert_calls(0);
+    assert_eq!(std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap(), lock, "nothing was recorded");
+}
