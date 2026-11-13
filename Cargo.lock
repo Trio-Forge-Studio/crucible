@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "crucible"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "clap 4.6.7",
  "crucible-abi",
@@ -690,11 +690,11 @@ dependencies = [
 
 [[package]]
 name = "crucible-abi"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "crucible-compiler"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "crucible-compiler",
  "crucible-luau",
@@ -711,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-docs"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "mermaid-text",
  "nucleo-matcher",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-iac"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "crucible-project",
  "serde",
@@ -731,11 +731,11 @@ dependencies = [
 
 [[package]]
 name = "crucible-luau"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "crucible-oc"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "httpmock",
  "serde",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-project"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "globset",
  "schemars",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-transform"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "crucible-abi",
  "crucible-compiler",
@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "oc-registry"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "crucible-oc",
  "serde",
@@ -4935,7 +4935,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "crucible-abi",
  "crucible-project",
