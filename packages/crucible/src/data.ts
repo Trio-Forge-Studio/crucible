@@ -1,3 +1,4 @@
+import type { ProductHandle } from "./experience";
 import { markServerOnly, replicatedPathsOf } from "./internal/data/declarations";
 
 declare const operationKind: unique symbol;
@@ -240,6 +241,11 @@ export interface ProfileStore<T> {
 		apply: (player: Player, data: ProfileData<T>, payload: P) => ProfileData<T>,
 	): ProfileClaim;
 	/** Server claim: grants a developer product. The purchase is acknowledged only after the change is saved. */
+	grant(
+		product: ProductHandle,
+		apply: (player: Player, data: ProfileData<T>, purchase: Purchase, afterGrant: AfterGrant) => ProfileData<T>,
+	): ProfileClaim;
+	/** Server claim: grants a developer product by its Roblox ID. */
 	grant(
 		productId: number,
 		apply: (player: Player, data: ProfileData<T>, purchase: Purchase, afterGrant: AfterGrant) => ProfileData<T>,

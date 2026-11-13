@@ -490,8 +490,10 @@ function member(declaration: ProfileDeclaration, key: string): unknown {
 					message: messageOf(message) ?? error(`${name}.receive takes a profile message`, 2),
 				});
 		case "grant":
-			return (_: unknown, productId: unknown, callback: unknown) => {
-				if (!typeIs(productId, "number")) error(`${name}.grant takes a product id`, 2);
+			return (_: unknown, product: unknown, callback: unknown) => {
+				// Reading a handle's id throws, naming the product, when the build holds no ID for it.
+				const productId = typeIs(product, "table") ? (product as { readonly id?: unknown }).id : product;
+				if (!typeIs(productId, "number")) error(`${name}.grant takes a product handle or a product id`, 2);
 				return binding.claim("grant", callback, { productId });
 			};
 	}
