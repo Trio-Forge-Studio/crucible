@@ -332,7 +332,7 @@ The steps below are the work items. `roadmap.md` groups them into 11 pull reques
 3. Typed Open Cloud operations, with gated live tests against a staging universe.
 4. The lock, the journal and `crucible provision`, with the state-machine conformance test.
 5. Codegen and bindings through the virtual module.
-6. Framework handle types and the handle overloads of `grant`, badge awards and pass checks, with the one-grant-per-product rule.
+6. Framework handle types and the handle overload of `grant`, with the one-grant-per-product rule. Badge awards and pass checks pass the handle's `id` to Roblox's own calls.
 7. `crucible deploy`, replacing `crucible publish`.
 8. FD adopts it in its own repository.
 
