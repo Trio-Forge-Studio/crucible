@@ -3,14 +3,17 @@
 (* What `crucible provision <env>` does to one kind of resource in one     *)
 (* environment: the lock file, the intent                                  *)
 (* journal, adopt-before-create, crashes at any step, create responses     *)
-(* that can be lost after the write either did or did not happen, and      *)
-(* renames on Roblox between runs. design/architecture.md, "Rules that     *)
+(* that can be lost after the write either did or did not happen, creates  *)
+(* Roblox refuses, resources made by hand under any name, and renames on   *)
+(* Roblox between runs. design/architecture.md, "Rules that                *)
 (* keep provisioning safe", is the source of each step, and                *)
 (* crates/iac/src/provision.rs implements it.                              *)
 (*                                                                         *)
 (* Roblox knows a resource by its ID and its display name, never by its    *)
-(* key. The adopt check matches the declared name, and after an unknown    *)
-(* outcome any ID the intent's run did not know. A key's name changes when *)
+(* key. The adopt check takes the declared name, and after an unknown      *)
+(* outcome stops on any ID the intent's run did not know that carries      *)
+(* another name, because only a person can tell whose it is. A key's name  *)
+(* changes when                                                            *)
 (* the developer edits crucible.toml, and a ghost owner records which key  *)
 (* a create was for, so the properties can say what the protocol cannot   *)
 (* see.                                                                    *)
@@ -22,15 +25,16 @@
 (*   A2. One provisioner runs per environment (rule 6).                    *)
 (*   A3. A lost lock entry names a resource that carries its key's name,   *)
 (*       and that key keeps its name until provision adopts it again.      *)
-(*   A4. After a run stops on two matches, the developer adopts the one    *)
-(*       provision created for the key, if it created one.                 *)
+(*   A4. After a run stops on two matches or on a new ID, the developer    *)
+(*       adopts the one provision created for the key, if it created one,  *)
+(*       and clears the intent with --none only if it created none.        *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, Sequences
 
 CONSTANTS
     Keys,       \* the resource keys of one kind the config declares here
     Names,      \* the display names a key may have
-    MaxHand,    \* resources someone made by hand before the first run
+    MaxHand,    \* resources someone makes by hand, before the first run or between runs
     MaxFaults,  \* crashes, lost responses and dropped lock edits, in total
     MaxRenames  \* display name edits in crucible.toml or on Roblox, in total
 
@@ -48,9 +52,12 @@ VARIABLES
     faults,     \* faults used so far
     renames,    \* renames used so far, in crucible.toml or on Roblox
     unknown,    \* ghost: keys created with no ID in the lock and no list since
-    dropped     \* ghost: keys whose lock entry was lost and not yet restored (A3)
+    dropped,    \* ghost: keys whose lock entry was lost and not yet restored (A3)
+    rejected,   \* ghost: keys whose last create Roblox refused, and whose intent the run cleared
+    how         \* ghost: how[k] says how lock[k] was bound: "create", "name", "other" or "person"
 
-vars == <<remote, want, lock, journal, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+vars == <<remote, want, lock, journal, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped,
+          rejected, how>>
 
 None == "none"
 Hand == "hand"
@@ -66,10 +73,13 @@ Distinct(w) == \A k, j \in Keys : k # j => w[k] # w[j]
 
 \* An adopt check looks for the declared name and, while the key has an
 \* intent, for any ID the intent's run did not know, whatever its name: the
-\* create may have landed and been renamed since. A resource the lock binds
-\* to a key is no candidate.
+\* create may have landed and been renamed since, or someone made it by hand.
+\* A run adopts only a resource with the declared name, and stops on a new ID
+\* with another name. A resource the lock binds to a key is never sought.
 New(k) == IF journal[k] = None THEN {} ELSE Ids \ before[k]
-Candidates(k) == (Match(want[k]) \cup New(k)) \ Locked
+Sought(k) == (Match(want[k]) \cup New(k)) \ Locked
+Candidates(k) == Match(want[k]) \ Locked
+Strangers(k) == Sought(k) \ Candidates(k)
 
 \* An intent whose create may have landed: the lock holds no ID for its key.
 Pending(k) == lock[k] = 0 /\ journal[k] # None
@@ -92,7 +102,7 @@ Rename(k, n) ==
     /\ want' = [want EXCEPT ![k] = n]
     /\ Distinct(want')
     /\ renames' = renames + 1
-    /\ UNCHANGED <<remote, lock, journal, before, pc, seen, blocked, reply, known, faults, unknown, dropped>>
+    /\ UNCHANGED <<remote, lock, journal, before, pc, seen, blocked, reply, known, faults, unknown, dropped, rejected, how>>
 
 \* Anyone with access renames a resource on Roblox between runs, an
 \* unresolved create's included. A3: not a resource whose lock entry is
@@ -104,10 +114,19 @@ RenameOnRoblox(i, n) ==
     /\ remote[i].name # n
     /\ remote' = [remote EXCEPT ![i].name = n]
     /\ renames' = renames + 1
-    /\ UNCHANGED <<want, lock, journal, before, pc, seen, blocked, reply, known, faults, unknown, dropped>>
+    /\ UNCHANGED <<want, lock, journal, before, pc, seen, blocked, reply, known, faults, unknown, dropped, rejected, how>>
 
 \* Resources someone made by hand before the first run. Two may share a name.
 HandMade == UNION {[1..n -> [name : Names, owner : {Hand}]] : n \in 0..MaxHand}
+
+\* Someone makes a resource by hand between runs, under any name, a declared
+\* one or not, while a key's intent is unresolved or not.
+HandMadeLater(n) ==
+    /\ pc \in {"down", "done"}
+    /\ Cardinality(Owned(Hand)) < MaxHand
+    /\ remote' = Append(remote, [name |-> n, owner |-> Hand])
+    /\ UNCHANGED <<want, lock, journal, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped,
+                   rejected, how>>
 
 Init ==
     /\ remote \in HandMade
@@ -125,6 +144,8 @@ Init ==
     /\ renames = 0
     /\ unknown = {}
     /\ dropped = {}
+    /\ rejected = {}
+    /\ how = [k \in Keys |-> "none"]
 
 \* A run plans first, reading the config, the lock and the journal from disk.
 \* Nothing else survives a run.
@@ -136,13 +157,13 @@ Begin ==
     /\ blocked' = {}
     /\ reply' = NoReply
     /\ known' = {}
-    /\ UNCHANGED <<remote, want, lock, journal, before, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, journal, before, faults, renames, unknown, dropped, rejected, how>>
 
 Refuse ==
     /\ pc \in {"down", "done"}
     /\ Refused
     /\ pc' = "done"
-    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped, rejected, how>>
 
 \* Rule 2: before any create, list the universe's resources of this kind.
 \* An inherited intent whose adopt check finds nothing goes: under A1 its
@@ -150,12 +171,23 @@ Refuse ==
 \* and a crash before the write leaves the state this step started from.
 List ==
     /\ pc = "fresh"
+    /\ \A k \in Keys : lock[k] = 0 => Strangers(k) = {}
     /\ seen' = [k \in Keys |-> IF lock[k] = 0 THEN Candidates(k) ELSE {}]
-    /\ journal' = [k \in Keys |-> IF Pending(k) /\ Candidates(k) = {} THEN None ELSE journal[k]]
+    /\ journal' = [k \in Keys |-> IF Pending(k) /\ Sought(k) = {} THEN None ELSE journal[k]]
     /\ known' = Ids
     /\ unknown' = {}
     /\ pc' = "ready"
-    /\ UNCHANGED <<remote, want, lock, before, blocked, reply, faults, renames, dropped>>
+    /\ UNCHANGED <<remote, want, lock, before, blocked, reply, faults, renames, dropped, rejected, how>>
+
+\* A resource new since a key's intent that carries another name than the
+\* declared one may be the create, renamed, or one someone made by hand. The
+\* plan stops on it and asks for `crucible adopt`, with its ID or --none.
+Suspect ==
+    /\ pc = "fresh"
+    /\ \E k \in Keys : lock[k] = 0 /\ Strangers(k) # {}
+    /\ pc' = "done"
+    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped,
+                   rejected, how>>
 
 \* The one resource the adopt check found is adopted instead of created.
 Adopt(k) ==
@@ -163,10 +195,12 @@ Adopt(k) ==
     /\ lock[k] = 0
     /\ Cardinality(seen[k]) = 1
     /\ ~Shared(k)
-    /\ lock' = [lock EXCEPT ![k] = CHOOSE i \in seen[k] : TRUE]
+    /\ LET i == CHOOSE i \in seen[k] : TRUE
+       IN /\ lock' = [lock EXCEPT ![k] = i]
+          /\ how' = [how EXCEPT ![k] = IF remote[i].name = want[k] THEN "name" ELSE "other"]
     /\ journal' = [journal EXCEPT ![k] = None]
     /\ dropped' = dropped \ {k}
-    /\ UNCHANGED <<remote, want, before, pc, seen, blocked, reply, known, faults, renames, unknown>>
+    /\ UNCHANGED <<remote, want, before, pc, seen, blocked, reply, known, faults, renames, unknown, rejected>>
 
 \* Two candidates for a key, or one candidate of two keys, stop the run and
 \* ask for `crucible adopt`.
@@ -175,7 +209,7 @@ Ambiguous(k) ==
     /\ lock[k] = 0
     /\ Cardinality(seen[k]) > 1 \/ Shared(k)
     /\ pc' = "done"
-    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped, rejected, how>>
 
 \* Rule 3: the intent, with the name the create sends and the IDs the run
 \* knows, reaches the journal before the create is sent, and not while
@@ -188,10 +222,12 @@ Intend(k) ==
     /\ ~OtherPending(k)
     /\ journal' = [journal EXCEPT ![k] = want[k]]
     /\ before' = [before EXCEPT ![k] = known]
-    /\ UNCHANGED <<remote, want, lock, pc, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+    /\ rejected' = rejected \ {k}
+    /\ UNCHANGED <<remote, want, lock, pc, seen, blocked, reply, known, faults, renames, unknown, dropped, how>>
 
 \* Rule 1: one create per key per run. The answer arrives, or is lost after
-\* the write landed, or is lost before it landed.
+\* the write landed, or is lost before it landed, or Roblox refuses it, which
+\* makes nothing.
 Create(k) ==
     /\ pc = "ready"
     /\ lock[k] = 0
@@ -211,7 +247,24 @@ Create(k) ==
        \/ /\ faults < MaxFaults
           /\ faults' = faults + 1
           /\ UNCHANGED <<remote, reply, pc>>
-    /\ UNCHANGED <<want, lock, journal, before, seen, known, renames, dropped>>
+       \/ /\ faults < MaxFaults
+          /\ faults' = faults + 1
+          /\ reply' = [key |-> k, id |-> 0]
+          /\ pc' = "rejected"
+          /\ UNCHANGED remote
+    /\ UNCHANGED <<want, lock, journal, before, seen, known, renames, dropped, rejected, how>>
+
+\* A refused create made nothing, so its intent is cleared before the run
+\* stops. A crash before that write leaves the intent of a create that never
+\* landed, which the next run treats as one whose answer was lost.
+Abandon ==
+    /\ pc = "rejected"
+    /\ journal' = [journal EXCEPT ![reply.key] = None]
+    /\ rejected' = rejected \cup {reply.key}
+    /\ unknown' = unknown \ {reply.key}
+    /\ reply' = NoReply
+    /\ pc' = "done"
+    /\ UNCHANGED <<remote, want, lock, before, seen, blocked, known, faults, renames, dropped, how>>
 
 \* Rule 3: the ID reaches the lock, then the intent is cleared.
 Record ==
@@ -220,15 +273,16 @@ Record ==
     /\ known' = known \cup {reply.id}
     /\ unknown' = unknown \ {reply.key}
     /\ dropped' = dropped \ {reply.key}
+    /\ how' = [how EXCEPT ![reply.key] = "create"]
     /\ pc' = "recorded"
-    /\ UNCHANGED <<remote, want, journal, before, seen, blocked, reply, faults, renames>>
+    /\ UNCHANGED <<remote, want, journal, before, seen, blocked, reply, faults, renames, rejected>>
 
 Clear ==
     /\ pc = "recorded"
     /\ journal' = [journal EXCEPT ![reply.key] = None]
     /\ reply' = NoReply
     /\ pc' = "ready"
-    /\ UNCHANGED <<remote, want, lock, before, seen, blocked, known, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, before, seen, blocked, known, faults, renames, unknown, dropped, rejected, how>>
 
 \* An update writes the declared name to the resource the lock names.
 Update(k) ==
@@ -236,7 +290,7 @@ Update(k) ==
     /\ lock[k] # 0
     /\ remote[lock[k]].name # want[k]
     /\ remote' = [remote EXCEPT ![lock[k]].name = want[k]]
-    /\ UNCHANGED <<want, lock, journal, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<want, lock, journal, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped, rejected, how>>
 
 \* A crash between Record and Clear leaves an intent for a key the lock holds.
 Forget(k) ==
@@ -244,7 +298,7 @@ Forget(k) ==
     /\ lock[k] # 0
     /\ journal[k] # None
     /\ journal' = [journal EXCEPT ![k] = None]
-    /\ UNCHANGED <<remote, want, lock, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, before, pc, seen, blocked, reply, known, faults, renames, unknown, dropped, rejected, how>>
 
 Settled(k) == lock[k] # 0 /\ journal[k] = None /\ remote[lock[k]].name = want[k]
 
@@ -255,22 +309,37 @@ Finish ==
     /\ \/ \A k \in Keys : Settled(k) \/ k \in blocked
        \/ \E k \in blocked : Pending(k)
     /\ pc' = "done"
-    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, faults, renames, unknown, dropped, rejected, how>>
 
 \* `crucible adopt <env> <kind> <key> <id>` reads the resource before writing
-\* its ID: it must be one of the key's candidates and no other key's without
-\* a lock entry. A4 says which of two matches the developer picks.
+\* its ID: the key's adopt check must seek it, and no other key's without a
+\* lock entry may. A4 says which of two the developer picks.
 AdoptById(k, i) ==
     /\ pc \in {"down", "done"}
     /\ lock[k] = 0
-    /\ i \in Candidates(k)
-    /\ \A j \in Keys \ {k} : lock[j] = 0 => i \notin Candidates(j)
+    /\ i \in Sought(k)
+    /\ \A j \in Keys \ {k} : lock[j] = 0 => i \notin Sought(j)
     /\ Owned(k) # {} => i \in Owned(k)
     /\ lock' = [lock EXCEPT ![k] = i]
     /\ journal' = [journal EXCEPT ![k] = None]
     /\ unknown' = unknown \ {k}
     /\ dropped' = dropped \ {k}
-    /\ UNCHANGED <<remote, want, before, pc, seen, blocked, reply, known, faults, renames>>
+    /\ how' = [how EXCEPT ![k] = "person"]
+    /\ UNCHANGED <<remote, want, before, pc, seen, blocked, reply, known, faults, renames, rejected>>
+
+\* `crucible adopt <env> <kind> <key> --none` clears an unresolved intent. It
+\* refuses while a resource carries the key's declared name, which the next
+\* run would adopt. A4 says the developer runs it only when provision made
+\* nothing for the key.
+DropIntent(k) ==
+    /\ pc \in {"down", "done"}
+    /\ Pending(k)
+    /\ Candidates(k) = {}
+    /\ Owned(k) = {}
+    /\ journal' = [journal EXCEPT ![k] = None]
+    /\ unknown' = unknown \ {k}
+    /\ UNCHANGED <<remote, want, lock, before, pc, seen, blocked, reply, known, faults, renames, dropped, rejected,
+                   how>>
 
 \* The process dies at any step and loses everything it held in memory.
 Crash ==
@@ -278,7 +347,8 @@ Crash ==
     /\ faults < MaxFaults
     /\ faults' = faults + 1
     /\ pc' = "down"
-    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, renames, unknown, dropped>>
+    /\ UNCHANGED <<remote, want, lock, journal, before, seen, blocked, reply, known, renames, unknown, dropped, rejected,
+                   how>>
 
 \* A lock entry is lost, as when someone discards the uncommitted lock change.
 DropLockEntry(k) ==
@@ -289,28 +359,33 @@ DropLockEntry(k) ==
     /\ faults' = faults + 1
     /\ lock' = [lock EXCEPT ![k] = 0]
     /\ dropped' = dropped \cup {k}
-    /\ UNCHANGED <<remote, want, journal, before, pc, seen, blocked, reply, known, renames, unknown>>
+    /\ UNCHANGED <<remote, want, journal, before, pc, seen, blocked, reply, known, renames, unknown, rejected, how>>
 
 Next ==
     \/ Begin
     \/ Refuse
     \/ List
+    \/ Suspect
+    \/ Abandon
     \/ Record
     \/ Clear
     \/ Finish
     \/ Crash
     \/ \E i \in Ids, n \in Names : RenameOnRoblox(i, n)
+    \/ \E n \in Names : HandMadeLater(n)
     \/ \E k \in Keys :
         \/ Adopt(k) \/ Ambiguous(k) \/ Intend(k) \/ Create(k) \/ Update(k) \/ Forget(k)
-        \/ DropLockEntry(k)
+        \/ DropLockEntry(k) \/ DropIntent(k)
         \/ \E n \in Names : Rename(k, n)
         \/ \E i \in 1..(Len(remote) + 1) : AdoptById(k, i)
 
-\* Every protocol step is weakly fair. Faults, renames and `crucible adopt`
-\* are not, so they can stop.
+\* Every protocol step is weakly fair. Faults, renames, resources made by
+\* hand and `crucible adopt` are not, so they can stop.
 Fairness ==
     /\ WF_vars(Begin)
     /\ WF_vars(List)
+    /\ WF_vars(Suspect)
+    /\ WF_vars(Abandon)
     /\ WF_vars(Record)
     /\ WF_vars(Clear)
     /\ WF_vars(Finish)
@@ -332,13 +407,15 @@ TypeOK ==
     /\ lock \in [Keys -> 0..Len(remote)]
     /\ journal \in [Keys -> Names \cup {None}]
     /\ before \in [Keys -> SUBSET (1..Len(remote))]
-    /\ pc \in {"down", "fresh", "ready", "answered", "recorded", "done"}
+    /\ pc \in {"down", "fresh", "ready", "answered", "rejected", "recorded", "done"}
     /\ blocked \subseteq Keys
     /\ known \subseteq 1..Len(remote)
     /\ faults \in 0..MaxFaults
     /\ renames \in 0..MaxRenames
     /\ unknown \subseteq Keys
     /\ dropped \subseteq Keys
+    /\ rejected \subseteq Keys
+    /\ how \in [Keys -> {"none", "create", "name", "other", "person"}]
 
 \* Provision makes at most one remote resource per key in this environment.
 AtMostOne == \A k \in Keys : Cardinality(Owned(k)) <= 1
@@ -354,19 +431,25 @@ LockNamesExisting ==
 
 \* No create follows an unknown outcome without a list, and none runs while a
 \* resource the key would adopt exists, so the list's result is what decides.
-NoBlindCreate == [][\A k \in Keys : Create(k) => k \notin unknown /\ Candidates(k) = {}]_vars
+NoBlindCreate == [][\A k \in Keys : Create(k) => k \notin unknown /\ Sought(k) = {}]_vars
+
+\* A key is bound only to its own create, to a resource a person adopted, or
+\* to one that carried the key's declared name when a run adopted it.
+BoundRightly == \A k \in Keys : lock[k] # 0 => remote[lock[k]].owner = k \/ how[k] \in {"name", "person"}
 
 \* A create whose outcome the process may not know always has its intent in the
 \* journal, so the next run and `crucible plan` can say so.
 JournalCoversUnknown == \A k \in unknown : lock[k] = 0 => journal[k] # None
 
 \* A run stops and asks the developer: two resources match a key, one
-\* resource matches two keys, or a key's name is one another key's intent
-\* sent.
+\* resource matches two keys, a key's name is one another key's intent sent,
+\* or a resource is new since an intent whose create may have landed. An
+\* intent of a create Roblox refused is no reason to stop.
 Stuck ==
     \/ Refused
     \/ \E k \in Keys : lock[k] = 0 /\ Cardinality(Candidates(k)) > 1
     \/ \E k, j \in Keys : k # j /\ lock[k] = 0 /\ lock[j] = 0 /\ Candidates(k) \cap Candidates(j) # {}
+    \/ \E k \in Keys : lock[k] = 0 /\ Strangers(k) # {} /\ k \notin rejected
 
 \* Once faults and renames stop, reruns reach the declared state: every key
 \* holds the ID of its one resource under its declared name, and no intent is

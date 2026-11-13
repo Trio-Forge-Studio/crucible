@@ -24,7 +24,7 @@ name = "adopt-trusts-the-typed-id"
 why = "`crucible adopt` writes the ID it is given without reading the resource."
 breaks = "LockNamesExisting"
 find = '''
-    /\ i \in Candidates(k)
+    /\ i \in Sought(k)
 '''
 replace = '''
 '''
@@ -121,13 +121,13 @@ Refused == TRUE
 
 [[mutant]]
 name = "adopt-check-ignores-new-ids"
-why = "The adopt check after an unknown outcome looks only for the declared name, so a create renamed on Roblox after its answer was lost is not found."
-breaks = "LockNamesExisting"
+why = "The adopt check after an unknown outcome looks only for the declared name, so a create renamed on Roblox after its answer was lost is not found and is made again."
+breaks = "AtMostOne"
 find = '''
-Candidates(k) == (Match(want[k]) \cup New(k)) \ Locked
+New(k) == IF journal[k] = None THEN {} ELSE Ids \ before[k]
 '''
 replace = '''
-Candidates(k) == Match(want[k]) \ Locked
+New(k) == {}
 '''
 
 [[mutant]]
@@ -143,23 +143,35 @@ replace = '''
 '''
 
 [[mutant]]
-name = "adopt-a-shared-candidate"
-why = "A run adopts a resource that another key's adopt check also finds, instead of stopping."
-breaks = "LockNamesExisting"
-find = '''
-    /\ Cardinality(seen[k]) = 1
-    /\ ~Shared(k)
-'''
-replace = '''
-    /\ Cardinality(seen[k]) = 1
-'''
-
-[[mutant]]
 name = "adopt-by-id-takes-a-shared-candidate"
 why = "`crucible adopt` accepts a resource that another key without a lock entry would adopt."
 breaks = "LockNamesExisting"
 find = '''
-    /\ \A j \in Keys \ {k} : lock[j] = 0 => i \notin Candidates(j)
+    /\ \A j \in Keys \ {k} : lock[j] = 0 => i \notin Sought(j)
 '''
 replace = '''
+'''
+
+[[mutant]]
+name = "a-refused-create-keeps-its-intent"
+why = "A create Roblox refused keeps its intent, so a resource someone makes by hand afterwards stops every run, though nothing was created."
+breaks = "Converges"
+find = '''
+    /\ journal' = [journal EXCEPT ![reply.key] = None]
+    /\ rejected' = rejected \cup {reply.key}
+'''
+replace = '''
+    /\ journal' = journal
+    /\ rejected' = rejected \cup {reply.key}
+'''
+
+[[mutant]]
+name = "adopt-a-new-id-of-another-name"
+why = "After an unknown outcome, a run adopts a resource new since the intent that carries another name, which may be one someone made by hand."
+breaks = "BoundRightly"
+find = '''
+Candidates(k) == Match(want[k]) \ Locked
+'''
+replace = '''
+Candidates(k) == Sought(k)
 '''

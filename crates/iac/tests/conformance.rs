@@ -1,8 +1,10 @@
 //! Drives `provision` against an in-process fake of Roblox with faults, and checks the invariants of
-//! `specs/provision/Provision.tla` after every step: at most one resource per key, a lock that names only resources
-//! that exist and belong to its key, no create after an unknown outcome without a list, and an intent in the journal for
-//! every create whose outcome is unknown. At the end of each case, a developer resolves what the runs stopped on, as
-//! the guide says, and fault-free runs must then bind every key.
+//! `specs/provision/Provision.tla` after every transition, that is after each provision run, rename and resource made
+//! by hand: at most one resource per key, a lock that names only resources that exist and belong to its key, a key
+//! bound only to its own create, to a resource a person adopted, or to one that carried its declared name when the run
+//! adopted it, and an intent in the journal for every create whose outcome is unknown. Inside a run, each create call
+//! checks that no unknown outcome, candidate or other unresolved intent comes before it. At the end of each case, a
+//! developer resolves what the runs stopped on, as the guide says, and fault-free runs must then bind every key.
 //!
 //! `PROPTEST_CASES=20000 cargo test -p crucible-iac --test conformance --release` runs it deeper than the default 1,000
 //! cases.
@@ -101,6 +103,33 @@ impl World {
             }
         }
         text + &self.extra.borrow()
+    }
+
+    /// The world as it stands, to run from more than once.
+    fn copy(&self) -> World {
+        let disk = self.disk.borrow();
+        World {
+            want: self.want.clone(),
+            remote: self.remote.clone(),
+            disk: RefCell::new(Disk { lock: disk.lock.clone(), journal: disk.journal.clone() }),
+            faults: self.faults.clone(),
+            unknown: self.unknown.clone(),
+            violations: self.violations.clone(),
+            updated: self.updated.clone(),
+            extra: self.extra.clone(),
+        }
+    }
+
+    /// What the next run starts from: the files, Roblox and the ghost of unknown outcomes.
+    fn state(&self) -> String {
+        let disk = self.disk.borrow();
+        let remote: Vec<_> = self
+            .remote
+            .borrow()
+            .iter()
+            .map(|r| (r.kind, r.id, r.name.clone(), r.owner.clone(), r.price, r.on, r.lagging))
+            .collect();
+        format!("{:?} {:?} {remote:?} {:?}", disk.lock, disk.journal, self.unknown.borrow())
     }
 
     fn lock(&self) -> Lock {
@@ -333,11 +362,31 @@ fn provision(world: &World, crash_after: Option<usize>) -> Outcome {
         world.want.borrow().keys().filter(|(kind, key)| world.bound(*kind, key).is_none()).cloned().collect();
     world.updated.borrow_mut().clear();
     let mut run = Run::new(&inputs, &plan, &lock, &mut no_icons).expect("no icons are read");
+    let names: BTreeMap<(Kind, u64), String> =
+        world.remote.borrow().iter().map(|resource| ((resource.kind, resource.id), resource.name.clone())).collect();
+    let outcome = steps(world, &mut run, crash_after, &unbound);
+    // BoundRightly: a run binds a key to its own create, or to a resource that carried its declared name.
+    for (kind, key) in &unbound {
+        let Some(id) = world.bound(*kind, key) else { continue };
+        let remote = world.remote.borrow();
+        let Some(resource) = remote.iter().find(|r| r.kind == *kind && r.id == id.get()) else { continue };
+        let declared = &world.want.borrow()[&(*kind, key.clone())];
+        if resource.owner.as_deref() != Some(key) && names.get(&(*kind, id.get())) != Some(declared) {
+            world.violate(format!(
+                "BoundRightly: {kind:?} {key} was bound to {id}, named {:?} when the run started",
+                names.get(&(*kind, id.get()))
+            ));
+        }
+    }
+    outcome
+}
+
+fn steps(world: &World, run: &mut Run, crash_after: Option<usize>, unbound: &[Key]) -> Outcome {
     for _ in 0..crash_after.unwrap_or(usize::MAX) {
         match run.step(&mut Fake(world), &mut Files(world)) {
             Ok(true) => {}
             Ok(false) => {
-                for (kind, key) in &unbound {
+                for (kind, key) in unbound {
                     let Some(id) = world.bound(*kind, key) else { continue };
                     let reported = run.applied().iter().any(|applied| {
                         applied.kind == kind.noun()
@@ -574,7 +623,7 @@ impl ReferenceStateMachine for Reference {
                 .prop_map(|(faults, crash_after)| Transition::Provision { faults, crash_after }),
             1 => (0..3usize, 0..3usize).prop_map(|(key, name)| Transition::Rename { key, name }),
             1 => (0..8usize, 0..4usize).prop_map(|(pick, name)| Transition::RenameOnRoblox { pick, name }),
-            1 => (any::<bool>(), 0..3usize).prop_map(|(badge, name)| Transition::HandMade { badge, name }),
+            1 => (any::<bool>(), 0..5usize).prop_map(|(badge, name)| Transition::HandMade { badge, name }),
         ]
         .boxed()
     }
@@ -649,7 +698,8 @@ impl StateMachineTest for Conformance {
             }
             Transition::HandMade { badge, name } => {
                 let kind = if badge { Kind::Badge } else { Kind::Product };
-                world.make(kind, names(kind)[name % names(kind).len()], None, (!badge).then_some(5), true);
+                let name = names(kind).get(name).map_or_else(|| format!("Someone's {name}"), |name| (*name).to_owned());
+                world.make(kind, &name, None, (!badge).then_some(5), true);
             }
         }
         world
@@ -832,4 +882,66 @@ fn a_retired_key_whose_resource_is_gone_sends_nothing() {
     }
     let entry = world.lock().env(ENV).unwrap().entries(Kind::Product)["a"].clone();
     assert_eq!(entry.status, crucible_iac::lock::Status::Retired);
+}
+
+/// Every fault sequence of up to four calls and every crash point in a first run, then nothing, a rename on Roblox or a
+/// product made by hand under another name, then a second run with a fault, then fault-free runs with a developer.
+/// Runs that start from the same files and Roblox are run once.
+#[test]
+fn two_runs_with_every_short_fault_sequence_bind_no_key_wrongly_and_make_no_duplicate() {
+    let alphabet = [Fault::None, Fault::LostAfter, Fault::LostBefore, Fault::Refused];
+    let mut sequences: Vec<Vec<Fault>> = vec![vec![]];
+    for length in 1..=4 {
+        let longer: Vec<Vec<Fault>> = sequences
+            .iter()
+            .filter(|sequence| sequence.len() == length - 1)
+            .flat_map(|sequence| alphabet.map(|fault| [sequence.clone(), vec![fault]].concat()))
+            .collect();
+        sequences.extend(longer);
+    }
+    let crashes: Vec<Option<usize>> = std::iter::once(None).chain((0..7).map(Some)).collect();
+    let seconds: [&[Fault]; 3] =
+        [&[], &[Fault::None, Fault::LostBefore], &[Fault::None, Fault::None, Fault::LostAfter]];
+    let (mut starts, mut cases) = (BTreeSet::new(), 0);
+    for hand in [false, true] {
+        for faults in &sequences {
+            for crash in &crashes {
+                let world =
+                    world_with(&[(Kind::Product, "a", "N1"), (Kind::Product, "b", "N2"), (Kind::Badge, "c", "B1")]);
+                if hand {
+                    world.make(Kind::Product, "N2", None, Some(5), false);
+                }
+                *world.faults.borrow_mut() = faults.iter().copied().collect();
+                provision(&world, *crash);
+                world.faults.borrow_mut().clear();
+                check(&world);
+                if !starts.insert(world.state()) {
+                    continue;
+                }
+                for between in 0..3 {
+                    for second in seconds {
+                        cases += 1;
+                        let world = world.copy();
+                        let mut stranger = None;
+                        match between {
+                            1 => {
+                                if let Some(last) = world.remote.borrow_mut().last_mut() {
+                                    last.name = "renamed".into();
+                                }
+                            }
+                            2 => stranger = Some(world.make(Kind::Product, "hand X", None, Some(1), true)),
+                            _ => {}
+                        }
+                        provision_with(&world, second);
+                        converge(&world);
+                        let case = format!("{faults:?} crash {crash:?}, between {between}, then {second:?}");
+                        for (kind, key) in KEYS.into_iter().filter(|_| stranger.is_some()) {
+                            assert_ne!(world.bound(kind, key), stranger, "{case}: {key} is bound to hand X");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(cases > 100, "{cases} cases");
 }
