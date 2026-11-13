@@ -94,10 +94,20 @@ impl Store for Files {
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap_or(Path::new(".")))?;
+    let folder = path.parent().filter(|folder| !folder.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(folder)?;
     file.write_all(bytes)?;
     file.as_file().sync_all()?;
     file.persist(path).map_err(|error| error.error)?;
+    sync_folder(folder)
+}
+
+/// On Unix a rename survives a power loss only once its folder is flushed too. Windows cannot open a folder to flush.
+fn sync_folder(folder: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    std::fs::File::open(folder)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = folder;
     Ok(())
 }
 

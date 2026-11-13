@@ -81,6 +81,8 @@ npx crucible adopt staging product coin-pack --none
 
 `crucible adopt <env> <kind> <key> --none` says that no resource on Roblox is the create the key's intent records, and clears the intent. Run it after you have looked at the resources the stop named. It lists the kind and refuses unless the journal holds an intent for the key, the lock holds no ID for it, and no resource carries the key's declared name, which the next run would adopt. It works for a key `crucible.toml` no longer declares, too. It prints the IDs you passed over, in `passedOver` with `--json`, and the next provision creates the resource.
 
+Before either form writes, it plans as provision would once it is written. It refuses, with exit 2 and `error.problems`, when that plan would still stop, such as on an intent of another key or on an environment `crucible.toml` no longer declares.
+
 ## Assumptions
 
 - Roblox shows every product and pass that exists in their lists, once a create has answered or its answer was lost. Provision cannot tell when it does not.

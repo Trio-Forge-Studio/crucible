@@ -264,7 +264,18 @@ pub fn adopt_main(args: AdoptArgs) -> ExitCode {
     } else {
         match &report.error {
             Some((_, error)) => {
-                output.note(error["message"].as_str().unwrap_or_default());
+                let mut message = error["message"].as_str().unwrap_or_default().to_owned();
+                for problem in error["problems"].as_array().into_iter().flatten() {
+                    let (file, key, said) =
+                        (problem["file"].as_str(), problem["key"].as_str(), problem["message"].as_str());
+                    message += &format!(
+                        "\n  {}: {}: {}",
+                        file.unwrap_or_default(),
+                        key.unwrap_or_default(),
+                        said.unwrap_or_default()
+                    );
+                }
+                output.note(&message);
                 Ok(())
             }
             None if args.none => {
@@ -308,6 +319,11 @@ fn adopt(root: &Path, args: &AdoptArgs, output: &mut Output) -> Report {
         KindArg::Pass => Kind::Pass,
         KindArg::Badge => Kind::Badge,
     };
+    let problems = left_after(root, &project, env, kind, &args.key, args.id);
+    if !problems.is_empty() {
+        let message = "provision would still stop on these after it, so nothing was written:".into();
+        return failed(&Failure { code: 2, message, problems });
+    }
     let (source, key) = match crate::load_key(root) {
         Ok(found) => found,
         Err(failure) => return remote(None, vec![], failure, None),
@@ -335,6 +351,51 @@ fn adopt(root: &Path, args: &AdoptArgs, output: &mut Output) -> Report {
             failed(&Failure { code: 1, message: format!("cannot write {}: {error}", path.display()), problems: vec![] })
         }
     }
+}
+
+/// What would stop provision once this adopt, or with `id` `None` this `--none`, is written: the problems of every
+/// environment `crucible.toml` no longer declares, and the offline plan's with the key's ID in the lock and its intent
+/// out of the journal. A problem the command resolves does not refuse it. An adopt of a key that is not declared and
+/// managed is left to `adopt`'s own refusal.
+fn left_after(
+    root: &Path,
+    project: &Project,
+    env: &str,
+    kind: Kind,
+    key: &str,
+    id: Option<std::num::NonZeroU64>,
+) -> Vec<crucible_iac::model::Problem> {
+    let declared = &project.manifest.envs[env];
+    let mut problems = undeclared(&project.manifest.envs, project.lock.as_ref(), &project.journals);
+    let resources = project.experience.resolve(declared);
+    let resource = resources.iter().find(|resource| resource.kind == kind && resource.key == key);
+    let mut lock = project.lock.clone().unwrap_or_else(crucible_iac::lock::Lock::empty);
+    if let Some(id) = id {
+        let Some(fields) = resource.and_then(|resource| resource.fields.as_ref()) else { return problems };
+        let entry = crucible_iac::lock::Entry {
+            id,
+            fingerprint: fields.fingerprint(),
+            icon: None,
+            status: crucible_iac::lock::Status::Managed,
+        };
+        lock.env_mut(env, declared.universe).entries_mut(kind).insert(key.to_owned(), entry);
+    }
+    let moved_from = resource.and_then(|resource| resource.moved_from.as_ref());
+    let journal = project.journals.get(env).cloned().map(|mut journal| {
+        journal
+            .intents
+            .retain(|intent| !(intent.kind == kind && (intent.key == key || moved_from == Some(&intent.key))));
+        journal
+    });
+    let inputs = crucible_iac::plan::Inputs {
+        lock: lock.env(env),
+        journal: journal.as_ref().filter(|journal| !journal.intents.is_empty()),
+        ..project.inputs(env, None)
+    };
+    if let Err(found) = plan(&inputs, &mut |path: &Path| std::fs::read(root.join(path))) {
+        problems.extend(found);
+    }
+    problems
 }
 
 fn remote(

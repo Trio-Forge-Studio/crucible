@@ -261,6 +261,28 @@ fn adopt_refuses_a_badge_another_universe_awards() {
 }
 
 #[test]
+fn adopt_refuses_while_provision_would_still_stop() {
+    let dir = project();
+    journal(
+        dir.path(),
+        r#"{"version":1,"universe":1,"intents":[{"kind":"product","key":"gem-pack","name":"Gem pack","before":[]}]}"#,
+    );
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![]);
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "product", "coin-pack", "77"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stdout));
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("provision would still stop on these after it, so nothing was written:"), "{stderr}");
+    assert!(stderr.contains("crucible.toml declares no products.gem-pack"), "{stderr}");
+    assert!(!dir.path().join("crucible.lock").exists());
+
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "product", "gem-pack", "--none"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let out = crucible(dir.path(), &server, &["adopt", "staging", "product", "coin-pack", "77"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+}
+
+#[test]
 fn a_dry_run_lists_and_plans_and_writes_nothing() {
     let dir = project();
     let server = MockServer::start();
