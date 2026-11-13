@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
@@ -98,6 +108,20 @@ test("npx crucible runs the installed platform binary", { skip: !supported && `n
 	const unknown = run("npx", ["crucible", "oc", "call", "no-such.operation"], app);
 	assert.equal(unknown.status, 2, "the shim forwards the binary's exit code");
 	assert.equal(JSON.parse(unknown.stdout).error.kind, "usage");
+
+	const scope = join(app, "node_modules", "@trioforge");
+	for (const name of [`.crucible-cli-${host}-AbCd1234`, `crucible-cli-${host}_pacquet-stage_1_2_3`]) {
+		mkdirSync(join(scope, name));
+		writeFileSync(join(scope, name, "crucible.exe"), "an old binary");
+	}
+	mkdirSync(join(scope, "crucible-cli-notes"));
+	const cleaned = run("npx", ["crucible", "--version"], app);
+	assert.equal(cleaned.status, 0, cleaned.stderr);
+	assert.deepEqual(
+		readdirSync(scope).sort(),
+		["crucible-cli", `crucible-cli-${host}`, "crucible-cli-notes"].sort(),
+		"the shim deletes the old binaries npm and pnpm moved aside, and nothing else",
+	);
 });
 
 test(
@@ -381,6 +405,14 @@ function assertPinned(game, version) {
 	assert.equal(manifest.dependencies["@trioforge/crucible"], version);
 	assert.equal(installedVersion(game, "@trioforge/crucible-cli"), version);
 	assert.equal(installedVersion(game, "@trioforge/crucible"), version);
+	// npm and pnpm move a folder aside when Windows refuses to delete the binary running in it.
+	assert.deepEqual(
+		readdirSync(join(game, "node_modules", "@trioforge")).filter(
+			(name) => name.startsWith(".") || name.includes("_pacquet-stage_"),
+		),
+		[],
+		"the install replaced the platform package in place",
+	);
 }
 
 test(
@@ -568,11 +600,13 @@ test(
 );
 
 test(
-	"upgrade reinstalls a pnpm game under CI despite its frozen lockfile default",
+	"upgrade reinstalls a hoisted pnpm game under CI despite its frozen lockfile default",
 	{ skip: !supported && `no package for ${host}` },
 	async () => {
 		const setup = await startUpgradeRegistry();
 		const game = createGame("pnpm-game", setup);
+		// The hoisted layout keeps the platform package at one path, so the install must replace the running binary's folder.
+		writeFileSync(join(game, "pnpm-workspace.yaml"), "nodeLinker: hoisted\n");
 		const ci = { CI: "true" };
 		const installed = run("pnpm", ["install"], game, ci);
 		assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);

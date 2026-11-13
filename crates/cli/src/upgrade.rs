@@ -361,6 +361,7 @@ fn apply(root: &Path, from: &Version, pins: &Pins, input: &str) -> Result<Report
     let old = old_template(input, from, pins)
         .inspect_err(|reason| eprintln!("crucible upgrade: {reason}, so the old template is unknown"))
         .ok();
+    let from = &old.as_ref().and_then(|old| old.version.parse().ok()).unwrap_or_else(|| from.clone());
     let new = snapshot(&name);
     let to = installed_version(root, CLI)?
         .ok_or_else(|| Error::Failed(format!("crucible is not installed in {}", root.display())))?;
@@ -477,12 +478,16 @@ impl Report {
     }
 }
 
+// An install that failed on Windows can leave the new shim package beside the old binary, so `from` names the new
+// version while the snapshot comes from the old binary. Pins that hold the snapshot's version still vouch for it.
 fn old_template(input: &str, from: &Version, pins: &Pins) -> Result<SnapshotV1, String> {
     let old = decode(input)?;
-    if old.version.parse().ok().as_ref() != Some(from) {
+    let pins = [&pins.crucible, &pins.runtime];
+    let pinned = |version: &Version| pins.iter().all(|pin| satisfies(pin, version) == Some(true));
+    let Some(version) = old.version.parse::<Version>().ok().filter(|version| version == from || pinned(version)) else {
         return Err(format!("the old template is from crucible {}, but {from} was installed", old.version));
-    }
-    if let Some(pin) = [&pins.crucible, &pins.runtime].into_iter().find(|pin| satisfies(pin, from) == Some(false)) {
+    };
+    if let Some(pin) = pins.into_iter().find(|pin| satisfies(pin, &version) == Some(false)) {
         return Err(format!("package.json pinned {pin}, which does not match the installed {from}"));
     }
     Ok(old)
@@ -1815,6 +1820,22 @@ mod tests {
         assert_eq!(Manager::YarnBerry.install_line(), "yarn install --no-immutable");
         assert_eq!(Manager::Yarn.install_line(), "yarn install");
         assert_eq!(Manager::Npm.install_line(), "npm install");
+    }
+
+    #[test]
+    fn the_old_binary_beside_a_newer_shim_package_still_vouches_for_its_template() {
+        let current = serde_json::to_string(&snapshot("game")).unwrap();
+        let here = env!("CARGO_PKG_VERSION");
+        let newer = version("99.0.0");
+        assert!(old_template(&current, &newer, &pins(here, here)).is_ok());
+        assert!(old_template(&current, &newer, &pins(&format!("^{here}"), here)).is_ok());
+        for (crucible, runtime) in [(here, "99.0.0"), ("99.0.0", here), (">=0.0.1 || 1.x", here)] {
+            assert!(
+                old_template(&current, &newer, &pins(crucible, runtime))
+                    .is_err_and(|reason| reason.contains("but 99.0.0 was installed")),
+                "{crucible} {runtime}"
+            );
+        }
     }
 
     #[test]
