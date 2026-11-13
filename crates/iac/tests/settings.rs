@@ -21,22 +21,28 @@ place = 2
 struct Roblox {
     settings: Vec<ResolvedSettings>,
     fail: Option<u8>,
+    products: Vec<Listed>,
+    /// Each write, in the order the run sent it.
+    calls: Vec<&'static str>,
 }
 
 impl Remote for Roblox {
-    fn list(&mut self, _: Kind) -> Result<Vec<Listed>, Failure> {
-        Ok(vec![])
+    fn list(&mut self, kind: Kind) -> Result<Vec<Listed>, Failure> {
+        Ok(if kind == Kind::Product { self.products.clone() } else { vec![] })
     }
     fn get(&mut self, _: Kind, _: Id) -> Result<Option<Listed>, Failure> {
         Ok(None)
     }
     fn create(&mut self, _: Kind, _: &Fields, _: Option<&Image>) -> Result<Id, Failure> {
-        unreachable!("the config declares no resource")
+        self.calls.push("create");
+        Ok(Id::new(900).unwrap())
     }
     fn update(&mut self, _: Kind, _: Id, _: &Patch) -> Result<(), Failure> {
-        unreachable!("the config declares no resource")
+        self.calls.push("update");
+        Ok(())
     }
     fn update_settings(&mut self, settings: &ResolvedSettings) -> Result<(), Failure> {
+        self.calls.push("settings");
         self.settings.push(settings.clone());
         match self.fail {
             Some(code) => Err(Failure::new(code, "outcome_unknown", "HTTP 503")),
@@ -48,6 +54,7 @@ impl Remote for Roblox {
 #[derive(Default)]
 struct Disk {
     lock: Option<Lock>,
+    journal: Option<Journal>,
 }
 
 impl Store for Disk {
@@ -56,14 +63,23 @@ impl Store for Disk {
         Ok(())
     }
     fn save_journal(&mut self, _: &str, journal: &Journal) -> io::Result<()> {
-        assert!(journal.intents.is_empty(), "nothing is created");
+        self.journal = Some(journal.clone());
         Ok(())
     }
 }
 
 /// One provision of `[experience]` holding `table`. Returns the settings it sent and how the run ended.
 fn provision(disk: &mut Disk, roblox: &mut Roblox, table: &str) -> (Vec<ResolvedSettings>, Result<Vec<Action>, Stop>) {
-    let manifest = Manifest::parse(&format!("{PLACES}\n[experience]\n{table}")).unwrap();
+    provision_of(disk, roblox, &format!("[experience]\n{table}"))
+}
+
+/// One provision of `PLACES` followed by `tables`.
+fn provision_of(
+    disk: &mut Disk,
+    roblox: &mut Roblox,
+    tables: &str,
+) -> (Vec<ResolvedSettings>, Result<Vec<Action>, Stop>) {
+    let manifest = Manifest::parse(&format!("{PLACES}\n{tables}")).unwrap();
     let experience = Experience::new(&manifest).unwrap();
     let mut read = |_: &Path| -> io::Result<Vec<u8>> { unreachable!("nothing has an icon") };
     let lock = disk.lock.clone().unwrap_or_else(Lock::empty);
@@ -153,4 +169,30 @@ fn a_run_that_writes_settings_lists_the_write_and_one_that_sends_nothing_does_no
         let run = Run::new(&inputs, &plan, &Lock::empty(), &mut read).unwrap();
         assert_eq!(run.writes(), writes, "{table:?}");
     }
+}
+
+#[test]
+fn settings_go_last_so_a_refused_settings_update_leaves_every_resource_step_applied() {
+    let tables = "[experience]\nvoice_chat = true\n\n[products.coin-pack]\nname = \"Coin pack\"\nprice = 49\n\n\
+                  [products.gem-pack]\nname = \"Gem pack\"\nprice = 99\n";
+    let lock = "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.products.gem-pack]\nid = 5\n\
+                fingerprint = \"x\"\nstatus = \"managed\"\n";
+    let mut disk = Disk { lock: Some(Lock::parse(lock).unwrap()), journal: None };
+    let gem = Listed {
+        id: Id::new(5).unwrap(),
+        name: "Gem pack".into(),
+        description: String::new(),
+        price: Some(10),
+        on: true,
+    };
+    let mut roblox = Roblox { fail: Some(4), products: vec![gem], ..Roblox::default() };
+    let (_, ended) = provision_of(&mut disk, &mut roblox, tables);
+    assert_eq!(roblox.calls, ["update", "create", "settings"], "the settings update is the last write");
+    assert!(matches!(ended, Err(Stop::Settings(failure)) if failure.code == 4));
+    let lock = disk.lock.as_ref().unwrap().env("staging").unwrap();
+    let products = lock.entries(Kind::Product);
+    assert_eq!(products["coin-pack"].id, Id::new(900).unwrap(), "the create is recorded");
+    assert_ne!(products["gem-pack"].fingerprint, "x", "the update is recorded");
+    assert!(disk.journal.as_ref().unwrap().intents.is_empty(), "no intent is left");
+    assert_eq!(lock.experience, None, "the next run sends the settings again");
 }

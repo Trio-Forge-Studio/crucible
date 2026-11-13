@@ -23,7 +23,7 @@ Run one provision per environment at a time: the lock is a file, and nothing sto
 1. It reads `crucible.toml`, `crucible.lock` and `.crucible/journal/<env>.json`, and stops on everything `crucible plan` stops on.
 2. It lists every product, pass and badge of the universe, to the last page. A list it cannot read whole stops the run, because a resource it did not see would be created again. It reads by ID each resource the lock names that a list left out.
 3. It plans. A key with no ID in the lock is adopted when exactly one resource has its declared name, and created when none has. A key with an ID is updated when its name, description, price, sale state, `enabled` state or icon differs from the declaration, on Roblox or in the lock.
-4. It prints the plan, then applies it: adopts first, then the experience settings, then updates, retirements and untracks, then creates.
+4. It prints the plan, then applies it: adopts first, then updates, retirements and untracks, then creates, then the experience settings.
 
 `--dry-run` stops after step 3 and writes nothing. `--json` prints one document, `{"plan": ..., "applied": [...], "dryRun": false}`, with an `error` object when the run failed. Without `--json`, the plan and each applied action go to stdout, and errors to stderr.
 
@@ -33,7 +33,7 @@ Each action in `applied` is `adopt`, `create`, `update`, `retire` or `untrack`, 
 
 `[experience]` sets `private_server_price` and `voice_chat`. When the table's fingerprint differs from the one `crucible.lock` records under `[env.<env>.experience]`, or the lock records none, provision sends one universe update with the settings the table sets and an update mask that names only them, so Roblox leaves the rest alone. It then records the fingerprint, and `applied` lists `{"kind": "experience", "key": "settings", "action": "update", "id": "<universe>"}`. An empty `[experience]` table sends nothing and records its fingerprint.
 
-Provision compares the settings with the lock, not with Roblox, so a setting changed in the Creator Dashboard stays changed until `[experience]` changes. The update writes absolute values, so a run that stops after it repeats it. When it fails, `error.resource` is `experience settings` and the lock keeps the old fingerprint.
+Provision compares the settings with the lock, not with Roblox, so a setting changed in the Creator Dashboard stays changed until `[experience]` changes. The update writes absolute values, so a run that stops after it repeats it. It is the run's last write, so a settings update Roblox refuses or fails stops no product, pass or badge step. When it fails, every other step was applied and recorded in `crucible.lock`, `error.resource` is `experience settings`, `error.hint` says so, and the lock keeps the old fingerprint, so the next run sends the settings again.
 
 ## Creates and the journal
 

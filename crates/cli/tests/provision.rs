@@ -372,23 +372,39 @@ fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
 }
 
 #[test]
-fn a_failed_settings_update_names_the_settings_and_writes_no_fingerprint() {
+fn a_refused_settings_update_comes_after_every_resource_step_and_writes_no_fingerprint() {
     let dir = project();
     std::fs::write(dir.path().join("crucible.toml"), format!("{CONFIG}\n[experience]\nprivate_server_price = 0\n"))
         .unwrap();
     let server = MockServer::start();
-    lists(&server, vec![product(77)], vec![badge(88)]);
+    lists(&server, vec![product(77)], vec![]);
+    let create = server.mock(|when, then| {
+        when.method(Method::POST).path("/legacy-badges/v1/universes/1/badges");
+        then.status(200).json_body(badge(88));
+    });
     let settings = server.mock(|when, then| {
         when.method(Method::PATCH).path("/cloud/v2/universes/1");
         then.status(400).json_body(json!({"message": "bad"}));
     });
     let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
     assert_eq!(out.status.code(), Some(4), "{}", text(&out.stderr));
+    create.assert_calls(1);
     settings.assert_calls(1);
     let document = document(&out);
     assert_eq!(document["error"]["resource"], "experience settings", "{document}");
+    assert!(
+        document["error"]["hint"].as_str().unwrap().contains("every product, pass and badge step was applied"),
+        "{document}"
+    );
+    assert_eq!(
+        document["applied"],
+        json!([{"kind": "product", "key": "coin-pack", "action": "adopt", "id": "77"},
+               {"kind": "badge", "key": "first-delivery", "action": "create", "id": "88"}])
+    );
     let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
+    assert!(lock.contains("[env.staging.badges.first-delivery]\nid = 88\n"), "{lock}");
     assert!(!lock.contains("[env.staging.experience]"), "{lock}");
+    assert!(!dir.path().join(".crucible/journal/staging.json").exists(), "no intent is left");
 }
 
 fn introspection(server: &MockServer, scopes: Value, enabled: bool) -> httpmock::Mock<'_> {

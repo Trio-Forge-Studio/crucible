@@ -10,12 +10,13 @@
 //!    shows every landed create, so that create never landed. After it, no intent is unresolved.
 //! 2. An adopt writes the ID to the lock, then clears the key's intent.
 //! 3. An update or a retire writes to Roblox, then to the lock. Its writes are absolute, so a crash between repeats it.
-//!    The experience settings update the same way, before the resources, and the lock records their fingerprint.
 //! 4. A create writes its intent, with the name it sends and the IDs the run knows, then sends the create, then writes
 //!    the ID to the lock, then clears the intent. No intent is written while another is unresolved, so every resource
 //!    the run did not know is the intent's own or one made by hand. An unknown outcome stops the run with the intent
 //!    kept, and the next run's adopt check resolves it. A create Roblox certainly refused clears its intent, then stops
 //!    the run. Nothing sends a create twice for one intent.
+//! 5. The experience settings update like a resource, and the lock records their fingerprint. They go last, so a
+//!    settings update Roblox refuses stops nothing a product, a pass or a badge needs.
 
 use crate::journal::{Intent, Journal};
 use crate::lock::{Entry, EnvLock, Lock, Status};
@@ -176,7 +177,8 @@ pub enum Stop {
         failure: Failure,
         intent: bool,
     },
-    /// Roblox refused or failed the update of the experience settings. It writes absolute values, so a rerun repeats it.
+    /// Roblox refused or failed the update of the experience settings. It is the last write, so every other effect was
+    /// applied. It writes absolute values, so a rerun repeats it.
     Settings(Failure),
     Write {
         path: PathBuf,
@@ -285,15 +287,14 @@ impl Run {
             })
             .map(|intent| (intent.kind, intent.key.clone()))
             .collect();
-        let (mut adopts, mut changes, mut creates) = (Vec::new(), Vec::new(), Vec::new());
-        let settings = inputs.experience.settings();
-        if let Some(settings) = settings
+        let (mut adopts, mut changes, mut creates, mut settings) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        if let Some(declared) = inputs.experience.settings()
             && plan.steps.iter().any(|step| step.kind == "experience" && step.action == Action::Update)
         {
-            if settings.private_server_price.is_some() || settings.voice_chat.is_some() {
-                changes.push(Effect::Settings(settings.clone()));
+            if declared.private_server_price.is_some() || declared.voice_chat.is_some() {
+                settings.push(Effect::Settings(declared.clone()));
             }
-            changes.push(Effect::RecordSettings(settings.fingerprint()));
+            settings.push(Effect::RecordSettings(declared.fingerprint()));
         }
         for step in &plan.steps {
             let Some(resource) =
@@ -364,6 +365,7 @@ impl Run {
         queue.extend(adopts);
         queue.extend(changes);
         queue.extend(creates);
+        queue.extend(settings);
         let mut known = BTreeMap::new();
         for (kind, listed) in &observed.listed {
             let ids: &mut BTreeSet<Id> = known.entry(*kind).or_default();

@@ -196,6 +196,10 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
             let mut report = remote(Some(plan), applied, failure, Some(&source));
             if let Some((_, error)) = &mut report.error {
                 error["resource"] = json!("experience settings");
+                error["hint"] = json!(
+                    "Provision writes the experience settings last, so every product, pass and badge step was \
+                     applied, and crucible.lock records it: commit it. The next provision sends the settings again"
+                );
             }
             report
         }
