@@ -167,4 +167,9 @@ impl Remote for Roblox<'_, '_> {
             None => Ok(()),
         }
     }
+
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
+        let held = self.transport.run(&universes::get(self.universe))?;
+        Ok(ResolvedSettings { private_server_price: held.private_server_price, voice_chat: held.voice_chat })
+    }
 }

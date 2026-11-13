@@ -93,7 +93,9 @@ impl Resource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// The experience settings `[experience]` sets, or those Roblox's reply states. `None` is a setting left unset, or one
+/// the reply did not state.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ResolvedSettings {
     pub private_server_price: Option<u32>,
     pub voice_chat: Option<bool>,
@@ -102,6 +104,30 @@ pub struct ResolvedSettings {
 impl ResolvedSettings {
     pub fn fingerprint(&self) -> String {
         fingerprint(self)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The settings this sets that `held` states with another value.
+    pub fn drifted(&self, held: &ResolvedSettings) -> ResolvedSettings {
+        ResolvedSettings {
+            private_server_price: self
+                .private_server_price
+                .filter(|price| held.private_server_price.is_some_and(|held| held != *price)),
+            voice_chat: self.voice_chat.filter(|on| held.voice_chat.is_some_and(|held| held != *on)),
+        }
+    }
+
+    /// The settings to write so Roblox holds these: each this sets, except one `held` states with the same value.
+    pub fn unheld(&self, held: Option<&ResolvedSettings>) -> ResolvedSettings {
+        ResolvedSettings {
+            private_server_price: self
+                .private_server_price
+                .filter(|price| held.is_none_or(|held| held.private_server_price != Some(*price))),
+            voice_chat: self.voice_chat.filter(|on| held.is_none_or(|held| held.voice_chat != Some(*on))),
+        }
     }
 }
 

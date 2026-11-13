@@ -40,6 +40,8 @@ pub trait Remote {
     fn update(&mut self, kind: Kind, id: Id, patch: &Patch) -> Result<(), Failure>;
     /// Writes the settings that are set and leaves the rest as they are. A run never calls it with none set.
     fn update_settings(&mut self, settings: &ResolvedSettings) -> Result<(), Failure>;
+    /// The experience settings the universe holds, `None` for each the reply does not state.
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure>;
 }
 
 /// The fields an update sets. `on` is the sale state of a product or a pass, or whether a badge is enabled.
@@ -135,7 +137,9 @@ pub fn listed_kinds(
 }
 
 /// Lists each of `listed_kinds`, and reads by ID each lock ID a list lacks, so the plan can tell a resource that is
-/// gone from one the list left out.
+/// gone from one the list left out. When the environment declares experience settings, it reads what the universe
+/// holds too. A failed read of the settings does not fail `observe`: it keeps why, and the plan compares the settings
+/// with the lock only.
 pub fn observe(
     experience: &Experience,
     env: &crucible_project::Env,
@@ -153,6 +157,11 @@ pub fn observe(
             }
         }
         observed.listed.insert(kind, listed);
+    }
+    if experience.settings().is_some() {
+        observed.settings = Some(remote.read_settings().map_err(|failure| {
+            failure.error["message"].as_str().unwrap_or("Roblox's answer could not be read").to_owned()
+        }));
     }
     Ok(observed)
 }
@@ -291,8 +300,9 @@ impl Run {
         if let Some(declared) = inputs.experience.settings()
             && plan.steps.iter().any(|step| step.kind == "experience" && step.action == Action::Update)
         {
-            if declared.private_server_price.is_some() || declared.voice_chat.is_some() {
-                settings.push(Effect::Settings(declared.clone()));
+            let write = declared.unheld(observed.held_settings());
+            if !write.is_empty() {
+                settings.push(Effect::Settings(write));
             }
             settings.push(Effect::RecordSettings(declared.fingerprint()));
         }

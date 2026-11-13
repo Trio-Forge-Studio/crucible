@@ -144,6 +144,12 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
         Ok(observed) => observed,
         Err(failure) => return remote(None, vec![], failure, Some(&source)),
     };
+    if let Some(Err(message)) = &observed.settings {
+        output.note(&format!(
+            "Could not read the experience settings Roblox holds: {message}. Going on; provision compares them with \
+             crucible.lock instead."
+        ));
+    }
     let inputs = project.inputs(env, Some(&observed));
     let plan = match plan(&inputs, read) {
         Ok(plan) => plan,

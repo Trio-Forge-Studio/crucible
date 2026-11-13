@@ -42,6 +42,9 @@ impl Remote for Recorder {
     fn update_settings(&mut self, _: &ResolvedSettings) -> Result<(), Failure> {
         unreachable!("observe never writes")
     }
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
+        unreachable!("the config declares no settings")
+    }
 }
 
 fn calls(lock: Option<&str>, journal: Option<&Journal>, passes: &[u64]) -> Vec<String> {

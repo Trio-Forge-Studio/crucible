@@ -67,6 +67,9 @@ impl Remote for Roblox {
     fn update_settings(&mut self, _: &ResolvedSettings) -> Result<(), Failure> {
         unreachable!("adopt never writes settings")
     }
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
+        unreachable!("adopt never reads settings")
+    }
 }
 
 #[derive(Default)]

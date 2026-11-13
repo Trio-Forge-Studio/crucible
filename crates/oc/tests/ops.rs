@@ -105,6 +105,7 @@ fn every_operation() -> Vec<(Row, Safety)> {
             row(universes::update(id(11), &UniverseSettings { voice_chat: Some(true), ..Default::default() }).unwrap()),
             Safety::Idempotent,
         ),
+        (row(universes::get(id(11))), Safety::Read),
         (row(api_keys::introspect()), Safety::Read),
     ]
 }
@@ -115,7 +116,7 @@ fn each_operation_matches_the_registry_and_carries_its_retry_rule() {
         serde_json::from_str(include_str!("../../oc-registry/spec/registry.json")).expect("the registry is JSON");
     let registry = registry["ops"].as_array().unwrap();
     let operations = every_operation();
-    assert_eq!(operations.len(), 15);
+    assert_eq!(operations.len(), 16);
     for (row, safety) in operations {
         let name = row.name;
         assert_eq!(row.safety, safety, "{name}");
@@ -128,8 +129,11 @@ fn each_operation_matches_the_registry_and_carries_its_retry_rule() {
         let path = entry["path"].as_str().unwrap().replace("{universeId}", "11").replace("{universe_id}", "11");
         let path = path.split('/').map(|part| if part.starts_with('{') { "22" } else { part }).collect::<Vec<_>>();
         assert_eq!(path.join("/"), row.path, "{name}");
+        // The registry leaves some operations' scopes unknown, and those declare none.
         let scopes: Vec<Scope> = match &entry["auth"]["bodykey"] {
-            Value::Null => serde_json::from_value(entry["auth"]["apikey"]["scopes"].clone()).unwrap(),
+            Value::Null => serde_json::from_value::<Option<_>>(entry["auth"]["apikey"]["scopes"].clone())
+                .unwrap()
+                .unwrap_or_default(),
             _ => vec![],
         };
         assert_eq!(row.scopes, scopes, "{name}");
@@ -839,4 +843,32 @@ fn an_introspection_reply_without_scopes_is_unavailable() {
     });
     let failure = transport(&server, &key).run(&api_keys::introspect()).unwrap_err();
     assert_eq!((failure.code, failure.error["field"].as_str()), (7, Some("scopes")), "{}", failure.error);
+}
+
+#[test]
+fn a_universe_read_returns_the_settings_its_reply_states() {
+    let server = MockServer::start();
+    let key = Secret::from_string("k".into());
+    let mut stated = server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1").header("x-api-key", "k");
+        then.status(200).json_body(json!({"path": "universes/1", "privateServerPriceRobux": 100,
+                                          "voiceChatEnabled": false, "displayName": "Game"}));
+    });
+    let transport = transport(&server, &key);
+    let held = transport.run(&universes::get(id(1))).unwrap();
+    assert_eq!(held, UniverseSettings { private_server_price: Some(100), voice_chat: Some(false) });
+    stated.delete();
+    let mut silent = server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1");
+        then.status(200).json_body(json!({"path": "universes/1", "voiceChatEnabled": null}));
+    });
+    let held = transport.run(&universes::get(id(1))).unwrap();
+    assert_eq!(held, UniverseSettings::default(), "a field the reply leaves out or nulls is unknown");
+    silent.delete();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1");
+        then.status(200).json_body(json!({"privateServerPriceRobux": "100"}));
+    });
+    let failure = transport.run(&universes::get(id(1))).unwrap_err();
+    assert_eq!((failure.code, failure.error["field"].as_str()), (7, Some("privateServerPriceRobux")));
 }

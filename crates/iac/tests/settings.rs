@@ -24,6 +24,8 @@ struct Roblox {
     products: Vec<Listed>,
     /// Each write, in the order the run sent it.
     calls: Vec<&'static str>,
+    /// What a read of the universe answers, or `None` when the read fails.
+    held: Option<ResolvedSettings>,
 }
 
 impl Remote for Roblox {
@@ -48,6 +50,9 @@ impl Remote for Roblox {
             Some(code) => Err(Failure::new(code, "outcome_unknown", "HTTP 503")),
             None => Ok(()),
         }
+    }
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
+        self.held.clone().ok_or_else(|| Failure::new(3, "auth", "HTTP 403"))
     }
 }
 
@@ -195,4 +200,55 @@ fn settings_go_last_so_a_refused_settings_update_leaves_every_resource_step_appl
     assert_ne!(products["gem-pack"].fingerprint, "x", "the update is recorded");
     assert!(disk.journal.as_ref().unwrap().intents.is_empty(), "no intent is left");
     assert_eq!(lock.experience, None, "the next run sends the settings again");
+}
+
+fn held(price: Option<u32>, voice: Option<bool>) -> Option<ResolvedSettings> {
+    Some(ResolvedSettings { private_server_price: price, voice_chat: voice })
+}
+
+#[test]
+fn provision_repairs_a_setting_roblox_holds_otherwise_and_writes_only_that_one() {
+    let table = "private_server_price = 100\nvoice_chat = false\n";
+    let (mut disk, mut roblox) = (Disk::default(), Roblox { held: held(Some(100), None), ..Roblox::default() });
+    let (sent, _) = provision(&mut disk, &mut roblox, table);
+    assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }], "100 is held");
+    let recorded = fingerprint(&disk).unwrap();
+
+    roblox.held = held(Some(100), Some(true));
+    let (sent, ended) = provision(&mut disk, &mut roblox, table);
+    assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }], "the lock matched");
+    assert_eq!(ended.unwrap(), [Action::Update]);
+    assert_eq!(fingerprint(&disk).unwrap(), recorded, "the lock stays the record of the table");
+
+    roblox.held = held(Some(100), Some(false));
+    let (sent, ended) = provision(&mut disk, &mut roblox, table);
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![]), "nothing differs");
+
+    roblox.held = held(None, None);
+    let (sent, ended) = provision(&mut disk, &mut roblox, table);
+    assert_eq!(
+        (sent, ended.unwrap()),
+        (vec![], vec![]),
+        "a setting the reply does not state is compared with the lock"
+    );
+}
+
+#[test]
+fn a_failed_read_of_the_settings_is_kept_and_the_plan_falls_back_to_the_lock() {
+    let table = "voice_chat = false\n";
+    let (mut disk, mut roblox) = (Disk::default(), Roblox { held: held(None, Some(true)), ..Roblox::default() });
+    let (sent, _) = provision(&mut disk, &mut roblox, table);
+    assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }]);
+    roblox.held = None;
+    let (sent, ended) = provision(&mut disk, &mut roblox, table);
+    assert_eq!((sent, ended.unwrap()), (vec![], vec![]), "the lock records the table, so nothing is written");
+
+    let manifest = Manifest::parse(&format!("{PLACES}\n[experience]\n{table}")).unwrap();
+    let experience = Experience::new(&manifest).unwrap();
+    let observed = observe(&experience, &manifest.envs["staging"], None, None, &mut roblox).unwrap();
+    assert_eq!(observed.settings, Some(Err("HTTP 403".into())), "observe keeps why, and goes on");
+    let (mut fresh, mut roblox) = (Disk::default(), Roblox::default());
+    let (sent, ended) = provision(&mut fresh, &mut roblox, table);
+    assert_eq!(sent, [ResolvedSettings { private_server_price: None, voice_chat: Some(false) }]);
+    assert_eq!(ended.unwrap(), [Action::Update], "without the lock or the read, it writes every setting");
 }

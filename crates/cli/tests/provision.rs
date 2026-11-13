@@ -480,3 +480,76 @@ fn a_disabled_key_stops_provision_and_an_unanswered_introspection_does_not() {
     assert!(text(&out.stderr).contains("Could not check the key's scopes"), "{}", text(&out.stderr));
     products.assert_calls(1);
 }
+
+fn settings_lock(dir: &Path, table: &str) {
+    let manifest = crucible_project::Manifest::parse(&format!("{CONFIG}\n[experience]\n{table}")).unwrap();
+    let fingerprint = crucible_iac::model::Experience::new(&manifest).unwrap().settings().unwrap().fingerprint();
+    std::fs::write(dir.join("crucible.toml"), format!("{CONFIG}\n[experience]\n{table}")).unwrap();
+    let lock = format!(
+        "version = 1\n\n[env.staging]\nuniverse = 1\n\n[env.staging.experience]\nfingerprint = {fingerprint:?}\n\n\
+         [env.staging.products.coin-pack]\nid = 77\nfingerprint = \"x\"\nstatus = \"managed\"\n"
+    );
+    std::fs::write(dir.join("crucible.lock"), lock).unwrap();
+}
+
+#[test]
+fn provision_repairs_a_setting_changed_on_roblox_that_the_lock_still_records() {
+    let dir = project();
+    settings_lock(dir.path(), "private_server_price = 100\nvoice_chat = false\n");
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1").header("x-api-key", "test-key");
+        then.status(200)
+            .json_body(json!({"path": "universes/1", "privateServerPriceRobux": 100, "voiceChatEnabled": true}));
+    });
+    let patch = server.mock(|when, then| {
+        when.method(Method::PATCH)
+            .path("/cloud/v2/universes/1")
+            .query_param("updateMask", "voiceChatEnabled")
+            .json_body(json!({"voiceChatEnabled": false}));
+        then.status(200).json_body(json!({"path": "universes/1"}));
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--dry-run"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let stdout = text(&out.stdout);
+    assert!(
+        stdout.contains(
+            "details, private_server_price = 100 (Roblox holds 100), voice_chat = false (Roblox holds true)\n"
+        ),
+        "{stdout}"
+    );
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    patch.assert_calls(1);
+    let document = document(&out);
+    assert_eq!(
+        document["plan"]["steps"][0]["settings"],
+        json!([{"key": "private_server_price", "value": 100, "roblox": 100},
+               {"key": "voice_chat", "value": false, "roblox": true}])
+    );
+}
+
+#[test]
+fn a_failed_read_of_the_settings_is_a_note_and_provision_compares_them_with_the_lock() {
+    let dir = project();
+    settings_lock(dir.path(), "voice_chat = false\n");
+    let server = MockServer::start();
+    lists(&server, vec![product(77)], vec![badge(88)]);
+    let read = server.mock(|when, then| {
+        when.method(Method::GET).path("/cloud/v2/universes/1");
+        then.status(403).json_body(json!({"message": "denied"}));
+    });
+    let patch = server.mock(|when, then| {
+        when.method(Method::PATCH).path("/cloud/v2/universes/1");
+        then.status(200);
+    });
+    let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    read.assert_calls(1);
+    patch.assert_calls(0);
+    assert!(text(&out.stderr).contains("Could not read the experience settings Roblox holds"), "{}", text(&out.stderr));
+    let document = document(&out);
+    assert_eq!(document["plan"]["steps"][0]["action"], "no-op", "{document}");
+    assert_eq!(document["plan"]["steps"][0]["settings"], json!([{"key": "voice_chat", "value": false}]));
+}

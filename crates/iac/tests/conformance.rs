@@ -301,6 +301,10 @@ impl Remote for Fake<'_> {
         self.0.violate("an update of experience settings the model declares none of".into());
         Ok(())
     }
+    fn read_settings(&mut self) -> Result<ResolvedSettings, Failure> {
+        self.0.violate("a read of experience settings the model declares none of".into());
+        Ok(ResolvedSettings::default())
+    }
 }
 
 struct Files<'w>(&'w World);

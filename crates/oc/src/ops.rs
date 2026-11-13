@@ -689,6 +689,30 @@ pub mod badges {
 pub mod universes {
     use super::*;
 
+    /// The experience settings the universe holds. A setting the reply leaves out is `None`: Roblox's JSON may omit a
+    /// field that holds its default, so a caller cannot read an absent field as any value. The registry leaves the
+    /// operation's scopes unknown, so it declares none, and a key Roblox refuses fails the read with exit 3.
+    pub fn get(universe: Id) -> Op<UniverseSettings, Read> {
+        op(
+            "universes.get",
+            "GET",
+            APIS,
+            format!("/cloud/v2/universes/{universe}"),
+            Auth::ApiKey { scopes: None },
+            Body::Empty,
+            |value| {
+                const PRICE: &str = "privateServerPriceRobux";
+                const VOICE: &str = "voiceChatEnabled";
+                let stated = |field| value.get(field).filter(|value| !value.is_null());
+                let price = stated(PRICE)
+                    .map(|price| price.as_u64().and_then(|price| u32::try_from(price).ok()).ok_or_else(|| bad(PRICE)))
+                    .transpose()?;
+                let voice = stated(VOICE).map(|on| on.as_bool().ok_or_else(|| bad(VOICE))).transpose()?;
+                Ok(UniverseSettings { private_server_price: price, voice_chat: voice })
+            },
+        )
+    }
+
     /// Writes the settings that are set, and names each in `updateMask`, the registry's "list of fields to update", so
     /// Roblox leaves every other field alone. `None` when no setting is set, because an empty mask could read as every
     /// field. The registry marks the operation unsafe, as it does every `PATCH` it has no rule for. The body holds

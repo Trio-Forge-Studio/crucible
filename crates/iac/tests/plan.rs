@@ -687,6 +687,7 @@ fn matching() -> Observed {
             (Kind::Badge, vec![listed(1002, "First delivery", None, true)]),
         ]),
         missing: BTreeMap::new(),
+        settings: None,
     }
 }
 

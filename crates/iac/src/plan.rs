@@ -87,15 +87,20 @@ pub struct Setting {
     /// Its key in `[experience]`.
     pub key: &'static str,
     pub value: Value,
+    /// What Roblox holds, when provision read the universe and its reply stated the setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roblox: Option<Value>,
 }
 
-fn settings(declared: &ResolvedSettings) -> Vec<Setting> {
+fn settings(declared: &ResolvedSettings, held: Option<&ResolvedSettings>) -> Vec<Setting> {
     let mut settings = Vec::new();
     if let Some(price) = declared.private_server_price {
-        settings.push(Setting { key: "private_server_price", value: json!(price) });
+        let roblox = held.and_then(|held| held.private_server_price).map(|price| json!(price));
+        settings.push(Setting { key: "private_server_price", value: json!(price), roblox });
     }
     if let Some(on) = declared.voice_chat {
-        settings.push(Setting { key: "voice_chat", value: json!(on) });
+        let roblox = held.and_then(|held| held.voice_chat).map(|on| json!(on));
+        settings.push(Setting { key: "voice_chat", value: json!(on), roblox });
     }
     settings
 }
@@ -138,9 +143,17 @@ pub struct Listed {
 pub struct Observed {
     pub listed: BTreeMap<Kind, Vec<Listed>>,
     pub missing: BTreeMap<(Kind, Id), Option<Listed>>,
+    /// The experience settings the universe holds, or why they could not be read. `None` when the environment declares
+    /// no settings. A plan without them compares the settings with the lock only.
+    pub settings: Option<Result<ResolvedSettings, String>>,
 }
 
 impl Observed {
+    /// The experience settings provision read from the universe.
+    pub fn held_settings(&self) -> Option<&ResolvedSettings> {
+        self.settings.as_ref()?.as_ref().ok()
+    }
+
     /// The resource a lock entry names, or the problem that stops provision: Roblox has no resource with the ID, or
     /// its list lacked one that exists, so the list cannot be trusted to find a resource before a create. The public
     /// badge list may leave out a disabled badge, so one found by itself is taken.
@@ -180,7 +193,9 @@ pub fn plan(
     let mut steps = Vec::new();
     if let Some(declared) = inputs.experience.settings() {
         let applied = inputs.lock.and_then(|lock| lock.experience.as_ref());
-        let changed = applied.is_none_or(|applied| applied.fingerprint != declared.fingerprint());
+        let held = inputs.observed.and_then(Observed::held_settings);
+        let changed = applied.is_none_or(|applied| applied.fingerprint != declared.fingerprint())
+            || held.is_some_and(|held| !declared.drifted(held).is_empty());
         steps.push(Step {
             kind: "experience",
             key: "settings".into(),
@@ -191,7 +206,7 @@ pub fn plan(
             moved_from: None,
             intent: None,
             note: None,
-            settings: settings(declared),
+            settings: settings(declared, held),
         });
     }
     let resources = inputs.experience.resolve(inputs.env);
