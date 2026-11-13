@@ -16,9 +16,9 @@
 		"@trioforge/crucible": "__VERSION__"
 	},
 	"devDependencies": {
-		"@trioforge/crucible-cli": "__VERSION__",
-		"@trioforge/compiler-types": "__VERSION__",
 		"@rbxts/types": "__RBXTS_TYPES__",
+		"@trioforge/compiler-types": "__VERSION__",
+		"@trioforge/crucible-cli": "__VERSION__",
 		"vite-plus": "__VITE_PLUS__"
 	}
 }

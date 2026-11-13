@@ -794,12 +794,8 @@ fn peer_manifest_with(root: &Path, text: &str, versions: Vec<(&str, String)>) ->
                 .into_iter()
                 .find(|group| manifest[group].get(RUNTIME).is_some())
                 .ok_or_else(|| Error::Failed("package.json must list the runtime".into()))?;
-            let found = entries(&result, RUNTIME, manifest[group][RUNTIME].as_str().unwrap());
-            let [runtime] = found.as_slice() else {
-                return Err(Error::Failed("cannot edit runtime peers in package.json".into()));
-            };
-            let separator = &result[result[..runtime.start].trim_end().len()..runtime.start];
-            result.insert_str(runtime.value.end, &format!(",{separator}{}: {}", quoted(package), quoted(&required)));
+            result = insert_sorted(&result, group, package, &required)
+                .ok_or_else(|| Error::Failed("cannot edit runtime peers in package.json".into()))?;
             manifest[group][package] = required.into();
         }
     }
@@ -807,6 +803,25 @@ fn peer_manifest_with(root: &Path, text: &str, versions: Vec<(&str, String)>) ->
         return Err(Error::Failed("cannot edit runtime peers in package.json automatically".into()));
     }
     Ok(result)
+}
+
+// Package managers write each dependency group sorted by name, so a new entry goes where the next install would put
+// it: before the first entry that sorts after it, with that entry's indentation and line ending.
+fn insert_sorted(text: &str, group: &str, package: &str, version: &str) -> Option<String> {
+    let parsed = jsonc_parser::parse_to_ast(text, &Default::default(), &Default::default()).ok()?;
+    let root = parsed.value?;
+    let entries = &root.as_object()?.get(group)?.value.as_object()?.properties;
+    let separator = |start: usize| &text[text[..start].trim_end().len()..start];
+    let entry = format!("{}: {}", quoted(package), quoted(version));
+    let mut result = text.to_owned();
+    match entries.iter().find(|existing| existing.name.as_str() > package) {
+        Some(next) => result.insert_str(next.range.start, &format!("{entry},{}", separator(next.range.start))),
+        None => {
+            let last = entries.last()?;
+            result.insert_str(last.range.end, &format!(",{}{entry}", separator(last.range.start)));
+        }
+    }
+    Some(result)
 }
 
 fn imports_ui(source: &str) -> bool {
@@ -1048,11 +1063,7 @@ fn drop_toolchain(text: &str, manifest: &serde_json::Value, dropped: &[&str], ad
     }
     if let Some(version) = added {
         let group = GROUPS.into_iter().find(|group| expected[group].get(CLI).is_some())?;
-        let found = entries(&result, CLI, expected[group][CLI].as_str()?);
-        let [cli] = found.as_slice() else { return None };
-        let separator = &result[result[..cli.start].trim_end().len()..cli.start];
-        let entry = format!(",{separator}{}: {}", quoted(COMPILER_TYPES), quoted(version));
-        result.insert_str(cli.value.end, &entry);
+        result = insert_sorted(&result, group, COMPILER_TYPES, version)?;
         expected[group][COMPILER_TYPES] = version.into();
     }
     (serde_json::from_str::<serde_json::Value>(&result).ok()? == expected).then_some(result)
@@ -1848,6 +1859,49 @@ mod tests {
             "delete node_modules/.yarn-state.yml, then run `yarn install --no-immutable`"
         );
         assert_eq!(Manager::Bun.recovery(), "run `bun install`");
+    }
+
+    #[test]
+    fn new_entries_go_where_a_package_manager_sorts_them() {
+        let text = "{\n\t\"dependencies\": {\n\t\t\"@rbxts/vide\": \"^0.6.1\",\n\t\t\"@trioforge/crucible\": \"0.5.0\"\n\t},\n\t\"devDependencies\": {\n\t\t\"@trioforge/crucible-cli\": \"0.5.0\"\n\t}\n}\n";
+        let insert = |text: &str, group, package| insert_sorted(text, group, package, "1.0.0").unwrap();
+        assert_eq!(
+            insert(text, "dependencies", "@rbxts/charm"),
+            text.replace("{\n\t\t\"@rbxts/vide\"", "{\n\t\t\"@rbxts/charm\": \"1.0.0\",\n\t\t\"@rbxts/vide\"")
+        );
+        assert_eq!(
+            insert(text, "dependencies", "@rbxts/vide-charm"),
+            text.replace("\"^0.6.1\",", "\"^0.6.1\",\n\t\t\"@rbxts/vide-charm\": \"1.0.0\",")
+        );
+        assert_eq!(
+            insert(text, "dependencies", "zod"),
+            text.replace("\"0.5.0\"\n\t},", "\"0.5.0\",\n\t\t\"zod\": \"1.0.0\"\n\t},")
+        );
+        assert_eq!(
+            insert(text, "devDependencies", "@trioforge/compiler-types"),
+            text.replace(
+                "{\n\t\t\"@trioforge/crucible-cli\"",
+                "{\n\t\t\"@trioforge/compiler-types\": \"1.0.0\",\n\t\t\"@trioforge/crucible-cli\""
+            )
+        );
+        let spaces = text.replace('\t', "  ").replace('\n', "\r\n");
+        assert_eq!(
+            insert(&spaces, "dependencies", "@rbxts/charm"),
+            insert(text, "dependencies", "@rbxts/charm").replace('\t', "  ").replace('\n', "\r\n")
+        );
+        assert_eq!(insert_sorted("{\"dependencies\":{}}", "dependencies", "a", "1.0.0"), None);
+    }
+
+    #[test]
+    fn added_peers_keep_the_group_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "{\n  \"dependencies\": {\n    \"@rbxts/services\": \"1.5.5\",\n    \"@trioforge/crucible\": \"0.5.0\"\n  }\n}\n";
+        let peers = serde_json::json!({"@rbxts/charm": "0.11.1", "@rbxts/charm-sync": "0.4.1"});
+        let updated = peer_manifest_with(dir.path(), text, crate::create::peer_versions_from(&peers)).unwrap();
+        assert_eq!(
+            updated,
+            "{\n  \"dependencies\": {\n    \"@rbxts/charm\": \"0.11.1\",\n    \"@rbxts/charm-sync\": \"0.4.1\",\n    \"@rbxts/services\": \"1.5.5\",\n    \"@trioforge/crucible\": \"0.5.0\"\n  }\n}\n"
+        );
     }
 
     #[test]
