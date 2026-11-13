@@ -58,7 +58,7 @@ The plan's stops change nothing. Exit codes follow `crucible oc`, plus exit 1 fo
 | Exit | Meaning |
 | --- | --- |
 | 0 | The plan was applied, or printed with `--dry-run`. |
-| 1 | A file could not be read or written. |
+| 1 | A file could not be read or written, or provision caught a bug in itself before it sent the create, with `error.kind` `internal`. |
 | 2 | A file is invalid, the environment is unknown, or the plan stops. `error.problems` lists each cause with its `file`, `key` and `line`. |
 | 3 | The key is missing, or Roblox refused it. |
 | 4 | Roblox rejected a request. |

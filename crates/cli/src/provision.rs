@@ -198,7 +198,7 @@ fn run(root: &Path, args: &Args, output: &mut Output) -> Report {
             Report {
                 plan: Some(plan),
                 applied,
-                error: Some((1, json!({ "kind": "io", "message": message }))),
+                error: Some((1, json!({ "kind": "internal", "message": message }))),
                 passed: vec![],
             }
         }
