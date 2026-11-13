@@ -282,6 +282,25 @@ Crucible no longer exports `state`, `computed`, `untracked`, `Readable` or `Stat
 
 A stored function needs the wrapper `handler(() => callback)`, because an atom calls a function it is given. `effect` and `watch` now return a dispose, and an effect runs inside the write instead of on a deferred flush.
 
+`coins.set(5)` returned nothing, but `coins(5)` returns the new value. So a `receive` callback with an expression body that writes an atom, such as `(player, { amount }) => this.coins(amount)`, now returns a number and fails with CRU012. Give it a block body.
+
+An effect's cleanup now runs inside the write that reruns the effect, on a thread that the writing thread resumes. When a timer's callback writes an atom that the timer's own effect reads, the cleanup runs while the timer's thread is `normal`: neither running nor suspended. `task.cancel` throws on that thread, and Crucible reports the throw as a failed cleanup. Cancel a timer only while it is suspended. Once it has fired, it needs no cancel.
+
+```ts
+import { atom } from "@rbxts/charm";
+import { effect } from "@trioforge/crucible";
+
+const phase = atom("idle");
+
+effect(() => {
+	if (phase() !== "countdown") return;
+	const timer = task.delay(3, () => phase("done"));
+	return () => {
+		if (coroutine.status(timer) === "suspended") task.cancel(timer);
+	};
+});
+```
+
 ## What the types reject
 
 A read is a call, so an uncalled value in a condition is a type error. An effect returns nothing or a cleanup, and `own` takes only an `Ownable`.
