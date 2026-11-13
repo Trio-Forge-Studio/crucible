@@ -194,6 +194,7 @@ pub(crate) fn render(plans: &[Plan]) -> String {
                     detail.push(format!("intent sent {:?}{resolved}", intent.name));
                 }
                 detail.extend(step.note.clone());
+                detail.extend(step.settings.iter().map(|setting| format!("{} = {}", setting.key, setting.value)));
                 [
                     label(&json!(step.action)),
                     format!("{} {}", step.kind, step.key),

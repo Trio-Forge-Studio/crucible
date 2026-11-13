@@ -8,8 +8,9 @@
 
 use crate::journal::{self, Intent, Journal};
 use crate::lock::{self, Entry, EnvLock, Status};
-use crate::model::{Experience, Fields, Kind, Lifecycle, Problem, Resource, content_hash};
+use crate::model::{Experience, Fields, Kind, Lifecycle, Problem, ResolvedSettings, Resource, content_hash};
 use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 use std::path::Path;
@@ -75,6 +76,28 @@ pub struct Step {
     pub intent: Option<StepIntent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The experience settings step's settings, each that `[experience]` sets.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<Setting>,
+}
+
+/// One setting `[experience]` sets, and the value a provision writes for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Setting {
+    /// Its key in `[experience]`.
+    pub key: &'static str,
+    pub value: Value,
+}
+
+fn settings(declared: &ResolvedSettings) -> Vec<Setting> {
+    let mut settings = Vec::new();
+    if let Some(price) = declared.private_server_price {
+        settings.push(Setting { key: "private_server_price", value: json!(price) });
+    }
+    if let Some(on) = declared.voice_chat {
+        settings.push(Setting { key: "voice_chat", value: json!(on) });
+    }
+    settings
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -155,9 +178,9 @@ pub fn plan(
     let intents: &[Intent] = inputs.journal.map_or(&[], |journal| &journal.intents);
     let mut attached = vec![false; intents.len()];
     let mut steps = Vec::new();
-    if let Some(settings) = inputs.experience.settings() {
+    if let Some(declared) = inputs.experience.settings() {
         let applied = inputs.lock.and_then(|lock| lock.experience.as_ref());
-        let changed = applied.is_none_or(|applied| applied.fingerprint != settings.fingerprint());
+        let changed = applied.is_none_or(|applied| applied.fingerprint != declared.fingerprint());
         steps.push(Step {
             kind: "experience",
             key: "settings".into(),
@@ -168,6 +191,7 @@ pub fn plan(
             moved_from: None,
             intent: None,
             note: None,
+            settings: settings(declared),
         });
     }
     let resources = inputs.experience.resolve(inputs.env);
@@ -266,6 +290,7 @@ pub fn plan(
                     moved_from: None,
                     intent: intent.map(|at| StepIntent { name: intents[at].name.clone(), resolved: true }),
                     note: Some("retired and no longer declared; the lock keeps its ID".into()),
+                    settings: vec![],
                 });
                 continue;
             }
@@ -596,6 +621,7 @@ fn step(
         moved_from,
         intent: intent.map(|intent| StepIntent { name: intent.name.clone(), resolved: entry.is_some() }),
         note: None,
+        settings: vec![],
     };
     if step.moved_from.is_some() {
         step.changes.push(Change::Key);

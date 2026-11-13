@@ -357,6 +357,7 @@ fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
     settings.assert_calls(1);
     let stdout = text(&out.stdout);
     assert!(stdout.contains("  update  experience settings"), "{stdout}");
+    assert!(stdout.contains("  details, voice_chat = true\n"), "the plan shows the value it writes: {stdout}");
     assert!(stdout.contains("update experience settings 1\n"), "{stdout}");
     assert!(!stdout.contains("does not write"), "{stdout}");
     let lock = std::fs::read_to_string(dir.path().join("crucible.lock")).unwrap();
@@ -368,7 +369,9 @@ fn provision_writes_the_experience_settings_and_records_them_in_the_lock() {
     let out = crucible(dir.path(), &server, &["provision", "staging", "--json"]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     settings.assert_calls(1);
-    assert_eq!(document(&out)["applied"], json!([]), "the lock records the settings it applied");
+    let document = document(&out);
+    assert_eq!(document["applied"], json!([]), "the lock records the settings it applied");
+    assert_eq!(document["plan"]["steps"][0]["settings"], json!([{"key": "voice_chat", "value": true}]));
 }
 
 #[test]

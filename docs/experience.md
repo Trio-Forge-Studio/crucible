@@ -13,7 +13,10 @@ Declare developer products, game passes and badges in `crucible.toml`, and plan 
 project = "default.project.json"
 
 [experience]
-private_server_price = 0
+# Provision writes each setting here to the universe. Leave one out to keep what Roblox holds.
+# A private server costs 100 Robux. 0 makes private servers free.
+private_server_price = 100
+# Voice chat is off in the experience.
 voice_chat = false
 
 [env.staging]
@@ -47,6 +50,7 @@ price = 1
 enabled = false
 ```
 
+- `[experience]` holds settings provision writes to each environment's universe: `private_server_price`, the Robux a private server costs, where 0 makes private servers free, and `voice_chat`, whether players can use voice chat. A setting you leave out keeps what Roblox holds. Before 0.6.0, provision wrote none of them, so the first `crucible provision <env>` after upgrading to 0.6.0 writes the table to the universe. Check each value against the Creator Dashboard before you run it, and remove a setting you do not mean to manage.
 - `crucible = "0.6"` at the top names the oldest crucible that can read the file. An older crucible that knows the key stops with `this project needs crucible 0.6.0 or later` before it reads anything else, so a key a newer release added never reads as unknown. A release from before the key reports ``unknown field `crucible` `` instead.
 - The `#:schema` line gives Taplo and the Even Better TOML extension completion and checking from the schema the CLI package ships. The schema checks what one table holds: unknown keys, types, key and name formats, prices of at least 1, a `name` on what is not retired and a `price` on a product or a pass that is neither retired nor untracked, and one of `place` or `places`. Only `crucible plan` and the other commands check the rules that span tables or need the running crucible:
   - a `crucible` version newer than the one running;
@@ -90,11 +94,11 @@ Without an environment, `crucible plan` plans every environment in `crucible.tom
 | `untrack` | The table sets `untrack = true` and the lock holds its ID. | Removes it from the lock. |
 | `no-op` | Nothing differs. | Nothing. |
 
-`crucible provision` plans with what Roblox lists too, so its plan can also show `adopt`, with the ID of the one resource a `create` or an `adopt-check` found, and an `update` for a change someone made on Roblox. `changes` says why an update happens: `details`, `icon`, `restore` or `key`. The lock keeps a fingerprint of the fields it applied, not the fields, so the plan cannot say which detail changed. More than five badge creates in one plan add a warning, because Roblox makes five badges a day free in each experience and charges 100 Robux for each one after that.
+`crucible provision` plans with what Roblox lists too, so its plan can also show `adopt`, with the ID of the one resource a `create` or an `adopt-check` found, and an `update` for a change someone made on Roblox. `changes` says why an update happens: `details`, `icon`, `restore` or `key`. The experience settings step lists each setting `[experience]` sets with the value provision writes, in `settings` with `--json`, such as `{"key": "voice_chat", "value": false}`. The lock keeps a fingerprint of the fields it applied, not the fields, so the plan cannot say which detail changed. More than five badge creates in one plan add a warning, because Roblox makes five badges a day free in each experience and charges 100 Robux for each one after that.
 
 ```text
 staging (universe 10772177432)
-  update  experience settings                         10772177432  details
+  update  experience settings                         10772177432  details, private_server_price = 100, voice_chat = false
   create  product coin-pack     Products.CoinPack
   create  pass vip              Passes.Vip
   create  badge first-delivery  Badges.FirstDelivery
