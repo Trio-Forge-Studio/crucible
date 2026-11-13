@@ -1,0 +1,22 @@
+#:schema ../../crates/project/crucible.schema.json
+
+[places.start]
+project = "default.project.json"
+
+# The sample's IDs are not on Roblox. Its build binds them so the specs can buy the coin pack.
+[env.sample]
+universe = 1
+place = 1
+
+[products.coin-pack]
+name = "Coin pack"
+description = "100 coins."
+price = 49
+
+[passes.vip]
+name = "VIP"
+price = 299
+
+[badges.first-pickup]
+name = "First pickup"
+description = "Collect your first coin."

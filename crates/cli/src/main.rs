@@ -6,6 +6,7 @@ mod create;
 mod discover;
 mod docs;
 mod exec;
+mod experience;
 mod flows;
 mod output;
 mod plan;
@@ -44,8 +45,8 @@ fn main() -> ExitCode {
         Ok(Cli { command: Command::Publish(args) }) => return publish::main(args),
         Ok(Cli { command: Command::Upgrade(args) }) => return upgrade::main(args),
         Ok(Cli { command: Command::Whoami(args) }) => return whoami::main(args),
-        Ok(Cli { command: Command::Compile { tsconfig, project, include } }) => {
-            return build::compile_main(tsconfig, project, include);
+        Ok(Cli { command: Command::Compile { tsconfig, project, include, experience } }) => {
+            return build::compile_main(tsconfig, project, include, experience);
         }
         Ok(Cli { command: Command::RojoBuild { project, output } }) => return build::rojo_main(project, output),
         Ok(Cli { command: Command::UpgradeApply { from, crucible, runtime } }) => {

@@ -1,6 +1,7 @@
 use crate::child;
-use crucible_compiler::{Compiled, InstanceMap, Module, Target};
+use crucible_compiler::{Compiled, InstanceMap, Module, Target, VirtualModule};
 use crucible_project::{Manifest, ManifestError, Place};
+use crucible_transform::Receipts;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fmt;
@@ -17,6 +18,9 @@ pub struct Args {
     /// Write the place file here instead of build/<name>.rbxl. Needs exactly one place.
     #[arg(long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+    /// Bind crucible:experience to this environment's IDs in crucible.lock. Without it, reading a handle's ID throws.
+    #[arg(long, value_name = "NAME")]
+    pub env: Option<String>,
 }
 
 #[derive(Debug)]
@@ -45,7 +49,9 @@ impl fmt::Display for Error {
 pub fn main(args: Args) -> ExitCode {
     let result = std::env::current_dir()
         .map_err(|error| Error::Failed(format!("cannot read the current directory: {error}")))
-        .and_then(|root| Ok((build(&root, &manifest(&root)?, &args.places, args.output.as_deref())?, root)));
+        .and_then(|root| {
+            Ok((build(&root, &manifest(&root)?, &args.places, args.output.as_deref(), args.env.as_deref())?, root))
+        });
     match result {
         Ok((built, root)) => {
             for (_, path) in built {
@@ -74,6 +80,7 @@ pub fn build(
     manifest: &Manifest,
     places: &[String],
     output: Option<&Path>,
+    env: Option<&str>,
 ) -> Result<Vec<(String, PathBuf)>, Error> {
     if let Some(unknown) = places.iter().find(|place| !manifest.places.contains_key(*place)) {
         let known: Vec<_> = manifest.places.keys().map(String::as_str).collect();
@@ -94,7 +101,15 @@ pub fn build(
             .map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
     }
     refuse_declared_out_dir_overlaps(root, manifest)?;
-    write(root, &compile_all(root, &selected)?)?;
+    let experience = crate::experience::prepare(root, manifest, env)?;
+    let compiles = compile_all(root, &selected, experience.as_deref())?;
+    // A place that grants nothing is exempt from CRU039, so only the whole game shows a product nobody grants. A game
+    // that assigns ProcessReceipt itself answers every product.
+    let answered = compiles.iter().any(|shared| shared.receipts.answered);
+    if experience.is_some() && selected.len() == manifest.places.len() && !answered {
+        crate::experience::refuse_ungranted(manifest, compiles.iter().flat_map(|shared| &shared.receipts.granted))?;
+    }
+    write(root, &compiles)?;
     let mut built = Vec::new();
     for (name, place) in selected {
         let path = match output {
@@ -111,16 +126,22 @@ pub fn build(
 struct SharedCompile<'m> {
     place: &'m Place,
     compiled: Compiled,
+    receipts: Receipts,
 }
 
-fn compile_all<'m>(root: &Path, selected: &[(&'m String, &'m Place)]) -> Result<Vec<SharedCompile<'m>>, Error> {
+fn compile_all<'m>(
+    root: &Path,
+    selected: &[(&'m String, &'m Place)],
+    experience: Option<&str>,
+) -> Result<Vec<SharedCompile<'m>>, Error> {
     let mut compiles: Vec<SharedCompile<'m>> = Vec::new();
     for &(name, place) in selected {
         if compiles.iter().any(|shared| shared.place == place) {
             continue;
         }
-        let compiled = compile(root, place).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
-        compiles.push(SharedCompile { place, compiled });
+        let (compiled, receipts) =
+            compile(root, place, experience).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
+        compiles.push(SharedCompile { place, compiled, receipts });
     }
     Ok(compiles)
 }
@@ -230,13 +251,29 @@ pub const COMPILE: &str = "__compile";
 struct ChildModules {
     out_dir: PathBuf,
     modules: Vec<(String, String)>,
+    /// The key of each product the place grants through its handle.
+    granted: Vec<String>,
+    /// Whether the place assigns `MarketplaceService.ProcessReceipt` itself.
+    answered: bool,
 }
 
 // tsrs never frees a program, so each compile runs in its own process and a build's peak memory is its largest place.
-fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
+fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Compiled, Receipts), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
     let mut command = Command::new(exe);
     command.arg(COMPILE).arg(&place.tsconfig).arg(&place.project).arg(&place.include);
+    // The bindings can outgrow a Windows command line, so they reach the child in a file.
+    let bindings = experience
+        .map(|source| {
+            let mut file = tempfile::NamedTempFile::new()?;
+            std::io::Write::write_all(&mut file, source.as_bytes())?;
+            Ok::<_, std::io::Error>(file)
+        })
+        .transpose()
+        .map_err(|error| format!("cannot write the crucible:experience bindings: {error}"))?;
+    if let Some(file) = &bindings {
+        command.arg("--experience").arg(file.path());
+    }
     command.current_dir(root).stdout(Stdio::piped());
     let mut tied = child::spawn_tied(&mut command).map_err(|error| format!("cannot start the compiler: {error}"))?;
     let mut json = Vec::new();
@@ -251,25 +288,47 @@ fn compile(root: &Path, place: &Place) -> Result<Compiled, String> {
     let child: ChildModules =
         serde_json::from_slice(&json).map_err(|error| format!("cannot read the compiler's output: {error}"))?;
     let modules = child.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
-    Ok(Compiled { out_dir: child.out_dir, modules })
+    Ok((Compiled { out_dir: child.out_dir, modules }, Receipts { granted: child.granted, answered: child.answered }))
 }
 
-pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> ExitCode {
+pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, experience: Option<PathBuf>) -> ExitCode {
     child::exit_with_parent();
-    let instances = match crucible_project::rojo::place(&project) {
-        Ok(mappings) => InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files),
-        Err(message) => {
-            eprint!("{}", relative_to_cwd(&format!("error: {message}\n")));
-            return ExitCode::FAILURE;
-        }
+    let fail = |message: String| {
+        eprint!("{}", relative_to_cwd(&format!("error: {message}\n")));
+        ExitCode::FAILURE
     };
-    match crucible_transform::compile(
+    let mappings = match crucible_project::rojo::place(&project) {
+        Ok(mappings) => mappings,
+        Err(message) => return fail(message),
+    };
+    let mut bindings = None;
+    if let Some(file) = experience {
+        let source = match std::fs::read_to_string(&file) {
+            Ok(source) => source,
+            Err(error) => return fail(format!("cannot read the crucible:experience bindings: {error}")),
+        };
+        let path = match crucible_compiler::out_dir(&tsconfig) {
+            (Some(out_dir), _) => crate::experience::module_path(&mappings.folders, &out_dir),
+            // The compile reports why the tsconfig has no outDir.
+            (None, _) => Ok("crucible-experience.luau".to_owned()),
+        };
+        match path {
+            Ok(path) => bindings = Some((path, source)),
+            Err(message) => return fail(message),
+        }
+    }
+    let modules: Vec<_> = bindings
+        .iter()
+        .map(|(path, source)| VirtualModule { specifier: crucible_iac::bindings::SPECIFIER, path, source })
+        .collect();
+    let instances = InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files);
+    match crucible_transform::compile_granting(
         &tsconfig,
-        Target::Game { instances: &instances, include: &include, modules: &[] },
+        Target::Game { instances: &instances, include: &include, modules: &modules },
     ) {
-        Ok(compiled) => {
+        Ok((compiled, Receipts { granted, answered })) => {
             let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
-            let child = ChildModules { out_dir: compiled.out_dir, modules };
+            let child = ChildModules { out_dir: compiled.out_dir, modules, granted, answered };
             match serde_json::to_writer(std::io::stdout().lock(), &child) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
@@ -280,6 +339,9 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf) -> Ex
         }
         Err(failure) => {
             eprint!("{}", relative_to_cwd(&failure.to_string()));
+            if !modules.is_empty() && crate::experience::misses_declaration(&failure) {
+                eprintln!("error: {}", crate::experience::include_declaration(&tsconfig));
+            }
             ExitCode::FAILURE
         }
     }

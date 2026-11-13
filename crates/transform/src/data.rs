@@ -79,6 +79,9 @@ impl Walk<'_, '_> {
             return;
         }
         let Some(StoreCall { store, member }) = self.store_call(call) else { return };
+        if member == Some("grant") {
+            self.grant(call);
+        }
         let client = matches!(member, None | Some("loaded")) && call.arguments().is_empty();
         let required = if client { Side::Client } else { Side::Server };
         if self.file_side(file) == Some(required) {
@@ -96,7 +99,7 @@ impl Walk<'_, '_> {
     }
 
     pub(crate) fn process_receipt(&mut self, n: Node) {
-        if n.operator() != Op::Assign || !self.api.exports_name("ProfileStore") {
+        if n.operator() != Op::Assign {
             return;
         }
         let target = unwrap(n.left());
@@ -105,9 +108,11 @@ impl Walk<'_, '_> {
         }
         let object = target.expression();
         let t = self.cx.type_at(object);
-        let marketplace =
-            t.symbol().is_some_and(|s| s.name() == "MarketplaceService" && self.standard(s, Standard::Types));
-        if marketplace && self.grants() {
+        if !t.symbol().is_some_and(|s| s.name() == "MarketplaceService" && self.standard(s, Standard::Types)) {
+            return;
+        }
+        self.state.grants.answers_receipts = true;
+        if self.api.exports_name("ProfileStore") && self.grants() {
             self.report(
                 n,
                 Code::Rule(25),

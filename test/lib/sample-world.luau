@@ -270,11 +270,11 @@ local function rebuild(self, realm, dataPort, configPort)
 	realm.graph.module(realm.side)
 end
 
--- Options: backend shares a data backend with another world.
+-- Options: backend shares a data backend with another world, and place reads another build of the sample.
 function World.new(options)
 	options = options or {}
 	local configs = ConfigBackend.new()
-	local place = roblox.deserializePlace(fs.readFile("build/sample-game.rbxl"))
+	local place = roblox.deserializePlace(fs.readFile(options.place or "build/sample-game.rbxl"))
 	local world = ProfileWorld.new({
 		backend = options.backend,
 		declare = function()

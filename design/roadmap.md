@@ -185,10 +185,20 @@ Nothing in this pull request writes to Roblox outside the gated tests.
 
 ### PR 9. `feat(iac): typed handles and deploy`
 
-- Codegen of `src/crucible-experience.d.ts`, plus the per-environment bindings delivered through `crucible:experience`.
-- Framework handle types, the handle overloads of `grant`, badge awards and pass checks, and the rule that every product has exactly one grant.
-- `crucible deploy` replaces `crucible publish`.
-- Docs for every new command.
+PR 9 ships as two pull requests that land independently.
+
+PR 9a, `feat(iac): typed experience handles`:
+
+- Codegen of `src/crucible-experience.d.ts`, plus the per-environment bindings delivered through `crucible:experience` and `crucible build --env`.
+- Framework handle types and the handle overload of `grant`. Badge awards and pass checks pass a handle's `id` to Roblox's own calls, and Crucible adds no wrappers.
+- CRU039, the rule that every product has exactly one grant, and the build's check that some place grants each product.
+- ABI 2, so a CLI that checks grants by handle refuses a runtime without handles.
+- Docs for the handles, `crucible build --env` and CRU039.
+
+PR 9b, `feat(iac): deploy, experience settings and the scope check`:
+
+- `crucible deploy` replaces `crucible publish`, and builds each place for its environment.
+- Docs for every other new command.
 
 **Read:** the handle types, the one-grant rule and deploy's preflight checks.
 

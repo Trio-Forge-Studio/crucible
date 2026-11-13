@@ -3,6 +3,7 @@ mod boot;
 mod data;
 mod declarations;
 mod facts;
+mod grants;
 mod lints;
 mod lower;
 mod network;
@@ -61,6 +62,23 @@ pub fn compile(tsconfig: &Path, target: Target<'_>) -> Result<Compiled, Failure>
     crucible_compiler::compile_with(tsconfig, target, &mut [&mut Crucible::default()])
 }
 
+/// How a program answers purchases, which `crucible build` reads across its places.
+pub struct Receipts {
+    /// The key of each product the program grants through its handle. A place that grants nothing passes CRU039, so
+    /// `crucible build` checks across its places that some place grants each product.
+    pub granted: Vec<String>,
+    /// Whether the program assigns `MarketplaceService.ProcessReceipt` itself, and so answers every product.
+    pub answered: bool,
+}
+
+/// `compile`, and how the program answers purchases.
+pub fn compile_granting(tsconfig: &Path, target: Target<'_>) -> Result<(Compiled, Receipts), Failure> {
+    let mut crucible = Crucible::default();
+    let compiled = crucible_compiler::compile_with(tsconfig, target, &mut [&mut crucible])?;
+    let grants = &crucible.state.grants;
+    Ok((compiled, Receipts { granted: grants.keys(), answered: grants.answers_receipts }))
+}
+
 #[cfg(feature = "test-support")]
 pub fn analyze(
     tsconfig: &Path,
@@ -84,6 +102,7 @@ pub struct Crucible {
 pub(crate) struct State {
     facts: HashMap<SiteId, Fact>,
     network: network::Network,
+    grants: grants::Grants,
     #[cfg(feature = "test-support")]
     recorded: Vec<(String, Span, Fact)>,
 }
@@ -139,6 +158,12 @@ impl Extension for Crucible {
         }
         let Some(api) = self.api.as_mut() else { return };
         registration::Walk { cx, api, state: &mut self.state }.file(file);
+    }
+
+    fn finish_program(&mut self, cx: &mut ProgramCx<'_>) {
+        if let Some(api) = &self.api {
+            self.state.grants.finish(cx, api);
+        }
     }
 
     fn lower_call(&self, cx: &mut LowerCx<'_, '_>, call: Node) -> Option<Expr> {

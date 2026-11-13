@@ -308,13 +308,18 @@ class ProfileBinding {
 	}
 
 	/** Rule 6: claims are field initializers of server Subsystems, frozen at activation. */
-	claim(kind: ClaimKind, callback: unknown, extra?: { message?: MessageDecl; productId?: number }): object {
+	claim(
+		kind: ClaimKind,
+		callback: unknown,
+		extra?: { message?: MessageDecl; productId?: number; absent?: true },
+	): object {
 		const name = this.declaration.name;
 		const owner = readClaim();
 		if (owner === undefined || owner.record.kind !== Kind.Subsystem)
 			error(`${name}.${kind} runs while a server Subsystem is constructed; make it a field initializer`, 3);
 		if (server.activated) error(`${name}.${kind}: claims are frozen once the data runtime has started`, 3);
 		if (!typeIs(callback, "function")) error(`${name}.${kind} takes a function`, 3);
+		if (extra?.absent) return table.freeze({});
 		const label = (owner.record as ClassRecord).id;
 		const claim: Claim = {
 			kind,
@@ -490,8 +495,13 @@ function member(declaration: ProfileDeclaration, key: string): unknown {
 					message: messageOf(message) ?? error(`${name}.receive takes a profile message`, 2),
 				});
 		case "grant":
-			return (_: unknown, productId: unknown, callback: unknown) => {
-				if (!typeIs(productId, "number")) error(`${name}.grant takes a product id`, 2);
+			return (_: unknown, product: unknown, callback: unknown) => {
+				// A retired product the environment never had sends no receipt, so its grant claims no product.
+				if (typeIs(product, "table") && (product as { readonly absent?: unknown }).absent === true)
+					return binding.claim("grant", callback, { absent: true });
+				// Reading a handle's id throws, naming the product, when the build holds no ID for it.
+				const productId = typeIs(product, "table") ? (product as { readonly id?: unknown }).id : product;
+				if (!typeIs(productId, "number")) error(`${name}.grant takes a product handle or a product id`, 2);
 				return binding.claim("grant", callback, { productId });
 			};
 	}

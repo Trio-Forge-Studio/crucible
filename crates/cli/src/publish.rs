@@ -106,7 +106,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
         })();
         acceptance.into_inner().finish(result).map_err(|failure| auth::decorate(failure, &primary.auth, Some(&source)))
     };
-    let built = crate::build::build(root, &manifest, &args.places, None).map_err(|error| {
+    let built = crate::build::build(root, &manifest, &args.places, None, Some(&args.env)).map_err(|error| {
         let failure = match error {
             crate::build::Error::Usage(message) => Failure::usage(message),
             crate::build::Error::Failed(message) => Failure::unavailable(message),
