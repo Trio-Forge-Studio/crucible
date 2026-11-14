@@ -60,7 +60,7 @@ return {
 				afterGrant(function()
 					table.insert(order, "first")
 					threads.first = coroutine.running()
-					durable.first = D2.session(a, pa).durable.R1
+					durable.first = (D2.session(a, pa):durable("R1") or nil)
 				end)
 				afterGrant(function()
 					table.insert(order, "second")
@@ -355,7 +355,7 @@ return {
 		retry.release()
 		backend:advance(0.5)
 		spec.eq(session.confirmed, 1, "the already confirmed only what it found")
-		spec.eq(session.durable.R, nil, "R is not durable")
+		spec.eq((session:durable("R") or nil), nil, "R is not durable")
 		spec.eq(handle.done, false, "the callback keeps waiting")
 		assert(#nextOp.parked == 1, "the next operation carries R and has not committed")
 		a.crash()

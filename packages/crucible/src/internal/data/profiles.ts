@@ -33,7 +33,23 @@ import {
 import type { DataPort } from "./port";
 import { ReceiptRouter } from "./receipts";
 import { KeyedScheduler, Priority, type Settled } from "./scheduler";
-import { assertOutsideCallback, Phase, Session, type Released, type SealReason } from "./session";
+import {
+	abandoned,
+	activated,
+	NONE,
+	assertOutsideCallback,
+	loadEnded,
+	Phase,
+	releaseOutcome,
+	releaseSettled,
+	releasing,
+	sealed,
+	Session,
+	type Released,
+	type SettledRelease,
+	type SealReason,
+	type Write,
+} from "./session";
 import { Waiters } from "./waiters";
 
 /** @internal */
@@ -116,8 +132,9 @@ export class DataEngine {
 		this.settled = true;
 		for (const runtime of this.profiles)
 			for (const [, session] of runtime.sessions) {
-				if (session.phase === Phase.Loading) session.abandoned = true;
-				else if (session.phase === Phase.Active) {
+				const state = session.authority;
+				if (state.phase === Phase.Loading) session.authority = abandoned(state);
+				else if (state.phase === Phase.Active) {
 					runtime.seal(session, "retired");
 					runtime.startRelease(session);
 				}
@@ -154,7 +171,7 @@ export class ProfileRuntime {
 
 	/** Rule 9: writable exactly while active and before the safe bound; a passed bound seals. */
 	accept(session: Session): boolean {
-		if (session.phase !== Phase.Active) return false;
+		if (session.authority.phase !== Phase.Active) return false;
 		if (bootClock() < session.safeUntil) return true;
 		this.lose(session, "authority");
 		return false;
@@ -202,17 +219,21 @@ export class ProfileRuntime {
 	private supersedes(userId: number): ReadonlyMap<string, Sealed> {
 		const result = new Map<string, Sealed>();
 		for (const [token, session] of this.sealed.get(userId) ?? new Map<string, Session>())
-			if (session.released !== undefined)
+			if (releaseOutcome(session.authority) !== undefined)
 				result.set(token, { epoch: session.epoch, snapshot: session.snapshot() });
 		return result;
 	}
 
 	private stopped(session: Session): boolean {
-		return session.abandoned || this.engine.closing || !this.present(session.player);
+		const state = session.authority;
+		return (
+			(state.phase === Phase.Loading && state.abandoned) || this.engine.closing || !this.present(session.player)
+		);
 	}
 
 	private end(session: Session, mayHaveCommitted: boolean, message?: string): boolean {
-		session.phase = Phase.Ended;
+		const state = session.authority;
+		if (state.phase === Phase.Loading) session.authority = loadEnded(state);
 		if (mayHaveCommitted)
 			this.engine.scheduler.submit({
 				store: this.schema.name,
@@ -237,7 +258,10 @@ export class ProfileRuntime {
 	/** Rules 17 to 21, 29 and 30. Yields; true once the session is writable. */
 	load(player: Player, reason: LoadReason): boolean {
 		const existing = this.sessions.get(player);
-		if (existing !== undefined && (existing.phase === Phase.Loading || existing.phase === Phase.Active))
+		if (
+			existing !== undefined &&
+			(existing.authority.phase === Phase.Loading || existing.authority.phase === Phase.Active)
+		)
 			return this.await(player);
 		const port = this.engine.port;
 		const deadline = bootClock() + LOAD_DEADLINE_SECONDS;
@@ -324,7 +348,8 @@ export class ProfileRuntime {
 		session.safeUntil = earliest! + LOCAL_AUTHORITY_SECONDS;
 		const superseded = this.sealed.get(userId);
 		if (superseded !== undefined)
-			for (const [token, sealed] of superseded) if (sealed.released !== undefined) superseded.delete(token);
+			for (const [token, old] of superseded)
+				if (releaseOutcome(old.authority) !== undefined) superseded.delete(token);
 		const loaded = loadRecord(this.schema, envelope.payload, envelope.schemaVersion);
 		if (loaded.kind !== "ok") {
 			this.engine.diagnose(
@@ -338,7 +363,7 @@ export class ProfileRuntime {
 		session.value = loaded.value;
 		session.revision = loaded.migrated ? 1 : 0;
 		for (const id of envelope.receipts) session.stage(id);
-		session.durable = new Set(envelope.receipts);
+		session.confirmReceipts(envelope.receipts);
 		const [ok, claimed] = pcall(() => {
 			const result = this.hooks.onLoad(session, session.value, reason);
 			return rawequal(result, session.value) ? result : session.prepare(result);
@@ -353,7 +378,8 @@ export class ProfileRuntime {
 		if (!rawequal(claimed, session.value)) session.commit(claimed);
 		if (this.stopped(session)) return this.end(session, true);
 		if (bootClock() >= session.safeUntil) return this.end(session, true, SESSION_ENDED_MESSAGE);
-		session.phase = Phase.Active;
+		const loading = session.authority;
+		if (loading.phase === Phase.Loading) session.authority = activated(loading);
 		this.hooks.publish(player, session.value);
 		this.hooks.delivered(session, envelope);
 		this.inbox.deliver(session, envelope);
@@ -368,7 +394,7 @@ export class ProfileRuntime {
 	private armSeal(session: Session) {
 		const port = this.engine.port;
 		const check = () => {
-			if (session.phase !== Phase.Active) return;
+			if (session.authority.phase !== Phase.Active) return;
 			const now = bootClock();
 			if (now < session.safeUntil) {
 				port.delay(session.safeUntil - now, check);
@@ -383,7 +409,7 @@ export class ProfileRuntime {
 	private armRenewal(session: Session) {
 		const port = this.engine.port;
 		const tick = () => {
-			if (session.phase !== Phase.Active || this.engine.settled) return;
+			if (session.authority.phase !== Phase.Active || this.engine.settled) return;
 			const now = bootClock();
 			if (now >= session.renewAt) {
 				if (!this.present(session.player)) {
@@ -399,10 +425,10 @@ export class ProfileRuntime {
 
 	/** Seals at once: the slot reads undefined, writes return false and waiters wake (rule 26). */
 	seal(session: Session, reason: SealReason) {
-		if (session.phase === Phase.Loading) session.abandoned = true;
-		if (session.phase !== Phase.Active) return;
-		session.phase = Phase.Sealed;
-		session.sealedBy = reason;
+		const state = session.authority;
+		if (state.phase === Phase.Loading) session.authority = abandoned(state);
+		if (state.phase !== Phase.Active) return;
+		session.authority = sealed(state, reason);
 		this.hooks.publish(session.player, undefined);
 		let tokens = this.sealed.get(session.userId);
 		if (tokens === undefined) {
@@ -426,7 +452,8 @@ export class ProfileRuntime {
 	}
 
 	startRelease(session: Session) {
-		session.releaseWanted = true;
+		const state = session.authority;
+		if (state.phase === Phase.Sealed) session.authority = releasing(state);
 		this.pumpWriter(session);
 	}
 
@@ -443,8 +470,9 @@ export class ProfileRuntime {
 	/** One owned operation at a time per session; requests coalesce into the next (rules 28, 31, 32). */
 	private pumpWriter(session: Session) {
 		if (session.writing !== undefined) return;
-		const release = session.releaseWanted && session.released === undefined && session.phase === Phase.Sealed;
-		if (!release && (session.want === undefined || session.phase !== Phase.Active)) return;
+		const state = session.authority;
+		const release = state.phase === Phase.Sealed && state.releasing;
+		if (!release && (session.want === undefined || state.phase !== Phase.Active)) return;
 		const priority = release ? Priority.Release : session.want!;
 		session.want = undefined;
 		const port = this.engine.port;
@@ -452,6 +480,7 @@ export class ProfileRuntime {
 		let decision: OwnedDecision | undefined;
 		let sentAt = 0;
 		let earliest: number | undefined;
+		let carrying = NONE;
 		if (!release)
 			session.renewAt = bootClock() + RENEW_INTERVAL_SECONDS + (port.random() * 2 - 1) * RENEW_JITTER_SECONDS;
 		const ticket = this.engine.scheduler.submit({
@@ -466,7 +495,7 @@ export class ProfileRuntime {
 			bytes: jsonBytes(session.value) + 1024,
 			transform: () => {
 				const snapshot = session.snapshot();
-				session.carrying = snapshot.revision;
+				carrying = snapshot.revision;
 				const input = {
 					userId: session.userId,
 					token: session.token,
@@ -483,7 +512,8 @@ export class ProfileRuntime {
 				if (outcome.kind === "ok" || outcome.ambiguous) earliest ??= sentAt;
 			},
 		});
-		session.writing = ticket;
+		const write: Write = { ticket, release, carrying: () => carrying };
+		session.writing = write;
 		ticket.onSettled((settled) => this.settleOwned(session, release, settled, decision, earliest));
 	}
 
@@ -494,7 +524,8 @@ export class ProfileRuntime {
 		decision: OwnedDecision | undefined,
 		earliest: number | undefined,
 	) {
-		const ambiguous = session.writing?.ambiguous === true;
+		const write = session.writing;
+		const ambiguous = write?.ticket.ambiguous === true;
 		session.writing = undefined;
 		let outcome: Released = "given up";
 		let lost: SealReason | undefined;
@@ -512,24 +543,24 @@ export class ProfileRuntime {
 				);
 				lost = "authority";
 			}
-		} else if (settled.kind === "uncertain") session.lost = math.max(session.lost, session.carrying);
-		if (release) {
-			session.released = outcome;
-			session.releaseAmbiguous = outcome !== "committed" && ambiguous;
-			session.phase = Phase.Ended;
-			this.released(session);
+		} else if (settled.kind === "uncertain") session.lost = math.max(session.lost, write?.carrying() ?? NONE);
+		const state = session.authority;
+		if (release && state.phase === Phase.Sealed) {
+			const ended = releaseSettled(state, outcome, outcome !== "committed" && ambiguous);
+			session.authority = ended;
+			this.released(session, ended);
 		} else if (lost !== undefined) this.lose(session, lost);
 		this.changed.wake();
 		this.pumpWriter(session);
 	}
 
-	private released(session: Session) {
-		if (session.released !== "committed")
+	private released(session: Session, state: SettledRelease) {
+		if (state.released !== "committed")
 			this.engine.diagnose(
 				`release:${this.schema.name}:${session.token}`,
-				`${this.schema.name}: ${session.userId}'s release did not confirm (${session.released}); revisions ${session.confirmed + 1} to ${session.revision} unconfirmed`,
+				`${this.schema.name}: ${session.userId}'s release did not confirm (${state.released}); revisions ${session.confirmed + 1} to ${session.revision} unconfirmed`,
 			);
-		if (session.sealedBy === "retired" && this.present(session.player))
+		if (state.by === "retired" && this.present(session.player))
 			this.engine.port.players.kick(session.player, SESSION_ENDED_MESSAGE);
 		const tokens = this.sealed.get(session.userId);
 		this.engine.port.delay(LEASE_SECONDS + TAKEOVER_GRACE_SECONDS, () => {
@@ -543,7 +574,7 @@ export class ProfileRuntime {
 	/** Rule 28: confirms exactly what the stored envelope holds, for this token only. */
 	private confirm(session: Session, envelope: Envelope, earliest: number | undefined) {
 		session.confirmed = math.max(session.confirmed, envelope.commit!.revision);
-		session.durable = new Set(envelope.receipts);
+		session.confirmReceipts(envelope.receipts);
 		if (earliest !== undefined && this.accept(session))
 			session.safeUntil = math.max(session.safeUntil, earliest + LOCAL_AUTHORITY_SECONDS);
 		this.hooks.delivered(session, envelope);
@@ -566,16 +597,17 @@ export class ProfileRuntime {
 	/** Rule 43 on PlayerRemoving, rule 44's self-healing, and rule 53's final phase. */
 	release(session: Session, reason: ReleaseReason) {
 		while (session.busy) this.changed.park();
-		if (session.phase === Phase.Loading) {
-			session.abandoned = true;
+		const state = session.authority;
+		if (state.phase === Phase.Loading) {
+			session.authority = abandoned(state);
 			this.changed.wake();
 			return;
 		}
-		if (session.phase === Phase.Active) {
+		if (state.phase === Phase.Active) {
 			this.releaseClaims(session, reason);
 			this.seal(session, reason);
 			this.startRelease(session);
-		} else if (session.phase === Phase.Ended) this.drop(session);
+		} else if (state.phase === Phase.Ended) this.drop(session);
 	}
 
 	leave(player: Player) {
@@ -594,11 +626,13 @@ export class ProfileRuntime {
 		this.releaseClaims(session, "handoff");
 		this.startRelease(session);
 		const deadline = bootClock() + HANDOFF_TIMEOUT_SECONDS;
-		while (session.released === undefined && bootClock() < deadline && !this.engine.settled)
+		while (releaseOutcome(session.authority) === undefined && bootClock() < deadline && !this.engine.settled)
 			this.changed.park(deadline);
-		if (session.released === "committed") return "ok";
-		const pending = session.writing;
-		return session.releaseAmbiguous || (pending?.dispatched === true && (pending.inFlight || pending.ambiguous))
+		const state = session.authority;
+		if (releaseOutcome(state) === "committed") return "ok";
+		const pending = session.writing?.ticket;
+		return (state.phase === Phase.Ended && state.released !== undefined && state.ambiguous) ||
+			(pending?.dispatched === true && (pending.inFlight || pending.ambiguous))
 			? "uncertain"
 			: "timeout";
 	}
@@ -620,7 +654,7 @@ export class ProfileRuntime {
 			const session = this.sessions.get(player);
 			if (session !== undefined && this.accept(session)) return true;
 			if (!this.present(player) || this.engine.closing || bootClock() >= deadline) return false;
-			if (session !== undefined && session.phase !== Phase.Loading) return false;
+			if (session !== undefined && session.authority.phase !== Phase.Loading) return false;
 			this.changed.park(deadline);
 		}
 	}
@@ -635,7 +669,7 @@ export class ProfileRuntime {
 		this.requestWrite(session, Priority.Renew);
 		while (
 			session.confirmed < target &&
-			session.phase !== Phase.Ended &&
+			session.authority.phase !== Phase.Ended &&
 			bootClock() < deadline &&
 			!this.engine.settled
 		)

@@ -18,7 +18,7 @@ import {
 } from "./envelope";
 import * as L from "./limits";
 import type { Cancel } from "./port";
-import { type Cleanup, newPeer, type Peer, PeerState, Session, Stage } from "./session";
+import { type Cleanup, newPeer, type Peer, PeerState, replySent, ReplyState, Session, Stage } from "./session";
 
 const FAIL_NAMES = ["overflow", "overloaded", "closing", "malformed"];
 
@@ -132,12 +132,12 @@ export class ServerSession extends Session {
 		const cleanups = new Array<[Peer, Cleanup]>();
 		for (const peer of this.order) {
 			for (const entry of peer.running) {
-				const request = entry.request;
-				if (entry.claim !== claim || request === undefined || entry.settled) continue;
-				entry.settled = true;
+				const reply = entry.reply;
+				if (entry.claim !== claim || reply.state !== ReplyState.Open) continue;
+				entry.reply = replySent(reply);
 				this.fire(
 					peer,
-					controlPacket(Opcode.Error, [request.definition.index!, request.nonce], ErrorReason.Unavailable),
+					controlPacket(Opcode.Error, [reply.definition.index!, reply.nonce], ErrorReason.Unavailable),
 				);
 			}
 			for (let i = peer.cleanups.size() - 1; i >= 0; i--) {

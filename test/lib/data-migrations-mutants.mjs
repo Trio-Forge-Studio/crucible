@@ -2618,7 +2618,7 @@ const mutants = [
 		"71",
 		"guard",
 		I,
-		"if (session.userId === userId && session.phase === Phase.Active)",
+		"if (session.userId === userId && session.authority.phase === Phase.Active)",
 		"if (session.userId === userId)",
 		[
 			"data-inbox-pins.luau: A16 rule 71 a send answered while the user's session on this server is sealed requests no write",
