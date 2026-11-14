@@ -20,27 +20,51 @@ pub enum Outcome {
     Hung(&'static str),
 }
 
-/// How a program fails the test, which shrinking keeps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How a program fails the test. Shrinking keeps a candidate only when it fails the same way, data and all, so a
+/// shrunk program shows the original's difference and not another one that an edit brought in.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
-    /// The traces differ.
-    Differs,
-    /// JavaScript threw an engine error, which a generated program never should: the generator is wrong.
-    NodeError,
-    Rejected,
-    Hung,
+    /// The traces differ, first at these lines of Node's and Lune's, `None` where one side has no line there. The
+    /// position itself is not kept, because a deleted trace moves it, and neither is the address in a Luau
+    /// `table: 0x...`, which changes from run to run.
+    Differs(Option<String>, Option<String>),
+    /// JavaScript threw an engine error, which a generated program never should: the generator is wrong. It holds
+    /// Node's first `!error` line.
+    NodeError(String),
+    /// The compiler refused the program. It holds the code of the first error, such as `TS2322`.
+    Rejected(Option<String>),
+    Hung(&'static str),
 }
 
 impl Outcome {
     pub fn failure(&self) -> Option<Failure> {
+        let error = |node: &[String]| node.iter().find(|l| l.starts_with("!error ")).cloned();
         match self {
-            Outcome::Ran { node, .. } if node.iter().any(|l| l.starts_with("!error ")) => Some(Failure::NodeError),
-            Outcome::Ran { node, lune } if node != lune => Some(Failure::Differs),
+            Outcome::Ran { node, .. } if error(node).is_some() => error(node).map(Failure::NodeError),
+            Outcome::Ran { node, lune } if node != lune => {
+                let at = node.iter().zip(lune).position(|(a, b)| a != b).unwrap_or(node.len().min(lune.len()));
+                let line = |lines: &[String]| lines.get(at).map(|l| without_addresses(l));
+                Some(Failure::Differs(line(node), line(lune)))
+            }
             Outcome::Ran { .. } => None,
-            Outcome::Rejected(_) => Some(Failure::Rejected),
-            Outcome::Hung(_) => Some(Failure::Hung),
+            Outcome::Rejected(text) => {
+                Some(Failure::Rejected(text.lines().next().and_then(|l| l.split(": ").nth(1)).map(str::to_owned)))
+            }
+            Outcome::Hung(side) => Some(Failure::Hung(side)),
         }
     }
+}
+
+/// The line with each `table: 0x...` or `function: 0x...` address of a Luau value written as `0x`.
+fn without_addresses(line: &str) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(at) = ["table: 0x", "function: 0x"].iter().filter_map(|p| rest.find(p).map(|i| i + p.len())).min() {
+        out.push_str(&rest[..at]);
+        rest = rest[at..].trim_start_matches(|c: char| c.is_ascii_hexdigit());
+    }
+    out.push_str(rest);
+    out
 }
 
 pub struct Runner {
@@ -81,16 +105,24 @@ impl Runner {
     /// Runs every program and returns their outcomes in order. A program the compiler refuses fails the whole
     /// compile, so the batch compiles again without it.
     pub fn run(&mut self, programs: &[String]) -> Vec<Outcome> {
+        self.run_edited(programs, None)
+    }
+
+    /// Runs every program as `run` does, except that the compiler gets `compiled[i]` in place of `programs[i]` while
+    /// Node still runs `programs[i]`. The shrinker's test stands such an edit in for a compiler bug, so it never
+    /// changes the compiler.
+    pub fn run_edited(&mut self, programs: &[String], compiled: Option<&[String]>) -> Vec<Outcome> {
         let mut outcomes: Vec<Option<Outcome>> = vec![None; programs.len()];
         loop {
             let pending: Vec<usize> = (0..programs.len()).filter(|&i| outcomes[i].is_none()).collect();
             if pending.is_empty() {
                 break;
             }
-            let dir = self.batch(&pending, programs);
+            let dir = self.batch(&pending, programs, compiled);
             match compile(&self.child, &dir.join("tsconfig.json")) {
                 Ok(()) => {
-                    for (i, outcome) in self.execute(&dir, &pending) {
+                    let node = dir.join(if compiled.is_some() { "node" } else { "src" });
+                    for (i, outcome) in self.execute(&dir, &node, &pending) {
                         outcomes[i] = Some(outcome);
                     }
                 }
@@ -115,13 +147,22 @@ impl Runner {
         outcomes.into_iter().map(|o| o.expect("every program has an outcome")).collect()
     }
 
-    fn batch(&mut self, pending: &[usize], programs: &[String]) -> PathBuf {
+    fn batch(&mut self, pending: &[usize], programs: &[String], compiled: Option<&[String]>) -> PathBuf {
         self.batches += 1;
         let dir = self.root.join(format!("batch-{}", self.batches));
         let src = dir.join("src");
         std::fs::create_dir_all(&src).expect("the batch folder is made");
+        let node = dir.join("node");
         for &i in pending {
-            std::fs::write(src.join(format!("{}.ts", name(i))), &programs[i]).expect("the program is written");
+            let file = format!("{}.ts", name(i));
+            match compiled {
+                Some(compiled) => {
+                    std::fs::create_dir_all(&node).expect("Node's folder is made");
+                    std::fs::write(node.join(&file), &programs[i]).expect("the program is written");
+                    std::fs::write(src.join(&file), &compiled[i]).expect("the program is written");
+                }
+                None => std::fs::write(src.join(&file), &programs[i]).expect("the program is written"),
+            }
         }
         let tsconfig = serde_json::json!({
             "extends": self.tsconfig_base,
@@ -136,16 +177,19 @@ impl Runner {
         std::fs::write(dir.join("tsconfig.json"), tsconfig.to_string()).expect("the tsconfig is written");
         // Node reads each program as an ES module, as TypeScript's `module: preserve` writes it.
         std::fs::write(src.join("package.json"), r#"{"type":"module"}"#).expect("package.json is written");
+        if compiled.is_some() {
+            std::fs::write(node.join("package.json"), r#"{"type":"module"}"#).expect("package.json is written");
+        }
         dir
     }
 
-    fn execute(&self, dir: &Path, pending: &[usize]) -> Vec<(usize, Outcome)> {
+    fn execute(&self, dir: &Path, node_dir: &Path, pending: &[usize]) -> Vec<(usize, Outcome)> {
         let names: Vec<String> = pending.iter().map(|&i| name(i)).collect();
         let limit = Duration::from_secs(30 + names.len() as u64 / 4);
         let mut node = Command::new("node");
         node.arg("--disable-warning=ExperimentalWarning")
             .arg(self.differential.join("node.mjs"))
-            .arg(dir.join("src"))
+            .arg(node_dir)
             .args(&names);
         let mut lune = Command::new("lune");
         lune.arg("run").arg(self.differential.join("lune.luau")).arg(dir.join("out")).arg(&self.vendored).args(&names);
@@ -154,7 +198,7 @@ impl Runner {
         let complete = |t: &Traces| t.finished && names.iter().all(|n| t.programs.contains_key(n));
         if (!complete(&node) || !complete(&lune)) && pending.len() > 1 {
             // One program hangs or kills its process. Run each alone to find it.
-            return pending.iter().flat_map(|&i| self.execute(dir, &[i])).collect();
+            return pending.iter().flat_map(|&i| self.execute(dir, node_dir, &[i])).collect();
         }
         pending
             .iter()

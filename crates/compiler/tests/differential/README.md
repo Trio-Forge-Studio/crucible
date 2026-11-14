@@ -26,7 +26,8 @@ cargo test -p crucible-compiler --test differential -- --ignored
 A large run is faster in release: `DIFFERENTIAL_CASES=50000 cargo test --release -p crucible-compiler --test
 differential -- --ignored generated`. On failure the test prints the seed, the program's number, the first differing
 trace line with both values, and the shrunk program, which it also writes to
-`target/tmp/differential/failures/seed-<seed>-program-<n>.ts`, so `DIFFERENTIAL_FILE=<that file>` reruns it alone.
+`target/tmp/differential/failures/seed-<seed>-program-<n>.ts`, with the program as generated next to it in
+`seed-<seed>-program-<n>-unshrunk.ts`, so `DIFFERENTIAL_FILE=<either file>` reruns it alone.
 `regressions/` holds the programs of fixed bugs, and `regressions_trace_the_same_in_node_and_lune` runs each one.
 `known_differences_still_differ` runs each program in `known/` and fails when one no longer differs, so a fix moves its
 program to `regressions/`.
@@ -37,7 +38,13 @@ The generator builds a typed syntax tree with `proptest`, and `print.rs` writes 
 parentheses its arithmetic, `??`, `&&` and `||` need, so the compiler sees chains such as `a ?? b ?? c` and `a - b + c`
 as TypeScript parses them. `shrink.rs` shrinks a failing program in rounds: each round tries every program one edit
 away in one batch, where an edit deletes a statement, replaces one with a block of its body, or replaces an expression
-with one of its operands, and keeps what still fails the same way. A batch is compiled once with `crucible_compiler::compile` in package mode, in a child process that
+with one of its operands, and keeps what still fails the same way. An operand replaces an expression only when it has
+the same type, or is an integer where a number was, and keeps what the generator built into an integer's sign, such as
+`abs(a)` in `abs(a) % b`. The printer's casts would let TypeScript accept an operand of another type, which can differ
+for a reason of its own. A kept program fails exactly as the original did: when the traces differ, they first differ
+in the same pair of lines. `shrinking_keeps_the_difference_it_started_from` checks this: it stands an edit of the
+program the compiler gets in for the compiler bug `??` lowered to `or`, and requires the shrunk program to keep its `??`
+and to agree on the real compiler. A batch is compiled once with `crucible_compiler::compile` in package mode, in a child process that
 re-runs the test binary, because tsrs keeps every program in memory until the process exits. A program the compiler
 rejects is taken out of the batch and reported as a failure, because the generator should only write programs the
 compiler accepts.

@@ -5,13 +5,18 @@
 //! with a block of its body, and replace an expression with one of its operands. Every variable stays a reference by
 //! type, so a deleted declaration leaves a program that still type-checks; an edit that does not is rejected and
 //! dropped.
+//!
+//! A shrunk program must show the same bug as the original, not another difference an edit brought in. So an operand
+//! replaces an expression only when it has the expression's own type and keeps what the generator knows of an Int's
+//! sign, and a candidate is kept only when it fails exactly as the original did: for traces that differ, with the same
+//! pair of lines where they first part.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::{Duration, Instant};
 
 use super::ast::*;
 use super::print;
-use super::run::{Failure, Outcome, Runner};
+use super::run::Outcome;
 
 #[derive(Clone, Copy)]
 enum Pass {
@@ -28,16 +33,20 @@ struct Edits {
     replace: BTreeMap<usize, usize>,
 }
 
+/// Runs candidates, given as programs and as their printed sources, and returns their outcomes in order. The test runs
+/// the sources; the shrinker's own test also prints an edited program for the compiler.
+pub type Run<'r> = dyn FnMut(&[Program], &[String]) -> Vec<Outcome> + 'r;
+
 pub fn shrink(
     program: Program,
-    kind: Failure,
     outcome: Outcome,
     batch: usize,
     limit: Duration,
-    runner: &mut Runner,
+    run: &mut Run,
 ) -> (String, Outcome, usize) {
     let started = Instant::now();
-    let same = |o: &Outcome| o.failure() == Some(kind) && same_rejection(o, &outcome);
+    let failure = outcome.failure();
+    let same = |o: &Outcome| o.failure() == failure;
     let mut best = (program.clone(), print::print(&program), outcome.clone());
     let mut seen: HashSet<String> = HashSet::from([best.1.clone()]);
     let mut rounds = 0;
@@ -61,8 +70,9 @@ pub fn shrink(
                     break;
                 }
                 rounds += 1;
+                let programs: Vec<Program> = candidates.iter().map(|(_, p, _)| p.clone()).collect();
                 let sources: Vec<String> = candidates.iter().map(|(_, _, s)| s.clone()).collect();
-                let outcomes = runner.run(&sources);
+                let outcomes = run(&programs, &sources);
                 let mut kept: Vec<(Edits, Program, String, Outcome)> = candidates
                     .into_iter()
                     .zip(outcomes)
@@ -84,7 +94,7 @@ pub fn shrink(
                     let p = apply(&best.0, &all);
                     let source = print::print(&p);
                     if seen.insert(source.clone()) {
-                        let o = runner.run(std::slice::from_ref(&source)).remove(0);
+                        let o = run(std::slice::from_ref(&p), std::slice::from_ref(&source)).remove(0);
                         if same(&o) && source.len() < kept[0].2.len() {
                             best = (p, source, o);
                             continue;
@@ -102,15 +112,6 @@ pub fn shrink(
     (best.1, best.2, rounds)
 }
 
-/// A rejected program shrinks to one rejected with the same first error, not to any program that fails to compile.
-fn same_rejection(a: &Outcome, b: &Outcome) -> bool {
-    let code = |o: &Outcome| match o {
-        Outcome::Rejected(text) => text.lines().next().and_then(|l| l.split(": ").nth(1)).map(str::to_owned),
-        _ => None,
-    };
-    code(a) == code(b)
-}
-
 fn edits(p: &Program, pass: Pass) -> Vec<Edits> {
     let mut counter = Counter::default();
     let mut p = p.clone();
@@ -126,9 +127,7 @@ fn edits(p: &Program, pass: Pass) -> Vec<Edits> {
         Pass::Replace => counter
             .operands
             .iter()
-            .flat_map(|&(n, count)| {
-                (0..count).map(move |j| Edits { replace: BTreeMap::from([(n, j)]), ..Edits::default() })
-            })
+            .map(|&(n, j)| Edits { replace: BTreeMap::from([(n, j)]), ..Edits::default() })
             .collect(),
     }
 }
@@ -454,6 +453,7 @@ struct Counter {
     expression: usize,
     statements: Vec<usize>,
     nested: Vec<usize>,
+    /// Each expression with the number of an operand that may replace it.
     operands: Vec<(usize, usize)>,
 }
 
@@ -478,9 +478,10 @@ impl Walk for Counter {
     }
 
     fn post_expression(&mut self, n: usize, e: &mut Expr) {
-        let count = operands(e).len();
-        if count > 0 {
-            self.operands.push((n, count));
+        for (j, operand) in operands(e).iter().enumerate() {
+            if fits(operand, e) {
+                self.operands.push((n, j));
+            }
         }
     }
 }
@@ -531,6 +532,25 @@ impl Walk for Editor<'_> {
     }
 }
 
+/// The program with `edit` applied to each expression, inner ones first, as the shrinker's own test edits one.
+pub fn map_expressions(p: &Program, edit: fn(&mut Expr)) -> Program {
+    struct Map(fn(&mut Expr));
+    impl Walk for Map {
+        fn next_statement(&mut self) -> usize {
+            0
+        }
+        fn next_expression(&mut self) -> usize {
+            0
+        }
+        fn post_expression(&mut self, _n: usize, e: &mut Expr) {
+            (self.0)(e)
+        }
+    }
+    let mut p = p.clone();
+    Map(edit).program(&mut p);
+    p
+}
+
 /// Drops the empty blocks deleted statements leave.
 struct Sweep;
 
@@ -569,7 +589,7 @@ fn body(s: &Stmt) -> Option<Vec<Stmt>> {
     }
 }
 
-/// The direct operands of an expression, which may replace it.
+/// The direct operands of an expression, which may replace it when they fit.
 fn operands(e: &Expr) -> Vec<Expr> {
     struct Collect(Vec<Expr>);
     impl Walk for Collect {
@@ -587,4 +607,219 @@ fn operands(e: &Expr) -> Vec<Expr> {
     let mut collect = Collect(Vec::new());
     collect.parts(&mut e.clone());
     collect.0
+}
+
+/// What is known of an Int's sign. `nat`, `pos` and `neg` in the generator build `%`'s operands so that their signs
+/// agree, so an edit must not swap one of those for an operand that may have another sign.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sign {
+    Pos,
+    /// At least 0.
+    Nat,
+    Neg,
+    Any,
+}
+
+impl Sign {
+    fn within(self, other: Sign) -> bool {
+        self == other || other == Sign::Any || (self == Sign::Pos && other == Sign::Nat)
+    }
+
+    fn join(self, other: Sign) -> Sign {
+        match (self, other) {
+            _ if self.within(other) => other,
+            _ if other.within(self) => self,
+            _ => Sign::Any,
+        }
+    }
+}
+
+/// An operand may replace an expression when it has the same type, or is an Int where a `Num` was, as the generator
+/// writes one, and keeps what is known of an Int's sign. The printer's casts would make TypeScript accept an operand
+/// of another type, such as a string in a `boolean[]`, and that program can differ for a reason that has nothing to do
+/// with the failure it shrinks.
+fn fits(operand: &Expr, e: &Expr) -> bool {
+    match (ty(operand), ty(e)) {
+        (Some(Ty::Int), Some(Ty::Int)) => sign(operand).within(sign(e)),
+        (Some(Ty::Int), Some(Ty::Num)) => true,
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn optional(ty: Ty) -> Option<Ty> {
+    Some(match ty {
+        Ty::Int => Ty::OptInt,
+        Ty::Str => Ty::OptStr,
+        Ty::Bool => Ty::OptBool,
+        Ty::Obj => Ty::OptObj,
+        _ => return None,
+    })
+}
+
+fn optional_element(array: Ty) -> Option<Ty> {
+    match array {
+        Ty::ArrInt | Ty::ArrStr | Ty::ArrBool | Ty::ArrObj => Some(array.optional_element()),
+        _ => None,
+    }
+}
+
+fn element(array: Ty) -> Option<Ty> {
+    match array {
+        Ty::ArrInt | Ty::ArrNum | Ty::ArrStr | Ty::ArrBool | Ty::ArrObj => Some(array.element()),
+        _ => None,
+    }
+}
+
+fn numeric(a: Option<Ty>, b: Option<Ty>) -> Option<Ty> {
+    match (a?, b?) {
+        (Ty::Int, Ty::Int) => Some(Ty::Int),
+        (Ty::Int | Ty::Num, Ty::Int | Ty::Num) => Some(Ty::Num),
+        _ => None,
+    }
+}
+
+fn field_ty(f: Field) -> Ty {
+    match f {
+        Field::A | Field::End | Field::InnerA => Ty::Int,
+        Field::S | Field::InnerS => Ty::Str,
+        Field::Then => Ty::OptStr,
+        Field::Inner => Ty::Obj,
+    }
+}
+
+fn is_zero(e: &Expr) -> bool {
+    matches!(e, Expr::Int(i) if INTS[*i as usize % INTS.len()] == "0")
+}
+
+/// The type of an expression's value, or `None` where the shrinker cannot tell, which no edit then replaces. An Int is
+/// a finite integer that is not `-0`, so a `-a`, `a * b` or `%` of negative numbers that may be `-0` is a `Num`.
+pub fn ty(e: &Expr) -> Option<Ty> {
+    use Expr as E;
+    Some(match e {
+        E::Int(_) => Ty::Int,
+        E::Num(_) => Ty::Num,
+        E::Str(..) => Ty::Str,
+        E::Bool(_) => Ty::Bool,
+        E::Var(t, _) => *t,
+        // `a % b + 0` of two negative Ints, which the generator writes so that `-0` becomes `0`.
+        E::Add(a, b) if matches!(**a, E::Mod(..)) && is_zero(b) => numeric(ty(a).map(|_| Ty::Int), ty(b))?,
+        E::Add(a, b) | E::Sub(a, b) => numeric(ty(a), ty(b))?,
+        E::Mod(a, b) => match numeric(ty(a), ty(b))? {
+            Ty::Int if sign(a).within(Sign::Nat) => Ty::Int,
+            _ => Ty::Num,
+        },
+        E::MulK(a, _) | E::Plus(a) | E::Cast(a, _) => numeric(ty(a), Some(Ty::Int))?,
+        E::Neg(a) => match numeric(ty(a), Some(Ty::Int))? {
+            Ty::Int if matches!(sign(a), Sign::Pos | Sign::Neg) => Ty::Int,
+            _ => Ty::Num,
+        },
+        E::Abs(_) | E::ModK(..) | E::Bit(..) | E::Shift(..) | E::Size(_) | E::IndexOf(..) | E::FindIndex(..) => Ty::Int,
+        E::Push(..) | E::Reduce(..) | E::ReduceLit(..) | E::OptSize(..) | E::SuperM(_) | E::InstX(_) => Ty::Int,
+        E::InstY(..) | E::InstM(..) | E::Count(_) | E::Inc(..) | E::FieldStep(..) | E::OptCallVar(..) => Ty::Int,
+        E::Idiv(..) | E::Div(..) | E::Mul(..) | E::Pow(..) => Ty::Num,
+        E::Concat(..) | E::Template(..) | E::Upper(_) | E::Lower(_) | E::Rep(..) | E::Join(..) => Ty::Str,
+        E::InstTag(_) | E::InstDescribe(_) => Ty::Str,
+        E::IsUndefined(_) | E::SameAny(..) | E::Includes(..) | E::Cmp(..) | E::Not(..) | E::IsEmpty(_) => Ty::Bool,
+        E::Some(..) | E::Every(..) | E::Has(..) | E::Delete(..) | E::InstanceOf(..) | E::In(..) | E::Same(..) => {
+            Ty::Bool
+        }
+        E::NaN(_) => Ty::Bool,
+        E::At(t, ..) | E::OptAt(t, ..) | E::Remove(t, ..) | E::Pop(t, _) | E::ShiftArr(t, _) => optional_element(*t)?,
+        E::Index(t, ..) | E::IndexAt(t, ..) => element(*t)?,
+        E::Find(a, _) => optional_element(ty(a)?)?,
+        E::OptMethod(_, _, Some(_), _) => Ty::Int,
+        E::OptMethod(_, _, None, _) => Ty::Str,
+        E::ObjSpreadOpt(..) | E::Obj(..) | E::ObjSpread(..) => Ty::Obj,
+        E::Rec(..) | E::RecSpread(..) => Ty::Rec,
+        E::Cond(_, a, b) => match (ty(a)?, ty(b)?) {
+            (a, b) if a == b => a,
+            (Ty::Int | Ty::Num, Ty::Int | Ty::Num) => Ty::Num,
+            _ => return None,
+        },
+        E::Coalesce(a, b) => {
+            let (a, b) = (ty(a)?, ty(b)?);
+            if a != b && optional(b) != Some(a) {
+                return None;
+            }
+            b
+        }
+        E::Or(t, ..) | E::And(t, ..) => *t,
+        E::Field(f, _) | E::Bracket(f, _) | E::NonNull(f, _) | E::OptField(f, ..) => match f {
+            // `o["inner"]["a"]` is what `Bracket` prints for every field but these.
+            _ if matches!(e, E::Bracket(..)) && !matches!(f, Field::A | Field::S | Field::End) => Ty::Int,
+            f => field_ty(*f),
+        },
+        E::Chain(f, _) => optional(field_ty(*f))?,
+        E::Make(_) => Ty::Inst(0),
+        E::New(k, _) => Ty::Inst(*k),
+        E::Call(k, ..) => SIGNATURES.get(*k as usize)?.1,
+        E::CallVar(t, ..) => match t {
+            Ty::FnII => Ty::Int,
+            Ty::FnSIS => Ty::Str,
+            _ => return None,
+        },
+        E::Assign(t, ..) | E::AddAssign(t, ..) => *t,
+        E::MapGet(m, _) => match ty(m)? {
+            Ty::MapSI => Ty::OptInt,
+            Ty::MapIS => Ty::OptStr,
+            _ => return None,
+        },
+        E::Maybe(v, _) => optional(ty(v)?)?,
+        E::Array(t, _) | E::NewMap(t, _) | E::NewSet(t, _) | E::NewSetFrom(t, _) => *t,
+        E::Filter(a, _) => ty(a)?,
+        E::Map(_, f) => match f.annotate? {
+            Ty::Int => Ty::ArrInt,
+            Ty::Str => Ty::ArrStr,
+            Ty::Bool => Ty::ArrBool,
+            Ty::Num => Ty::ArrNum,
+            Ty::Obj => Ty::ArrObj,
+            _ => return None,
+        },
+        E::Split(..) => Ty::ArrStr,
+        E::Lambda(f) => match (f.params.as_slice(), f.annotate?) {
+            ([Ty::Int], Ty::Int) => Ty::FnII,
+            ([Ty::Str, Ty::Int], Ty::Str) => Ty::FnSIS,
+            _ => return None,
+        },
+        E::This | E::Guard(..) => return None,
+    })
+}
+
+/// What is known of an Int expression's sign, from the shapes `nat`, `pos` and `neg` build.
+fn sign(e: &Expr) -> Sign {
+    use Expr as E;
+    match e {
+        E::Int(i) => match INTS[*i as usize % INTS.len()] {
+            "0" => Sign::Nat,
+            text if text.starts_with('-') => Sign::Neg,
+            _ => Sign::Pos,
+        },
+        E::Abs(_) | E::Size(_) => Sign::Nat,
+        E::Add(a, b) => match (sign(a), sign(b)) {
+            (Sign::Neg, Sign::Neg) => Sign::Neg,
+            (a, b) if a.within(Sign::Nat) && b.within(Sign::Nat) => {
+                if a == Sign::Pos || b == Sign::Pos {
+                    Sign::Pos
+                } else {
+                    Sign::Nat
+                }
+            }
+            _ => Sign::Any,
+        },
+        E::Sub(a, b) => match (sign(a), sign(b)) {
+            (Sign::Neg, b) if b.within(Sign::Nat) => Sign::Neg,
+            (Sign::Pos, Sign::Neg) => Sign::Pos,
+            _ => Sign::Any,
+        },
+        E::MulK(a, _) | E::Plus(a) | E::Cast(a, _) => sign(a),
+        E::Mod(a, b) if sign(a).within(Sign::Nat) && sign(b) == Sign::Pos => Sign::Nat,
+        E::Neg(a) => match sign(a) {
+            Sign::Pos => Sign::Neg,
+            Sign::Neg => Sign::Pos,
+            _ => Sign::Any,
+        },
+        E::Cond(_, a, b) => sign(a).join(sign(b)),
+        _ => Sign::Any,
+    }
 }
