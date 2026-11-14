@@ -758,6 +758,7 @@ version = "0.6.1"
 dependencies = [
  "crucible-compiler",
  "crucible-luau",
+ "proptest",
  "serde_json",
  "tsrs_ast",
  "tsrs_checker",

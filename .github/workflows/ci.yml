@@ -95,7 +95,11 @@ jobs:
         uses: Trio-Forge-Studio/tooling/.github/actions/setup@main
       - name: Run the compiler's emitted Luau, JSX, network declarations and a virtual module's place in Lune
         if: runner.os == 'Linux'
-        run: cargo test --locked -p crucible-compiler -p crucible-transform -- --ignored
+        run: cargo test --locked -p crucible-compiler -p crucible-transform -- --ignored --skip generated_programs
+      - name: Run generated programs in Node and as the compiler's Luau in Lune, and compare their traces
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        run: cargo test --locked -p crucible-compiler --test differential -- --ignored generated_programs
       - name: Run the crucible:experience bindings a build writes, and a place built for a fresh environment, in Lune
         if: runner.os == 'Linux'
         run: cargo test --locked -p crucible --test build -- --ignored
