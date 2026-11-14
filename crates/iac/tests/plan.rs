@@ -1,7 +1,7 @@
 use crucible_iac::journal::Journal;
 use crucible_iac::lock::Lock;
 use crucible_iac::model::{Experience, Fields, Kind, Lifecycle, Problem, content_hash};
-use crucible_iac::plan::{Action, Change, Id, Inputs, Listed, Observed, Plan, StepIntent, differs, plan};
+use crucible_iac::plan::{Action, Change, Field, Id, Inputs, Listed, Observed, Plan, StepIntent, differs, plan};
 use crucible_project::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -734,6 +734,44 @@ fn what_roblox_lists_decides_each_adopt_check() {
 }
 
 #[test]
+fn an_adopt_names_the_update_it_sends() {
+    let project = Project::new(CONFIG);
+    let changes = |plan: &Plan, key: &str| {
+        let step = plan.steps.iter().find(|step| step.key == key).unwrap();
+        (step.action, step.changes.clone(), step.fields.clone())
+    };
+    let mut observed = matching();
+    describe(&mut observed);
+    let plan = project.plan_seen("staging", None, None, Some(&observed)).unwrap();
+    assert_eq!(changes(&plan, "coin-pack"), (Action::Adopt, vec![Change::Icon], vec![]), "a declared icon is sent");
+    assert_eq!(changes(&plan, "vip"), (Action::Adopt, vec![], vec![]));
+    assert_eq!(changes(&plan, "first-delivery"), (Action::Adopt, vec![], vec![]));
+
+    let products = observed.listed.get_mut(&Kind::Product).unwrap();
+    products[0].description = String::new();
+    products[0].price = Some(49);
+    products[0].on = false;
+    observed.listed.get_mut(&Kind::Badge).unwrap()[0].on = false;
+    let plan = project.plan_seen("staging", None, None, Some(&observed)).unwrap();
+    assert_eq!(
+        changes(&plan, "coin-pack"),
+        (Action::Adopt, vec![Change::Details, Change::Icon], vec![Field::Description, Field::Price, Field::Sale])
+    );
+    assert_eq!(changes(&plan, "first-delivery"), (Action::Adopt, vec![Change::Details], vec![Field::Enabled]));
+    assert_eq!(plan.summary[&Action::Adopt], 3, "an adopt that updates is still one adopt");
+
+    let lock = project.applied("staging");
+    let plan = project.plan_seen("staging", Some(&lock), None, Some(&observed)).unwrap();
+    assert_eq!(changes(&plan, "first-delivery"), (Action::Update, vec![Change::Details], vec![Field::Enabled]));
+    let offline = Project::new(&CONFIG.replace("price = 299", "price = 300")).plan("staging", Some(&lock), None);
+    assert_eq!(
+        changes(&offline.unwrap(), "vip"),
+        (Action::Update, vec![Change::Details], vec![]),
+        "no list, no fields"
+    );
+}
+
+#[test]
 fn after_an_unknown_outcome_a_run_adopts_only_the_declared_name_and_stops_on_a_new_id_with_another() {
     let project = Project::new(CONFIG);
     let intent = |before: &str| {
@@ -925,6 +963,60 @@ fn a_moved_key_that_is_retired_is_retired_and_then_only_renamed_in_the_lock() {
 }
 
 #[test]
+fn an_overlay_off_sale_creates_off_sale_and_changes_the_sale_state_both_ways() {
+    let off =
+        CONFIG.replace("[env.staging.products.coin-pack]\n", "[env.staging.products.coin-pack]\nfor_sale = false\n");
+    let project = Project::new(&off);
+    let resources = project.experience().unwrap().resolve(&project.manifest.envs["staging"]);
+    let fields = |key: &str| resources.iter().find(|resource| resource.key == key).unwrap().fields.clone().unwrap();
+    assert!(!fields("coin-pack").on() && fields("vip").on());
+    let production = project.experience().unwrap().resolve(&project.manifest.envs["production"]);
+    assert!(production[0].fields.as_ref().unwrap().on(), "the overlay changes only its environment");
+
+    let on_sale = Project::new(CONFIG).applied("staging");
+    let plan = project.plan("staging", Some(&on_sale), None).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+    assert_eq!((step.action, step.changes.as_slice()), (Action::Update, &[Change::Details][..]), "offline");
+    let off_sale = project.applied("staging");
+    assert_ne!(off_sale, on_sale, "the fingerprint covers the sale state");
+    assert!(
+        project
+            .plan("staging", Some(&off_sale), None)
+            .unwrap()
+            .steps
+            .iter()
+            .all(|step| step.action == Action::NoOp || step.kind == "experience")
+    );
+    let plan = Project::new(CONFIG).plan("staging", Some(&off_sale), None).unwrap();
+    assert_eq!(intent(&plan, "coin-pack").0, Action::Update, "removing the field puts it back on sale");
+
+    let mut observed = matching();
+    describe(&mut observed);
+    let plan = project.plan_seen("staging", Some(&off_sale), None, Some(&observed)).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+    assert_eq!((step.action, step.fields.as_slice()), (Action::Update, &[Field::Sale][..]));
+    let product = &mut observed.listed.get_mut(&Kind::Product).unwrap()[0];
+    product.on = false;
+    product.price = None;
+    let plan = project.plan_seen("staging", Some(&off_sale), None, Some(&observed)).unwrap();
+    assert_eq!(intent(&plan, "coin-pack").0, Action::NoOp, "an off-sale resource Roblox holds no price for matches");
+    let plan = Project::new(CONFIG).plan_seen("staging", Some(&on_sale), None, Some(&observed)).unwrap();
+    let step = plan.steps.iter().find(|step| step.key == "coin-pack").unwrap();
+    assert_eq!(step.fields, [Field::Price, Field::Sale], "back on sale, it needs its price");
+
+    let retired = off.replace("icon = \"assets/coin-pack.png\"\n", "icon = \"assets/coin-pack.png\"\nretired = true\n");
+    let plan = Project::new(&retired).plan("staging", Some(&on_sale), None).unwrap();
+    assert_eq!(intent(&plan, "coin-pack").0, Action::Retire, "retired wins");
+}
+
+#[test]
+fn an_on_sale_fingerprint_is_the_one_locks_hold_from_before_for_sale() {
+    let fields = Fields::Priced { name: "VIP".into(), description: String::new(), price: 299, for_sale: true };
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(br#"{"name":"VIP","description":"","price":299}"#);
+    assert_eq!(fields.fingerprint(), format!("sha256:{digest:x}"));
+}
+
+#[test]
 fn a_badge_differs_in_any_one_field() {
     let fields = Fields::Badge { name: "First".into(), description: "Deliver.".into(), enabled: true };
     let same =
@@ -933,7 +1025,7 @@ fn a_badge_differs_in_any_one_field() {
     assert!(differs(&fields, &Listed { name: "Other".into(), ..same.clone() }));
     assert!(differs(&fields, &Listed { description: "Other.".into(), ..same.clone() }));
     assert!(differs(&fields, &Listed { on: false, ..same.clone() }));
-    let priced = Fields::Priced { name: "First".into(), description: "Deliver.".into(), price: 5 };
+    let priced = Fields::Priced { name: "First".into(), description: "Deliver.".into(), price: 5, for_sale: true };
     let sold = Listed { price: Some(5), ..same.clone() };
     assert!(!differs(&priced, &sold));
     for other in [

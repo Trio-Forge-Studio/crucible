@@ -55,6 +55,14 @@ fn a_first_plan_prints_the_creates_of_one_environment() {
 }
 
 #[test]
+fn an_environment_that_maps_no_place_plans() {
+    let dir = project(&CONFIG.replace("place = 132306245523809\n", ""));
+    let out = plan(dir.path(), &["staging", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(document(&out)["environments"][0]["summary"], json!({"create": 2}));
+}
+
+#[test]
 fn json_plans_every_environment_and_reads_the_lock() {
     let dir = project(CONFIG);
     std::fs::write(

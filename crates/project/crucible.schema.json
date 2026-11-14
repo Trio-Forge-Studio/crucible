@@ -173,7 +173,7 @@
       "additionalProperties": false
     },
     "Environment": {
-      "description": "One Roblox universe the game deploys to. It sets exactly one of `place` and `places`.",
+      "description": "One Roblox universe the game deploys to. It sets one of `place` and `places`, or neither when `crucible deploy` never\npublishes it, such as for a game that publishes its places with its own scripts.",
       "type": "object",
       "properties": {
         "badges": {
@@ -233,18 +233,12 @@
         }
       },
       "additionalProperties": false,
-      "oneOf": [
-        {
-          "required": [
-            "place"
-          ]
-        },
-        {
-          "required": [
-            "places"
-          ]
-        }
-      ],
+      "not": {
+        "required": [
+          "place",
+          "places"
+        ]
+      },
       "required": [
         "universe"
       ]
@@ -376,6 +370,10 @@
       "description": "The fields an environment may override.",
       "type": "object",
       "properties": {
+        "for_sale": {
+          "description": "`false` keeps it off sale in this environment while its handle stays bound. Defaults to true. `retired` wins.",
+          "type": "boolean"
+        },
         "price": {
           "type": "integer",
           "format": "uint64",

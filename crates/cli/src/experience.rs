@@ -130,7 +130,8 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// The output path of the bindings: in the shallowest folder of the output that the place maps under
-/// ReplicatedStorage, because the server and the client both read the handles.
+/// ReplicatedStorage, because the server and the client both read the handles. A project that maps each file by
+/// itself, as Rogen generates, maps no folder, so the error shows the one folder mapping it needs.
 pub fn module_path(folders: &[(PathBuf, Vec<String>)], out_dir: &Path) -> Result<String, String> {
     let out_dir = normalize(&std::path::absolute(out_dir).map_err(|error| error.to_string())?);
     let (relative, _) = folders
@@ -139,12 +140,14 @@ pub fn module_path(folders: &[(PathBuf, Vec<String>)], out_dir: &Path) -> Result
         .filter_map(|(folder, instance)| Some((normalize(folder).strip_prefix(&out_dir).ok()?.to_path_buf(), instance)))
         .min_by(|(a, x), (b, y)| x.len().cmp(&y.len()).then_with(|| a.cmp(b)))
         .ok_or_else(|| {
+            let out = out_dir.file_name().unwrap_or_default().to_string_lossy();
             format!(
                 "the Rojo project maps no folder of {} under ReplicatedStorage, where {} goes. Map one, such as \
-                 {}/shared",
+                 {out}/shared. A project that maps each file by itself, such as one Rogen generates, still needs one \
+                 folder mapping under ReplicatedStorage inside {out}, where the build puts the handles module: add a \
+                 node such as \"Crucible\": {{ \"$path\": \"{out}/crucible\" }} under its ReplicatedStorage",
                 out_dir.display(),
                 bindings::SPECIFIER,
-                out_dir.file_name().unwrap_or_default().to_string_lossy()
             )
         })?;
     let mut parts: Vec<String> =

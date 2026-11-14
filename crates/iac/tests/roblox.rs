@@ -146,7 +146,7 @@ fn only_a_404_reads_as_a_resource_roblox_lacks() {
 }
 
 #[test]
-fn a_create_sends_the_declared_fields_on_sale_and_returns_the_new_id() {
+fn a_create_sends_the_declared_fields_and_sale_state_and_returns_the_new_id() {
     let server = MockServer::start();
     let product_create = server.mock(|when, then| {
         when.method(Method::POST)
@@ -161,7 +161,7 @@ fn a_create_sends_the_declared_fields_on_sale_and_returns_the_new_id() {
         when.method(Method::POST)
             .path("/game-passes/v1/universes/1/game-passes")
             .body_includes("name=\"name\"\r\n\r\nVIP\r\n")
-            .body_includes("name=\"isForSale\"\r\n\r\ntrue\r\n");
+            .body_includes("name=\"isForSale\"\r\n\r\nfalse\r\n");
         then.status(200).json_body(pass(40));
     });
     let badge_create = server.mock(|when, then| {
@@ -175,9 +175,9 @@ fn a_create_sends_the_declared_fields_on_sale_and_returns_the_new_id() {
     let transport = transport(&server, &key);
     let mut roblox = Roblox { transport: &transport, universe: id(1) };
 
-    let coins = Fields::Priced { name: "Coin pack".into(), description: "Coins.".into(), price: 49 };
+    let coins = Fields::Priced { name: "Coin pack".into(), description: "Coins.".into(), price: 49, for_sale: true };
     assert_eq!(roblox.create(Kind::Product, &coins, Some(&icon())).unwrap(), id(30));
-    let vip = Fields::Priced { name: "VIP".into(), description: "".into(), price: 250 };
+    let vip = Fields::Priced { name: "VIP".into(), description: "".into(), price: 250, for_sale: false };
     assert_eq!(roblox.create(Kind::Pass, &vip, None).unwrap(), id(40));
     let first = Fields::Badge { name: "First delivery".into(), description: "".into(), enabled: false };
     assert_eq!(roblox.create(Kind::Badge, &first, None).unwrap(), id(50));

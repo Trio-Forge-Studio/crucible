@@ -88,6 +88,8 @@ pub struct Badge {
 pub struct PricedOverlay {
     #[schemars(range(min = 1))]
     pub price: Option<u64>,
+    /// `false` keeps it off sale in this environment while its handle stays bound. Defaults to true. `retired` wins.
+    pub for_sale: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]

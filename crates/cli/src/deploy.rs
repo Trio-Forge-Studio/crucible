@@ -110,15 +110,23 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
             manifest.envs.keys().cloned().collect::<Vec<_>>().join(", ")
         ))
     })?;
-    if let Some(unknown) = args.places.iter().find(|name| !env.places.contains_key(*name)) {
+    let Some(places) = &env.places else {
+        let declared: Vec<String> = manifest.places.keys().map(|name| format!("{name} = <id>")).collect();
+        return Err(Failure::usage(format!(
+            "env {name} in crucible.toml maps no place, so deploy has no place ID to publish to. Map each place in \
+             [env.{name}] with places = {{ {} }}, or with place = <id> when start is the only place",
+            declared.join(", "),
+            name = args.env,
+        )));
+    };
+    if let Some(unknown) = args.places.iter().find(|name| !places.contains_key(*name)) {
         return Err(Failure::usage(format!(
             "unknown place {unknown}. Places: {}",
-            env.places.keys().cloned().collect::<Vec<_>>().join(", ")
+            places.keys().cloned().collect::<Vec<_>>().join(", ")
         )));
     }
     preflight(root, &project, &args.env, output)?;
-    let targets: Vec<_> =
-        env.places.keys().filter(|name| args.places.is_empty() || args.places.contains(name)).collect();
+    let targets: Vec<_> = places.keys().filter(|name| args.places.is_empty() || args.places.contains(name)).collect();
     let mut published = Vec::new();
     let progress = |published: &[Value], failed: Option<&String>, remaining: &[&String]| json!({"environment":args.env,"dryRun":args.dry_run,"published":published,"failed":failed,"notAttempted":remaining});
     let primary = crate::flows::op(&crate::REGISTRY, crate::flows::PUBLISH);
@@ -160,7 +168,7 @@ fn run(root: &Path, args: Args, output: &mut Output) -> Result<Value, Failure> {
                 crate::flows::publish::Args {
                     file,
                     universe: env.universe.to_string(),
-                    place: env.places[name].to_string(),
+                    place: places[name].to_string(),
                     version_type: match env.version_type {
                         VersionType::Saved => crate::flows::publish::VersionType::Saved,
                         VersionType::Published => crate::flows::publish::VersionType::Published,

@@ -244,7 +244,7 @@ impl Remote for Fake<'_> {
             }
         }
         let (price, on) = match fields {
-            Fields::Priced { price, .. } => (Some(*price), true),
+            Fields::Priced { price, for_sale, .. } => (Some(*price), *for_sale),
             Fields::Badge { enabled, .. } => (None, *enabled),
         };
         match world.fault() {
