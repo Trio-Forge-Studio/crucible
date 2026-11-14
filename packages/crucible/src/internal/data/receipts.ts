@@ -9,7 +9,7 @@ import {
 } from "./limits";
 import type { DataEngine, ProfileRuntime } from "./profiles";
 import { Priority } from "./scheduler";
-import { Phase, type Session } from "./session";
+import { type Effect, Phase, receiptAcknowledged, receiptStaged, sealedBy, type Session, Stage } from "./session";
 
 /** @internal The part of Roblox's receipt info that data reads. */
 export interface ReceiptInfo {
@@ -113,13 +113,17 @@ export class ReceiptRouter {
 			if (player === undefined) return "notYet";
 			const runtime = route.runtime;
 			const session = runtime.sessions.get(player);
-			if (session === undefined || session.phase === Phase.Loading || session.sealedBy === "handoff") {
+			if (
+				session === undefined ||
+				session.authority.phase === Phase.Loading ||
+				sealedBy(session.authority) === "handoff"
+			) {
 				if (bootClock() >= holdUntil) return "notYet";
 				runtime.changed.park(holdUntil);
 				continue;
 			}
 			if (!runtime.writable(player)) return "notYet";
-			if (session.durable.has(id)) return this.granted(session, id);
+			if (session.durable(id)) return this.granted(session, id);
 			return this.save(route, session, player, id, info);
 		}
 	}
@@ -143,7 +147,7 @@ export class ReceiptRouter {
 				return "notYet";
 			}
 			const purchase = { id, productId: info.ProductId, currencySpent: info.CurrencySpent };
-			const effects = new Array<() => void>();
+			const effects = new Array<Effect>();
 			const afterGrant: AfterGrant = (effect) => {
 				if (!typeIs(effect, "function")) error("afterGrant takes a function", 2);
 				effects.push(effect);
@@ -153,7 +157,7 @@ export class ReceiptRouter {
 					(data) => route.grant(player, data, purchase, afterGrant),
 					() => {
 						session.stage(id);
-						session.effects.set(id, effects);
+						session.purchases.set(id, receiptStaged(effects));
 					},
 				),
 			);
@@ -167,16 +171,21 @@ export class ReceiptRouter {
 		}
 		runtime.requestWrite(session, Priority.Receipt);
 		const timeout = bootClock() + RECEIPT_SAVE_TIMEOUT_SECONDS;
-		while (!session.durable.has(id) && session.phase !== Phase.Ended && bootClock() < timeout && !engine.settled)
+		while (
+			!session.durable(id) &&
+			session.authority.phase !== Phase.Ended &&
+			bootClock() < timeout &&
+			!engine.settled
+		)
 			runtime.changed.park(timeout);
-		return session.durable.has(id) ? this.granted(session, id) : "notYet";
+		return session.durable(id) ? this.granted(session, id) : "notYet";
 	}
 
 	/** Rule 61: the effects staged with this session's grant run once each, on fresh threads. */
 	private granted(session: Session, id: string): ReceiptResult {
-		const effects = session.effects.get(id);
-		session.effects.delete(id);
-		for (const effect of effects ?? [])
+		const receipt = session.purchases.get(id);
+		if (receipt?.stage === Stage.Durable) session.purchases.set(id, receiptAcknowledged(receipt));
+		for (const effect of receipt?.effects ?? [])
 			this.engine.port.spawn(() => {
 				const [ok] = pcall(effect);
 				if (!ok)

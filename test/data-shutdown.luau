@@ -220,7 +220,7 @@ return {
 		backend:advance(1)
 		backend:advance(issued + 69 - backend.now)
 		assert(old.writing ~= nil, "the flush is in flight")
-		assert(old.sealedBy == "shutdown", "sealed by the final phase")
+		assert(old.authority.by == "shutdown", "sealed by the final phase")
 		backend:advance(bound + 2 - backend.now)
 		for _, plan in backend.plans do
 			plan.remaining = 0
@@ -233,7 +233,7 @@ return {
 			end
 		end
 		spec.eq(count, 1, "one commit after the safe bound")
-		spec.eq(old.released, "committed", "and it is the release")
+		spec.eq(old.authority.released, "committed", "and it is the release")
 		spec.eq(stored(backend).lease, nil, "the lease is released")
 		spec.eq(stored(backend).payload.coins, 3, "with the sealed revision")
 	end,

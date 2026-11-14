@@ -272,7 +272,7 @@ return {
 		local gate = backend:gate("transform", { server = a.id })
 		spec.eq(write(a, pa, 5), true, "origin writes locally")
 		backend:advance(75)
-		spec.eq(session(a, pa).phase >= SEALED, true, "origin sealed at its bound")
+		spec.eq(session(a, pa).authority.phase >= SEALED, true, "origin sealed at its bound")
 		spec.eq(a.kicked(pa), a.limits.SESSION_ENDED_MESSAGE, "origin kicked")
 		local pb = b.join(USER)
 		local lb = load(b, pb)
@@ -305,7 +305,7 @@ return {
 			a.store:leave(first)
 		end)
 		backend:advance(1)
-		spec.eq(old.phase, ENDED, "old session released")
+		spec.eq(old.authority.phase, ENDED, "old session released")
 		local second = a.join(USER)
 		load(a, second)
 		backend:advance(1)
@@ -591,7 +591,7 @@ return {
 		backend:advance(1)
 		spec.eq(session(a, pa).safeUntil, bound, "the late confirmation did not extend authority")
 		spec.eq(write(a, pa, 3), false, "writes stay refused")
-		spec.eq(session(a, pa).phase >= SEALED, true, "no resurrection")
+		spec.eq(session(a, pa).authority.phase >= SEALED, true, "no resurrection")
 	end,
 	["rule 25 skew of 5 s either way keeps the 20 s margin"] = function()
 		for _, skew in { 5, -5 } do

@@ -33,13 +33,42 @@ export const enum PeerState {
 	Ended,
 }
 
+/**
+ * @internal A handler counts toward MAX_ACTIVE_HANDLERS while it runs, stops counting once it outlives its lifetime,
+ * and is done when it returns (specs/asks).
+ */
+export const enum Handler {
+	Running,
+	Overrun,
+	Done,
+}
+
+/** @internal */
+export const enum ReplyState {
+	None,
+	Open,
+	Sent,
+}
+
+/** @internal An event's handler replies nothing; a request gets one reply, from its handler or its retirement. */
+export type Reply =
+	| { readonly state: ReplyState.None }
+	| { readonly state: ReplyState.Open; readonly definition: Definition; readonly nonce: number }
+	| { readonly state: ReplyState.Sent };
+
+const EVENT: Reply = { state: ReplyState.None };
+const SENT: Reply = { state: ReplyState.Sent };
+
+/** @internal The one transition of a reply: an open request's reply is sent. */
+export function replySent(_reply: Extract<Reply, { readonly state: ReplyState.Open }>): Reply {
+	return SENT;
+}
+
 /** @internal */
 export interface Running {
 	readonly claim: Claim;
-	readonly request?: { readonly definition: Definition; readonly nonce: number };
-	done: boolean;
-	counted: boolean;
-	settled: boolean;
+	handler: Handler;
+	reply: Reply;
 	reported: boolean;
 	lifetime?: Cancel;
 }
@@ -137,8 +166,18 @@ export abstract class Session implements NetworkLifecycle {
 		for (const packet of queue) this.fire(peer, packet);
 	}
 
-	protected start(peer: Peer, claim: Claim, args: readonly unknown[], request?: Running["request"]) {
-		const entry: Running = { claim, request, done: false, counted: true, settled: false, reported: false };
+	protected start(
+		peer: Peer,
+		claim: Claim,
+		args: readonly unknown[],
+		request?: { readonly definition: Definition; readonly nonce: number },
+	) {
+		const entry: Running = {
+			claim,
+			handler: Handler.Running,
+			reply: request === undefined ? EVENT : { state: ReplyState.Open, ...request },
+			reported: false,
+		};
 		peer.running.push(entry);
 		peer.counted += 1;
 		const thread = coroutine.create(() => {
@@ -150,40 +189,37 @@ export abstract class Session implements NetworkLifecycle {
 		enter(thread, claim.owner, undefined);
 		this.port.resume(thread);
 		leave();
-		if (!entry.done && peer.state !== PeerState.Ended)
+		if (entry.handler !== Handler.Done && peer.state !== PeerState.Ended)
 			entry.lifetime = this.port.delay(L.HANDLER_LIFETIME_SECONDS, () => this.overrun(peer, entry));
-	}
-
-	private uncount(peer: Peer, entry: Running) {
-		if (!entry.counted) return;
-		entry.counted = false;
-		peer.counted -= 1;
 	}
 
 	private overrun(peer: Peer, entry: Running) {
 		entry.lifetime = undefined;
-		if (entry.done) return;
+		if (entry.handler === Handler.Done) return;
 		this.reportCallback(peer, entry.claim, entry, `still running after ${L.HANDLER_LIFETIME_SECONDS} seconds`);
-		this.uncount(peer, entry);
+		if (entry.handler !== Handler.Running) return;
+		entry.handler = Handler.Overrun;
+		peer.counted -= 1;
 	}
 
 	private finish(peer: Peer, entry: Running, ok: boolean, value: unknown) {
-		entry.done = true;
+		const counted = entry.handler === Handler.Running;
+		entry.handler = Handler.Done;
 		entry.lifetime?.();
 		entry.lifetime = undefined;
 		const index = peer.running.indexOf(entry);
 		if (index !== -1) peer.running.remove(index);
-		this.uncount(peer, entry);
+		if (counted) peer.counted -= 1;
 		let failure: string | undefined;
-		const request = entry.request;
+		const reply = entry.reply;
 		if (!ok) failure = tostring(value);
-		else if (request === undefined) {
+		else if (reply.state === ReplyState.None) {
 			if (value !== undefined) failure = `returned a ${typeOf(value)}; event callbacks return nothing`;
 		} else if (isPromise(value)) failure = "returned a Promise; request callbacks return the response";
-		const replies = request !== undefined && !entry.settled && peer.state !== PeerState.Ended;
+		const replies = reply.state === ReplyState.Open && peer.state !== PeerState.Ended;
 		let packet: Packet | undefined;
 		if (replies && failure === undefined) {
-			const { definition, nonce } = request;
+			const { definition, nonce } = reply;
 			const [encoded, result] = pcall(() =>
 				frame(encodeBody(definition.name, definition.output!, "response", value), Opcode.Ok, [
 					definition.index!,
@@ -195,10 +231,10 @@ export abstract class Session implements NetworkLifecycle {
 		}
 		if (failure !== undefined) this.reportCallback(peer, entry.claim, entry, failure);
 		if (!replies) return;
-		entry.settled = true;
+		entry.reply = replySent(reply);
 		this.fire(
 			peer,
-			packet ?? controlPacket(Opcode.Error, [request.definition.index!, request.nonce], ErrorReason.HandlerError),
+			packet ?? controlPacket(Opcode.Error, [reply.definition.index!, reply.nonce], ErrorReason.HandlerError),
 		);
 	}
 

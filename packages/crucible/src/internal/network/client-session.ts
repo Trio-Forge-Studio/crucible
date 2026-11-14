@@ -36,12 +36,31 @@ function failed(reason: AskFailure): AskResult<unknown> {
 	return table.freeze({ ok: false, reason });
 }
 
+const enum AskState {
+	Waiting,
+	Settled,
+}
+
+/** An ask waits for its reply, its timeout or the session's end, and then holds the one result its caller gets. */
+type Ask =
+	| { readonly state: AskState.Waiting; readonly deadline?: Cancel }
+	| { readonly state: AskState.Settled; readonly result: AskResult<unknown> };
+
+const WAITING: Ask = { state: AskState.Waiting };
+
+function armed(_ask: Extract<Ask, { readonly state: AskState.Waiting }>, deadline: Cancel): Ask {
+	return { state: AskState.Waiting, deadline };
+}
+
+function settled(_ask: Extract<Ask, { readonly state: AskState.Waiting }>, result: AskResult<unknown>): Ask {
+	return { state: AskState.Settled, result };
+}
+
 interface Pending {
 	readonly definition: Definition;
 	readonly thread: thread;
 	readonly packet: Packet;
-	deadline?: Cancel;
-	result?: AskResult<unknown>;
+	ask: Ask;
 }
 
 type Game = Extract<Header, { readonly payloadAt: number }>;
@@ -133,11 +152,12 @@ export class ClientSession extends Session {
 		const nonce = this.nextNonce;
 		const packet = frame(body, Opcode.Request, [index, nonce]);
 		this.nextNonce = nonce + 1;
-		const entry: Pending = { definition, thread: coroutine.running(), packet };
+		const entry: Pending = { definition, thread: coroutine.running(), packet, ask: WAITING };
 		this.pending.set(nonce, entry);
-		entry.deadline = this.port.delay(definition.timeout, () => this.expire(nonce));
+		const deadline = this.port.delay(definition.timeout, () => this.expire(nonce));
+		if (entry.ask.state === AskState.Waiting) entry.ask = armed(entry.ask, deadline);
 		this.deliver(this.peer, packet);
-		if (entry.result !== undefined) return entry.result;
+		if (entry.ask.state === AskState.Settled) return entry.ask.result;
 		return coroutine.yield()[0] as AskResult<unknown>;
 	}
 
@@ -187,18 +207,21 @@ export class ClientSession extends Session {
 		this.settle(nonce, failed("timeout"));
 	}
 
+	/** The pending map holds exactly the waiting asks, so a late or second settle finds nothing. */
 	private settle(nonce: number, result: AskResult<unknown>) {
 		const entry = this.pending.get(nonce);
-		if (entry === undefined) return;
+		if (entry === undefined || entry.ask.state !== AskState.Waiting) return;
 		this.pending.delete(nonce);
-		entry.deadline?.();
-		entry.result = result;
+		entry.ask.deadline?.();
+		entry.ask = settled(entry.ask, result);
 		if (this.later !== undefined) this.later.push(entry);
 		else this.resume(entry);
 	}
 
 	private resume(entry: Pending) {
-		if (coroutine.status(entry.thread) === "suspended") this.port.resume(entry.thread, entry.result);
+		const ask = entry.ask;
+		if (ask.state === AskState.Settled && coroutine.status(entry.thread) === "suspended")
+			this.port.resume(entry.thread, ask.result);
 	}
 
 	private receive(count: number, packet?: unknown, sidecar?: unknown) {
