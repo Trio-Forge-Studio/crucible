@@ -3,7 +3,12 @@
 What the differential test found where a program's Luau does not do what its JavaScript does. Each entry has a minimal
 program, run through the test's own runners with `DIFFERENTIAL_FILE=<file> cargo test -p crucible-compiler --test
 differential -- --ignored one_program --nocapture`, and what each side printed. The generator leaves out exactly the
-construct of each open entry, with a comment that names the entry's title.
+construct of each open entry, with a comment that names the entry's title. Each open entry's program is in `known/`,
+and `known_differences_still_differ` fails when one of them stops differing.
+
+Each open entry says what it is. A **compiler bug** is a difference nobody chose: the compiler should do what
+JavaScript does, and a fix is welcome, even where roblox-ts has the same bug. An **intended difference** is one that
+roblox-ts chose and documents, which the compiler keeps on purpose.
 
 roblox-ts 3.0.0 below means `roblox-ts/out/TSTransformer` of the published package, which the compiler follows.
 
@@ -49,7 +54,8 @@ trace(`${new Derived()}`, "s");
 - Node: `"base"`.
 - Lune: `"table: 0x..."`.
 
-The generator never declares `toString` and never turns an instance into a string.
+**Compiler bug**, where the compiler parts from roblox-ts. `known/inherited-tostring-is-lost.ts`. The generator never
+declares `toString` and never turns an instance into a string.
 
 ## Compiler and roblox-ts alike
 
@@ -83,6 +89,8 @@ ys.unshift(say(1), say(2));
 - Node: `[]`, then `1`, `2`.
 - Lune: `[0]`, then `2`, `1`.
 
+**Compiler bug**, shared with roblox-ts, which does not document it. `known/push-inserts-before-it-evaluates-the-next.ts`.
+
 The generator gives `push` and `unshift` several arguments only when all but the one evaluated first are literals or
 variables.
 
@@ -100,6 +108,8 @@ trace(xs.includes(1, -1), "b");
 - Node: `2`, then `false`.
 - Lune: `!throw "[string \x22p00000\x22]:3: invalid argument #3 to 'find' (index out of range)"`, and nothing after.
 
+**Compiler bug**, shared with roblox-ts. `known/negative-from-index-throws.ts`.
+
 The generator draws `fromIndex` from 0 to 3.
 
 ### includes(NaN) is false
@@ -114,12 +124,13 @@ trace([0 / 0].includes(0 / 0), "b");
 - Node: `true`.
 - Lune: `false`.
 
-The generator calls `includes` on `number[]` only for arrays of integers, which never hold NaN.
+**Compiler bug**, shared with roblox-ts. `known/includes-nan-is-false.ts`. The generator calls `includes` on `number[]`
+only for arrays of integers, which never hold NaN.
 
 ### join() separates with a comma and a space
 
-With no separator, `join` passes `", "` to `table.concat`. compiler-types documents this, and roblox-ts does the same.
-JavaScript separates with `","`.
+With no separator, `join` passes `", "` to `table.concat`, as roblox-ts does. JavaScript separates with `","`, and
+compiler-types documents the same: "If omitted, the array elements are separated with a comma."
 
 ```ts
 trace([1, 2, 3].join(), "s");
@@ -128,7 +139,8 @@ trace([1, 2, 3].join(), "s");
 - Node: `"1,2,3"`.
 - Lune: `"1, 2, 3"`.
 
-The generator always passes a separator.
+**Compiler bug**, shared with roblox-ts, which parts from the types it ships.
+`known/join-separates-with-a-comma-and-a-space.ts`. The generator always passes a separator.
 
 ## Luau semantics that roblox-ts keeps
 
@@ -142,13 +154,16 @@ the two languages part.
 ```ts
 trace(id(-7) % 3, "n");
 trace(id(7) % -3, "n");
-trace(id(-0) % 3, "n");
+trace(id(-6) % -3, "n");
 ```
 
 - Node: `-1`, `1`, `-0`.
 - Lune: `2`, `-2`, `0`.
 
-The generator takes `%` of `abs(x)` by a positive constant.
+**Intended difference**, as roblox-ts keeps Luau's `%`. Matching JavaScript would take a helper on every `%`.
+`known/modulo-is-floored.ts`.
+The generator writes `%` with any operand expressions whose signs agree: one not below 0 by one above it, or two below
+0. Two below 0 can still differ in the sign of a zero remainder, as the third line shows, so `+ 0` follows them.
 
 ### ** is C's pow
 
@@ -168,6 +183,8 @@ trace(id(-1) ** (1 / 0), "n");
 - Node: `0`, `-2.7000000000000014e-2`, `NaN`, `NaN`.
 - Lune: `-0`, `-2.700000000000001e-2`, `1`, `1`.
 
+**Intended difference**: `**` is Luau's `^`. `known/pow-is-c-pow.ts`.
+
 The generator's exponents are 0, 1, 2 and -1, which both sides compute exactly.
 
 ### Bitwise results are unsigned
@@ -186,8 +203,9 @@ trace(id(1) << 33, "n");
 - Node: `-1`, `-2147483648`, `-4`, `-6`, `2`.
 - Lune: `4294967295`, `2147483648`, `4294967292`, `4294967290`, `0`.
 
-`>>>` agrees. The generator takes each operand of a bitwise operator modulo 256 after `abs`, shifts by 0 to 8, and
-never uses `~`.
+`>>>` agrees, and so does `&` by a mask that is not negative. **Intended difference**: roblox-ts lowers to `bit32`.
+`known/bitwise-results-are-unsigned.ts`. The generator takes each operand of a bitwise operator modulo 256 after
+`abs`, shifts by 0 to 8, never uses `~`, and writes `&=` only with a mask from 0 to 255.
 
 ### A number becomes a string through tostring
 
@@ -204,6 +222,8 @@ trace(`${id(1e-7)}`, "s");
 - Node: `"0"`, `"Infinity"`, `"NaN"`, `"1e-7"`.
 - Lune: `"-0"`, `"inf"`, `"nan"`, `"1e-07"`.
 
+**Intended difference**: roblox-ts uses `tostring`. `known/numbers-become-strings-through-tostring.ts`.
+
 The generator turns only integers into strings.
 
 ### A string's size counts bytes
@@ -217,5 +237,8 @@ trace(id("😀").size(), "n");
 
 - Node: `1`, `2`.
 - Lune: `2`, `4`.
+
+**Intended difference**: `size()` is roblox-ts's own method, which it lowers to `#` on purpose, and the Node side's
+`length` counts UTF-16 code units. `known/string-size-counts-bytes.ts`.
 
 The generator's strings are ASCII.

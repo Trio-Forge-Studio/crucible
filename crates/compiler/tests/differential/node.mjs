@@ -16,6 +16,25 @@ method(Array.prototype, "isEmpty", function () {
 method(Array.prototype, "clear", function () {
 	this.length = 0;
 });
+// roblox-ts's own array methods, as compiler-types documents them, for an index the program keeps in bounds.
+method(Array.prototype, "insert", function (index, value) {
+	this.splice(index, 0, value);
+});
+method(Array.prototype, "remove", function (index) {
+	return this.splice(index, 1)[0];
+});
+method(Array.prototype, "unorderedRemove", function (index) {
+	const value = this[index];
+	if (value !== undefined) {
+		this[index] = this[this.length - 1];
+		this.length -= 1;
+	}
+	return value;
+});
+// `idiv` is Luau's `//`, which floors the quotient.
+method(Number.prototype, "idiv", function (other) {
+	return Math.floor(this / other);
+});
 method(String.prototype, "size", function () {
 	return this.length;
 });

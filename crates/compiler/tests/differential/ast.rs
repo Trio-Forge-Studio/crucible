@@ -12,6 +12,8 @@ pub enum Ty {
     Bool,
     OptInt,
     OptStr,
+    /// `boolean | undefined`, whose defined `false` is what tells `??` from `||`.
+    OptBool,
     ArrInt,
     ArrNum,
     ArrStr,
@@ -50,8 +52,20 @@ impl Ty {
         match self {
             Ty::OptInt => Ty::Int,
             Ty::OptStr => Ty::Str,
+            Ty::OptBool => Ty::Bool,
             Ty::OptObj => Ty::Obj,
             other => panic!("{other:?} is not optional"),
+        }
+    }
+
+    /// The optional type of an element of this array type.
+    pub fn optional_element(self) -> Ty {
+        match self {
+            Ty::ArrInt => Ty::OptInt,
+            Ty::ArrStr => Ty::OptStr,
+            Ty::ArrBool => Ty::OptBool,
+            Ty::ArrObj => Ty::OptObj,
+            other => panic!("{other:?} has no optional element type"),
         }
     }
 }
@@ -148,6 +162,32 @@ pub enum Expr {
     MulK(B, u8),
     /// `abs(a) % k`
     ModK(B, u8),
+    /// `a % b`, where the generator makes the operands' signs agree: known.md, "% is floored".
+    Mod(B, B),
+    /// `abs(a)`
+    Abs(B),
+    /// `a.idiv(b)`, Luau's floor division `//`.
+    Idiv(B, B),
+    /// `(xs[i] as T | undefined)` over an array variable, with any index, in bounds or not.
+    At(Ty, u8, B),
+    /// `(maybe(xs, keep)?.[i] as T | undefined)`: an optional element read, whose index runs only when the array is
+    /// there.
+    OptAt(Ty, u8, bool, B),
+    /// `xs.remove(i)` or `xs.unorderedRemove(i)` over an array variable, under a bounds check of a pure index.
+    Remove(Ty, u8, B, bool),
+    /// `(a === undefined)`
+    IsUndefined(B),
+    /// `((a as unknown) === (b as unknown))` over operands of different types, or `!==` when the flag is set.
+    SameAny(B, B, bool),
+    /// `(maybe(i, keep)?.m(n) ?? d)`, or `?.describe()` without `n`, over a class instance.
+    OptMethod(B, bool, Option<B>, B),
+    /// `(maybe(f, keep)?.(n) ?? d)` over an `FnII` variable.
+    OptCallVar(u8, bool, B, B),
+    /// `{ a, s, ...o }` with an optional `o`.
+    ObjSpreadOpt(B, B, B),
+    /// `a op b` as a statement, whose right side runs only when `op` says: `&&`, `||` or `??` over a left operand of
+    /// the given type.
+    Guard(Logical, Ty, B, B),
     /// `(abs(a) % 256) op (abs(b) % 256)`
     Bit(Bit, B, B),
     /// `(abs(a) % 256) op k`
@@ -200,6 +240,8 @@ pub enum Expr {
     /// A call of a function variable of the given type.
     CallVar(Ty, u8, Vec<Expr>),
     Inc(Step, u8),
+    /// `(o.a++)` and the like as a value, on an `Obj` variable.
+    FieldStep(Step, u8),
     Assign(Ty, u8, B),
     AddAssign(Ty, u8, B),
     MapGet(B, B),
@@ -261,6 +303,18 @@ pub enum Expr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Write {
+    /// `xs[i] = v`, where `i` may also be the length, which appends.
+    Set,
+    /// `xs[i] += v` on an `ArrInt` or an `ArrStr`.
+    Add,
+    /// `xs[i]++` and the like on an `ArrInt`.
+    Inc(Step),
+    /// `xs[i] ||= v` or `xs[i] &&= v` on an `ArrBool`.
+    Logical(Logical),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Logical {
     Coalesce,
     Or,
@@ -289,6 +343,16 @@ pub enum Mutation {
     FieldInc(Ty, Field, u8, Step),
     /// `if (xs.size() > k) xs[k] += v`
     IndexAdd(u8, u8, Expr),
+    /// A write to `xs[i]` with a pure index, under a bounds check.
+    WriteAt(Ty, u8, Expr, Write, Expr),
+    /// `xs.insert(i, v)` with a pure index, under a bounds check.
+    Insert(Ty, u8, Expr, Expr),
+    /// `xs.remove(i)` or `xs.unorderedRemove(i)` as a statement.
+    Remove(Ty, u8, Expr, bool),
+    /// `v.field &= k` (`>>>=` when the flag is set) on an `Int` field.
+    FieldBit(Ty, Field, u8, bool, u8),
+    /// `r.then ??= v`
+    ThenCoalesce(u8, Expr),
 }
 
 /// How an aggregate visits a map or set. Each adds an order-free term to a fresh sum.
@@ -312,26 +376,54 @@ pub enum Stmt {
         init: Expr,
     },
     Assign(Ty, u8, Expr),
-    /// `+=` on an Int or a string, `-=` on an Int.
+    /// `+=` on an Int or a string, `-=` on an Int. A string's right side may be an Int or a boolean too.
     AddAssign(Ty, u8, Expr),
     SubAssign(u8, Expr),
     MulAssign(u8, u8),
+    /// `-=`, `*=`, `/=` or `**=` (with an exponent of `POWS`) on a `Num` variable.
+    NumAssign(u8, u8, Expr),
+    /// `&= k` on an Int variable, or `>>>= k` when the flag is set.
+    BitAssign(u8, bool, u8),
+    /// A fresh Int set to the first expression, then a compound assignment by the second, then traced: `%=` of a
+    /// value not below 0 by one above it (0) or of two below 0 (1), or `|=`, `^=`, `&=`, `<<=` or `>>=` (2 to 6) of
+    /// `abs(a) % 256` by `abs(b) % 256`, or by `abs(b) % 9` for a shift.
+    Compound(u8, Expr, Expr),
+    /// A fresh string set to the first expression, then `+=` of the boolean, then traced: Luau's `..` turns a number
+    /// into a string by itself but refuses a boolean, so only this shows that the boolean went through `tostring`.
+    AddBool(Expr, Expr),
     Logical(Logical, Ty, u8, Expr),
     Inc(Step, u8),
     Trace(Ty, Expr),
     Expr(Expr),
     Mutate(Mutation),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
-    /// `for (let i = 0; i < count; i += step)`, or counting down when the flag is set.
+    /// `for (let i = 0; i < count; i += step)`, or counting down when the flag is set. With `capture`, each pass
+    /// first stores a closure over `i` in a variable declared before the loop, which is called after it.
     For {
         count: u8,
         step: u8,
         down: bool,
+        capture: bool,
         body: Vec<Stmt>,
     },
+    /// `for (let i = 0; i < xs.size(); i++)` over an array variable, or from `xs.size() - 1` down to 0. With `peek`,
+    /// the body first traces `xs[i + peek]`, which reads past an end on the first or the last pass. With `cull`, a
+    /// loop over a variable it may change then removes and traces `xs[i]` when `i % m === 0`, with `unorderedRemove`
+    /// when the flag is set, and the array is traced after the loop. Without such a variable, it loops over a copy,
+    /// `[...xs, ...extra]`, with the extra elements after it.
+    ForIndex {
+        ty: Ty,
+        source: u8,
+        down: bool,
+        peek: Option<i8>,
+        cull: Option<(bool, u8, Vec<Expr>)>,
+        body: Vec<Stmt>,
+    },
+    /// `for (const x of source)`, or `for (const { a: x, s: y } of source)` over an `ArrObj` with `destructure`.
     ForOf {
         ty: Ty,
         source: Expr,
+        destructure: bool,
         body: Vec<Stmt>,
     },
     ForOfStr(Expr, Vec<Stmt>),
@@ -353,15 +445,21 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    /// `do { ... } while (guard < count)`, or `while (guard < count && cond)`, whose body then has no `continue`.
+    /// With `shadow`, a `let w = 1` before the loop, a `w === 1` in the condition, and a `const w = 2` at the end of
+    /// the body, which the condition must not see.
     DoWhile {
         count: u8,
+        cond: Option<Expr>,
+        shadow: bool,
         body: Vec<Stmt>,
     },
     Break,
     Continue,
+    /// Each case is a constant, or a pure expression when it has one, then its body and whether it ends in `break`.
     Switch {
         disc: Expr,
-        cases: Vec<(u8, Vec<Stmt>, bool)>,
+        cases: Vec<(u8, Option<Expr>, Vec<Stmt>, bool)>,
         default: Option<Vec<Stmt>>,
     },
     Try {
@@ -371,7 +469,7 @@ pub enum Stmt {
     },
     Throw(Expr),
     Return(Option<Expr>),
-    /// `const [a = d, , b = d, ...rest] = source` over an `ArrInt` or `ArrStr`. `None` is a hole; the numbers pick
+    /// `const [a = d, , b = d, ...rest] = source` over an `ArrInt`, `ArrStr` or `ArrBool`. `None` is a hole; the numbers pick
     /// each default.
     DestructureArray {
         ty: Ty,

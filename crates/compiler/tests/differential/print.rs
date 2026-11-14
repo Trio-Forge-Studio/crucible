@@ -133,6 +133,7 @@ pub fn ty_text(ty: Ty) -> String {
         Ty::Bool => "boolean".into(),
         Ty::OptInt => "number | undefined".into(),
         Ty::OptStr => "string | undefined".into(),
+        Ty::OptBool => "boolean | undefined".into(),
         Ty::ArrInt | Ty::ArrNum => "number[]".into(),
         Ty::ArrStr => "string[]".into(),
         Ty::ArrBool => "boolean[]".into(),
@@ -158,6 +159,7 @@ impl Printer<'_> {
             Ty::Bool => "b".into(),
             Ty::OptInt => "?n".into(),
             Ty::OptStr => "?s".into(),
+            Ty::OptBool => "?b".into(),
             Ty::ArrInt | Ty::ArrNum => "[n]".into(),
             Ty::ArrStr => "[s]".into(),
             Ty::ArrBool => "[b]".into(),
@@ -287,6 +289,10 @@ impl Printer<'_> {
                 self.maybe = true;
                 "maybe(\"\", false)".into()
             }
+            Ty::OptBool => {
+                self.maybe = true;
+                "maybe(false, false)".into()
+            }
             Ty::OptObj => {
                 self.maybe = true;
                 "maybe({ a: 0, s: \"\" }, false)".into()
@@ -350,12 +356,97 @@ impl Printer<'_> {
             Expr::Str(i, q) => quote(STRS[*i as usize % STRS.len()], *q),
             Expr::Bool(v) => v.to_string(),
             Expr::Var(ty, k) => self.var(*ty, *k),
-            Expr::Add(a, b) => self.bin(a, "+", b),
-            Expr::Sub(a, b) => self.bin(a, "-", b),
-            Expr::Mul(a, b) => self.bin(a, "*", b),
-            Expr::Div(a, b) => self.bin(a, "/", b),
-            Expr::Concat(a, b) => self.bin(a, "+", b),
-            Expr::MulK(a, k) => format!("({} * {k})", self.e(a)),
+            Expr::Add(..)
+            | Expr::Sub(..)
+            | Expr::Mul(..)
+            | Expr::Div(..)
+            | Expr::Concat(..)
+            | Expr::MulK(..)
+            | Expr::Mod(..)
+            | Expr::Coalesce(..)
+            | Expr::Or(Ty::Bool, ..)
+            | Expr::And(Ty::Bool, ..) => {
+                let text = self.bare(x);
+                format!("({text})")
+            }
+            Expr::Abs(a) => {
+                self.abs = true;
+                format!("abs({})", self.e(a))
+            }
+            Expr::Idiv(a, b) => {
+                let a = self.recv(a);
+                format!("{a}.idiv({})", self.e(b))
+            }
+            Expr::At(ty, k, i) => {
+                let optional = ty.optional_element();
+                match self.resolve(*ty, *k, Need::Read) {
+                    Some(xs) => format!("({xs}[{}] as {})", self.operand(i, 0), ty_text(optional)),
+                    None => self.default(optional),
+                }
+            }
+            Expr::OptAt(ty, k, keep, i) => {
+                let optional = ty.optional_element();
+                match self.resolve(*ty, *k, Need::Read) {
+                    Some(xs) => {
+                        self.maybe = true;
+                        format!("(maybe({xs}, {keep})?.[{}] as {})", self.operand(i, 0), ty_text(optional))
+                    }
+                    None => self.default(optional),
+                }
+            }
+            Expr::Remove(ty, k, i, unordered) => {
+                let optional = ty.optional_element();
+                match self.resolve(*ty, *k, Need::Mutate) {
+                    Some(xs) => {
+                        let i = self.operand(i, INDEX);
+                        let method = if *unordered { "unorderedRemove" } else { "remove" };
+                        format!("({i} >= 0 && {i} < {xs}.size() ? {xs}.{method}({i}) : undefined)")
+                    }
+                    None => self.default(optional),
+                }
+            }
+            Expr::IsUndefined(a) => {
+                let a = self.e(a);
+                format!("({} === undefined)", self.unnarrowed(a))
+            }
+            Expr::SameAny(a, b, ne) => {
+                let (a, b) = (self.e(a), self.e(b));
+                let op = if *ne { "!==" } else { "===" };
+                format!("(({a} as unknown) {op} ({b} as unknown))")
+            }
+            Expr::OptMethod(i, keep, n, d) => {
+                self.maybe = true;
+                let i = self.e(i);
+                let call = match n {
+                    Some(n) => format!("m({})", self.e(n)),
+                    None => "describe()".into(),
+                };
+                format!("(maybe({i}, {keep})?.{call} ?? {})", self.e(d))
+            }
+            Expr::OptCallVar(k, keep, n, d) => {
+                self.maybe = true;
+                let found = if self.closures > 0 { None } else { self.resolve(Ty::FnII, *k, Need::Read) };
+                let callee = match found {
+                    Some(name) => name,
+                    None => self.default(Ty::FnII),
+                };
+                let n = self.e(n);
+                format!("(maybe({callee}, {keep})?.({n}) ?? {})", self.e(d))
+            }
+            Expr::ObjSpreadOpt(a, s, o) => {
+                let (a, s) = (self.e(a), self.e(s));
+                format!("{{ a: {a}, s: {s}, ...{} }}", self.e(o))
+            }
+            Expr::Guard(op, ty, a, f) => {
+                let left = self.e(a);
+                let left = self.opaque(left, a);
+                let (op, left) = match op {
+                    Logical::And => ("&&", truthy(left, *ty)),
+                    Logical::Or => ("||", truthy(left, *ty)),
+                    Logical::Coalesce => ("??", left),
+                };
+                format!("{left} {op} {}", self.e(f))
+            }
             Expr::ModK(a, k) => {
                 self.abs = true;
                 format!("(abs({}) % {k})", self.e(a))
@@ -440,17 +531,13 @@ impl Printer<'_> {
                 let c = self.opaque(c, x.cond());
                 format!("({c} ? {} : {})", self.e(a), self.e(b))
             }
-            Expr::Coalesce(a, b) => self.bin(a, "??", b),
             Expr::Or(ty, a, b) | Expr::And(ty, a, b) => {
                 let op = if matches!(x, Expr::Or(..)) { "||" } else { "&&" };
                 let left = self.e(a);
                 let left = self.opaque(left, a);
                 let left = truthy(left, *ty);
-                match ty {
-                    Ty::Bool => format!("({left} {op} {})", self.e(b)),
-                    // TypeScript narrows `n && 0` to the type `0`, which an array literal would take as its element.
-                    _ => format!("(({left} {op} {}) as {})", self.e(b), ty_text(*ty)),
-                }
+                // TypeScript narrows `n && 0` to the type `0`, which an array literal would take as its element.
+                format!("(({left} {op} {}) as {})", self.e(b), ty_text(*ty))
             }
             Expr::Field(f, o) => format!("{}{}", self.recv(o), field(*f)),
             Expr::Chain(f, o) => format!("{}?{}", self.recv(o), field(*f)),
@@ -521,6 +608,15 @@ impl Printer<'_> {
                 },
                 None => "0".into(),
             },
+            Expr::FieldStep(op, k) => match self.resolve(Ty::Obj, *k, Need::Read) {
+                Some(name) => match op {
+                    Step::PreInc => format!("(++{name}.a)"),
+                    Step::PostInc => format!("({name}.a++)"),
+                    Step::PreDec => format!("(--{name}.a)"),
+                    Step::PostDec => format!("({name}.a--)"),
+                },
+                None => "0".into(),
+            },
             Expr::Assign(ty, k, v) | Expr::AddAssign(ty, k, v) => match self.resolve(*ty, *k, Need::Write) {
                 Some(name) => {
                     let op = if matches!(x, Expr::Assign(..)) { "=" } else { "+=" };
@@ -529,6 +625,8 @@ impl Printer<'_> {
                         _ => format!("({name} {op} {})", self.e(v)),
                     }
                 }
+                // A string's `+=` may add a number, so the value goes through a template.
+                None if *ty == Ty::Str => format!("`${{{}}}`", self.e(v)),
                 None => {
                     let text = self.e(v);
                     self.opaque(text, v)
@@ -706,9 +804,42 @@ impl Printer<'_> {
         }
     }
 
-    fn bin(&mut self, a: &Expr, op: &str, b: &Expr) -> String {
-        let a = self.e(a);
-        format!("({a} {op} {})", self.e(b))
+    /// A binary expression without its outer parentheses, and with only the parentheses its operands need, so the
+    /// compiler sees chains such as `a ?? b ?? c` and `a - b + c` as TypeScript parses them.
+    fn bare(&mut self, x: &Expr) -> String {
+        match x {
+            Expr::Add(a, b) | Expr::Concat(a, b) => self.infix(a, "+", b, ADD),
+            Expr::Sub(a, b) => self.infix(a, "-", b, ADD),
+            Expr::Mul(a, b) => self.infix(a, "*", b, MUL),
+            Expr::Div(a, b) => self.infix(a, "/", b, MUL),
+            Expr::Mod(a, b) => self.infix(a, "%", b, MUL),
+            Expr::MulK(a, k) => format!("{} * {k}", self.operand(a, MUL)),
+            // `??` takes no `||` or `&&` operand without parentheses, so only a `??` stays bare on its left.
+            Expr::Coalesce(a, b) => {
+                let left = if matches!(**a, Expr::Coalesce(..)) { self.bare(a) } else { self.e(a) };
+                format!("{left} ?? {}", self.e(b))
+            }
+            Expr::Or(Ty::Bool, a, b) | Expr::And(Ty::Bool, a, b) => {
+                let (op, p) = if matches!(x, Expr::Or(..)) { ("||", OR) } else { ("&&", AND) };
+                let left = self.operand(a, p);
+                let left = self.opaque(left, a);
+                format!("{left} {op} {}", self.operand(b, p + 1))
+            }
+            other => self.e(other),
+        }
+    }
+
+    fn infix(&mut self, a: &Expr, op: &str, b: &Expr, p: u8) -> String {
+        let a = self.operand(a, p);
+        format!("{a} {op} {}", self.operand(b, p + 1))
+    }
+
+    /// An operand written bare when its operator binds at least as tightly as `min`.
+    fn operand(&mut self, x: &Expr, min: u8) -> String {
+        match ts_precedence(x) {
+            Some(p) if p >= min => self.bare(x),
+            _ => self.e(x),
+        }
     }
 
     fn list(&mut self, items: &[Expr]) -> String {
@@ -800,13 +931,33 @@ impl Printer<'_> {
     }
 
     /// A loop body whose first statement counts `guard`, so no `let` in it may hide the guard.
-    fn guarded_block(&mut self, list: &[Stmt], guard: &str) {
+    fn guarded_block(&mut self, list: &[Stmt], guard: &str) -> bool {
         self.indent += 1;
         self.open();
         self.mark(guard);
+        let ended = self.stmts(list);
+        self.close();
+        self.indent -= 1;
+        ended
+    }
+
+    /// A loop body after its `first` lines, which read `names`, so no `let` in the body may hide them.
+    fn body_after(&mut self, first: &[String], names: &[&str], list: &[Stmt], frozen: Option<Ty>) {
+        self.frozen.extend(frozen);
+        self.indent += 1;
+        self.open();
+        for name in names {
+            self.mark(name);
+        }
+        for line in first {
+            self.line(line);
+        }
         self.stmts(list);
         self.close();
         self.indent -= 1;
+        if frozen.is_some() {
+            self.frozen.pop();
+        }
     }
 
     /// Statements in a loop body, where the collection types in `frozen` must not change.
@@ -853,6 +1004,57 @@ impl Printer<'_> {
                     self.line(&format!("{name} *= {m};"));
                 }
             }
+            Stmt::NumAssign(k, op, v) => {
+                if let Some(name) = self.resolve(Ty::Num, *k, Need::Write) {
+                    let text = match op {
+                        0 => format!("{name} -= {};", self.e(v)),
+                        1 => format!("{name} *= {};", self.e(v)),
+                        2 => format!("{name} /= {};", self.e(v)),
+                        _ => format!("{name} **= {};", POWS[*op as usize % POWS.len()]),
+                    };
+                    self.line(&text);
+                }
+            }
+            Stmt::Compound(op, a, b) => {
+                let r = self.fresh("r");
+                let (a, b) = (self.e(a), self.e(b));
+                // Operands under 256 and shifts by at most 8 keep the bitwise results unsigned on both sides: known.md,
+                // "Bitwise results are unsigned".
+                let (start, text) = match op {
+                    0 | 1 => (a, format!("{r} %= {b};")),
+                    _ => {
+                        self.abs = true;
+                        let (op, m) = match op {
+                            2 => ("|=", 256),
+                            3 => ("^=", 256),
+                            4 => ("&=", 256),
+                            5 => ("<<=", 9),
+                            _ => (">>=", 9),
+                        };
+                        (format!("abs({a}) % 256"), format!("{r} {op} abs({b}) % {m};"))
+                    }
+                };
+                self.line(&format!("let {r}: number = {start};"));
+                self.line(&text);
+                // Two negative operands give JavaScript `-0` for a zero remainder, where Luau gives `0`.
+                let zero = if *op == 1 { " + 0" } else { "" };
+                self.line(&format!("trace({r}{zero}, \"n\");"));
+            }
+            Stmt::AddBool(s, v) => {
+                let r = self.fresh("r");
+                let (s, v) = (self.e(s), self.e(v));
+                self.line(&format!("let {r}: string = {s};"));
+                self.line(&format!("{r} += {v};"));
+                self.line(&format!("trace({r}, \"s\");"));
+            }
+            Stmt::BitAssign(k, ushr, m) => {
+                if let Some(name) = self.resolve(Ty::Int, *k, Need::Write) {
+                    // `&` by a mask that is not negative and `>>>` agree for every integer: known.md, "Bitwise results
+                    // are unsigned".
+                    let text = if *ushr { format!("{name} >>>= {};", m % 9) } else { format!("{name} &= {m};") };
+                    self.line(&text);
+                }
+            }
             Stmt::Logical(op, ty, k, v) => {
                 if let Some(name) = self.resolve(*ty, *k, Need::Write) {
                     let op = match op {
@@ -860,7 +1062,16 @@ impl Printer<'_> {
                         Logical::Or => "||=",
                         Logical::And => "&&=",
                     };
+                    // TypeScript reads the target as `never` on the right of a `??=` once it has narrowed it to a value,
+                    // so `(x ?? "a") + 1` there is a number.
+                    let hidden = op == "??=";
+                    if hidden {
+                        self.tdz.push(name.clone());
+                    }
                     let v = self.e(v);
+                    if hidden {
+                        self.tdz.pop();
+                    }
                     self.line(&format!("{name} {op} {v};"));
                 }
             }
@@ -895,8 +1106,13 @@ impl Printer<'_> {
             }
             Stmt::Mutate(m) => self.mutation(m),
             Stmt::If(c, then, otherwise) => self.if_chain(c, then, otherwise.as_deref(), "if"),
-            Stmt::For { count, step, down, body } => {
+            Stmt::For { count, step, down, capture, body } => {
                 let i = self.fresh("i");
+                let closure = capture.then(|| self.fresh("c"));
+                if let Some(c) = &closure {
+                    let n = self.fresh("x");
+                    self.line(&format!("let {c}: (n: number) => number = ({n}: number): number => {n};"));
+                }
                 let head = match (down, step) {
                     (false, 1) => format!("for (let {i} = 0; {i} < {count}; {i}++) {{"),
                     (false, _) => format!("for (let {i} = 0; {i} < {count}; {i} += {step}) {{"),
@@ -905,18 +1121,95 @@ impl Printer<'_> {
                 };
                 self.line(&head);
                 self.open();
-                self.declare(i, Ty::Int, true, true, false);
-                self.frozen_block(body, None);
+                self.declare(i.clone(), Ty::Int, true, true, false);
+                // Each pass has its own `i`, which the closure keeps after the pass ends.
+                let first: Vec<String> = closure
+                    .iter()
+                    .map(|c| {
+                        let n = self.fresh("x");
+                        format!("{c} = ({n}: number): number => {n} * 10 + {i};")
+                    })
+                    .collect();
+                self.body_after(&first, &[&i], body, None);
                 self.close();
                 self.line("}");
+                if let Some(c) = closure {
+                    self.line(&format!("trace({c}(1), \"n\");"));
+                    self.declare(c, Ty::FnII, true, false, false);
+                }
             }
-            Stmt::ForOf { ty, source, body } => {
+            Stmt::ForIndex { ty, source, down, peek, cull, body } => {
+                // A cull changes a variable it may change, or else a copy that no other statement names.
+                let mutable = cull.as_ref().and_then(|_| self.resolve(*ty, *source, Need::Mutate));
+                let xs = match mutable {
+                    Some(name) => name,
+                    None => {
+                        let xs = match self.resolve(*ty, *source, Need::Read) {
+                            Some(name) => name,
+                            None => self.default(*ty),
+                        };
+                        match cull {
+                            Some((_, _, extra)) => {
+                                let copy = self.fresh("c");
+                                let mut items = vec![format!("...{xs}")];
+                                items.extend(extra.iter().map(|x| self.e(x)));
+                                self.line(&format!("const {copy}: {} = [{}];", ty_text(*ty), items.join(", ")));
+                                copy
+                            }
+                            None => xs,
+                        }
+                    }
+                };
+                let culled = cull.as_ref().map(|(unordered, m, _)| (xs.clone(), (*unordered, *m)));
+                let i = self.fresh("i");
+                let head = if *down {
+                    format!("for (let {i} = {xs}.size() - 1; {i} >= 0; {i}--) {{")
+                } else {
+                    format!("for (let {i} = 0; {i} < {xs}.size(); {i}++) {{")
+                };
+                self.line(&head);
+                let mut first = Vec::new();
+                if let Some(peek) = peek {
+                    let at = match peek {
+                        0 => i.clone(),
+                        p if *p > 0 => format!("{i} + {p}"),
+                        p => format!("{i} - {}", -p),
+                    };
+                    let (optional, shape) = (ty.optional_element(), self.shape(ty.optional_element()));
+                    first.push(format!("trace({xs}[{at}] as {}, \"{shape}\");", ty_text(optional)));
+                }
+                if let Some((_, (unordered, m))) = culled {
+                    let method = if unordered { "unorderedRemove" } else { "remove" };
+                    let shape = self.shape(ty.optional_element());
+                    first.push(format!("if ({i} % {m} === 0) {{"));
+                    first.push(format!("\ttrace({xs}.{method}({i}), \"{shape}\");"));
+                    first.push("}".to_string());
+                }
+                self.open();
+                self.declare(i.clone(), Ty::Int, true, true, false);
+                self.body_after(&first, &[&i, &xs], body, Some(*ty));
+                self.close();
+                self.line("}");
+                if culled.is_some() {
+                    let shape = self.shape(*ty);
+                    self.line(&format!("trace({xs}, \"{shape}\");"));
+                }
+            }
+            Stmt::ForOf { ty, source, destructure, body } => {
                 // The cast keeps TypeScript from inferring the element from a body that assigns what the source reads.
                 let source = format!("({} as {})", self.e(source), ty_text(*ty));
                 let x = self.fresh("x");
-                self.line(&format!("for (const {x} of {source}) {{"));
-                self.open();
-                self.declare(x, ty.element(), false, true, false);
+                if *destructure {
+                    let y = self.fresh("x");
+                    self.line(&format!("for (const {{ a: {x}, s: {y} }} of {source}) {{"));
+                    self.open();
+                    self.declare(x, Ty::Int, false, true, false);
+                    self.declare(y, Ty::Str, false, true, false);
+                } else {
+                    self.line(&format!("for (const {x} of {source}) {{"));
+                    self.open();
+                    self.declare(x, ty.element(), false, true, false);
+                }
                 self.frozen_block(body, Some(*ty));
                 self.close();
                 self.line("}");
@@ -960,14 +1253,34 @@ impl Printer<'_> {
                 self.guarded_block(body, &g);
                 self.line("}");
             }
-            Stmt::DoWhile { count, body } => {
+            Stmt::DoWhile { count, cond, shadow, body } => {
                 let g = self.fresh("g");
                 self.line(&format!("let {g} = 0;"));
                 self.declare(g.clone(), Ty::Int, true, true, false);
+                // The outer `w` is not declared in a frame, so nothing else reads or assigns it.
+                let w = shadow.then(|| self.fresh("w"));
+                if let Some(w) = &w {
+                    self.line(&format!("let {w}: number = 1;"));
+                }
                 self.line("do {");
                 self.line(&format!("\t{g}++;"));
-                self.guarded_block(body, &g);
-                self.line(&format!("}} while ({g} < {count});"));
+                let ended = self.guarded_block(body, &g);
+                if let Some(w) = w.as_ref().filter(|_| !ended) {
+                    self.line(&format!("\tconst {w} = 2;"));
+                    self.line(&format!("\ttrace({w}, \"n\");"));
+                }
+                let head = match &w {
+                    Some(w) => format!("{g} < {count} && {w} === 1"),
+                    None => format!("{g} < {count}"),
+                };
+                match cond {
+                    // Printed after the body, whose variables it does not see.
+                    Some(cond) => {
+                        let cond = self.e(cond);
+                        self.line(&format!("}} while ({head} && {cond});"));
+                    }
+                    None => self.line(&format!("}} while ({head});")),
+                }
             }
             Stmt::Break => self.line("break;"),
             Stmt::Continue => self.line("continue;"),
@@ -976,11 +1289,13 @@ impl Printer<'_> {
                 self.line(&format!("switch ({disc} as number) {{"));
                 self.indent += 1;
                 let mut seen = HashSet::new();
-                for (value, body, brk) in cases {
-                    if !seen.insert(*value) {
-                        continue;
-                    }
-                    self.line(&format!("case {value}: {{"));
+                for (value, label, body, brk) in cases {
+                    let label = match label {
+                        Some(label) => self.operand(label, 0),
+                        None if seen.insert(*value) => value.to_string(),
+                        None => continue,
+                    };
+                    self.line(&format!("case {label}: {{"));
                     let ended = self.block(body);
                     if *brk && !ended {
                         self.line("\tbreak;");
@@ -1044,6 +1359,7 @@ impl Printer<'_> {
                             let name = self.fresh("v");
                             let default = match element {
                                 Ty::Int => number(INTS[*d as usize % INTS.len()]),
+                                Ty::Bool => (d % 2 == 0).to_string(),
                                 _ => quote(STRS[*d as usize % STRS.len()], 0),
                             };
                             parts.push(format!("{name} = {default}"));
@@ -1262,6 +1578,65 @@ impl Printer<'_> {
                     self.line("}");
                 }
             }
+            Mutation::WriteAt(ty, k, i, write, v) => {
+                if let Some(xs) = self.resolve(*ty, *k, Need::Mutate) {
+                    let i = self.operand(i, INDEX);
+                    // The value may not change an array of this type, which could move the index past the end.
+                    self.frozen.push(*ty);
+                    let (bound, text) = match write {
+                        Write::Set => ("<=", format!("{xs}[{i}] = {};", self.e(v))),
+                        Write::Add => ("<", format!("{xs}[{i}] += {};", self.e(v))),
+                        Write::Inc(Step::PreInc) => ("<", format!("++{xs}[{i}];")),
+                        Write::Inc(Step::PostInc) => ("<", format!("{xs}[{i}]++;")),
+                        Write::Inc(Step::PreDec) => ("<", format!("--{xs}[{i}];")),
+                        Write::Inc(Step::PostDec) => ("<", format!("{xs}[{i}]--;")),
+                        Write::Logical(Logical::Or) => ("<", format!("{xs}[{i}] ||= {};", self.e(v))),
+                        Write::Logical(_) => ("<", format!("{xs}[{i}] &&= {};", self.e(v))),
+                    };
+                    self.frozen.pop();
+                    let short = if *ty == Ty::ArrStr && *write == Write::Add {
+                        format!(" && {}", short(&format!("{xs}[{i}]")))
+                    } else {
+                        String::new()
+                    };
+                    self.line(&format!("if ({i} >= 0 && {i} {bound} {xs}.size(){short}) {{"));
+                    self.line(&format!("\t{text}"));
+                    self.line("}");
+                }
+            }
+            Mutation::Insert(ty, k, i, v) => {
+                if let Some(xs) = self.resolve(*ty, *k, Need::Mutate) {
+                    let i = self.operand(i, INDEX);
+                    self.frozen.push(*ty);
+                    let v = self.e(v);
+                    self.frozen.pop();
+                    self.line(&format!("if ({i} >= 0 && {i} <= {xs}.size()) {{"));
+                    self.line(&format!("\t{xs}.insert({i}, {v});"));
+                    self.line("}");
+                }
+            }
+            Mutation::Remove(ty, k, i, unordered) => {
+                if let Some(xs) = self.resolve(*ty, *k, Need::Mutate) {
+                    let i = self.operand(i, INDEX);
+                    let method = if *unordered { "unorderedRemove" } else { "remove" };
+                    self.line(&format!("if ({i} >= 0 && {i} < {xs}.size()) {{"));
+                    self.line(&format!("\t{xs}.{method}({i});"));
+                    self.line("}");
+                }
+            }
+            Mutation::FieldBit(ty, f, k, ushr, m) => {
+                if let Some(name) = self.resolve(*ty, *k, Need::Read) {
+                    let place = format!("{name}{}", field(*f));
+                    let text = if *ushr { format!("{place} >>>= {};", m % 9) } else { format!("{place} &= {m};") };
+                    self.line(&text);
+                }
+            }
+            Mutation::ThenCoalesce(k, v) => {
+                if let Some(name) = self.resolve(Ty::Rec, *k, Need::Read) {
+                    let v = self.e(v);
+                    self.line(&format!("{name}.then ??= {v};"));
+                }
+            }
             Mutation::DeleteThen(k) => {
                 if let Some(name) = self.resolve(Ty::Rec, *k, Need::Read) {
                     // Through a cast, so TypeScript does not narrow `name.then` to `undefined` for the rest of the block.
@@ -1425,6 +1800,25 @@ impl Expr {
     }
 }
 
+// TypeScript's precedences of the operators `bare` writes, and the least an operand of a comparison needs.
+const COALESCE: u8 = 1;
+const OR: u8 = 2;
+const AND: u8 = 3;
+const INDEX: u8 = 9;
+const ADD: u8 = 10;
+const MUL: u8 = 11;
+
+fn ts_precedence(x: &Expr) -> Option<u8> {
+    Some(match x {
+        Expr::Coalesce(..) => COALESCE,
+        Expr::Or(Ty::Bool, ..) => OR,
+        Expr::And(Ty::Bool, ..) => AND,
+        Expr::Add(..) | Expr::Sub(..) | Expr::Concat(..) => ADD,
+        Expr::Mul(..) | Expr::Div(..) | Expr::MulK(..) | Expr::Mod(..) => MUL,
+        _ => return None,
+    })
+}
+
 /// Whether TypeScript sees a constant truthiness here, which it rejects in a condition. This follows
 /// `getSyntacticTruthySemantics`: literals other than `0`, `1` and the booleans, object and array literals and
 /// functions, through casts and through a conditional whose branches both are.
@@ -1439,7 +1833,12 @@ fn constant(e: &Expr) -> bool {
         Expr::Template(_, parts) => parts.is_empty(),
         Expr::Cast(a, _) => constant(a),
         Expr::Cond(_, a, b) => constant(a) || constant(b),
-        Expr::Obj(..) | Expr::ObjSpread(..) | Expr::Rec(..) | Expr::RecSpread(..) | Expr::Lambda(_) => true,
+        Expr::Obj(..)
+        | Expr::ObjSpread(..)
+        | Expr::ObjSpreadOpt(..)
+        | Expr::Rec(..)
+        | Expr::RecSpread(..)
+        | Expr::Lambda(_) => true,
         Expr::Array(..) => true,
         _ => false,
     }
@@ -1462,11 +1861,16 @@ fn makes_new(e: &Expr) -> bool {
 /// A truthiness test of a number or string, which CRU032 rejects unless the line before the operand disables it, as
 /// code that means it does.
 fn truthy(text: String, ty: Ty) -> String {
-    if ty == Ty::Bool { text } else { format!("\n// oxlint-disable-next-line roblox-ts/lua-truthiness\n{text}") }
+    if matches!(ty, Ty::Bool | Ty::OptBool) {
+        text
+    } else {
+        format!("\n// oxlint-disable-next-line roblox-ts/lua-truthiness\n{text}")
+    }
 }
 
 fn is_name(text: &str) -> bool {
-    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn field(f: Field) -> &'static str {

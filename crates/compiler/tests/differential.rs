@@ -19,16 +19,16 @@ mod generate;
 mod print;
 #[path = "differential/run.rs"]
 mod run;
+#[path = "differential/shrink.rs"]
+mod shrink;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use proptest::strategy::{Strategy, ValueTree};
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 
-use ast::Program;
-use run::{Failure, Outcome, Runner};
+use run::{Outcome, Runner};
 
 const DEFAULT_SEED: u64 = 0x0c0f_fee5_eed5_2026;
 
@@ -57,8 +57,11 @@ fn generated_programs_trace_the_same_in_node_and_lune() {
     let mut rng = TestRunner::new_with_rng(Config::default(), TestRng::from_seed(RngAlgorithm::ChaCha, &seed_bytes));
     let strategy = generate::program();
     let mut runner = Runner::new(root.join(format!("work-{}", std::process::id())));
+    runner.keep = std::env::var_os("DIFFERENTIAL_KEEP").is_some();
     let failures_dir = root.join("failures");
-    let _ = std::fs::remove_dir_all(&failures_dir);
+    if keep_going {
+        let _ = std::fs::remove_dir_all(&failures_dir);
+    }
     let started = Instant::now();
     let mut done = 0;
     let mut failed = 0;
@@ -82,15 +85,25 @@ fn generated_programs_trace_the_same_in_node_and_lune() {
                 std::fs::write(failures_dir.join(format!("{name}.txt")), describe(&outcome))
                     .expect("the outcome is written");
             } else if first.is_none() {
-                first = Some((done + i, tree, kind, outcome));
+                first = Some((done + i, tree.current(), kind, outcome));
             }
         }
         done += n;
         eprintln!("{done} programs, {traced} trace lines, {failed} failing, {:.0?}", started.elapsed());
-        if let Some((index, tree, kind, outcome)) = first {
-            let (source, outcome) = shrink(tree, kind, outcome, &sources[index - (done - n)], &mut runner);
+        if let Some((index, program, kind, outcome)) = first {
+            let limit = Duration::from_secs(env("DIFFERENTIAL_SHRINK_SECONDS", 300));
+            let shrinking = Instant::now();
+            let (source, outcome, rounds) = shrink::shrink(program, kind, outcome, batch, limit, &mut runner);
+            eprintln!("shrunk in {rounds} rounds and {:.0?}", shrinking.elapsed());
+            std::fs::create_dir_all(&failures_dir).expect("the failures folder is made");
+            let file = failures_dir.join(format!("seed-{seed}-program-{index}.ts"));
+            std::fs::write(&file, &source).expect("the shrunk program is written");
             panic!(
-                "program {index} of seed {seed} fails ({failed} of the {n} in its batch fail):\n{}\nshrunk program:\n{source}",
+                "program {index} of seed {seed} fails ({failed} of the {n} in its batch fail). Rerun the same programs \
+                 with DIFFERENTIAL_SEED={seed} DIFFERENTIAL_CASES={}, or the shrunk program alone with \
+                 DIFFERENTIAL_FILE={} and the one_program test.\n{}\nshrunk program:\n{source}",
+                index + 1,
+                file.display(),
                 describe(&outcome)
             );
         }
@@ -103,25 +116,42 @@ fn generated_programs_trace_the_same_in_node_and_lune() {
 #[test]
 #[ignore = "runs programs in Node and Lune, which must be on PATH"]
 fn regressions_trace_the_same_in_node_and_lune() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/differential/regressions");
+    let ran = run_folder("regressions");
+    let failing: Vec<String> = ran
+        .iter()
+        .filter(|(_, o)| o.failure().is_some())
+        .map(|(p, o)| format!("{}: {}", p.display(), describe(o)))
+        .collect();
+    assert!(failing.is_empty(), "{}", failing.join("\n"));
+    assert!(ran.iter().all(|(_, o)| matches!(o, Outcome::Ran { node, .. } if !node.is_empty())), "{ran:?}");
+}
+
+/// Runs every program in `differential/known`, the smallest program of each open entry of `known.md`, and fails when
+/// one of them no longer differs: the difference is fixed, and its program belongs in `regressions`.
+#[test]
+#[ignore = "runs programs in Node and Lune, which must be on PATH"]
+fn known_differences_still_differ() {
+    let ran = run_folder("known");
+    let agreeing: Vec<String> = ran
+        .iter()
+        .filter(|(_, o)| !matches!(o, Outcome::Ran { node, lune } if node != lune))
+        .map(|(p, o)| format!("{}: {o:?}", p.display()))
+        .collect();
+    assert!(agreeing.is_empty(), "these no longer differ:\n{}", agreeing.join("\n"));
+}
+
+fn run_folder(folder: &str) -> Vec<(PathBuf, Outcome)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/differential").join(folder);
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .expect("the regressions folder is read")
+        .expect("the folder is read")
         .map(|e| e.expect("the entry is read").path())
         .filter(|p| p.extension().is_some_and(|e| e == "ts"))
         .collect();
     paths.sort();
     let sources: Vec<String> = paths.iter().map(|p| std::fs::read_to_string(p).expect("the program is read")).collect();
-    let root =
-        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("differential-regressions-{}", std::process::id()));
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("differential-{folder}-{}", std::process::id()));
     let outcomes = Runner::new(root).run(&sources);
-    let failing: Vec<String> = paths
-        .iter()
-        .zip(&outcomes)
-        .filter(|(_, o)| o.failure().is_some())
-        .map(|(p, o)| format!("{}: {}", p.display(), describe(o)))
-        .collect();
-    assert!(failing.is_empty(), "{}", failing.join("\n"));
-    assert!(outcomes.iter().all(|o| matches!(o, Outcome::Ran { node, .. } if !node.is_empty())), "{outcomes:?}");
+    paths.into_iter().zip(outcomes).collect()
 }
 
 /// Runs the program in `DIFFERENTIAL_FILE` alone and prints both traces and its Luau, for a person reading a failure.
@@ -146,47 +176,6 @@ fn one_program() {
         }
         other => eprintln!("{}", describe(other)),
     }
-}
-
-/// Shrinks with proptest's own value tree, keeping each simpler program that still fails the same way.
-fn shrink(
-    mut tree: Box<dyn ValueTree<Value = Program>>,
-    kind: Failure,
-    outcome: Outcome,
-    source: &str,
-    runner: &mut Runner,
-) -> (String, Outcome) {
-    let limit = Duration::from_secs(env("DIFFERENTIAL_SHRINK_SECONDS", 300));
-    let started = Instant::now();
-    let mut best = (source.to_owned(), outcome);
-    let mut seen: HashMap<String, Outcome> = HashMap::new();
-    let mut runs = 0;
-    if !tree.simplify() {
-        return best;
-    }
-    while started.elapsed() < limit {
-        let source = print::print(&tree.current());
-        let outcome = match seen.get(&source) {
-            Some(outcome) => outcome.clone(),
-            None => {
-                runs += 1;
-                let outcome = runner.run(std::slice::from_ref(&source)).remove(0);
-                seen.insert(source.clone(), outcome.clone());
-                outcome
-            }
-        };
-        let more = if outcome.failure() == Some(kind) {
-            best = (source, outcome);
-            tree.simplify()
-        } else {
-            tree.complicate()
-        };
-        if !more {
-            break;
-        }
-    }
-    eprintln!("shrunk in {runs} runs and {:.0?}", started.elapsed());
-    best
 }
 
 fn describe(outcome: &Outcome) -> String {

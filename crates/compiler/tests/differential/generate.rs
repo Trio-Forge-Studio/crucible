@@ -157,6 +157,8 @@ fn leaves(ty: Ty, arms: &mut Vec<(u32, S<Expr>)>) {
             arms.push((3, index(NUMS.len()).prop_map(Expr::Num).boxed()));
             arms.push((1, index(INTS.len()).prop_map(Expr::Int).boxed()));
             arms.push((1, var(Ty::Int)));
+            // NaN, the falsy number that is not 0.
+            arms.push((1, Just(Expr::Div(Box::new(Expr::Int(0)), Box::new(Expr::Int(0)))).boxed()));
         }
         Ty::Str => arms.push((4, (index(STRS.len()), 0..3u8).prop_map(|(i, q)| Expr::Str(i, q)).boxed())),
         Ty::Bool => arms.push((2, any::<bool>().prop_map(Expr::Bool).boxed())),
@@ -183,6 +185,115 @@ fn inserted(element: Ty, free: S<Expr>, rest: std::ops::Range<usize>, unshift: b
         .boxed()
 }
 
+/// `INTS` that are not negative, and those above 0.
+const NON_NEGATIVE: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 19];
+const POSITIVE: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 19];
+/// `INTS` for `0` to `3` and `-1`, the offsets of an index.
+const SMALL: &[u8] = &[0, 1, 2, 3, 11];
+
+/// An Int expression that is never negative, built so: `%` needs its operands' signs to agree, because JavaScript's
+/// takes the dividend's sign and Luau's the divisor's (known.md, "% is floored").
+fn nat(cx: Cx) -> S<Expr> {
+    lazy(move || {
+        let d = cx.down();
+        let mut arms: Vec<(u32, S<Expr>)> = vec![
+            (2, select(NON_NEGATIVE).prop_map(Expr::Int).boxed()),
+            (3, b(expr(Ty::Int, d)).prop_map(Expr::Abs).boxed()),
+            (1, b(expr(Ty::Str, d)).prop_map(Expr::Size).boxed()),
+            (1, b(expr(Ty::ArrInt, d)).prop_map(Expr::Size).boxed()),
+        ];
+        if cx.depth > 0 {
+            arms.push((2, (b(nat(d)), b(nat(d))).prop_map(|(a, b)| Expr::Add(a, b)).boxed()));
+            arms.push((1, (b(nat(d)), 2..6u8).prop_map(|(a, k)| Expr::MulK(a, k)).boxed()));
+            arms.push((2, (b(nat(d)), b(pos(d))).prop_map(|(a, b)| Expr::Mod(a, b)).boxed()));
+            arms.push((
+                1,
+                (b(expr(Ty::Bool, d)), b(nat(d)), b(nat(d))).prop_map(|(c, a, b)| Expr::Cond(c, a, b)).boxed(),
+            ));
+        }
+        Union::new_weighted(arms).boxed()
+    })
+}
+
+/// An Int expression that is always above 0.
+fn pos(cx: Cx) -> S<Expr> {
+    lazy(move || {
+        let d = cx.down();
+        let mut arms: Vec<(u32, S<Expr>)> = vec![(2, select(POSITIVE).prop_map(Expr::Int).boxed())];
+        if cx.depth > 0 {
+            arms.push((
+                2,
+                (b(nat(d)), select(POSITIVE)).prop_map(|(a, k)| Expr::Add(a, Box::new(Expr::Int(k)))).boxed(),
+            ));
+            arms.push((1, (b(pos(d)), 2..6u8).prop_map(|(a, k)| Expr::MulK(a, k)).boxed()));
+        }
+        Union::new_weighted(arms).boxed()
+    })
+}
+
+/// An Int expression that is always below 0.
+fn neg(cx: Cx) -> S<Expr> {
+    lazy(move || {
+        let d = cx.down();
+        let mut arms: Vec<(u32, S<Expr>)> = vec![(2, b(pos(d)).prop_map(Expr::Neg).boxed())];
+        if cx.depth > 0 {
+            arms.push((1, (b(neg(d)), b(nat(d))).prop_map(|(a, b)| Expr::Sub(a, b)).boxed()));
+        }
+        Union::new_weighted(arms).boxed()
+    })
+}
+
+/// An Int index that reads only variables and lengths, so a bounds check written before it sees the value it has:
+/// a variable, a small constant, a length, or sums and differences of them, as `xs[i + 1]` and `xs[xs.size() - 1]`.
+fn pure_index(cx: Cx) -> S<Expr> {
+    // Its own depth, so an index deep in an expression is still `i + 1`.
+    index_at(Cx { depth: 2, ..cx })
+}
+
+fn index_at(cx: Cx) -> S<Expr> {
+    lazy(move || {
+        let d = cx.down();
+        let mut arms: Vec<(u32, S<Expr>)> = vec![
+            (4, var(Ty::Int)),
+            (2, select(SMALL).prop_map(Expr::Int).boxed()),
+            (1, any::<u8>().prop_map(|k| Expr::Size(Box::new(Expr::Var(Ty::ArrInt, k)))).boxed()),
+        ];
+        if cx.depth > 0 {
+            let small = || select(SMALL).prop_map(|k| Box::new(Expr::Int(k)));
+            arms.push((4, (b(index_at(d)), small()).prop_map(|(a, k)| Expr::Add(a, k)).boxed()));
+            arms.push((3, (b(index_at(d)), small()).prop_map(|(a, k)| Expr::Sub(a, k)).boxed()));
+            arms.push((1, (small(), b(index_at(d))).prop_map(|(k, a)| Expr::Add(k, a)).boxed()));
+            arms.push((1, (b(index_at(d)), b(index_at(d))).prop_map(|(a, b)| Expr::Add(a, b)).boxed()));
+            arms.push((1, (b(index_at(d)), b(index_at(d))).prop_map(|(a, b)| Expr::Sub(a, b)).boxed()));
+            arms.push((1, b(index_at(d)).prop_map(|a| Expr::MulK(a, 2)).boxed()));
+        }
+        Union::new_weighted(arms).boxed()
+    })
+}
+
+/// The index of a read, which may be any Int, in bounds or not: JavaScript gives `undefined` past either end and
+/// Luau `nil`.
+fn read_index(cx: Cx) -> S<Expr> {
+    prop_oneof![4 => pure_index(cx), 1 => expr(Ty::Int, cx)].boxed()
+}
+
+/// `(xs[i] as T | undefined) ?? d`: an element read with any index, and a default past either end.
+fn at_or(array: Ty, cx: Cx) -> S<Expr> {
+    (any::<u8>(), read_index(cx), b(expr(array.element(), cx)))
+        .prop_map(move |(k, i, d)| Expr::Coalesce(Box::new(Expr::At(array, k, Box::new(i))), d))
+        .boxed()
+}
+
+/// A falsy value of a primitive type: `0`, `""` or `false`.
+fn falsy(ty: Ty) -> Expr {
+    match ty {
+        Ty::Int => Expr::Int(0),
+        Ty::Str => Expr::Str(0, 0),
+        Ty::Bool => Expr::Bool(false),
+        other => panic!("{other:?} has no falsy literal"),
+    }
+}
+
 fn build(ty: Ty, cx: Cx) -> S<Expr> {
     let mut arms: Vec<(u32, S<Expr>)> = Vec::new();
     leaves(ty, &mut arms);
@@ -204,8 +315,15 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             push(3, (be(Ty::Int), be(Ty::Int)).prop_map(|(a, b)| Expr::Add(a, b)).boxed());
             push(2, (be(Ty::Int), be(Ty::Int)).prop_map(|(a, b)| Expr::Sub(a, b)).boxed());
             push(2, (be(Ty::Int), 2..6u8).prop_map(|(a, k)| Expr::MulK(a, k)).boxed());
-            // `%` takes `abs` of its left operand and a positive right one: known.md, "% is floored".
-            push(2, (be(Ty::Int), 1..10u8).prop_map(|(a, k)| Expr::ModK(a, k)).boxed());
+            // The operands of `%` agree in sign: known.md, "% is floored". Two negative ones give JavaScript `-0` for a
+            // zero remainder, where Luau gives `0`, and an Int is never `-0`, so `+ 0` follows.
+            push(3, (b(nat(d)), b(pos(d))).prop_map(|(a, b)| Expr::Mod(a, b)).boxed());
+            push(
+                1,
+                (b(neg(d)), b(neg(d)))
+                    .prop_map(|(a, b)| Expr::Add(Box::new(Expr::Mod(a, b)), Box::new(Expr::Int(0))))
+                    .boxed(),
+            );
             // The printer takes each operand `abs(a) % 256`, shifts by at most 8 and never writes `~`: known.md,
             // "Bitwise results are unsigned".
             push(
@@ -255,6 +373,7 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
                     .boxed(),
             );
             push(2, (any::<u8>(), 0..4u8, be(Ty::Int)).prop_map(|(k, i, d)| Expr::Index(Ty::ArrInt, k, i, d)).boxed());
+            push(3, at_or(Ty::ArrInt, d));
             push(
                 1,
                 (any::<u8>(), any::<u8>(), be(Ty::Int))
@@ -291,7 +410,7 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             if cx.calls > 2 {
                 push(
                     1,
-                    (e(Ty::ArrInt), option::of(e(Ty::Int)))
+                    (e(Ty::ArrInt), option::of(prop_oneof![e(Ty::Int), e(Ty::OptInt)]))
                         .prop_map(|(xs, k)| Expr::Call(2, std::iter::once(xs).chain(k).collect(), None))
                         .boxed(),
                 );
@@ -310,8 +429,29 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             push(2, (any::<u8>(), e(Ty::Int)).prop_map(|(k, a)| Expr::CallVar(Ty::FnII, k, vec![a])).boxed());
             push(
                 1,
+                (any::<u8>(), any::<bool>(), be(Ty::Int), be(Ty::Int))
+                    .prop_map(|(k, keep, n, d)| Expr::OptCallVar(k, keep, n, d))
+                    .boxed(),
+            );
+            // Only outside the classes, where no method can call itself.
+            for &k in insts.iter().filter(|_| cx.classes) {
+                push(
+                    1,
+                    (be(Ty::Inst(k)), any::<bool>(), be(Ty::Int), be(Ty::Int))
+                        .prop_map(|(i, keep, n, d)| Expr::OptMethod(i, keep, Some(n), d))
+                        .boxed(),
+                );
+            }
+            push(
+                1,
                 (select(vec![Step::PreInc, Step::PostInc, Step::PreDec, Step::PostDec]), any::<u8>())
                     .prop_map(|(op, k)| Expr::Inc(op, k))
+                    .boxed(),
+            );
+            push(
+                1,
+                (select(vec![Step::PreInc, Step::PostInc, Step::PreDec, Step::PostDec]), any::<u8>())
+                    .prop_map(|(op, k)| Expr::FieldStep(op, k))
                     .boxed(),
             );
             push(1, (any::<u8>(), be(Ty::Int)).prop_map(|(k, a)| Expr::Assign(Ty::Int, k, a)).boxed());
@@ -325,6 +465,18 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             push(2, (be(Ty::Num), be(Ty::Num)).prop_map(|(a, b)| Expr::Div(a, b)).boxed());
             push(1, be(Ty::Num).prop_map(Expr::Neg).boxed());
             push(1, (be(Ty::Num), 0..6u8).prop_map(|(a, k)| Expr::Pow(a, k)).boxed());
+            push(1, (be(Ty::Num), be(Ty::Num)).prop_map(|(a, b)| Expr::Idiv(a, b)).boxed());
+            // `a // (b / c)` and `a // (b * c)` are where the precedence of `//` decides the value: Luau reads
+            // `a // b / c` as `(a // b) / c`.
+            push(
+                1,
+                (be(Ty::Num), be(Ty::Num), be(Ty::Num), any::<bool>())
+                    .prop_map(|(a, b, c, div)| {
+                        let right = if div { Expr::Div(b, c) } else { Expr::Mul(b, c) };
+                        Expr::Idiv(a, Box::new(right))
+                    })
+                    .boxed(),
+            );
             push(1, cond(Ty::Num));
             push(1, (any::<u8>(), 0..4u8, be(Ty::Num)).prop_map(|(k, i, d)| Expr::Index(Ty::ArrNum, k, i, d)).boxed());
             push(1, (be(Ty::Num), be(Ty::Num)).prop_map(|(a, b)| Expr::Or(Ty::Num, a, b)).boxed());
@@ -357,6 +509,7 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             push(1, be(Ty::Rec).prop_map(|o| Expr::Field(Field::InnerS, o)).boxed());
             push(1, (be(Ty::OptObj), be(Ty::Str)).prop_map(|(o, d)| Expr::OptField(Field::S, o, d)).boxed());
             push(1, (any::<u8>(), 0..4u8, be(Ty::Str)).prop_map(|(k, i, d)| Expr::Index(Ty::ArrStr, k, i, d)).boxed());
+            push(2, at_or(Ty::ArrStr, d));
             push(
                 1,
                 (any::<u8>(), any::<u8>(), be(Ty::Str))
@@ -367,6 +520,12 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             for &k in &insts {
                 push(1, be(Ty::Inst(k)).prop_map(Expr::InstTag).boxed());
                 push(1, be(Ty::Inst(k)).prop_map(Expr::InstDescribe).boxed());
+                push(
+                    1,
+                    (be(Ty::Inst(k)), any::<bool>(), be(Ty::Str))
+                        .prop_map(|(i, keep, d)| Expr::OptMethod(i, keep, None, d))
+                        .boxed(),
+                );
             }
             if cx.calls > 1 {
                 push(2, (e(Ty::Str), e(Ty::Int)).prop_map(|(s, n)| Expr::Call(1, vec![s, n], None)).boxed());
@@ -379,6 +538,7 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             );
             push(1, (any::<u8>(), be(Ty::Str)).prop_map(|(k, a)| Expr::Assign(Ty::Str, k, a)).boxed());
             push(1, (any::<u8>(), be(Ty::Str)).prop_map(|(k, a)| Expr::AddAssign(Ty::Str, k, a)).boxed());
+            push(1, (any::<u8>(), be(Ty::Int)).prop_map(|(k, a)| Expr::AddAssign(Ty::Str, k, a)).boxed());
         }
         Ty::Bool => {
             let cmp = select(vec![Cmp::Lt, Cmp::Le, Cmp::Gt, Cmp::Ge, Cmp::Eq, Cmp::Ne]);
@@ -453,15 +613,48 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
             push(1, (var(Ty::Obj), var(Ty::Obj)).prop_map(|(a, b)| Expr::Same(Box::new(a), Box::new(b))).boxed());
             push(1, be(Ty::Num).prop_map(Expr::NaN).boxed());
             push(1, (any::<u8>(), be(Ty::Bool)).prop_map(|(k, a)| Expr::Assign(Ty::Bool, k, a)).boxed());
+            push(2, (be(Ty::OptBool), be(Ty::Bool)).prop_map(|(a, b)| Expr::Coalesce(a, b)).boxed());
+            push(1, be(Ty::OptBool).prop_map(|a| Expr::Not(Ty::OptBool, a)).boxed());
+            push(1, at_or(Ty::ArrBool, d));
+            for optional in [Ty::OptInt, Ty::OptStr, Ty::OptBool, Ty::OptObj] {
+                push(1, be(optional).prop_map(Expr::IsUndefined).boxed());
+            }
+            for optional in [Ty::OptInt, Ty::OptStr, Ty::OptBool] {
+                push(
+                    1,
+                    (select(vec![Cmp::Eq, Cmp::Ne]), be(optional), be(optional))
+                        .prop_map(move |(op, a, b)| Expr::Cmp(op, optional, a, b))
+                        .boxed(),
+                );
+            }
+            push(1, (be(Ty::Int), be(Ty::Str), any::<bool>()).prop_map(|(a, b, ne)| Expr::SameAny(a, b, ne)).boxed());
         }
-        Ty::OptInt | Ty::OptStr | Ty::OptObj => {
+        Ty::OptInt | Ty::OptStr | Ty::OptBool | Ty::OptObj => {
             let inner = ty.required();
             push(3, (be(inner), any::<bool>()).prop_map(|(v, keep)| Expr::Maybe(v, keep)).boxed());
+            if inner != Ty::Obj {
+                // A defined falsy value, which `??` keeps and `||` replaces.
+                push(1, Just(Expr::Maybe(Box::new(falsy(inner)), true)).boxed());
+            }
             let array = match inner {
                 Ty::Int => Ty::ArrInt,
                 Ty::Str => Ty::ArrStr,
+                Ty::Bool => Ty::ArrBool,
                 _ => Ty::ArrObj,
             };
+            push(2, (any::<u8>(), read_index(d)).prop_map(move |(k, i)| Expr::At(array, k, Box::new(i))).boxed());
+            push(
+                1,
+                (any::<u8>(), any::<bool>(), read_index(d))
+                    .prop_map(move |(k, keep, i)| Expr::OptAt(array, k, keep, Box::new(i)))
+                    .boxed(),
+            );
+            push(
+                1,
+                (any::<u8>(), pure_index(d), any::<bool>())
+                    .prop_map(move |(k, i, unordered)| Expr::Remove(array, k, Box::new(i), unordered))
+                    .boxed(),
+            );
             push(1, any::<u8>().prop_map(move |k| Expr::Pop(array, k)).boxed());
             push(1, any::<u8>().prop_map(move |k| Expr::ShiftArr(array, k)).boxed());
             push(1, (be(array), lambda(vec![inner, Ty::Int], Ty::Bool, d)).prop_map(|(a, f)| Expr::Find(a, f)).boxed());
@@ -475,6 +668,11 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
                     push(1, (be(Ty::MapIS), be(Ty::Int)).prop_map(|(m, k)| Expr::MapGet(m, k)).boxed());
                     push(1, be(Ty::OptObj).prop_map(|o| Expr::Chain(Field::S, o)).boxed());
                     push(1, be(Ty::Rec).prop_map(|r| Expr::Field(Field::Then, r)).boxed());
+                }
+                Ty::Bool => {
+                    push(1, (be(Ty::OptBool), be(Ty::OptBool)).prop_map(|(a, b)| Expr::Coalesce(a, b)).boxed());
+                    push(1, (be(Ty::OptBool), be(Ty::OptBool)).prop_map(|(a, b)| Expr::Or(Ty::OptBool, a, b)).boxed());
+                    push(1, (be(Ty::OptBool), be(Ty::OptBool)).prop_map(|(a, b)| Expr::And(Ty::OptBool, a, b)).boxed());
                 }
                 _ => {}
             }
@@ -513,6 +711,10 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
         Ty::Obj => {
             push(4, (be(Ty::Int), be(Ty::Str)).prop_map(|(a, s)| Expr::Obj(a, s)).boxed());
             push(1, (be(Ty::Obj), option::of(be(Ty::Int))).prop_map(|(o, a)| Expr::ObjSpread(o, a)).boxed());
+            push(
+                1,
+                (be(Ty::Int), be(Ty::Str), be(Ty::OptObj)).prop_map(|(a, s, o)| Expr::ObjSpreadOpt(a, s, o)).boxed(),
+            );
             push(1, be(Ty::Rec).prop_map(|r| Expr::Field(Field::Inner, r)).boxed());
             push(1, cond(ty));
         }
@@ -560,6 +762,7 @@ fn types(cx: Cx) -> Vec<Ty> {
         Ty::Bool,
         Ty::OptInt,
         Ty::OptStr,
+        Ty::OptBool,
         Ty::ArrInt,
         Ty::ArrNum,
         Ty::ArrStr,
@@ -594,6 +797,22 @@ fn build_stmt(cx: Cx) -> S<Stmt> {
     let e = |ty: Ty| expr(ty, cx);
     let mut push = |w: u32, s: S<Stmt>| arms.push((w, s));
     push(6, typed(cx).prop_map(|(ty, e)| Stmt::Trace(ty, e)).boxed());
+    // `??` over a value that may be a defined falsy one, which `or` would replace.
+    for (optional, ty) in [(Ty::OptBool, Ty::Bool), (Ty::OptInt, Ty::Int), (Ty::OptStr, Ty::Str)] {
+        push(1, (b(e(optional)), b(e(ty))).prop_map(move |(a, d)| Stmt::Trace(ty, Expr::Coalesce(a, d))).boxed());
+    }
+    push(
+        2,
+        (select(vec![Ty::ArrInt, Ty::ArrStr, Ty::ArrBool, Ty::ArrObj]), any::<u8>(), read_index(cx))
+            .prop_map(|(ty, k, i)| Stmt::Trace(ty.optional_element(), Expr::At(ty, k, Box::new(i))))
+            .boxed(),
+    );
+    push(
+        1,
+        (select(vec![Ty::ArrInt, Ty::ArrStr, Ty::ArrBool, Ty::ArrObj]), any::<u8>(), any::<bool>(), read_index(cx))
+            .prop_map(|(ty, k, keep, i)| Stmt::Trace(ty.optional_element(), Expr::OptAt(ty, k, keep, Box::new(i))))
+            .boxed(),
+    );
     let mut declared = types(cx);
     declared.extend([Ty::FnII, Ty::FnSIS]);
     push(
@@ -609,10 +828,35 @@ fn build_stmt(cx: Cx) -> S<Stmt> {
     }
     push(2, (any::<u8>(), e(Ty::Int)).prop_map(|(k, v)| Stmt::AddAssign(Ty::Int, k, v)).boxed());
     push(1, (any::<u8>(), e(Ty::Str)).prop_map(|(k, v)| Stmt::AddAssign(Ty::Str, k, v)).boxed());
+    // `+=` on a string with a number or a boolean, which concatenates.
+    push(
+        1,
+        (any::<u8>(), prop_oneof![e(Ty::Int), e(Ty::Bool)]).prop_map(|(k, v)| Stmt::AddAssign(Ty::Str, k, v)).boxed(),
+    );
     push(1, (any::<u8>(), e(Ty::Int)).prop_map(|(k, v)| Stmt::SubAssign(k, v)).boxed());
     push(1, (any::<u8>(), 2..4u8).prop_map(|(k, m)| Stmt::MulAssign(k, m)).boxed());
+    push(1, (any::<u8>(), 0..7u8, e(Ty::Num)).prop_map(|(k, op, v)| Stmt::NumAssign(k, op, v)).boxed());
+    push(1, (any::<u8>(), any::<bool>(), any::<u8>()).prop_map(|(k, ushr, m)| Stmt::BitAssign(k, ushr, m)).boxed());
+    // The signs agree as they do for `%`: known.md, "% is floored".
+    push(1, (nat(cx), pos(cx)).prop_map(|(a, b)| Stmt::Compound(0, a, b)).boxed());
+    push(1, (neg(cx), neg(cx)).prop_map(|(a, b)| Stmt::Compound(1, a, b)).boxed());
+    push(1, (2..7u8, e(Ty::Int), e(Ty::Int)).prop_map(|(op, a, b)| Stmt::Compound(op, a, b)).boxed());
+    // `|=` and `^=` differ only where the operands share a bit, so they get more programs than the shifts.
+    push(1, (select(vec![2u8, 3]), e(Ty::Int), e(Ty::Int)).prop_map(|(op, a, b)| Stmt::Compound(op, a, b)).boxed());
+    push(1, (e(Ty::Str), e(Ty::Bool)).prop_map(|(s, v)| Stmt::AddBool(s, v)).boxed());
+    // `a // (b / c)` over integers, whose values are finite where most numbers are not.
+    push(
+        1,
+        (e(Ty::Int), e(Ty::Int), e(Ty::Int), any::<bool>())
+            .prop_map(|(a, b, c, div)| {
+                let right = if div { Expr::Div(Box::new(b), Box::new(c)) } else { Expr::Mul(Box::new(b), Box::new(c)) };
+                Stmt::Trace(Ty::Num, Expr::Idiv(Box::new(a), Box::new(right)))
+            })
+            .boxed(),
+    );
     push(1, (any::<u8>(), e(Ty::Int)).prop_map(|(k, v)| Stmt::Logical(Logical::Coalesce, Ty::OptInt, k, v)).boxed());
     push(1, (any::<u8>(), e(Ty::Str)).prop_map(|(k, v)| Stmt::Logical(Logical::Coalesce, Ty::OptStr, k, v)).boxed());
+    push(1, (any::<u8>(), e(Ty::Bool)).prop_map(|(k, v)| Stmt::Logical(Logical::Coalesce, Ty::OptBool, k, v)).boxed());
     for ty in [Ty::Int, Ty::Str, Ty::Bool] {
         push(
             1,
@@ -643,7 +887,11 @@ fn build_stmt(cx: Cx) -> S<Stmt> {
     }
     push(
         1,
-        (select(vec![Ty::ArrInt, Ty::ArrStr]), vec(option::weighted(0.8, any::<u8>()), 0..4), any::<bool>())
+        (
+            select(vec![Ty::ArrInt, Ty::ArrStr, Ty::ArrBool]),
+            vec(option::weighted(0.8, any::<u8>()), 0..4),
+            any::<bool>(),
+        )
             .prop_flat_map(move |(ty, elements, rest)| {
                 expr(ty, cx).prop_map(move |source| Stmt::DestructureArray {
                     ty,
@@ -698,15 +946,42 @@ fn build_stmt(cx: Cx) -> S<Stmt> {
         );
         push(
             2,
-            (1..7u8, 1..3u8, any::<bool>(), block(looped))
-                .prop_map(|(count, step, down, body)| Stmt::For { count, step, down, body })
+            (1..7u8, 1..3u8, any::<bool>(), proptest::bool::weighted(0.25), block(looped))
+                .prop_map(|(count, step, down, capture, body)| Stmt::For { count, step, down, capture, body })
                 .boxed(),
         );
         push(
             2,
-            select(vec![Ty::ArrInt, Ty::ArrStr, Ty::ArrObj, Ty::ArrNum])
-                .prop_flat_map(move |ty| {
-                    (expr(ty, cx), block(looped)).prop_map(move |(source, body)| Stmt::ForOf { ty, source, body })
+            (
+                select(vec![Ty::ArrInt, Ty::ArrStr, Ty::ArrBool, Ty::ArrObj]),
+                any::<u8>(),
+                any::<bool>(),
+                option::weighted(0.7, -2..3i8),
+                option::weighted(0.4, (any::<bool>(), 2..4u8)),
+                block(looped),
+            )
+                .prop_flat_map(move |(ty, source, down, peek, cull, body)| {
+                    vec(expr(ty.element(), cx), 0..4).prop_map(move |extra| Stmt::ForIndex {
+                        ty,
+                        source,
+                        down,
+                        peek,
+                        cull: cull.map(|(unordered, m)| (unordered, m, extra.clone())),
+                        body: body.clone(),
+                    })
+                })
+                .boxed(),
+        );
+        push(
+            2,
+            (select(vec![Ty::ArrInt, Ty::ArrStr, Ty::ArrObj, Ty::ArrNum]), any::<bool>())
+                .prop_flat_map(move |(ty, destructure)| {
+                    (expr(ty, cx), block(looped)).prop_map(move |(source, body)| Stmt::ForOf {
+                        ty,
+                        source,
+                        destructure: destructure && ty == Ty::ArrObj,
+                        body,
+                    })
                 })
                 .boxed(),
         );
@@ -729,11 +1004,26 @@ fn build_stmt(cx: Cx) -> S<Stmt> {
                 .prop_map(|(count, cond, body)| Stmt::While { count, cond, body })
                 .boxed(),
         );
-        push(1, (1..5u8, block(looped)).prop_map(|(count, body)| Stmt::DoWhile { count, body }).boxed());
-        let switched = cx.in_switch();
         push(
             1,
-            (e(Ty::Int), vec((0..6u8, block(switched), any::<bool>()), 1..4), option::of(block(switched)))
+            (1..5u8, proptest::bool::weighted(0.5), block(looped))
+                .prop_map(|(count, shadow, body)| Stmt::DoWhile { count, cond: None, shadow, body })
+                .boxed(),
+        );
+        // A condition that needs statements may not follow a `continue`, which the compiler rejects.
+        let no_continue = Cx { continuable: false, ..looped };
+        push(
+            1,
+            (1..5u8, e(Ty::Bool), proptest::bool::weighted(0.5), block(no_continue))
+                .prop_map(|(count, cond, shadow, body)| Stmt::DoWhile { count, cond: Some(cond), shadow, body })
+                .boxed(),
+        );
+        let switched = cx.in_switch();
+        // A case expression may not need statements either, so it is a pure index.
+        let case = (0..6u8, option::weighted(0.3, pure_index(cx)), block(switched), any::<bool>());
+        push(
+            1,
+            (e(Ty::Int), vec(case, 1..4), option::of(block(switched)))
                 .prop_map(|(disc, cases, default)| Stmt::Switch { disc, cases, default })
                 .boxed(),
         );
@@ -786,6 +1076,18 @@ fn effect(cx: Cx) -> S<Expr> {
         for k in 0..3u8 {
             arms.push((1, (b(e(Ty::Inst(k))), b(e(Ty::Int))).prop_map(|(i, n)| Expr::InstM(i, n)).boxed()));
         }
+    }
+    let simple = Union::new_weighted(arms.clone()).boxed();
+    // `a && f()`, `a || f()` and `a ?? f()` as statements, which lower to an `if`.
+    for (op, ty) in [
+        (Logical::And, Ty::Bool),
+        (Logical::Or, Ty::Bool),
+        (Logical::And, Ty::Int),
+        (Logical::Or, Ty::Str),
+        (Logical::Coalesce, Ty::OptInt),
+        (Logical::Coalesce, Ty::OptBool),
+    ] {
+        arms.push((1, (b(e(ty)), b(simple.clone())).prop_map(move |(a, f)| Expr::Guard(op, ty, a, f)).boxed()));
     }
     Union::new_weighted(arms).boxed()
 }
@@ -862,6 +1164,44 @@ fn mutation(cx: Cx) -> S<Mutation> {
     arms.push((1, (any::<u8>(), inc()).prop_map(|(k, op)| Mutation::FieldInc(Ty::Obj, Field::A, k, op)).boxed()));
     arms.push((1, (any::<u8>(), inc()).prop_map(|(k, op)| Mutation::FieldInc(Ty::Rec, Field::InnerA, k, op)).boxed()));
     arms.push((1, (any::<u8>(), 0..3u8, e(Ty::Int)).prop_map(|(k, i, v)| Mutation::IndexAdd(k, i, v)).boxed()));
+    for ty in arrays {
+        let element = ty.element();
+        let mut writes = vec![Just(Write::Set).boxed()];
+        match ty {
+            Ty::ArrInt => {
+                writes.push(Just(Write::Add).boxed());
+                writes.push(inc().prop_map(Write::Inc).boxed());
+            }
+            Ty::ArrStr => writes.push(Just(Write::Add).boxed()),
+            Ty::ArrBool => writes.push(select(vec![Logical::Or, Logical::And]).prop_map(Write::Logical).boxed()),
+            _ => {}
+        }
+        arms.push((
+            3,
+            (any::<u8>(), pure_index(cx), Union::new(writes), e(element))
+                .prop_map(move |(k, i, w, v)| Mutation::WriteAt(ty, k, i, w, v))
+                .boxed(),
+        ));
+        arms.push((
+            2,
+            (any::<u8>(), pure_index(cx), e(element)).prop_map(move |(k, i, v)| Mutation::Insert(ty, k, i, v)).boxed(),
+        ));
+        arms.push((
+            2,
+            (any::<u8>(), pure_index(cx), any::<bool>())
+                .prop_map(move |(k, i, unordered)| Mutation::Remove(ty, k, i, unordered))
+                .boxed(),
+        ));
+    }
+    arms.push((
+        1,
+        (select(vec![Field::A, Field::InnerA]), any::<u8>(), any::<bool>(), any::<u8>())
+            .prop_map(|(f, k, ushr, m)| {
+                Mutation::FieldBit(if f == Field::A { Ty::Obj } else { Ty::Rec }, f, k, ushr, m)
+            })
+            .boxed(),
+    ));
+    arms.push((1, (any::<u8>(), e(Ty::Str)).prop_map(|(k, v)| Mutation::ThenCoalesce(k, v)).boxed()));
     Union::new_weighted(arms).boxed()
 }
 
