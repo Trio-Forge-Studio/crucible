@@ -1271,7 +1271,8 @@ fn reactive_alias_and_workspace_entries_keep_their_range() {
     assert_eq!(code(&output), 0, "an alias of another package names another source: {}", text(&output.stderr));
 }
 
-const EXPERIENCE: &str = "[places.start]\nproject = \"default.project.json\"\n\n[env.staging]\nuniverse = 10772177432\nplace = 1\n\n[passes.vip]\nname = \"VIP\"\nprice = 299\n\n[badges.first-pickup]\nname = \"First pickup\"\n";
+/// Its environment maps no place, as for a game that provisions and builds with crucible and publishes by itself.
+const EXPERIENCE: &str = "[places.start]\nproject = \"default.project.json\"\n\n[env.staging]\nuniverse = 10772177432\n\n[passes.vip]\nname = \"VIP\"\nprice = 299\n\n[badges.first-pickup]\nname = \"First pickup\"\n";
 const DECLARATION: &str = "src/crucible-experience.d.ts";
 const BINDINGS: &str = "out/shared/crucible-experience.luau";
 
@@ -1308,7 +1309,7 @@ fn a_build_writes_the_experience_declaration_and_binds_no_id_without_an_environm
     for line in [
         "declare module \"crucible:experience\" {\n",
         "\t\treadonly Vip: PassHandle<\"vip\">;\n",
-        "\texport const Products: {};\n",
+        "\texport const Products: Record<never, never>;\n",
         "\t\treadonly FirstPickup: BadgeHandle<\"first-pickup\">;\n",
     ] {
         assert!(declaration.contains(line), "{line:?} in\n{declaration}");
@@ -1338,9 +1339,9 @@ fn a_build_for_an_environment_binds_the_lock_s_ids_or_names_provision() {
     assert_eq!(code(&out), 2);
     assert_eq!(
         text(&out.stderr),
-        "crucible build: this build cannot bind crucible:experience:\n  crucible.toml:8: passes.vip: \
+        "crucible build: this build cannot bind crucible:experience:\n  crucible.toml:7: passes.vip: \
          crucible.lock holds no ID for it in staging, so a build for staging cannot bind Passes.Vip. Run \
-         crucible provision staging, commit crucible.lock, and build again\n  crucible.toml:12: badges.first-pickup: \
+         crucible provision staging, commit crucible.lock, and build again\n  crucible.toml:11: badges.first-pickup: \
          crucible.lock holds no ID for it in staging, so a build for staging cannot bind Badges.FirstPickup. Run \
          crucible provision staging, commit crucible.lock, and build again\n"
     );
@@ -1354,7 +1355,7 @@ fn a_build_for_an_environment_binds_the_lock_s_ids_or_names_provision() {
     let out = game.build(&["--env", "staging"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     let bindings = game.read(BINDINGS);
-    assert!(bindings.contains("\t\tVip = bound(\"vip\", 3301234567),\n"), "{bindings}");
+    assert!(bindings.contains("\t\tVip = bound(\"vip\", 3301234567, true),\n"), "{bindings}");
     assert!(bindings.contains("\t\tFirstPickup = bound(\"first-pickup\", 2124000000000000),\n"), "{bindings}");
     let out = game.build(&["--env", "production"]);
     assert_eq!(code(&out), 2);
@@ -1378,9 +1379,38 @@ fn a_place_that_maps_no_output_folder_under_replicated_storage_cannot_hold_the_b
     let stderr = text(&out.stderr);
     assert!(
         stderr.contains("maps no folder of ")
-            && stderr.contains(" under ReplicatedStorage, where crucible:experience goes. Map one, such as out/shared"),
+            && stderr.contains(
+                " under ReplicatedStorage, where crucible:experience goes. Map one, such as out/shared. A project that \
+                 maps each file by itself, such as one Rogen generates, still needs one folder mapping under \
+                 ReplicatedStorage inside out, where the build puts the handles module: add a node such as \
+                 \"Crucible\": { \"$path\": \"out/crucible\" } under its ReplicatedStorage"
+            ),
         "{stderr}"
     );
+}
+
+#[test]
+fn a_project_that_maps_each_file_by_itself_is_told_the_one_folder_mapping_the_handles_need() {
+    let game = experience_game();
+    let mut project: Value = serde_json::from_str(&game.read("default.project.json")).unwrap();
+    project["tree"]["ReplicatedStorage"].as_object_mut().unwrap().remove("TS");
+    project["tree"]["ReplicatedStorage"]["Greeting"] = json!({ "$path": "out/shared/greeting.luau" });
+    project["tree"]["ServerScriptService"]["TS"] =
+        json!({ "$className": "Folder", "Main": { "$path": "out/server/main.server.luau" } });
+    game.json("default.project.json", &project);
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 1);
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("add a node such as \"Crucible\": { \"$path\": \"out/crucible\" } under its ReplicatedStorage"),
+        "{stderr}"
+    );
+
+    project["tree"]["ReplicatedStorage"]["Crucible"] = json!({ "$path": "out/crucible" });
+    game.json("default.project.json", &project);
+    let out = game.build(&[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(game.path("out/crucible/crucible-experience.luau").exists(), "the handles go in the one mapped folder");
 }
 
 #[test]
@@ -1392,7 +1422,8 @@ fn an_unbound_handle_throws_naming_its_key_when_its_id_is_read() {
         "read.luau",
         "local experience = require(\"./out/shared/crucible-experience\")\nassert(experience.Passes.Vip.key == \"vip\")\n\
          local ok, message = pcall(function() return experience.Passes.Vip.id end)\nassert(not ok)\nprint(message)\n\
-         assert(not pcall(function() experience.Passes.Vip.key = \"x\" end), \"frozen\")\n",
+         assert(not pcall(function() experience.Passes.Vip.key = \"x\" end), \"frozen\")\n\
+         assert(not pcall(function() return experience.Passes.Vip.forSale end), \"forSale throws unbound\")\n",
     );
     // Rokit finds lune through the repository's rokit.toml.
     let out = Command::new("lune").arg("run").arg(game.path("read.luau")).current_dir(repo()).output().unwrap();
@@ -1474,7 +1505,7 @@ fn a_retired_product_an_environment_never_had_lets_its_place_boot() {
 
     let out = game.build(&["--env", "sample", "--output", "build/sample.rbxl"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
-    assert!(game.read(BINDINGS).contains("\t\tOldPack = bound(\"old-pack\", 1002),\n"));
+    assert!(game.read(BINDINGS).contains("\t\tOldPack = bound(\"old-pack\", 1002, false),\n"));
     let out = game.build(&["--env", "fresh", "--output", "build/fresh.rbxl"]);
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     assert!(game.read(BINDINGS).contains("\t\tOldPack = absent(\"old-pack\", "), "{}", game.read(BINDINGS));

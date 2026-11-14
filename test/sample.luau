@@ -158,6 +158,7 @@ return {
 		connect(w, "Ann", ANN)
 		local experience = shared(w.server, "crucible-experience")
 		spec.eq(experience.Products.CoinPack.id, 1001, "the handle holds the sample environment's ID")
+		spec.eq(experience.Products.CoinPack.forSale, true, "the coin pack is on sale in the sample environment")
 		local bought = w:run(function()
 			return w.marketplace.ProcessReceipt({
 				PlayerId = ANN,

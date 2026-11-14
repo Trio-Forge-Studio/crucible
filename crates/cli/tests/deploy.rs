@@ -198,6 +198,28 @@ fn invalid_targets_and_arguments_are_json_usage_errors_without_requests() {
 }
 
 #[test]
+fn an_environment_that_maps_no_place_is_refused_before_any_request() {
+    let server = Server::new(vec![]);
+    let unmapped = TWO.replace("places={arena=20,start=30}\n", "");
+    for args in [vec!["production"], vec!["production", "--place", "arena"], vec!["production", "--dry-run"]] {
+        let game = Game::new(Some(&unmapped));
+        let out = game.deploy(&server.origin, &args);
+        assert_eq!(code(&out), 2);
+        let d = document(&out);
+        assert_eq!(d["error"]["kind"], "usage");
+        assert_eq!(
+            d["error"]["message"],
+            "env production in crucible.toml maps no place, so deploy has no place ID to publish to. Map each place \
+             in [env.production] with places = { arena = <id>, start = <id> }, or with place = <id> when start is \
+             the only place",
+            "{args:?}"
+        );
+        assert!(!game.0.path().join("out").exists());
+    }
+    assert!(server.requests().is_empty());
+}
+
+#[test]
 fn build_failure_is_unavailable_and_never_uploads() {
     let game = Game::new(Some(TWO));
     let server = Server::new(vec![granted()]);
