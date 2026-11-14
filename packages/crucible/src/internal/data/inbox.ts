@@ -113,7 +113,7 @@ export class Inbox {
 	/** A session of this user on this server reads the change within one round trip (rules 66, 73). */
 	private prompt(userId: number) {
 		for (const [, session] of this.runtime.sessions)
-			if (session.userId === userId && session.phase === Phase.Active)
+			if (session.userId === userId && session.authority.phase === Phase.Active)
 				this.runtime.requestWrite(session, Priority.Renew);
 	}
 

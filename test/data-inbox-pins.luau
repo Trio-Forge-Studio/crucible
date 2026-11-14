@@ -77,11 +77,11 @@ return {
 		end)
 		backend:advance(2)
 		local session = D2.session(a, player)
-		spec.eq(session.phase, LOADING, "the load is held by the other server's lease")
+		spec.eq(session.authority.phase, LOADING, "the load is held by the other server's lease")
 		local sent = D2.send(a, decl, { amount = 1 }, D2.id(W - 5, "m1"))
 		backend:advance(1)
 		spec.eq(sent.value.kind, "ok", "the message is queued")
-		spec.eq(session.phase, LOADING, "the session is still loading")
+		spec.eq(session.authority.phase, LOADING, "the session is still loading")
 		spec.eq(session.want, nil, "no write was requested for it")
 		spec.eq(session.op, 0, "and none was started")
 	end,
@@ -99,7 +99,7 @@ return {
 			return a.store:handoff(player)
 		end)
 		backend:advance(0.3)
-		spec.eq(session.phase, SEALED, "the handoff sealed the session behind the send")
+		spec.eq(session.authority.phase, SEALED, "the handoff sealed the session behind the send")
 		local before = session.op
 		gate.release()
 		backend:advance(2)

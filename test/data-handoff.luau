@@ -118,7 +118,7 @@ return {
 		spec.eq(stored(backend).epoch, 2, "a new acquisition")
 		spec.eq(current.value.pendingRewards, 57, "the payout survived the trip")
 		spec.list(a.store.reasons, { "join", "resume" }, "onLoad ran with reason resume")
-		spec.eq(old.phase, 3, "rule 48: the sealed session never became writable again")
+		spec.eq(old.authority.phase, 3, "rule 48: the sealed session never became writable again")
 		spec.eq(call(a, "resume", pa).value, true, "resume of a writable session is true at once")
 	end,
 	["rule 47 resume after the destination took over is refused busy"] = function()
@@ -196,7 +196,7 @@ return {
 		spec.eq(stored(backend).lease.token, old.token, "the sealed lease is untouched")
 		backend:advance(80)
 		spec.eq(resumed.value, true, "resumed once the release settled")
-		spec.eq(old.released, "committed", "the release was never fenced by our own acquisition")
+		spec.eq(old.authority.released, "committed", "the release was never fenced by our own acquisition")
 		spec.eq(session(a, pa).value.pendingRewards, 12, "the newest revision is kept")
 	end,
 	["rule 29 resume after the release gave up carries the sealed revision"] = function()
@@ -209,7 +209,7 @@ return {
 		backend:fail("transient", { server = a.id }, 1000)
 		call(a, "handoff", pa)
 		backend:advance(75)
-		spec.eq(old.released, "given up", "the release gave up at its bound")
+		spec.eq(old.authority.released, "given up", "the release gave up at its bound")
 		spec.eq(stored(backend).lease.token, old.token, "the sealed token's lease is still stored")
 		clearPlans(backend)
 		local resumed = call(a, "resume", pa)
