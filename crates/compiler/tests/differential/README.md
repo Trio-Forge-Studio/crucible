@@ -28,7 +28,9 @@ differential -- --ignored generated`. On failure the test prints the seed, the p
 trace line with both values, and the shrunk program, which it also writes to
 `target/tmp/differential/failures/seed-<seed>-program-<n>.ts`, with the program as generated next to it in
 `seed-<seed>-program-<n>-unshrunk.ts`, so `DIFFERENTIAL_FILE=<either file>` reruns it alone.
-`regressions/` holds the programs of fixed bugs, and `regressions_trace_the_same_in_node_and_lune` runs each one.
+`regressions/` holds the programs of fixed bugs, and of constructs the generator does not write where a compiler
+change once went unnoticed, such as a computed key with an effect in `||=` and `+=`.
+`regressions_trace_the_same_in_node_and_lune` runs each one.
 `known_differences_still_differ` runs each program in `known/` and fails when one no longer differs, so a fix moves its
 program to `regressions/`.
 
