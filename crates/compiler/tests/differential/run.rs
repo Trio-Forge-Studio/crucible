@@ -26,7 +26,8 @@ pub enum Outcome {
 pub enum Failure {
     /// The traces differ, first at these lines of Node's and Lune's, `None` where one side has no line there. The
     /// position itself is not kept, because a deleted trace moves it, and neither is the address in a Luau
-    /// `table: 0x...`, which changes from run to run.
+    /// `table: 0x...`, which changes from run to run, nor the chunk and line of a Luau error, such as
+    /// `[string "p00002"]:88:`, which change with the program's place in its batch and with every deleted line.
     Differs(Option<String>, Option<String>),
     /// JavaScript threw an engine error, which a generated program never should: the generator is wrong. It holds
     /// Node's first `!error` line.
@@ -43,7 +44,7 @@ impl Outcome {
             Outcome::Ran { node, .. } if error(node).is_some() => error(node).map(Failure::NodeError),
             Outcome::Ran { node, lune } if node != lune => {
                 let at = node.iter().zip(lune).position(|(a, b)| a != b).unwrap_or(node.len().min(lune.len()));
-                let line = |lines: &[String]| lines.get(at).map(|l| without_addresses(l));
+                let line = |lines: &[String]| lines.get(at).map(|l| without_places(&without_addresses(l)));
                 Some(Failure::Differs(line(node), line(lune)))
             }
             Outcome::Ran { .. } => None,
@@ -65,6 +66,53 @@ fn without_addresses(line: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// The line with each `[string "<chunk>"]:<line>:` of a Luau error written as `[string]:`. The trace escapes the quotes
+/// of a thrown string as `"`, so the chunk name is whatever stands before the `]:`.
+fn without_places(line: &str) -> String {
+    const OPEN: &str = "[string ";
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(at) = rest.find(OPEN) {
+        let after = &rest[at + OPEN.len()..];
+        let place = after.find("]:").and_then(|close| {
+            let tail = &after[close + 2..];
+            let digits = tail.len() - tail.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            (digits > 0 && tail[digits..].starts_with(':') && !after[..close].contains('['))
+                .then(|| &tail[digits + 1..])
+        });
+        match place {
+            Some(tail) => {
+                out.push_str(&rest[..at]);
+                out.push_str("[string]:");
+                rest = tail;
+            }
+            None => {
+                out.push_str(&rest[..at + OPEN.len()]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[test]
+fn a_luau_error_fails_the_same_way_wherever_its_program_and_line_are() {
+    let outcome = |chunk: &str, line: u32| Outcome::Ran {
+        node: vec!["1".into(), "2".into()],
+        lune: vec!["1".into(), format!("!error [string \"{chunk}\"]:{line}: attempt to index nil with 'x'")],
+    };
+    assert_eq!(outcome("p00002", 88).failure(), outcome("p00017", 5).failure());
+    assert_eq!(without_places("a [string \"p1\"]:3: b [string \"p2\"]:44: c"), "a [string]: b [string]: c");
+    assert_eq!(without_places("[string \"p1\"] and [string \"x"), "[string \"p1\"] and [string \"x");
+    let other = Outcome::Ran {
+        node: vec!["1".into(), "2".into()],
+        lune: vec!["1".into(), "!error [string \"p1\"]:5: no".into()],
+    };
+    assert_ne!(outcome("p1", 5).failure(), other.failure());
+    assert_eq!(without_places(r#"!throw "[string "p00002"]:88: attempt""#), r#"!throw "[string]: attempt""#);
 }
 
 pub struct Runner {

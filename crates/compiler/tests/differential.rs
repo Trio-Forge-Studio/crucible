@@ -103,6 +103,19 @@ fn generated_programs_trace_the_same_in_node_and_lune() {
             let mut run = |_: &[ast::Program], sources: &[String]| runner.run(sources);
             let (source, shrunk, rounds) = shrink::shrink(program, outcome.clone(), batch, limit, &mut run);
             eprintln!("shrunk in {rounds} rounds and {:.0?}", shrinking.elapsed());
+            let (before, after) = (unshrunk.lines().count(), source.lines().count());
+            let shrinkage = if shrinking.elapsed() > limit {
+                format!(
+                    "Shrinking stopped at its limit of {limit:.0?}, from {before} lines to {after}. \
+                     DIFFERENTIAL_SHRINK_SECONDS raises the limit."
+                )
+            } else if after * 10 >= before * 9 {
+                format!(
+                    "Shrinking barely helped, from {before} lines to {after}: no smaller program fails the same way."
+                )
+            } else {
+                format!("Shrunk from {before} lines to {after}.")
+            };
             std::fs::create_dir_all(&failures_dir).expect("the failures folder is made");
             let file = failures_dir.join(format!("seed-{seed}-program-{index}.ts"));
             let original = failures_dir.join(format!("seed-{seed}-program-{index}-unshrunk.ts"));
@@ -112,7 +125,7 @@ fn generated_programs_trace_the_same_in_node_and_lune() {
                 "program {index} of seed {seed} fails ({failed} of the {n} in its batch fail). Rerun the same programs \
                  with DIFFERENTIAL_SEED={seed} DIFFERENTIAL_CASES={}, and add DIFFERENTIAL_KEEP_GOING=1 to write every \
                  failing program unshrunk. Run one program alone with DIFFERENTIAL_FILE=<file> and the one_program \
-                 test.\nunshrunk program: {}\n{}\nshrunk program: {}\n{}\n{source}",
+                 test. {shrinkage}\nunshrunk program: {}\n{}\nshrunk program: {}\n{}\n{source}",
                 index + 1,
                 original.display(),
                 describe(&outcome),
