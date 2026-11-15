@@ -340,7 +340,7 @@ class ProfileBinding {
 		return table.freeze({});
 	}
 
-	/** Each observer runs as a data callback, so it cannot yield or write data; one that fails is reported once. */
+	/** Each observer runs as a data callback, so it cannot yield or write data; one that fails is reported once per Subsystem and kind. */
 	notify(raised: ProfileEvent) {
 		this.events.push(table.freeze(raised));
 		if (this.notifying) return;
@@ -353,7 +353,7 @@ class ProfileBinding {
 				const [ok, err] = pcall(() => dataCallback(observer.listener, event, undefined));
 				if (!ok)
 					server.engine!.diagnose(
-						`observe:${name}:${observer.owner}:${event.kind}`,
+						`observe:${observer.owner}:${event.kind}`,
 						`${name}: the observer of ${observer.owner} failed on ${event.kind} for ${event.player.UserId}: ${tostring(err)}`,
 					);
 			}

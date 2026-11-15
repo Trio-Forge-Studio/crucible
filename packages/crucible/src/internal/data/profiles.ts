@@ -94,12 +94,13 @@ const NO_HOOKS: ProfileHooks = {
 	observe: () => {},
 };
 
-const SAVED: Saved = { ok: true };
+/** Frozen: observers receive it, and every successful write shares it. */
+const SAVED: Saved = table.freeze({ ok: true });
 
 function writeResult(settled: Settled, committed: boolean, ambiguous: boolean): Saved {
 	if (committed) return SAVED;
-	if (ambiguous || settled.kind === "uncertain") return { ok: false, reason: "uncertain" };
-	return { ok: false, reason: settled.kind === "done" ? "unavailable" : "timeout" };
+	if (ambiguous || settled.kind === "uncertain") return table.freeze<Saved>({ ok: false, reason: "uncertain" });
+	return table.freeze<Saved>({ ok: false, reason: settled.kind === "done" ? "unavailable" : "timeout" });
 }
 
 /** Revision 0 is the record as loaded, which the store already holds. */

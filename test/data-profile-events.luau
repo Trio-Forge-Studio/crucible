@@ -15,14 +15,15 @@ local function declare(r)
 end
 
 -- A world whose Logger service records every event it observes, checking each carries only its kind's fields.
-local function newWorld(serve)
+local function newWorld(serve, declareStores)
 	local events = {}
 	local w = World.new({
-		declare = declare,
+		declare = declareStores or declare,
 		serve = function(s, d, world)
 			s.service("Logger", function(self)
 				self.events = d.PlayerData:observe(function(event)
 					assert(table.isfrozen(event), "an event is frozen")
+					assert(event.result == nil or table.isfrozen(event.result), "so is its result")
 					local keys = {}
 					for key in event do
 						table.insert(keys, key)
@@ -128,6 +129,7 @@ return {
 		end)
 		w:settle(2)
 		spec.eq(box.value.ok, false, "save() did not confirm")
+		spec.eq(box.value.reason, "timeout", "save() waited out its deadline")
 		spec.list(kinds(w.events), { "writable", "save" }, "the rejected write reports a save")
 		local failed = w.events[2]
 		spec.eq(failed.result.ok, false, "that failed")
@@ -297,6 +299,78 @@ return {
 			spec.eq(w:logged(`the observer of {owner} failed on save`), 1, `{owner} reported once for two saves`)
 		end
 		spec.eq(w:logged("observer broke"), 3, "each report carries the error: writable, save and released")
+		w:finish()
+	end,
+
+	["a listener cannot change a result that other listeners and later events see"] = function()
+		local tried = {}
+		local seen = {}
+		local w = newWorld(function(s, d)
+			s.service("Tamperer", function(self)
+				self.events = d.PlayerData:observe(function(event)
+					if event.result ~= nil then
+						local changed = pcall(function()
+							event.result.ok = not event.result.ok
+						end)
+						table.insert(tried, if changed then "changed" else "refused")
+					end
+				end)
+			end)
+			s.service("After", function(self)
+				self.events = d.PlayerData:observe(function(event)
+					if event.result ~= nil then
+						table.insert(seen, `{event.kind} {event.result.ok} {event.result.reason}`)
+					end
+				end)
+			end)
+		end)
+		local ann = w:player("Ann", USER)
+		w:settle()
+		addCoins(w, ann.player, 1)
+		spec.eq(saveNow(w, ann.player).ok, true, "the first save confirmed")
+		addCoins(w, ann.player, 1)
+		w.backend:fail("reject", { kind = "update" }, 1, { code = 500 })
+		w:run(function()
+			return w.server.d.PlayerData:save(ann.player, 1)
+		end)
+		w:settle(2)
+		addCoins(w, ann.player, 1)
+		spec.eq(saveNow(w, ann.player).ok, true, "a later save confirmed")
+		w:leave(ann)
+		w:settle(2)
+		spec.list(tried, { "refused", "refused", "refused", "refused" }, "every write to a result threw")
+		spec.list(
+			seen,
+			{ "save true nil", "save false unavailable", "save true nil", "released true nil" },
+			"the next listener and every later success saw the results as they were"
+		)
+		w:finish()
+	end,
+
+	["an observer that throws on two stores is reported once per kind, not once per store"] = function()
+		local w = newWorld(function(s, d)
+			s.service("Thrower", function(self)
+				self.players = d.PlayerData:observe(function()
+					error("observer broke")
+				end)
+				self.stats = d.Stats:observe(function()
+					error("observer broke")
+				end)
+			end)
+		end, function(r)
+			local small = r.n.object({ { "level", r.n.f64 } })
+			return {
+				PlayerData = fixture.declare(r),
+				Stats = r.emit.profileStore("FD.Stats", { template = { level = 1 } }, small, small, {}),
+			}
+		end)
+		local ann = w:player("Ann", USER)
+		w:settle()
+		spec.eq(w.server.d.Stats:loaded(ann.player), true, "FD.Stats loaded")
+		spec.eq(w:logged("the observer of Thrower failed on writable"), 1, "both stores' writable report once")
+		w:leave(ann)
+		w:settle(2)
+		spec.eq(w:logged("the observer of Thrower failed on released"), 1, "both stores' released report once")
 		w:finish()
 	end,
 

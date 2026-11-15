@@ -1510,6 +1510,38 @@ const mutants = [
 		"this.events.push(raised);",
 		"data-profile-events",
 	],
+	[
+		"events",
+		"guard",
+		D + "profiles.ts",
+		"const SAVED: Saved = table.freeze({ ok: true });",
+		"const SAVED: Saved = { ok: true };",
+		"data-profile-events",
+	],
+	[
+		"events",
+		"guard",
+		D + "profiles.ts",
+		'return table.freeze<Saved>({ ok: false, reason: "uncertain" });',
+		'return { ok: false, reason: "uncertain" };',
+		"data-profile-events",
+	],
+	[
+		"events",
+		"guard",
+		D + "profiles.ts",
+		'return table.freeze<Saved>({ ok: false, reason: settled.kind === "done" ? "unavailable" : "timeout" });',
+		'return { ok: false, reason: settled.kind === "done" ? "unavailable" : "timeout" };',
+		"data-profile-events",
+	],
+	[
+		"events",
+		"swap",
+		D + "runtime.ts",
+		"`observe:${observer.owner}:${event.kind}`",
+		"`observe:${name}:${observer.owner}:${event.kind}`",
+		"data-profile-events",
+	],
 ];
 // Type-checks every mutant in one language service, so a mutant that cannot compile fails before the slow runs.
 function typecheck(originals) {
