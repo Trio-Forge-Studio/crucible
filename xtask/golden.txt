@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-550e6947d1a07b2c006a02cd6e5ba656b23f286b8d3063ac284ac597a060c915  build/sample-game.rbxl
+06cec26d1fda9c7c7b725f12736b83d6ceda0b92c5a41db464f52c490a274937  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -29,7 +29,7 @@ b1c407f57ccfc4aaac59cf878a1a407fa3dbf406e3b0229ddb1cd3815b4fd478  packages/cruci
 c3d9ba39c2f711697c920f5d4868daa8f3e840e80f62cd7752738bb41b3e9339  packages/crucible/out/crucible-behaviour.luau
 43b4d8eb6ddf2496fba3e6dfb6d8f3ece6325f461d6a4c3bb9035fc4a7942fc8  packages/crucible/out/crucible-object.d.ts
 94f0dfab4eb7ab7a0b32ba0bfcbf698f6efb283d64ae3565f845a7048dcbc3e9  packages/crucible/out/crucible-object.luau
-32386fb2a1859c43004a9f59c6e41be83ae3ea0b42f73c1d31b879bd8d9ce589  packages/crucible/out/data.d.ts
+9dbc305f8b50ff2a60a5eaea2131640cb128d827389a62df766c28dddd9f4518  packages/crucible/out/data.d.ts
 3cf43f300f5a747a8adf4743b037d24781d6ea10a5469c40f1f9c2fe6533ebdc  packages/crucible/out/data.luau
 1268f5ab3930573e5d1c57b755dc0af2b78b3637d1879b142c892d1c600a8f8a  packages/crucible/out/emit/configs.d.ts
 d39b31e4a5f3e4ecc27188a0644addfed7050624b6efc140d2f329e9e0d5b4e5  packages/crucible/out/emit/configs.luau
@@ -84,7 +84,7 @@ c418db5081630233145df0aadf40470874c8a616b7279af0d579e0eb8f94acc4  packages/cruci
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/port.d.ts
 716b1405acc0d0c7040084cede8fe0c8eec2cd3fc712fc02d95a984dfd537bce  packages/crucible/out/internal/data/port.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/profiles.d.ts
-548fd111efb88ae6566e2f204d36e33c398ae888c114402994e199b3e6f01f1f  packages/crucible/out/internal/data/profiles.luau
+faa5ea2289028b0738ee27e1a9001f549cd16765bfc06a40d2e0d1d720a6fbd4  packages/crucible/out/internal/data/profiles.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/receipts.d.ts
 825d89423e020b09c66b30e84c1d1776a535909ec5460b3e7bbb6b4b0448f8e1  packages/crucible/out/internal/data/receipts.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/record-bindings.d.ts
@@ -94,7 +94,7 @@ c418db5081630233145df0aadf40470874c8a616b7279af0d579e0eb8f94acc4  packages/cruci
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/records.d.ts
 b39bfcb1153940e0867a4d56f916d4521cb1805e6b23b5eb1eb83e59cc40a2d9  packages/crucible/out/internal/data/records.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/runtime.d.ts
-63386775a834d740bcd9c308790e42471667c1021c33a999fe7d2dbfa9e5e89f  packages/crucible/out/internal/data/runtime.luau
+3d9680fb4e724144bb3211e8ea5f30469fcb8dde0b87760e604bb205e0410bd2  packages/crucible/out/internal/data/runtime.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/scheduler.d.ts
 8e9c009f2dab2863e322fa1740fb89b6f5308dd2c9d24dc1aa4c8d48552056e4  packages/crucible/out/internal/data/scheduler.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/session.d.ts
@@ -187,7 +187,7 @@ ffa89d9de90c5f9c07c8f320c841346a61039dfbf7f2efea6c454aaf7cff6d60  packages/cruci
 14d302e97c5485a7ec6e6a31d1f17c34008f9ee9d53afe8537bb5022bc88351c  packages/crucible/out/replicated.luau
 40a9795f38a14f9acc3430754c3ed007f2c9ae5e75dcf35f8866df5288b6be84  packages/crucible/out/server/data.d.ts
 ffe36bdc0e0bb566df5e82383e27e83c64a9fdc8ff162c4ea0c11484455df983  packages/crucible/out/server/data.luau
-dcf0083e2729f3daf4c868da2b159e237768d3fbc34e1b92a0074d3529e6d7f2  packages/crucible/out/server/index.d.ts
+b5ee48346774683044aa1b071f1ff1ee86c3e23e9667973250b701e6f19909f9  packages/crucible/out/server/index.d.ts
 aa73e1b45e0c950d9a6206494d059b4999174abb6536f142dac0a7a59ed43bf2  packages/crucible/out/server/init.luau
 cef6af19e92459dd2e351be613c59c38af7af6acb2b1ccff9e4630f482a1f845  packages/crucible/out/server/publish.d.ts
 63da1081ad9a20454b068295c657642aaa80a39f0b647bd3474ed12d3bfec5c0  packages/crucible/out/server/publish.luau

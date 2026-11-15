@@ -24,6 +24,8 @@ export type { OperationId, StoreFailure, StoreResult } from "../data";
 export type {
 	ProfileMessage,
 	ProfileClaim,
+	ProfileEvent,
+	ProfileObserver,
 	LoadReason,
 	ReleaseReason,
 	Purchase,

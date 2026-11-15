@@ -475,6 +475,7 @@ function Backend:realm(options)
 				published[player] = value
 			end,
 			delivered = function() end,
+			observe = function() end,
 		})
 		runtime.published = published
 		runtime.reasons = reasons

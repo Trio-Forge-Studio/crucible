@@ -382,6 +382,7 @@ return {
 					end,
 					publish = function() end,
 					delivered = function() end,
+					observe = function() end,
 				}
 			)
 			D2.seed(backend, nil, { payload = { upgrades = { u1 = 5, u2 = 50, future = 7 } }, epoch = 5 })
