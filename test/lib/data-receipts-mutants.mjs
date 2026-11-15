@@ -1077,7 +1077,7 @@ function spec(target) {
 	return { hung: false, status: result.status, output: result.stdout + result.stderr };
 }
 try {
-	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
 	fs.cpSync(path.join(repo, "crates/compiler/roblox-ts"), path.join(scratch, "crates/compiler/roblox-ts"), {

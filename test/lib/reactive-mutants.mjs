@@ -508,7 +508,7 @@ try {
 	// reactive-charm's P4 reads the built place's rbxts_include.
 	fs.mkdirSync(path.join(scratch, "build"), { recursive: true });
 	fs.copyFileSync(path.join(repo, "build/sample-game.rbxl"), path.join(scratch, "build/sample-game.rbxl"));
-	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
 	fs.cpSync(path.join(repo, "crates/compiler/roblox-ts"), path.join(scratch, "crates/compiler/roblox-ts"), {

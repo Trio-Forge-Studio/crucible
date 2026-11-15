@@ -1,5 +1,0 @@
-{
-	"aliases": {
-		"tooling": "./node_modules/@trioforge/tooling/lune"
-	}
-}

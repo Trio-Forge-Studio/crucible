@@ -166,9 +166,6 @@ importers:
 
   .:
     devDependencies:
-      '@trioforge/tooling':
-        specifier: 0.1.0
-        version: 0.1.0
       tsrs:
         specifier: 0.20.1-ts7.1.0-beta
         version: 0.20.1-ts7.1.0-beta
@@ -589,10 +586,6 @@ packages:
     engines: {node: '>=12', npm: '>=6'}
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
-
-  '@trioforge/tooling@0.1.0':
-    resolution: {integrity: sha512-I2qTrrITQ7Hzu8Og0NuUwvWSUy9PtX0Uk1yijCs8eTWAvXrfUVPSeTjmPtQuBPh50OoDHYmo5iE5VbfgLva3ng==}
-    hasBin: true
 
   '@tsrs/darwin-arm64@0.20.1-ts7.1.0-beta':
     resolution: {integrity: sha512-35FzlwW1basYFfHM4aEXD9ix/BJ7xfBM4/k0CLnooHVYKELg279gK5peLGQzI7IuTMWlwxt8IB9MRKT7GfKWXA==}
@@ -1419,8 +1412,6 @@ snapshots:
   '@testing-library/user-event@14.6.8(@testing-library/dom@10.4.2)':
     dependencies:
       '@testing-library/dom': 10.4.2
-
-  '@trioforge/tooling@0.1.0': {}
 
   '@tsrs/darwin-arm64@0.20.1-ts7.1.0-beta':
     optional: true
