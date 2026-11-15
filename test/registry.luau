@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local world = require("./lib/registry-world")
 local meter = require("./lib/meter")
 local tests = {}
@@ -40,7 +40,7 @@ tests["server seal rejects renderPriority without a preRender hook and names the
 end
 
 tests["defineClass records override masks once and scheduler lanes follow registered overrides"] = function()
-	local Engine = require("./lib/engine")
+	local Engine = require("../packages/crucible/lune").engine
 	for mask = 0, 15 do
 		local w = world()
 		local seen = {}

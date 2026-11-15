@@ -1,7 +1,7 @@
 local roblox = require("@lune/roblox")
 local DM = require("./lib/data-migrations")
 local World = require("./lib/sample-world")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local ui = require("./lib/ui-instances")
 
 local STORE = "Sample.Players"

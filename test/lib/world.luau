@@ -1,8 +1,8 @@
 -- A fresh compiled lifecycle with recording effects. `scripts[name]` scripts one object's constructor, hooks
 -- and effects. Lifecycle runs every hook through the real runner and `start` on a real thread. `defer` goes
 -- through the fake engine's port, so `flush` runs deferred cancellations.
-local Engine = require("./engine")
-local spec = require("./load")
+local Engine = require("../../packages/crucible/lune").engine
+local spec = require("../../packages/crucible/lune")
 
 local world = {}
 

@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local World = require("./lib/binding-world")
 local tests = {}
 local function test(name, fn)

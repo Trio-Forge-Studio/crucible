@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local world = require("./lib/world")
 
 local Phase, Want, Hook, Kind = world.Phase, world.Want, world.Hook, world.Kind

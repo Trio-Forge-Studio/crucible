@@ -49,15 +49,19 @@ for (const [config, sources, imported] of [
 }
 import { typecheck } from "./lib/typecheck.mjs";
 
-test("every published subpath resolves through exports with bundler resolution and no physical remaps", () => {
+test("every TypeScript subpath resolves through exports with bundler resolution and no physical remaps", () => {
 	const manifest = JSON.parse(fs.readFileSync(path.join(repo, "packages/crucible/package.json"), "utf8"));
-	const source = Object.keys(manifest.exports)
+	const entries = Object.entries(manifest.exports)
+		.filter(([, entry]) => typeof entry === "object" && typeof entry.types === "string")
+		.map(([key]) => key);
+	assert(entries.length > 0, "package exports TypeScript entries");
+	const source = entries
 		.map(
 			(key, i) =>
 				`import * as entry${i} from "@trioforge/crucible${key === "." ? "" : key.slice(1)}";\nexport const use${i} = entry${i};`,
 		)
 		.join("\n");
-	for (const key of Object.keys(manifest.exports).filter((key) => key !== "."))
+	for (const key of entries.filter((key) => key !== "."))
 		assert.equal(fs.existsSync(path.join(repo, "packages/crucible", key)), false, key);
 	const result = typecheck(new Map([[path.join(repo, "examples/sample-game/src/subpaths/index.ts"), source]]));
 	assert.equal(result.status, 0, result.output);

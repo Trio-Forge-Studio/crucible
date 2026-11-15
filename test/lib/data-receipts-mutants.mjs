@@ -16,7 +16,7 @@ const L = D + "lease.ts";
 const S = D + "session.ts";
 const P = D + "profiles.ts";
 const H = D + "shutdown.ts";
-const FAKE = "test/lib/data-backend.luau";
+const FAKE = "packages/crucible/lune/data-backend.luau";
 const m = (rule, kind, file, before, after, spec) => [rule, kind, file, before, after, spec];
 // [rule, kind, file, before, after, spec]. Kinds: guard deletes a reset or guard, swap exchanges two values of one
 // type, pair short-circuits one half of a paired operation.

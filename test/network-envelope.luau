@@ -1,6 +1,6 @@
 local Link = require("./lib/network-link")
 local h = require("./lib/network-codec")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local CHIME = "00 00 00 00 00 00 10 40 00 00 00 00 00 00 14 40 00 00 00 00 00 00 18 40"
 

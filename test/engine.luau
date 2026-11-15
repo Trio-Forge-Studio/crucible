@@ -1,5 +1,5 @@
-local Engine = require("./lib/engine")
-local spec = require("./lib/load")
+local Engine = require("../packages/crucible/lune").engine
+local spec = require("../packages/crucible/lune")
 
 return {
 	["act-on 11: render steps run by ascending priority, in bind order for equal priorities"] = function()

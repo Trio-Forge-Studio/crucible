@@ -1,5 +1,5 @@
 local World = require("./lib/sync-world")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local BIG = string.rep("x", 49152)
 local KICK = "Connection problem, please rejoin."

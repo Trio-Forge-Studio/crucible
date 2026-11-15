@@ -1,5 +1,5 @@
-local loadPlace = require("./lib/place")
-local spec = require("./lib/load")
+local loadPlace = require("../packages/crucible/lune").loadPlace
+local spec = require("../packages/crucible/lune")
 
 -- A realm's place, with the testing entry and the sample's modules loaded into its one module graph.
 local function world(client: boolean?)

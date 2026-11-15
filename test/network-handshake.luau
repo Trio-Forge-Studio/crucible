@@ -1,6 +1,6 @@
 local Link = require("./lib/network-link")
 local h = require("./lib/network-codec")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local KICK = "Connection problem, please rejoin."
 

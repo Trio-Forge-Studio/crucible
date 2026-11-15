@@ -1,6 +1,6 @@
 local roblox = require("@lune/roblox")
 local World = require("./lib/sync-world")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local CALLBACK = 8
 

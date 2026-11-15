@@ -1,5 +1,5 @@
 local process = require("@lune/process")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 return {
 	["44 78 K9 the Crucible compiler build type-checks replicated declarations and rejects client writes"] = function()

@@ -1,6 +1,6 @@
 local World = require("./lib/profile-world")
 local fixture = require("./lib/profile-fixture")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local function declare(r)
 	return { PlayerData = fixture.declare(r) }

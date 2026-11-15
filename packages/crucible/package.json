@@ -37,7 +37,8 @@
 		"./testing": {
 			"types": "./out/testing/index.d.ts",
 			"default": "./out/testing/init.luau"
-		}
+		},
+		"./lune": "./lune/init.luau"
 	},
 	"scripts": {
 		"build": "node ../../test/compiler/package.mjs ."
@@ -61,7 +62,8 @@
 	},
 	"files": [
 		"out",
-		"LICENSE"
+		"LICENSE",
+		"lune"
 	],
 	"repository": {
 		"type": "git",

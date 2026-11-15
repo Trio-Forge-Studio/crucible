@@ -1,5 +1,5 @@
 local golden = require("./lib/random-golden")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local Rng = spec.module("util/random").Rng
 

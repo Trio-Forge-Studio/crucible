@@ -1,7 +1,3 @@
--- One shared DataStore backend of committed values, UserIds and metadata, served to two or more independently loaded
--- server realms (data rule 108). Time is one scripted timeline: each realm's monotonic clock, which is also its
--- BootPort clock, is the timeline plus a fixed offset, and its wall clock carries an offset the spec can step alone.
--- Calls run as events on the timeline, so gates park them at four points and plans inject failures.
 local spec = require("./load")
 local Engine = require("./engine")
 
@@ -58,8 +54,6 @@ function Backend:resume(thread, ...)
 		table.insert(self.errors, debug.traceback(thread, tostring(err)))
 	end
 end
-
--- Runs every event due within `seconds`, in time order. A suspended realm's events wait; a crashed realm's are dropped.
 function Backend:advance(seconds: number)
 	local target = self.now + seconds
 	while true do
@@ -96,8 +90,6 @@ end
 function Backend:entry(store: string, key: string)
 	return self.stores[store] and self.stores[store][key]
 end
-
--- The committed envelope at a key, as a copy.
 function Backend:envelope(store: string, key: string)
 	local entry = self:entry(store, key)
 	return entry and copy(entry.value)
@@ -106,8 +98,6 @@ end
 function Backend:stored(store: string, key: string)
 	return copy(self:entry(store, key))
 end
-
--- Seeds a key with a stored value, as a game's fixture spec does with a record an older build saved.
 function Backend:seed(store: string, key: string, value, userIds, metadata)
 	self.stores[store] = self.stores[store] or {}
 	self.stores[store][key] = {
@@ -126,8 +116,6 @@ local function matches(filter, call): boolean
 	end
 	return true
 end
-
--- Parks calls made after it that reach `point` ("transform", "commit", "committed" or "response") while closed.
 function Backend:gate(point: string, filter)
 	local gate = { point = point, filter = filter or {}, open = false, parked = {}, after = #self.calls }
 	function gate.release()
@@ -153,11 +141,6 @@ function Backend:pass(call, point: string, continue)
 	call.parked = nil
 	continue()
 end
-
--- Injects one failure into each of the next `times` matching calls. Kinds: "throttle" (301, nothing sent),
--- "transient" (503 before the commit), "committed" (commits, then a 502), "conflict" (a rerun of the transform),
--- "late" (the response arrives `seconds` later), "stall" (the call holds its slot for `seconds` before running) and
--- "reject" (a non-retryable `code`). `options.after` skips the first calls: the plan only hits calls numbered above it.
 function Backend:fail(kind: string, filter, times: number?, options)
 	table.insert(self.plans, {
 		kind = kind,
@@ -270,8 +253,6 @@ function Backend:callsTo(filter)
 	end
 	return found
 end
-
--- An independently loaded server realm: its own module graph, BootPort, data port, players, clocks and seed.
 function Backend:realm(options)
 	options = options or {}
 	local backend = self
@@ -334,7 +315,6 @@ function Backend:realm(options)
 		realm.seed = (realm.seed * 1103515245 + 12345) % 2147483648
 		return realm.seed / 2147483648
 	end
-	-- Runs `fn` on a realm thread; `handle.done` and `handle.value` report its return.
 	function realm.run(fn)
 		local handle = { done = false }
 		realm.spawn(function()
@@ -363,7 +343,6 @@ function Backend:realm(options)
 		end
 		return nil
 	end
-	-- A crash: nothing of this realm runs again, and its unanswered calls never return. Their commits still land.
 	function realm.crash()
 		realm.dead = true
 	end
@@ -443,8 +422,6 @@ function Backend:realm(options)
 	realm.n = realm.graph.module("internal/network/schema").n
 	realm.records = realm.graph.module("internal/data/records")
 	realm.admission = realm.graph.module("internal/data/admission")
-
-	-- Defines framework-shaped Subsystems, then ignites the realm so bootClock() is this realm's clock (rule 25).
 	local emit = realm.graph.module("emit")
 	local Subsystem = realm.graph.module("subsystem").Subsystem
 	for _, definition in options.subsystems or {} do
@@ -464,9 +441,6 @@ function Backend:realm(options)
 		booted = function() end,
 		network = { open = none, loaded = none, commit = none, close = none },
 	}, {})
-
-	-- The schema an engine takes: with `shape.migrations` the version is their count (rule 74), and with `shape.node` the
-	-- descriptor admits. Without a node every key is undeclared and kept in place.
 	function realm.schema(name: string, defaults, shape)
 		shape = shape or {}
 		return {
@@ -477,14 +451,9 @@ function Backend:realm(options)
 			migrations = shape.migrations,
 		}
 	end
-
-	-- A generic store's engine on this realm's scheduler (rules 85 to 91).
 	function realm.recordStore(name: string, defaults, shape)
 		return realm.records.RecordStore.new(realm.data, realm.schema(name, defaults, shape))
 	end
-
-	-- A profile store's engine with the D1 seams: identity load, no claims, and a recorded slot. `version` is a number
-	-- or a schema shape table (`node`, `migrations`).
 	function realm.profile(name: string, defaults, version: number | { [string]: any }?)
 		local published = {}
 		local reasons = {}
@@ -506,8 +475,6 @@ function Backend:realm(options)
 		runtime.reasons = reasons
 		return runtime
 	end
-
-	-- Starts core's shutdown sweep on a realm thread, as BindToClose would.
 	function realm.close()
 		return realm.run(function()
 			realm.closers[1]()

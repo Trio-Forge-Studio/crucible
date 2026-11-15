@@ -1,8 +1,8 @@
 -- A fresh runtime and its own copy of Charm, as the runtime imports it. `patch(graph)` runs before the runtime loads,
 -- so it can replace a module's export. `globals` override Lune's for every module, such as a `typeof` that knows fake
 -- engine values. `strict` turns on Charm's strict mode, which Studio turns on, before anything is created.
-local Engine = require("./engine")
-local spec = require("./load")
+local Engine = require("../../packages/crucible/lune").engine
+local spec = require("../../packages/crucible/lune")
 
 return function(patch: ((any) -> ())?, globals: { [string]: any }?, strict: boolean?)
 	local engine = Engine.new()

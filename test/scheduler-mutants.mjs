@@ -6,10 +6,11 @@ import { spawnSync } from "node:child_process";
 const scratch = mkdtempSync(join(tmpdir(), "crucible-r4-mutants-"));
 mkdirSync(join(scratch, "packages/crucible"), { recursive: true });
 cpSync("packages/crucible/out", join(scratch, "packages/crucible/out"), { recursive: true });
+cpSync("packages/crucible/lune", join(scratch, "packages/crucible/lune"), { recursive: true });
 cpSync("test", join(scratch, "test"), { recursive: true });
 cpSync("rokit.toml", join(scratch, "rokit.toml"));
 const scheduler = "packages/crucible/out/internal/scheduler.luau";
-const engine = "test/lib/engine.luau";
+const engine = "packages/crucible/lune/engine.luau";
 const dense = "packages/crucible/out/internal/dense-list.luau";
 const rules = [
 	[

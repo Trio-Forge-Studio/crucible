@@ -9,20 +9,21 @@ roblox.implementMethod("Instance", "WaitForChild", function(instance, name: stri
 	return assert(instance:FindFirstChild(name), `{instance:GetFullName()} has no child {name}`)
 end)
 
-return function(client: boolean?, path: string?)
+return function(client: boolean?, path: string?, options)
+	options = options or {}
 	local place = roblox.deserializePlace(fs.readFile(path or "build/sample-game.rbxl"))
-	local e = engine.new()
+	local e = options.engine or engine.new()
 	local messages = {}
 	local closers = {}
 	local attributes = {}
-	e.port.bindToClose = function(callback)
+	e.port.bindToClose = e.port.bindToClose or function(callback)
 		table.insert(closers, callback)
 	end
-	e.port.spawn = function(callback)
+	e.port.spawn = e.port.spawn or function(callback)
 		callback()
 	end
-	e.port.clock = os.clock
-	e.port.wait = task.wait
+	e.port.clock = e.port.clock or os.clock
+	e.port.wait = e.port.wait or task.wait
 	local runService = {
 		Heartbeat = {
 			Connect = function()
@@ -42,7 +43,6 @@ return function(client: boolean?, path: string?)
 			return client ~= true
 		end,
 	}
-	-- Vide lists the engine's classes when it loads.
 	local reflectionService = {
 		GetClasses = function()
 			return {}
@@ -50,6 +50,9 @@ return function(client: boolean?, path: string?)
 	}
 	local game = {
 		GetService = function(_self, name: string)
+			if options.services and options.services[name] ~= nil then
+				return options.services[name]
+			end
 			if name == "Players" then
 				return {
 					LocalPlayer = {
@@ -71,7 +74,6 @@ return function(client: boolean?, path: string?)
 	local realm = {}
 	local loaded = {}
 	local load
-	-- A package such as Vide requires its siblings by `./name`, and Charm its children by `@self/name`.
 	local function requireFrom(script)
 		return function(target)
 			if type(target) == "string" then
@@ -98,47 +100,53 @@ return function(client: boolean?, path: string?)
 			}
 		end
 		if loaded[module] == nil then
+			local environment = {
+				_G = realm,
+				game = game,
+				script = module,
+				require = requireFrom(module),
+				task = options.task or task,
+			}
+			for key, value in roblox do
+				environment[key] = value
+			end
+			for key, value in options.globals or {} do
+				environment[key] = value
+			end
+			if environment.print == nil then
+				environment.print = function(...)
+					local values = {}
+					for _, value in { ... } do
+						table.insert(values, tostring(value))
+					end
+					table.insert(messages, table.concat(values, " "))
+				end
+			end
 			local chunk = luau.load(module.Source, {
 				debugName = module:GetFullName(),
-				environment = {
-					_G = realm,
-					game = game,
-					script = module,
-					require = requireFrom(module),
-					task = task,
-					Instance = roblox.Instance,
-					Enum = roblox.Enum,
-					Color3 = roblox.Color3,
-					Font = roblox.Font,
-					UDim = roblox.UDim,
-					UDim2 = roblox.UDim2,
-					Vector2 = roblox.Vector2,
-					Vector3 = roblox.Vector3,
-					print = function(...)
-						local values = {}
-						for _, value in { ... } do
-							table.insert(values, tostring(value))
-						end
-						table.insert(messages, table.concat(values, " "))
-					end,
-				},
+				environment = environment,
 			})
 			loaded[module] = { value = chunk() }
 			if module.Name == "log-output" and module.Parent.Name == "internal" then
 				loaded[module].value.installLoggingPort(e.loggingPort)
 			end
 			if module.Name == "port" and module.Parent.Name == "network" then
-				loaded[module].value.installNetworkPort(networkPort())
+				loaded[module].value.installNetworkPort(options.network or networkPort())
+			end
+			if module.Name == "port" and module.Parent.Name == "data" and options.dataPort then
+				loaded[module].value.installDataPort(options.dataPort)
 			end
 		end
 		return loaded[module].value
 	end
 	local include = place:GetService("ReplicatedStorage").rbxts_include
 	local runtime = load(include.RuntimeLib)
+	local crucible = include.node_modules["@trioforge"].crucible
+	crucible = crucible:FindFirstChild("out") or crucible
 
 	return {
 		place = place,
-		crucible = include.node_modules["@trioforge"].crucible.out,
+		crucible = crucible,
 		loaded = loaded,
 		engine = e,
 		messages = messages,

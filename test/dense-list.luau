@@ -1,5 +1,5 @@
 local meter = require("./lib/meter")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local function newList(items: { any }?)
 	local list = spec.fresh("internal/dense-list").DenseList.new()

@@ -9,7 +9,7 @@ const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-data-mutants-"));
 const D = "packages/crucible/src/internal/data/";
 const BOOT = "packages/crucible/src/internal/boot.ts";
-const FAKE = "test/lib/data-backend.luau";
+const FAKE = "packages/crucible/lune/data-backend.luau";
 // [rule, kind, file, before, after, spec]. Kinds: guard deletes a reset or guard, swap exchanges two values of one
 // type, pair short-circuits one half of a paired operation.
 const mutants = [

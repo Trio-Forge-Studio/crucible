@@ -1,11 +1,11 @@
 -- Crucible's lifetimes on Charm 0.11.1, with Charm's strict mode on, as Studio runs it: each user callback Charm calls
 -- runs on a new coroutine that must not yield.
-local Engine = require("./lib/engine")
+local Engine = require("../packages/crucible/lune").engine
 local Link = require("./lib/network-link")
 local life = require("./lib/reactive-life")
-local loadPlace = require("./lib/place")
+local loadPlace = require("../packages/crucible/lune").loadPlace
 local realm = require("./lib/reactive-world")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local SyncWorld = require("./lib/sync-world")
 
 local function strictLife()

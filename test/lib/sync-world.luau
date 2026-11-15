@@ -3,7 +3,7 @@
 -- with the packet the session fired, so `finish` can pin frameCost against networking's own encoder and decoder on
 -- every frame a spec sent (rule 69).
 local Link = require("./network-link")
-local spec = require("./load")
+local spec = require("../../packages/crucible/lune")
 
 local HEARTBEAT = 5
 local EVENT = 0

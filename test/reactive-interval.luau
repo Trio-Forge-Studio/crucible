@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local life = require("./lib/reactive-life")
 
 local ON_DISABLE, ON_DESTROY = 4, 5

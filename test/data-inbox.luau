@@ -1,5 +1,5 @@
 local serde = require("@lune/serde")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local D2 = require("./lib/data-d2")
 
 local W = D2.WALL

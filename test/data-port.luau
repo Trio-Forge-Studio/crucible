@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 -- A Roblox surface for port.ts alone: services record every call, so a spec sees which backing a write reached.
 local function roblox(options)

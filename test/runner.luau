@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local task = require("@lune/task")
 
 local CallResult = { Ok = 0, Threw = 1, Yielded = 2 }

@@ -1,5 +1,5 @@
 local roblox = require("@lune/roblox")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local realm = require("./lib/reactive-world")
 local life = require("./lib/reactive-life")
 local ownable = require("./lib/ownable")

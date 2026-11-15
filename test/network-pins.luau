@@ -1,6 +1,6 @@
 local Link = require("./lib/network-link")
-local networkPort = require("./lib/network-port")
-local spec = require("./lib/load")
+local networkPort = require("../packages/crucible/lune").networkPort
+local spec = require("../packages/crucible/lune")
 
 local function declare(r)
 	return { Ping = r.emit.toServer("Pins.Ping", r.n.string) }

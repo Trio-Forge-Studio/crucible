@@ -1,6 +1,6 @@
 -- Fixtures for the receipt and inbox specs: a two-realm world over the shared backend, grant and message routes, and
 -- operation ids built by an encoder of the spec's own (the ids' format is the contract's, not the engine's).
-local Backend = require("./data-backend")
+local Backend = require("../../packages/crucible/lune").Backend
 
 local D2 = {}
 

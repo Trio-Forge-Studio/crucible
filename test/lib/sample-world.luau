@@ -16,7 +16,7 @@ local UiLoad = require("./ui-load")
 require("./ui-instances")
 
 -- Defines Instance:WaitForChild for Lune once per process.
-require("./place")
+require("../../packages/crucible/lune")
 
 local World = setmetatable({}, { __index = ProfileWorld })
 World.__index = World
@@ -257,7 +257,7 @@ end
 
 -- Replaces a realm's runtime graph with one whose boot reads the place's scripts.
 local function rebuild(self, realm, dataPort, configPort)
-	local spec = require("./load")
+	local spec = require("../../packages/crucible/lune")
 	local env, load = attach(self, realm, self.place:GetService("ReplicatedStorage").rbxts_include.RuntimeLib)
 	realm.graph = spec.runtime(env, realm.engine.loggingPort, configPort, realm.port, dataPort)
 	realm.graph.module("internal/roblox-port").robloxPort = function()

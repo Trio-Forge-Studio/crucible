@@ -1,5 +1,5 @@
 local roblox = require("@lune/roblox")
-local spec = require("./load")
+local spec = require("../../packages/crucible/lune")
 
 local function realm()
 	local runtime = spec.runtime({

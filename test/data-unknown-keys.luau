@@ -1,5 +1,5 @@
-local spec = require("./lib/load")
-local Backend = require("./lib/data-backend")
+local spec = require("../packages/crucible/lune")
+local Backend = require("../packages/crucible/lune").Backend
 local D2 = require("./lib/data-d2")
 local DM = require("./lib/data-migrations")
 

@@ -1,4 +1,4 @@
-local loadPlace = require("./lib/place")
+local loadPlace = require("../packages/crucible/lune").loadPlace
 
 return {
 	["real root exports stay shared safe and side subpaths resolve"] = function()

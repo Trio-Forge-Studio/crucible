@@ -2,8 +2,8 @@
 -- interval ends through `LifeEffects.disabled`, and an effect that fails after a hook is logged in `effectFailures`.
 -- `scripts[id]` holds an object's hooks; `lookup(hook)` runs when lifecycle asks for a hook caller, so a spec can make
 -- it throw. `globals` override Lune's for every module. `strict` turns on Charm's strict mode before anything runs.
-local Engine = require("./engine")
-local spec = require("./load")
+local Engine = require("../../packages/crucible/lune").engine
+local spec = require("../../packages/crucible/lune")
 
 local HOOKS = { [1] = "awake", [2] = "onEnable", [4] = "onDisable", [5] = "onDestroy" }
 

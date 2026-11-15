@@ -1,8 +1,8 @@
-local Backend = require("./lib/data-backend")
+local Backend = require("../packages/crucible/lune").Backend
 local DM = require("./lib/data-migrations")
 local World = require("./lib/profile-world")
 local fixture = require("./lib/profile-fixture")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local SECRET_NOTE = "SECRET-NOTE-4120"
 local UNKNOWN_ROOT = "UNKNOWN-ROOT-4120"
@@ -498,7 +498,7 @@ return {
 	end,
 
 	["134 a store whose declarations would pass MAX_REPLICATED_DECLARATIONS throws at evaluation with none declared"] = function()
-		local g = spec.runtime({}, require("./lib/engine").new().loggingPort)
+		local g = spec.runtime({}, require("../packages/crucible/lune").engine.new().loggingPort)
 		local emit = g.module("emit")
 		local registry = g.module("internal/sync/declarations")
 		for i = 1, 248 do

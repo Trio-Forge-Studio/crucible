@@ -1,6 +1,6 @@
 local ConfigBackend = require("./lib/config-backend")
 local World = require("./lib/sync-world")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 -- Amendment A7: configs.md cases 2 and 4 in their effect form, and the client and publish halves of cases 13 and 15,
 -- over reactive and networking's fake link.
