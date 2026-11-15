@@ -3,6 +3,7 @@ local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
 local task = require("@lune/task")
 local serde = require("@lune/serde")
+local process = require("@lune/process")
 local engine = require("./engine")
 local networkPort = require("./network-port")
 
@@ -10,23 +11,42 @@ roblox.implementMethod("Instance", "WaitForChild", function(instance, name: stri
 	return assert(instance:FindFirstChild(name), `{instance:GetFullName()} has no child {name}`)
 end)
 
+local function resolve(root, file)
+	root = string.gsub(root, "\\", "/")
+	file = string.gsub(file, "\\", "/")
+	if string.sub(file, 1, 1) ~= "/" and not string.match(file, "^%a:/") then
+		file = root .. "/" .. file
+	end
+	local prefix = string.match(file, "^%a:") or ""
+	local parts = {}
+	for part in string.gmatch(string.sub(file, #prefix + 1), "[^/]+") do
+		if part == ".." then
+			table.remove(parts)
+		elseif part ~= "." then
+			table.insert(parts, part)
+		end
+	end
+	return prefix .. "/" .. table.concat(parts, "/")
+end
+
 return function(client: boolean?, path: string?, options)
 	options = options or {}
 	local place
 	if options.sourcemap then
 		local source = serde.decode("json", fs.readFile(options.sourcemap))
 		place = roblox.Instance.new("DataModel")
-		local root = options.root or "."
+		local root = resolve(process.cwd, options.root or ".")
+		local sourceRoot = resolve(root, options.sourceRoot or "src")
 		local function walk(node, parent)
 			local instance = roblox.Instance.new(node.className)
 			instance.Name = node.name
 			instance.Parent = parent
 			for _, file in node.filePaths or {} do
-				file = string.gsub(file, "\\", "/")
+				file = resolve(root, file)
 				if string.match(file, "%.lua[u]?$") then
-					instance.Source = fs.readFile(root .. "/" .. file)
+					instance.Source = fs.readFile(file)
 				elseif options.output and string.match(file, "%.tsx?$") and not string.match(file, "%.d%.ts$") then
-					local prefix = (options.sourceRoot or "src") .. "/"
+					local prefix = sourceRoot .. "/"
 					assert(string.sub(file, 1, #prefix) == prefix, `source {file} is outside {prefix}`)
 					local relative = string.gsub(string.sub(file, #prefix + 1), "%.tsx?$", ".luau")
 					instance.Source = fs.readFile(options.output .. "/" .. relative)
@@ -104,6 +124,7 @@ return function(client: boolean?, path: string?, options)
 	local realm = {}
 	local loaded = {}
 	local replacements = {}
+	local generations = {}
 	local load
 	local function requireFrom(script)
 		return function(target)
@@ -124,6 +145,7 @@ return function(client: boolean?, path: string?, options)
 	end
 	function load(module)
 		if replacements[module] then
+			loaded[module] = replacements[module]
 			return replacements[module].value
 		end
 		if module.Name == "roblox-port" and module.Parent.Name == "internal" then
@@ -161,6 +183,18 @@ return function(client: boolean?, path: string?, options)
 				environment = environment,
 			})
 			loaded[module] = { value = chunk() }
+			if module.Name == "lifecycle" and module.Parent.Name == "internal" then
+				local lifecycle = loaded[module].value
+				local track = lifecycle.track
+				lifecycle.track = function(record, instance, ...)
+					local state = track(record, instance, ...)
+					if instance then
+						generations[record] = generations[record] or {}
+						generations[record][instance] = state
+					end
+					return state
+				end
+			end
 			if module.Name == "log-output" and module.Parent.Name == "internal" then
 				loaded[module].value.installLoggingPort(e.loggingPort)
 			end
@@ -195,7 +229,7 @@ return function(client: boolean?, path: string?, options)
 		lifecycle = function(class, instance)
 			local record = load(crucible.internal.registry).recordOf(class)
 			assert(record, "lifecycle needs a registered class from this graph")
-			local state = if record.bound then record.bound[instance] else record.state
+			local state = if record.bound then (generations[record] or {})[instance] else record.state
 			return if state
 				then ({ "unconstructed", "constructed", "awake", "enabled", "disabled", "faulted", "destroyed" })[state.phase + 1]
 				else "unconstructed"

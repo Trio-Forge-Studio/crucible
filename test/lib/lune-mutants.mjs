@@ -6,6 +6,14 @@ import path from "node:path";
 const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(repo, "build/lune-mutants-"));
 const mutants = [
+	["terminal behaviour state", "place.luau", "(generations[record] or {})[instance]", "record.bound[instance]"],
+	["consumed replacement", "place.luau", "loaded[module] = replacements[module]", ""],
+	[
+		"wait timer tracking",
+		"data-backend.luau",
+		"realm.timers[thread] = backend:schedule(backend.now + math.max(seconds, FRAME)",
+		"backend:schedule(backend.now + math.max(seconds, FRAME)",
+	],
 	[
 		"hook player",
 		"init.luau",

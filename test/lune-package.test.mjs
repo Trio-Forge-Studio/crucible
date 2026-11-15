@@ -73,6 +73,34 @@ test("packed Lune entry runs in a pnpm-installed game", { timeout: 180_000 }, ()
 			mapped.replaceAll('sourcemap = "sourcemap.json"', 'sourcemap = "typescript-map.json", output = "out"'),
 		);
 		assert.match(run("lune", ["run", "typescript"], game), /packed harness passed/);
+		for (const [name, map] of [
+			["compiled", JSON.parse(readFileSync(path.join(game, "sourcemap.json"), "utf8"))],
+			["typescript", sourcemap],
+		]) {
+			for (const separator of process.platform === "win32" ? ["/", "\\"] : ["/"]) {
+				const absolute = structuredClone(map);
+				function absolutePaths(node) {
+					node.filePaths = node.filePaths?.map((file) =>
+						path.resolve(game, file).replaceAll(path.sep, separator),
+					);
+					for (const child of node.children ?? []) absolutePaths(child);
+				}
+				absolutePaths(absolute);
+				writeFileSync(path.join(game, "absolute-map.json"), JSON.stringify(absolute));
+				writeFileSync(
+					path.join(game, "absolute.luau"),
+					mapped.replaceAll(
+						'sourcemap = "sourcemap.json"',
+						`sourcemap = "absolute-map.json", root = ${JSON.stringify(game.replaceAll(path.sep, "/"))}, sourceRoot = ${JSON.stringify(path.join(game, "src").replaceAll(path.sep, separator))}, output = "out"`,
+					),
+				);
+				assert.match(
+					run("lune", ["run", "absolute"], game),
+					/packed harness passed/,
+					`${name} absolute ${separator}`,
+				);
+			}
+		}
 		const nested = path.join(game, ".lune");
 		mkdirSync(nested);
 		const nestedSpec = readFileSync(path.join(game, "spec.luau"), "utf8")

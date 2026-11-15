@@ -1,6 +1,53 @@
 local harness = require("../packages/crucible/lune")
 
 return {
+	["Lune behaviour lifecycle retains terminal states and follows rebinding"] = function()
+		for _, fails in { false, true } do
+			local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
+			local Member = graph.import(graph.place:GetService("ServerScriptService").TS.systems.member).Member
+			local instance = graph.engine.instance("Member", "Part", { Identity = "test" })
+			graph.engine.addTag(instance, "S2Member")
+			assert(graph.lifecycle(Member, instance) == "unconstructed", "not yet admitted")
+			if fails then
+				Member.awake = function()
+					error("behaviour awake failure")
+				end
+			end
+			local ok, message = pcall(graph.import(graph.crucible.server).boot, { load = {} })
+			if not fails then
+				assert(ok, tostring(message))
+			end
+			if fails then
+				assert(graph.lifecycle(Member, instance) == "faulted", "fault survives unbinding")
+			else
+				assert(graph.lifecycle(Member, instance) == "enabled", "behaviour booted")
+				graph.engine.removeTag(instance, "S2Member")
+				graph.engine.flush()
+				assert(graph.lifecycle(Member, instance) == "destroyed", "destroy survives unbinding")
+				graph.engine.addTag(instance, "S2Member")
+				graph.engine.flush()
+				assert(graph.lifecycle(Member, instance) == "enabled", "latest generation replaces terminal state")
+			end
+			graph.place:Destroy()
+		end
+	end,
+	["Lune replacements cannot change after a consumer reads false"] = function()
+		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
+		local roblox = require("@lune/roblox")
+		local folder = roblox.Instance.new("Folder")
+		local replacement = roblox.Instance.new("ModuleScript")
+		replacement.Name = "replacement"
+		replacement.Parent = folder
+		local consumer = roblox.Instance.new("ModuleScript")
+		consumer.Parent = folder
+		consumer.Source = "return { value = require('./replacement') }"
+		graph.provideGame(replacement, false)
+		assert(graph.load(consumer).value == false, "consumer captures false")
+		assert(not pcall(graph.provideGame, replacement, 42), "consumed replacement rejected")
+		assert(graph.load(replacement) == false, "later loads retain false")
+		folder:Destroy()
+		graph.place:Destroy()
+	end,
 	["Lune lifecycle reports a fault from a compiled hook"] = function()
 		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
 		local systems = graph.place:GetService("ServerScriptService").TS.systems
@@ -52,7 +99,14 @@ return {
 		end)
 		realm.cancel(waiting)
 		realm.cancel(delayed)
+		local resumes = 0
+		local resume = backend.resume
+		backend.resume = function(self, ...)
+			resumes += 1
+			return resume(self, ...)
+		end
 		backend:advance(2)
+		assert(resumes == 0, "cancelled timers never attempt a resume")
 		assert(calls == 0 and coroutine.status(waiting) == "dead", "cancelled threads never resume")
 	end,
 	["Lune network faults consume every supported operation once"] = function()

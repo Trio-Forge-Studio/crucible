@@ -145,9 +145,9 @@ BAFM's `load.luau`, `engine.luau`, `data-backend.luau` and `network-port.luau` m
 
 ## Replace modules and inspect lifecycle
 
-`graph.provideGame(instance, value)` replaces a compiled module before it or a consumer imports it. Imports and requires receive the replacement, including `false`. Replacing an already evaluated module throws. Replacements belong to one graph.
+`graph.provideGame(instance, value)` replaces a compiled module before it or a consumer imports it. Imports and requires receive the replacement, including `false`. Replacing an already evaluated module or a replacement already read by a consumer throws. Replacements belong to one graph.
 
-`graph.lifecycle(Class, instance?)` returns `"unconstructed"`, `"constructed"`, `"awake"`, `"enabled"`, `"disabled"`, `"faulted"` or `"destroyed"` for a registered class in this graph. Pass a bound instance for a behaviour. This replaces numeric phase assertions such as FD's private `Phase.Faulted` check. It observes lifecycle driven by boot and engine events; objects constructed manually through `/testing` are outside lifecycle.
+`graph.lifecycle(Class, instance?)` returns `"unconstructed"`, `"constructed"`, `"awake"`, `"enabled"`, `"disabled"`, `"faulted"` or `"destroyed"` for a registered class in this graph. Pass an instance for a behaviour. Its latest generation remains observable after fault or destruction until a new generation binds. This replaces numeric phase assertions such as FD's private `Phase.Faulted` check. It observes lifecycle driven by boot and engine events; objects constructed manually through `/testing` are outside lifecycle.
 
 ## Load a Rojo sourcemap
 
@@ -162,6 +162,6 @@ local graph = harness.loadGame({
 })
 ```
 
-`root` is the folder against which sourcemap file paths resolve. Lua and Luau paths load directly. TypeScript paths below `sourceRoot` load their matching `.luau` file below `output`, preserving folders and `init` modules. Paths already pointing to compiled output need no `output` option. All paths are relative to the current working directory unless absolute. The graph API and isolation match place loading.
+`root` is the folder against which sourcemap file paths resolve. Lua and Luau paths load directly. TypeScript paths below `sourceRoot` load their matching `.luau` file below `output`, preserving folders and `init` modules. Paths already pointing to compiled output need no `output` option. `sourcemap`, `root` and `output` resolve against the current working directory. Sourcemap file paths and `sourceRoot` resolve against `root`. Absolute paths load directly, including Windows drive paths with either slash style and Linux paths. The graph API and isolation match place loading.
 
 Only the game APIs described above are supported. Additional entry functions and backend realm fields are unsupported white-box hooks for Crucible's own specs. Games must not depend on them.
