@@ -169,7 +169,7 @@ export class ServerSession extends Session {
 		const rate = definition.rate;
 		if (rate === undefined) return true;
 		const now = this.port.now();
-		const capacity = math.max(1, rate);
+		const capacity = definition.burst ?? math.max(1, rate);
 		let bucket = peer.buckets.get(definition);
 		if (bucket === undefined) {
 			bucket = { tokens: capacity, at: now, reported: false };

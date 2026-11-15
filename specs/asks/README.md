@@ -10,7 +10,7 @@ An ask is `pending[n]`: `none` before the caller asks, `waiting` until its reply
 
 A request on the server is `handler[n]`: `running` while it counts toward the cap, `overrun` once it has outlived `HANDLER_LIFETIME_SECONDS` and stopped counting, and `done` when it returns. Its reply is open until the handler or the retirement of its Subsystem sends it, and then sent. `Running` in `session.ts` holds the `Handler` enum and the `Reply` union, whose `None` variant is an event's, which never replies.
 
-`Network.ask` returns at once with `disconnected` when the session ended and `overloaded` when `MAX_PENDING_ASKS` asks wait, and a queue overflow before READY fails the session, which settles every waiting ask, the new one included, before `ask` returns. The server refuses a request it cannot start with one reply: `limited` when the player's bucket for the ask is empty, `invalid` when its payload does not decode, `unavailable` when no claim receives it, and `overloaded` at the cap. The rate comes first, after the nonce check, so a request over the rate takes nothing from the bucket and opens and decodes nothing, and every other request takes one request from it. `tokens` is the bucket: `Burst` requests at the start, and `Refill`, the passing of time, adds one back up to `Burst`. `ServerSession.admit` in `server-session.ts` keeps it as the peer's `Bucket` for the message, where time adds back `rate` requests a second and `Burst` is the rate, at least one.
+`Network.ask` returns at once with `disconnected` when the session ended and `overloaded` when `MAX_PENDING_ASKS` asks wait, and a queue overflow before READY fails the session, which settles every waiting ask, the new one included, before `ask` returns. The server refuses a request it cannot start with one reply: `limited` when the player's bucket for the ask is empty, `invalid` when its payload does not decode, `unavailable` when no claim receives it, and `overloaded` at the cap. The rate comes first, after the nonce check, so a request over the rate takes nothing from the bucket and opens and decodes nothing, and every other request takes one request from it. `tokens` is the bucket: `Burst` requests at the start, and `Refill`, the passing of time, adds one back up to `Burst`. `ServerSession.admit` in `server-session.ts` keeps it as the peer's `Bucket` for the message, where time adds back `rate` requests a second and `Burst` is the declaration's `burst`, or its rate and at least one when it names no burst.
 
 ## What TLC checks
 
@@ -28,7 +28,7 @@ A request on the server is `handler[n]`: `running` while it counts toward the ca
 
 `OneResult` and `Settles` together say an ask gets exactly one answer or a timeout, never both. `resumed`, `replies`, `admitted` and `refills` are ghost variables: the code keeps neither, and the properties count with them.
 
-`Asks.cfg` checks three asks, two pending at most, one packet queued before READY, one active handler and a bucket of one request. Packets and timers are weakly fair; asks, the client's commit, handler returns, lifetimes, refills, retirement and either side ending are not. TLC 1.7.4 explores 2,111,265 states, 548,344 of them distinct, to depth 25, in about two minutes on two workers.
+`Asks.cfg` checks three asks, two pending at most, one packet queued before READY, one active handler and a bucket of one request, which is `burst: 1`. Packets and timers are weakly fair; asks, the client's commit, handler returns, lifetimes, refills, retirement and either side ending are not. TLC 1.7.4 explores 2,111,265 states, 548,344 of them distinct, to depth 25, in about two minutes on two workers.
 
 ## Assumptions
 
@@ -56,3 +56,4 @@ The model has one ask message, so one bucket, and leaves out that a player has o
 | `limit-spends-nothing` | A request the bucket lets through takes nothing out of it, so the bucket never empties. | `Admitted`, 7 states |
 | `refill-past-burst` | Time refills the bucket past what it holds, so a long pause lets a burst through. | `Spent`, 2 states |
 | `limited-still-starts` | The server answers `limited` and also starts the handler. | `LimitedNeverRuns`, 8 states |
+| `start-past-burst` | A new bucket starts with more requests than its burst, as one that starts at its rate would. | `Spent`, 1 state |

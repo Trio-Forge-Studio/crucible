@@ -159,6 +159,7 @@ return {
 			DEFAULT_ASK_TIMEOUT_SECONDS = 10,
 			MAX_ASK_TIMEOUT_SECONDS = 120,
 			MAX_RATE_PER_SECOND = 1000,
+			MAX_BURST = 1000,
 		}
 		for name, value in expected do
 			spec.eq(actual[name], value, name)

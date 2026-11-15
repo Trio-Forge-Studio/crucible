@@ -48,7 +48,7 @@ export interface Abi {
 	readonly resolveAll: (id: string) => unknown;
 	readonly attribute: (object: Passed, field: string, fallback?: Passed) => unknown;
 	readonly receive: (owner: Passed, field: string, target: Passed, callback: Passed) => unknown;
-	readonly toServer: (name: string, payload: Passed, rate: number | undefined) => unknown;
+	readonly toServer: (name: string, payload: Passed, rate: number | undefined, burst: number | undefined) => unknown;
 	readonly toClient: (name: string, payload: Passed) => unknown;
 	readonly askServer: (
 		name: string,
@@ -56,6 +56,7 @@ export interface Abi {
 		response: Passed,
 		timeout: number | undefined,
 		rate: number | undefined,
+		burst: number | undefined,
 	) => unknown;
 	readonly replicated: (name: string, initial: Passed, value: Passed) => unknown;
 	readonly replicatedPerPlayer: (name: string, initial: Passed, value: Passed) => unknown;
@@ -111,9 +112,16 @@ export interface Arguments {
 	readonly resolveAll: [id: unknown];
 	readonly attribute: [object: unknown, field: unknown, fallback?: unknown];
 	readonly receive: [owner: unknown, field: unknown, target: unknown, callback: unknown];
-	readonly toServer: [name: unknown, payload: unknown, rate: unknown];
+	readonly toServer: [name: unknown, payload: unknown, rate: unknown, burst: unknown];
 	readonly toClient: [name: unknown, payload: unknown];
-	readonly askServer: [name: unknown, request: unknown, response: unknown, timeout: unknown, rate: unknown];
+	readonly askServer: [
+		name: unknown,
+		request: unknown,
+		response: unknown,
+		timeout: unknown,
+		rate: unknown,
+		burst: unknown,
+	];
 	readonly replicated: [name: unknown, initial: unknown, value: unknown];
 	readonly replicatedPerPlayer: [name: unknown, initial: unknown, value: unknown];
 	readonly dataStore: [name: unknown, options: unknown, value: unknown];

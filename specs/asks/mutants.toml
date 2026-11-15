@@ -150,3 +150,14 @@ replace = '''
           /\ counted' = counted + 1
           /\ UNCHANGED <<speer, rate>>
 '''
+
+[[mutant]]
+name = "start-past-burst"
+why = "A new bucket starts with more requests than its burst, as one that starts at its rate would."
+breaks = "Spent"
+find = '''
+    /\ tokens = Burst
+'''
+replace = '''
+    /\ tokens = Burst + 1
+'''

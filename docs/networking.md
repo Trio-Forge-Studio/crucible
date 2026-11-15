@@ -35,7 +35,7 @@ Each declaration returns a token that carries the direction and the payload type
 - `toClient<P>(name)` returns a `ToClient<P>`. The server sends it and one client Subsystem receives it.
 - `askServer<Request, Response>(name, options?)` returns an `AskServer<Request, Response>`. A client asks it and one server Subsystem answers it.
 
-A name is 1 to 64 bytes of dot-separated segments, each a letter followed by letters, digits, or underscores. The first segment `Crucible` is reserved. `askServer` options take `timeout`, a number of seconds in (0, 120], and `rate`. The default timeout is 10 seconds. `toServer` options take only `rate`, which "Limit how often a player sends" describes.
+A name is 1 to 64 bytes of dot-separated segments, each a letter followed by letters, digits, or underscores. The first segment `Crucible` is reserved. `askServer` options take `timeout`, a number of seconds in (0, 120], `rate` and `burst`. The default timeout is 10 seconds. `toServer` options take only `rate` and `burst`, which "Limit how often a player sends" describes.
 
 A payload of exactly `undefined` takes no argument and sends no bytes. `PayloadArgs<P>` is the argument list a token takes: `[]` for `undefined`, `[payload: P]` otherwise.
 
@@ -53,16 +53,19 @@ Strings must be valid UTF-8 of at most 65,536 bytes. An Instance in a server-to-
 
 ## Limit how often a player sends
 
-`toServer` and `askServer` take a `rate`, the requests per second each player may send. The server checks it before the callback runs, so a player who sends too often cannot make the callback run more often than the rate.
+`toServer` and `askServer` take a `rate`, the requests per second each player may send, and a `burst`, the most requests a player may send at once. The server checks them before the callback runs, so a player who sends too often cannot make the callback run more often than they allow.
 
 ```ts
 import { askServer, toServer } from "@trioforge/crucible";
 
 export const Tap = toServer<{ readonly target: string }>("Cannon.Tap", { rate: 8 });
+export const Spin = toServer<undefined>("Wheel.Spin", { rate: 5, burst: 1 });
 export const Rebirth = askServer<undefined, boolean>("Cannon.Rebirth", { rate: 1, timeout: 5 });
 ```
 
-Each player has an allowance for each rated message. It holds one second of requests, and at least one, and refills at the rate. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. Every request counts, including one that does not decode or whose sidecar is malformed.
+Each player has an allowance for each rated message. It holds `burst` requests and refills at the rate. Without a `burst`, it holds one second of requests, and at least one. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. Every request counts, including one that does not decode or whose sidecar is malformed.
+
+`burst: 1` spaces requests evenly. `Wheel.Spin` runs once, and a second spin is refused until 0.2 seconds have passed, so two spins sent in the same frame run once. Strict spacing is sensitive to network jitter. Two spins a player sends 0.2 seconds apart can arrive closer together, and the second is refused. Leave `burst` out, or raise it, unless the game must refuse a request sent right after another.
 
 A request over the rate never reaches its callback:
 
@@ -82,7 +85,7 @@ export function reportTaps() {
 }
 ```
 
-A rate is a number literal greater than 0 and at most 1,000. The compiler rejects any other value with CRU040. A message without a rate has no limit. Keep game rules, such as a cooldown that depends on a tool's stats, in the callback.
+A rate is a number literal greater than 0 and at most 1,000. A burst is an integer literal from 1 to 1,000, and needs a rate beside it. The compiler rejects any other value with CRU040. A message without a rate has no limit. Keep game rules, such as a cooldown that depends on a tool's stats, in the callback.
 
 ## Receive messages
 
@@ -173,7 +176,7 @@ export function nameOf(userId: number): string | undefined {
 | `handler-error` | The server callback threw, returned a Promise, or returned a value the response type rejects. |
 | `overloaded` | 64 asks are already pending, or the server is running 64 callbacks for this player. |
 | `invalid` | The request or the reply did not decode, for example because an Instance it names is gone. |
-| `limited` | The player sent this ask more often than its `rate` allows. |
+| `limited` | The player sent this ask more often than its `rate` and `burst` allow. |
 
 A timeout does not mean the server did nothing. Call `Network.ask` where yielding is allowed, such as `start` or a spawned thread.
 

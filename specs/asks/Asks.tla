@@ -20,7 +20,7 @@ CONSTANTS
     MaxPending,  \* MAX_PENDING_ASKS
     MaxQueued,   \* MAX_QUEUED_PACKETS before READY
     MaxActive,   \* MAX_ACTIVE_HANDLERS
-    Burst        \* the requests the ask's rate bucket holds: its rate, and at least one
+    Burst        \* the requests the ask's rate bucket holds: its burst, or its rate and at least one
 
 VARIABLES
     cpeer,    \* the client's peer: "waiting" before its commit sends READY, "ready", or "ended"

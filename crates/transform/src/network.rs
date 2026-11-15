@@ -10,10 +10,10 @@ use crucible_compiler::extension::{
 use crate::Code;
 use crate::api::{Macro, normalize};
 use crate::declarations::{
-    DeclarationKind, MAX_ASK_TIMEOUT_SECONDS, MAX_RATE_PER_SECOND, MAX_SCHEMA_NODES, MAX_UNION_BRANCHES, Position,
-    RESERVED_HANDLE_NAMES, Side, Spec, TypeArguments, VIEW_NAME_MAX_BYTES, VIEW_NAME_PREFIX,
+    DeclarationKind, MAX_ASK_TIMEOUT_SECONDS, MAX_BURST, MAX_RATE_PER_SECOND, MAX_SCHEMA_NODES, MAX_UNION_BRANCHES,
+    Position, RESERVED_HANDLE_NAMES, Side, Spec, TypeArguments, VIEW_NAME_MAX_BYTES, VIEW_NAME_PREFIX,
 };
-use crate::facts::{ClassKind, Declaration, Fact, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
+use crate::facts::{Allowance, ClassKind, Declaration, Fact, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
 use crate::registration::{Walk, is_global, is_reference};
 
 #[derive(Default)]
@@ -403,37 +403,45 @@ impl Walk<'_, '_> {
             let ask = kind == DeclarationKind::AskServer;
             let shape = if ask {
                 format!(
-                    "askServer options must be {{ timeout?: <number literal in (0, {MAX_ASK_TIMEOUT_SECONDS}]>, rate?: <number literal> }}."
+                    "askServer options must be {{ timeout?: <number literal in (0, {MAX_ASK_TIMEOUT_SECONDS}]>, rate?: <number literal>, burst?: <integer literal> }}."
                 )
             } else {
-                "toServer options must be { rate: <number literal> }.".to_owned()
+                "toServer options must be { rate: <number literal>, burst?: <integer literal> }.".to_owned()
             };
-            let keys: &[&'static str] = if ask { &["timeout", "rate"] } else { &["rate"] };
-            let (mut timeout, mut rate) = (None, None);
+            let keys: &[&'static str] = if ask { &["timeout", "rate", "burst"] } else { &["rate", "burst"] };
+            let (mut timeout, mut allowance) = (None, None);
             if let Some(options) = arguments.get(1) {
                 match option_values(options, keys) {
                     None => self.report(call, Code::Rule(17), &shape),
                     Some(values) => {
-                        for (key, value) in values {
-                            if key == "timeout" {
-                                timeout = literal_within(value, MAX_ASK_TIMEOUT_SECONDS);
-                                if timeout.is_none() {
-                                    self.report(call, Code::Rule(17), &shape);
-                                }
-                            } else {
-                                rate = literal_within(value, MAX_RATE_PER_SECOND);
-                                if rate.is_none() {
-                                    let message = format!(
-                                        "A rate is a number literal of requests per second in (0, {MAX_RATE_PER_SECOND}]."
-                                    );
-                                    self.report(call, Code::Rule(40), &message);
-                                }
+                        let value = |key| values.iter().find(|&&(k, _)| k == key).map(|&(_, v)| v);
+                        if let Some(given) = value("timeout") {
+                            timeout = literal_within(given, MAX_ASK_TIMEOUT_SECONDS);
+                            if timeout.is_none() {
+                                self.report(call, Code::Rule(17), &shape);
                             }
                         }
+                        let rate = value("rate").map(|given| literal_within(given, MAX_RATE_PER_SECOND));
+                        if rate == Some(None) {
+                            let message = format!(
+                                "A rate is a number literal of requests per second in (0, {MAX_RATE_PER_SECOND}]."
+                            );
+                            self.report(call, Code::Rule(40), &message);
+                        }
+                        let burst = value("burst").map(|given| {
+                            literal_within(given, MAX_BURST).filter(|&burst| burst >= 1.0 && burst.fract() == 0.0)
+                        });
+                        if burst.is_some() && rate.is_none() {
+                            self.report(call, Code::Rule(40), "A burst needs a rate beside it.");
+                        } else if burst == Some(None) {
+                            let message = format!("A burst is an integer literal of requests in [1, {MAX_BURST}].");
+                            self.report(call, Code::Rule(40), &message);
+                        }
+                        allowance = rate.flatten().map(|rate| Allowance { rate, burst: burst.flatten() });
                     }
                 }
             }
-            tail = if ask { Tail::Ask { timeout, rate } } else { Tail::Rate(rate) };
+            tail = if ask { Tail::Ask { timeout, allowance } } else { Tail::Rate(allowance) };
         }
         if arguments.len() > spec.arguments {
             self.report(call, Code::Rule(17), "Unexpected declaration arguments.");

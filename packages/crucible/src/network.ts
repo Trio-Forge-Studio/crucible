@@ -44,10 +44,12 @@ export type AskResult<T> =
 	| { readonly ok: false; readonly reason: AskFailure };
 export interface ToServerOptions {
 	readonly rate?: number;
+	readonly burst?: number;
 }
 export interface AskOptions {
 	readonly timeout?: number;
 	readonly rate?: number;
+	readonly burst?: number;
 }
 
 // `any` is the only argument every invariant token is assignable to.

@@ -29,7 +29,24 @@ const mutants = [
 		"bucket.tokens + (now - bucket.at) * rate);",
 		"bucket.tokens + (now - bucket.at));",
 	],
-	["the bucket holds one request", SS, "const capacity = math.max(1, rate);", "const capacity = 1;"],
+	[
+		"the bucket holds one request",
+		SS,
+		"const capacity = definition.burst ?? math.max(1, rate);",
+		"const capacity = definition.burst ?? 1;",
+	],
+	[
+		"the burst is ignored",
+		SS,
+		"const capacity = definition.burst ?? math.max(1, rate);",
+		"const capacity = math.max(1, rate);",
+	],
+	[
+		"a new bucket starts at the rate",
+		SS,
+		"bucket = { tokens: capacity, at: now, reported: false };",
+		"bucket = { tokens: math.max(1, rate), at: now, reported: false };",
+	],
 	["the refill time never moves", SS, "\t\t\tbucket.at = now;\n", ""],
 	[
 		"a drop is not counted",
@@ -75,6 +92,9 @@ const mutants = [
 		'"overloaded", "invalid", "unavailable"];',
 	],
 	["a definition drops its rate", K, "\t\t\t\ttimeout,\n\t\t\t\trate,\n", "\t\t\t\ttimeout,\n"],
+	["a definition drops its burst", K, "\t\t\t\trate,\n\t\t\t\tburst,\n", "\t\t\t\trate,\n"],
+	["define accepts any burst", K, "burst >= 1 && burst <= L.MAX_BURST && burst % 1 === 0", 'typeIs(burst, "number")'],
+	["define accepts a burst without a rate", K, "(rate !== undefined && typeIs(burst,", "(typeIs(burst,"],
 	["end keeps the allowances", SN, "\t\tpeer.buckets.clear();\n", ""],
 	[
 		"define accepts any rate",
@@ -82,8 +102,10 @@ const mutants = [
 		'typeIs(rate, "number") && rate > 0 && rate <= L.MAX_RATE_PER_SECOND',
 		'typeIs(rate, "number")',
 	],
-	["toServer drops its rate", EN, "input: payload, rate })", "input: payload })"],
+	["toServer drops its rate", EN, "input: payload, rate, burst })", "input: payload, burst })"],
+	["toServer drops its burst", EN, "input: payload, rate, burst })", "input: payload, rate })"],
 	["askServer drops its rate", EN, "\t\ttimeout,\n\t\trate,\n", "\t\ttimeout,\n"],
+	["askServer drops its burst", EN, "\t\trate,\n\t\tburst,\n\t})", "\t\trate,\n\t})"],
 ];
 
 const missing = mutants.filter(([, file, before]) => {

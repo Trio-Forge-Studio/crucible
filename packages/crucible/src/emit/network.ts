@@ -3,8 +3,13 @@ import { define } from "../internal/network/catalog";
 import { claim } from "../internal/network/claims";
 import type { Node } from "../internal/network/schema";
 
-export function toServer<P>(name: string, payload: Node, rate: number | undefined): ToServer<P> {
-	return define({ kind: "to-server", name, input: payload, rate }) as unknown as ToServer<P>;
+export function toServer<P>(
+	name: string,
+	payload: Node,
+	rate: number | undefined,
+	burst: number | undefined,
+): ToServer<P> {
+	return define({ kind: "to-server", name, input: payload, rate, burst }) as unknown as ToServer<P>;
 }
 
 export function toClient<P>(name: string, payload: Node): ToClient<P> {
@@ -17,6 +22,7 @@ export function askServer<Request, Response>(
 	response: Node,
 	timeout: number | undefined,
 	rate: number | undefined,
+	burst: number | undefined,
 ): AskServer<Request, Response> {
 	return define({
 		kind: "ask-server",
@@ -25,6 +31,7 @@ export function askServer<Request, Response>(
 		output: response,
 		timeout,
 		rate,
+		burst,
 	}) as unknown as AskServer<Request, Response>;
 }
 

@@ -41,7 +41,7 @@ Several rules depend on the file's side. The side is the nearest folder named `s
 | CRU027 | A profile store call runs on the side it reads or writes. |
 | CRU038 | Game code takes `effect`, `scope` and `onCleanup` from Crucible, not from Charm. |
 | CRU039 | A place that grants products grants each product of `crucible:experience` exactly once, and a retired one at most once. |
-| CRU040 | A message's `rate` is a number literal in (0, 1000]. |
+| CRU040 | A message's `rate` is a number literal in (0, 1000], and its `burst` an integer literal in [1, 1000] beside a rate. |
 
 ## CRU001
 
@@ -283,7 +283,7 @@ CRU017: Unexpected declaration arguments.
 CRU017: Cannot read <macro>'s value type; give it an explicit type argument.
 ```
 
-Each declaration macro is the whole initializer of an `export const` at the top level of a module on the side the table names. It takes the type arguments and arguments in the table, and nothing more. `askServer` options are an object literal with a `timeout` property, a `rate` property or both, each at most once. `timeout` is a number literal greater than 0 and at most 120. `toServer` options are an object literal with one `rate` property. CRU040 checks the rate's value.
+Each declaration macro is the whole initializer of an `export const` at the top level of a module on the side the table names. It takes the type arguments and arguments in the table, and nothing more. `askServer` options are an object literal with any of the properties `timeout`, `rate` and `burst`, and at least one, each at most once. `timeout` is a number literal greater than 0 and at most 120. `toServer` options are an object literal with `rate`, `burst` or both, each at most once. A spread, a computed key or a variable in place of the object literal is CRU017. CRU040 checks the rate's and the burst's values.
 
 | Macro | Side | Type arguments | Arguments |
 | --- | --- | --- | --- |
@@ -501,13 +501,16 @@ A place that grants any developer product must grant each product `crucible:expe
 
 ```text
 CRU040: A rate is a number literal of requests per second in (0, 1000].
+CRU040: A burst is an integer literal of requests in [1, 1000].
+CRU040: A burst needs a rate beside it.
 ```
 
-The `rate` of a `toServer` or `askServer` declaration is the number of requests per second each player may send, and the compiler writes it into the declaration. It must be a number literal greater than 0 and at most 1,000, such as `8` or `0.5`. A variable, an expression such as `1 / 5`, a negative number and `0` fail. To fix it, write the number itself. To send without a limit, leave `rate` out. `crucible docs networking` describes what a rate does.
+The `rate` of a `toServer` or `askServer` declaration is the number of requests per second each player may send, and its `burst` is the most requests a player may send at once. The compiler writes both into the declaration. A rate must be a number literal greater than 0 and at most 1,000, such as `8` or `0.5`. A burst must be an integer literal from 1 to 1,000, and the declaration must also have a rate. A variable, an expression such as `1 / 5` or `-0`, a negative number, `0` and a number above 1,000 fail, and so does a burst such as `1.5`. To fix it, write the number itself. To send without a limit, leave out both `rate` and `burst`. `crucible docs networking` describes what a rate and a burst do.
 
 ```ts
 import { toServer } from "@trioforge/crucible";
 
 export const Tap = toServer<undefined>("Cannon.Tap", { rate: 8 });
+export const Spin = toServer<undefined>("Wheel.Spin", { rate: 5, burst: 1 });
 export const Rebirth = toServer<undefined>("Cannon.Rebirth", { rate: 0.5 });
 ```

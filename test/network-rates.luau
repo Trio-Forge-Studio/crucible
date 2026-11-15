@@ -10,6 +10,9 @@ local function declare(r)
 		Free = r.emit.toServer("Rate.Free", n["nil"], nil),
 		Buy = r.emit.askServer("Rate.Buy", n.string, n.string, nil, 1),
 		Gone = r.emit.askServer("Rate.Gone", n.string, n.string, nil, 1),
+		Spin = r.emit.toServer("Rate.Spin", n["nil"], 5, 1),
+		Hold = r.emit.toServer("Rate.Hold", n["nil"], 1, 3),
+		Boost = r.emit.askServer("Rate.Boost", n.string, n.string, nil, 5, 1),
 		Wait = r.emit.toServer("Rate.Wait", n["nil"], 1),
 	}
 end
@@ -40,12 +43,12 @@ local function server(link)
 	link:boot(function(s)
 		m = declare(s)
 		s.service("Rated", function(self)
-			for _, name in { "Tap", "Slow", "Free" } do
+			for _, name in { "Tap", "Slow", "Free", "Spin", "Hold" } do
 				self[name] = s.emit.receive(self, name, m[name], function(player)
 					count(`{name} {player.Name}`)
 				end)
 			end
-			for _, name in { "Buy" } do
+			for _, name in { "Buy", "Boost" } do
 				self[name] = s.emit.receive(self, name, m[name], function(player, item)
 					count(`{name} {player.Name}`)
 					return `sold {item}`
@@ -289,6 +292,68 @@ return {
 		spec.eq(#link.kicks, 0, "a malformed body never kicks")
 		link:assertClean()
 	end,
+	["a burst of one spaces requests by the rate"] = function()
+		local link = Link.new()
+		local m = server(link)
+		local ann = link:join("Ann", client)
+		sends(ann, ann.m.Spin, 2)
+		link:flush()
+		spec.eq(link.calls["Spin Ann"], 1, "a same-frame duplicate is refused")
+		link:advance(0.1)
+		sends(ann, ann.m.Spin, 1)
+		link:flush()
+		spec.eq(link.calls["Spin Ann"], 1, "0.1 seconds later is too soon")
+		link:advance(0.1)
+		sends(ann, ann.m.Spin, 1)
+		link:flush()
+		spec.eq(link.calls["Spin Ann"], 2, "0.2 seconds after the first, one more runs")
+		link:advance(10)
+		sends(ann, ann.m.Spin, 2)
+		link:flush()
+		spec.eq(link.calls["Spin Ann"], 3, "a long pause still holds one")
+		spec.eq(link.server.Network.limited(m.Spin), 3, "every refusal counted")
+		link:assertClean()
+	end,
+	["a burst of one refuses a same-frame second ask"] = function()
+		local link = Link.new()
+		server(link)
+		local ann = link:join("Ann", client)
+		local first = link:run(function()
+			return ann.Network.ask(ann.m.Boost, "gem")
+		end)
+		local second = link:run(function()
+			return ann.Network.ask(ann.m.Boost, "gem")
+		end)
+		link:flush()
+		spec.eq(first.value.value, "sold gem", "the first boost runs")
+		spec.eq(second.value.reason, "limited", "a same-frame second boost is refused")
+		link:advance(0.2)
+		local third = link:run(function()
+			return ann.Network.ask(ann.m.Boost, "gem")
+		end)
+		link:flush()
+		spec.eq(third.value.value, "sold gem", "0.2 seconds later it runs")
+		spec.eq(link.calls["Boost Ann"], 2, "two boosts ran")
+		link:assertClean()
+	end,
+	["a burst above the rate holds that many requests"] = function()
+		local link = Link.new()
+		local m = server(link)
+		local ann = link:join("Ann", client)
+		sends(ann, ann.m.Hold, 4)
+		link:flush()
+		spec.eq(link.calls["Hold Ann"], 3, "a burst of three at a rate of one")
+		link:advance(1)
+		sends(ann, ann.m.Hold, 2)
+		link:flush()
+		spec.eq(link.calls["Hold Ann"], 4, "one second refills one")
+		link:advance(60)
+		sends(ann, ann.m.Hold, 4)
+		link:flush()
+		spec.eq(link.calls["Hold Ann"], 7, "a long pause refills the burst and no more")
+		spec.eq(link.server.Network.limited(m.Hold), 3, "every refusal counted")
+		link:assertClean()
+	end,
 	["limited replies free the client's pending asks"] = function()
 		local link = Link.new()
 		local m = server(link)
@@ -371,5 +436,18 @@ return {
 		spec.eq(ok, false, "askServer refuses 1001")
 		spec.has(tostring(err), "invalid message rate", "askServer names the rate")
 		spec.eq(pcall(s.emit.toServer, "Rate.Most", n["nil"], 1000), true, "1000 is the most")
+		for i, burst in { 0, -1, 1.5, 1001, 0 / 0, math.huge, "2" } do
+			local refused, reason = pcall(s.emit.toServer, `Rate.BadBurst{i}`, n["nil"], 5, burst)
+			spec.eq(refused, false, `toServer refuses a burst of {burst}`)
+			spec.has(tostring(reason), "invalid message burst", `toServer names the burst for {burst}`)
+		end
+		local alone, aloneErr = pcall(s.emit.toServer, "Rate.Alone", n["nil"], nil, 1)
+		spec.eq(alone, false, "a burst needs a rate")
+		spec.has(tostring(aloneErr), "invalid message burst", "and names the burst")
+		local ask, askErr = pcall(s.emit.askServer, "Rate.BadBurstAsk", n.string, n.string, nil, 5, 0)
+		spec.eq(ask, false, "askServer refuses a burst of 0")
+		spec.has(tostring(askErr), "invalid message burst", "askServer names the burst")
+		spec.eq(pcall(s.emit.toServer, "Rate.Burst1", n["nil"], 5, 1), true, "1 is the least burst")
+		spec.eq(pcall(s.emit.toServer, "Rate.Burst1000", n["nil"], 0.5, 1000), true, "1000 is the most burst")
 	end,
 }

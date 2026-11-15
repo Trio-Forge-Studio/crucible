@@ -1402,7 +1402,7 @@ export const id = operationId();",
     let shared = game.luau("shared/messages.luau");
     has(
         &shared,
-        "local Ping = __crucible.toServer(\"X.Ping\", __crucible.n.object({ { \"a\", __crucible.n.string } }), nil)",
+        "local Ping = __crucible.toServer(\"X.Ping\", __crucible.n.object({ { \"a\", __crucible.n.string } }), nil, nil)",
     );
     has(&shared, "local Score = __crucible.replicated(\"Score\", 0, __crucible.n.f64)");
     let server = game.luau("server/main.luau");
