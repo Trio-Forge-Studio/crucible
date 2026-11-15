@@ -132,6 +132,8 @@ return function(client: boolean?, path: string?, options)
 	local include = place:GetService("ReplicatedStorage").rbxts_include
 	local crucible = include.node_modules["@trioforge"].crucible
 	crucible = crucible:FindFirstChild("out") or crucible
+	local internal = crucible:FindFirstChild("internal")
+	local lifecycleModule = internal and internal:FindFirstChild("lifecycle")
 	local load
 	local function requireFrom(script)
 		return function(target)
@@ -190,7 +192,7 @@ return function(client: boolean?, path: string?, options)
 				environment = environment,
 			})
 			loaded[module] = { value = chunk() }
-			if module == crucible.internal.lifecycle then
+			if module == lifecycleModule then
 				local lifecycle = loaded[module].value
 				local useEffects = lifecycle.useEffects
 				lifecycle.useEffects = function(effects)

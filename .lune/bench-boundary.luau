@@ -5,7 +5,7 @@
 --
 --   lune run bench-boundary [runs]
 local process = require("@lune/process")
-local spec = require("../test/lib/load")
+local spec = require("../packages/crucible/lune")
 local realm = require("../test/lib/reactive-world")
 local ownable = require("../test/lib/ownable")
 

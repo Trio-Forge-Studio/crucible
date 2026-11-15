@@ -15,7 +15,7 @@ const mutants = [
 	[
 		"lifecycle name collision",
 		"place.luau",
-		"module == crucible.internal.lifecycle",
+		"module == lifecycleModule",
 		'module.Name == "lifecycle" and module.Parent.Name == "internal"',
 	],
 	["terminal behaviour state", "place.luau", "else (generations[record] or {})[instance]", "else nil"],
