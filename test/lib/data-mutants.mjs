@@ -1422,6 +1422,12 @@ try {
 		path.join(scratch, "packages/crucible/node_modules"),
 		"junction",
 	);
+	fs.mkdirSync(path.join(scratch, "examples/sample-game"), { recursive: true });
+	fs.symlinkSync(
+		path.join(repo, "examples/sample-game/node_modules"),
+		path.join(scratch, "examples/sample-game/node_modules"),
+		"junction",
+	);
 	const files = [...new Set(mutants.map(([, , file]) => file))];
 	const originals = new Map(files.map((file) => [file, fs.readFileSync(path.join(scratch, file), "utf8")]));
 	for (const [rule, kind, file, before] of mutants) {
