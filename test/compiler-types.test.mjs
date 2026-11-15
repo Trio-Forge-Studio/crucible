@@ -52,9 +52,10 @@ import { typecheck } from "./lib/typecheck.mjs";
 test("every TypeScript subpath resolves through exports with bundler resolution and no physical remaps", () => {
 	const manifest = JSON.parse(fs.readFileSync(path.join(repo, "packages/crucible/package.json"), "utf8"));
 	const entries = Object.entries(manifest.exports)
-		.filter(([, entry]) => typeof entry === "object" && typeof entry.types === "string")
+		.filter(([key]) => key !== "./lune")
 		.map(([key]) => key);
 	assert(entries.length > 0, "package exports TypeScript entries");
+	for (const key of entries) assert.equal(typeof manifest.exports[key].types, "string", `${key} has types`);
 	const source = entries
 		.map(
 			(key, i) =>

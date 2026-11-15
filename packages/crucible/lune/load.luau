@@ -69,31 +69,34 @@ local function fileOf(path: string): string
 end
 local PROMISE_PATH = directory .. "/Promise.source"
 local PROMISE_SOURCE = if fs.isFile(PROMISE_PATH) then fs.readFile(PROMISE_PATH) else nil
-local promise
-local function Promise()
-	if promise == nil then
-		assert(PROMISE_SOURCE, `TS.Promise needs {PROMISE_PATH}`)
-		local runService = {
-			Heartbeat = {
-				Connect = function()
-					return { Disconnect = function() end }
-				end,
-			},
-		}
-		promise = luau.load(PROMISE_SOURCE, {
-			debugName = "Promise",
-			environment = {
-				game = {
-					GetService = function()
-						return runService
+local function newPromise()
+	local promise
+	return function()
+		if promise == nil then
+			assert(PROMISE_SOURCE, `TS.Promise needs {PROMISE_PATH}`)
+			local runService = {
+				Heartbeat = {
+					Connect = function()
+						return { Disconnect = function() end }
 					end,
 				},
-				task = task,
-			},
-		})()
+			}
+			promise = luau.load(PROMISE_SOURCE, {
+				debugName = "Promise",
+				environment = {
+					game = {
+						GetService = function()
+							return runService
+						end,
+					},
+					task = task,
+				},
+			})()
+		end
+		return promise
 	end
-	return promise
 end
+local Promise = newPromise()
 local PACKAGE_SERVICE = {
 	IsStudio = function()
 		return false
@@ -105,13 +108,14 @@ local PACKAGE_GAME = {
 	end,
 }
 local function graph(defaults, loggingPort, configPort, network, dataPort, root: string?)
+	local graphPromise = newPromise()
 	local folder = root or ROOT
 	network = network or networkPort()
 	local loaded: { [string]: any } = {}
 	local load: (string, { [string]: any }?) -> any
 	local TS = setmetatable({}, {
 		__index = function(_, key)
-			return if key == "Promise" then Promise() else nil
+			return if key == "Promise" then graphPromise() else nil
 		end,
 	})
 	function TS.getModule(_caller: Node, scope: string, name: string): Node
@@ -138,7 +142,11 @@ local function graph(defaults, loggingPort, configPort, network, dataPort, root:
 			for key, value in globals or {} do
 				env[key] = value
 			end
-			if string.sub(path, 1, #PACKAGES + 1) == PACKAGES .. "/" then
+			if
+				string.sub(path, 1, #PACKAGES + 1) == PACKAGES .. "/"
+				and string.sub(path, 1, #ROOT + 1) ~= ROOT .. "/"
+				and path ~= ROOT
+			then
 				env.game = PACKAGE_GAME
 				env.Instance = roblox.Instance
 				env.Enum = roblox.Enum
@@ -187,6 +195,7 @@ local function graph(defaults, loggingPort, configPort, network, dataPort, root:
 		return loaded[path]
 	end
 	return {
+		Promise = graphPromise,
 		network = network,
 		module = function(relative: string, globals: { [string]: any }?): any
 			return load(if relative == "" then folder else folder .. "/" .. relative, globals)
@@ -197,6 +206,7 @@ local function graph(defaults, loggingPort, configPort, network, dataPort, root:
 	}
 end
 
+-- Unsupported disk-loading hooks for Crucible's white-box specs.
 local spec = {}
 
 local shared = graph()

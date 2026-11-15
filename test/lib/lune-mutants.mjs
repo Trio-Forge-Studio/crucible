@@ -6,6 +6,28 @@ import path from "node:path";
 const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(repo, "build/lune-mutants-"));
 const mutants = [
+	[
+		"hook player",
+		"init.luau",
+		"options.onLoad(session.player, value, reason)",
+		"options.onLoad(session, value, reason)",
+	],
+	["release player", "init.luau", "profile:release(session, reason or", "profile:release(player, reason or"],
+	["module replacement", "place.luau", "if replacements[module] then", "if false then"],
+	[
+		"Promise isolation",
+		"load.luau",
+		"local graphPromise = newPromise()\n\tlocal folder",
+		"local graphPromise = Promise\n\tlocal folder",
+	],
+	[
+		"wait cancellation",
+		"data-backend.luau",
+		"function realm.cancel(thread)",
+		"function realm.cancel(thread)\n\t\tif true then return end",
+	],
+	["server send failure", "network-port.luau", 'failing("fireClient")', ""],
+	["named fault phase", "place.luau", '"faulted"', '"enabled"'],
 	["service overrides", "place.luau", "if options.services and options.services[name] ~= nil then", "if false then"],
 	["module cache", "place.luau", "if loaded[module] == nil then", "if true then"],
 	[
@@ -17,7 +39,7 @@ const mutants = [
 	[
 		"load hook",
 		"init.luau",
-		"return if options.onLoad then options.onLoad(player, value, reason) else value",
+		"return if options.onLoad then options.onLoad(session.player, value, reason) else value",
 		"return value",
 	],
 ];

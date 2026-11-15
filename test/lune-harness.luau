@@ -1,6 +1,82 @@
 local harness = require("../packages/crucible/lune")
 
 return {
+	["Lune lifecycle reports a fault from a compiled hook"] = function()
+		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
+		local systems = graph.place:GetService("ServerScriptService").TS.systems
+		graph.import(systems.store)
+		local Controller = graph.import(systems.controller).Controller
+		Controller.awake = function()
+			error("fixture awake failure")
+		end
+		local ok, message = pcall(graph.import(graph.crucible.server).boot, { load = {} })
+		assert(not ok and string.find(tostring(message), "fixture awake failure", 1, true), "boot reports hook failure")
+		assert(graph.lifecycle(Controller) == "faulted", "faulted hook has a named lifecycle state")
+		graph.place:Destroy()
+	end,
+	["Lune runtime preserves supplied game under installed node_modules"] = function()
+		local game = {
+			GetService = function()
+				return {
+					IsStudio = function()
+						return false
+					end,
+					IsServer = function()
+						return true
+					end,
+					IsClient = function()
+						return false
+					end,
+				}
+			end,
+		}
+		assert(harness.runtime({ game = game }).module("server"), "server entry loads with supplied game")
+	end,
+	["Lune graph Promise handlers are isolated"] = function()
+		local a = harness.runtime().Promise()
+		local b = harness.runtime().Promise()
+		assert(a ~= b, "Promise implementation belongs to graph")
+		local disconnect = a.onUnhandledRejection(function() end)
+		disconnect()
+	end,
+	["Lune scheduler cancels waiting and delayed threads"] = function()
+		local backend = harness.Backend.new()
+		local realm = backend:realm()
+		local calls = 0
+		local waiting = realm.spawn(function()
+			realm.wait(1)
+			calls += 1
+		end)
+		local delayed = realm.delay(1, function()
+			calls += 1
+		end)
+		realm.cancel(waiting)
+		realm.cancel(delayed)
+		backend:advance(2)
+		assert(calls == 0 and coroutine.status(waiting) == "dead", "cancelled threads never resume")
+	end,
+	["Lune network faults consume every supported operation once"] = function()
+		for _, name in { "create", "publish", "discover", "fireClient", "fireServer" } do
+			local port = harness.networkPort()
+			port.failNext = name
+			local ok, message = pcall(port[name], {}, {}, {})
+			assert(not ok and string.find(tostring(message), "injected " .. name, 1, true), name)
+			assert(port.failNext == nil and #port.fired == 0, "failed operation consumed before send")
+			assert(pcall(port[name], {}, {}, {}), "next operation succeeds")
+		end
+	end,
+	["Lune graph replaces modules before consumers import them"] = function()
+		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
+		local module = graph.place:GetService("ReplicatedStorage").TS.profile
+		local double = { PlayerData = {} }
+		graph.provideGame(module, double)
+		assert(graph.import(module) == double and graph.load(module) == double, "imports use replacement")
+		local Controller = graph.import(graph.place:GetService("ServerScriptService").TS.systems.controller).Controller
+		assert(graph.lifecycle(Controller) == "unconstructed", "not booted")
+		graph.import(graph.crucible.testing)
+		assert(not pcall(graph.provideGame, graph.crucible.testing, false), "evaluated replacement rejected")
+		graph.place:Destroy()
+	end,
 	["Lune harness isolates compiled graphs and overrides services"] = function()
 		local service = { marker = true }
 		local a = harness.loadGame({ place = "build/sample-game.rbxl", services = { Workspace = service } })
@@ -44,13 +120,21 @@ return {
 			operationFloor = 0,
 		})
 		local hookCalls = 0
+		local player = realm.join(4120)
+		local released = false
 		local fixture = harness.profileFixture(realm, token, {
-			onLoad = function(_, value)
+			onLoad = function(got, value)
+				assert(got == player, "onLoad receives player")
 				hookCalls += 1
 				return value
 			end,
+			onRelease = function(got, value, reason)
+				assert(got == player and reason == "leave", "onRelease receives player and reason")
+				released = true
+				return value
+			end,
 		})
-		local player = realm.join(4120)
+		assert(fixture:state(player) == "absent", "no session before load")
 		local loading = realm.run(function()
 			return fixture:load(player, "join")
 		end)
@@ -58,6 +142,7 @@ return {
 		assert(loading.done and loading.value == true, "compiled schema admitted")
 		assert(fixture.published[player].coins == 9, "compiled migration from gold")
 		assert(hookCalls == 1, "fixture hook")
+		assert(fixture:state(player) == "active" and fixture:writable(player), "loaded session active")
 		assert(fixture.published[player].pickups == 0, "serverOnly default unwrapped")
 		realm.run(function()
 			fixture:write(player, function(value)
@@ -72,6 +157,12 @@ return {
 		backend:advance(21)
 		assert(saving.done, "save completed on fake clock")
 		assert(backend:envelope("Sample.Players", "4120").payload.coins == 7, "real persistence path")
+		local releasing = realm.run(function()
+			fixture:release(player)
+		end)
+		backend:advance(1)
+		assert(releasing.done and released and not fixture:writable(player), "player-facing release")
+		assert(fixture:state(player) == "ended", "release settled")
 		graph.place:Destroy()
 	end,
 }

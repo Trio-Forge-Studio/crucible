@@ -34,6 +34,7 @@ return function()
 		port.published = { protocol = protocol, catalog = catalog }
 	end
 	function port.fireClient(player, packet, sidecar)
+		failing("fireClient")
 		table.insert(port.fired, { player = player, packet = packet, sidecar = sidecar })
 	end
 	function port.players()

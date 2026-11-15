@@ -5,7 +5,10 @@ harness.networkPort = require("@self/network-port")
 harness.loadPlace = require("@self/place")
 
 function harness.loadGame(options)
-	assert(type(options) == "table" and type(options.place) == "string", "loadGame needs { place = <rbxl path> }")
+	assert(
+		type(options) == "table" and (type(options.place) == "string" or type(options.sourcemap) == "string"),
+		"loadGame needs a place or sourcemap path"
+	)
 	return harness.loadPlace(options.client, options.place, options)
 end
 
@@ -17,21 +20,35 @@ function harness.profileFixture(realm, store, options)
 	local published = {}
 	local reasons = {}
 	local profile = realm.data:profile(declaration.schema, {
-		onLoad = function(player, value, reason)
+		onLoad = function(session, value, reason)
 			table.insert(reasons, reason)
-			return if options.onLoad then options.onLoad(player, value, reason) else value
+			return if options.onLoad then options.onLoad(session.player, value, reason) else value
 		end,
-		onRelease = options.onRelease or function(_, value)
-			return value
+		onRelease = function(session, value, reason)
+			return if options.onRelease then options.onRelease(session.player, value, reason) else value
 		end,
 		publish = function(player, value)
 			published[player] = value
 		end,
 		delivered = function() end,
 	})
-	profile.published = published
-	profile.reasons = reasons
-	return profile
+	local fixture = { published = published, reasons = reasons }
+	for _, name in { "load", "write", "save", "writable", "players", "leave", "handoff", "resume", "await" } do
+		fixture[name] = function(_, ...)
+			return profile[name](profile, ...)
+		end
+	end
+	function fixture:release(player, reason)
+		local session = profile.sessions[player]
+		if session then
+			profile:release(session, reason or "leave")
+		end
+	end
+	function fixture:state(player)
+		local session = profile.sessions[player]
+		return if session then ({ "loading", "active", "sealed", "ended" })[session.authority.phase + 1] else "absent"
+	end
+	return fixture
 end
 
 return harness

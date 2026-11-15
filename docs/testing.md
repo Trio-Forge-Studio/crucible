@@ -127,9 +127,9 @@ assert(pending.done and pending.value == true)
 assert(profile.published[player] ~= nil)
 ```
 
-`profileFixture(realm, compiledStore, options?)` uses the compiled store's sealed defaults, persistence schema and migrations, including server-only fields. It returns the real profile engine with `published[player]` snapshots and a `reasons` list. Optional `onLoad(player, value, reason)` and `onRelease(player, value)` callbacks transform values under the runtime's normal claim rules. Methods such as `load`, `write`, `save` and `release` run through the same engine as production. Yielding methods run through `realm.run`, whose result has `done` and `value`.
+`profileFixture(realm, compiledStore, options?)` uses the compiled store's sealed defaults, persistence schema and migrations, including server-only fields. It returns a player-facing fixture with `published[player]` snapshots and a `reasons` list. Optional `onLoad(player, value, reason)` and `onRelease(player, value, reason)` callbacks transform values under the runtime's normal claim rules. `load(player, reason)`, `write(player, change)`, `save(player, timeout?)`, `release(player, reason?)`, `writable(player)`, `leave(player)`, `handoff(player)`, `resume(player)` and `await(player)` run through the production engine. `players()` lists writable players. `state(player)` returns `"absent"`, `"loading"`, `"active"`, `"sealed"` or `"ended"`. Release defaults to `"leave"`. Yielding methods run through `realm.run`, whose result has `done` and `value`.
 
-`Backend.new()` creates committed storage and virtual time. `backend:realm({ id?, mono?, wall?, latency?, seed?, env?, subsystems? })` creates an independent server realm. `realm.join(userId)`, `leave(player)`, `crash()` and `suspended` control presence and execution. `realm.clock()`, `wall()`, `spawn`, `wait`, `delay` and `cancel` form its fake clock and scheduler. `backend:advance(seconds)` runs due events and reports coroutine failures. `seed(store, key, value, userIds?, metadata?)`, `envelope(store, key)` and `stored(store, key)` seed or inspect copied committed values. `callsTo(filter)` lists calls matching fields such as `server`, `kind`, `store` and `key`.
+`Backend.new()` creates committed storage and virtual time. `backend:realm({ id?, mono?, wall?, latency?, seed? })` creates an independent server realm. `realm.join(userId)`, `leave(player)`, `crash()` and `suspended` control presence and execution. `realm.clock()`, `wall()`, `spawn`, `wait`, `delay` and `cancel` form its fake clock and scheduler. `backend:advance(seconds)` runs due events and reports coroutine failures. `seed(store, key, value, userIds?, metadata?)`, `envelope(store, key)` and `stored(store, key)` seed or inspect copied committed values. `callsTo(filter)` lists calls matching fields such as `server`, `kind`, `store` and `key`.
 
 `backend:fail(kind, filter?, times?, options?)` injects `throttle`, `transient`, `committed`, `conflict`, `late`, `stall` or `reject` failures. Options include `seconds`, `code` and `after`. `gate(point, filter?)` parks future calls at `transform`, `commit`, `committed` or `response`; call the returned `release()` to continue. A crashed realm never runs again, but an already-sent write can still commit.
 
@@ -137,12 +137,31 @@ assert(profile.published[player] ~= nil)
 
 `engine.new()` returns an engine with `port` and `loggingPort`. It supports `instance`, `addTag`, `removeTag`, `setAttribute`, `setInWorld`, `move`, `destroy`, `clone`, `flush`, `frame`, `cycle` and `logged`. Signals queue until `flush()`. `frame(engine.FrameEvent.Heartbeat, dt)` and `cycle(dt, renders)` drive frame callbacks. `logs` and `gameLogs` capture output.
 
-`networkPort()` returns a port that records `fired`, `kicked`, `listeners` and `timers`. `failNext` names the next operation to throw. It supplies an empty-game discovery catalog; games that exercise declared messages provide a network double implementing the catalog and transport they need.
-
-## Runtime unit-test helpers
-
-Crucible's own specs use the same entry. `module(path, globals?)` loads a compiled runtime module once, `fresh(path, globals?)` isolates one load, and `runtime(globals?, loggingPort?, configPort?, network?, dataPort?)` returns a graph with `module(path)` and `package(path)`. `runtimeAt(root, globals?, loggingPort?)` selects another compiled runtime folder. These helpers synthesize TS imports for package unit tests; compiled games use `loadGame`. `optimize(level)`, `rewrite(transform?)` and `readAhead(enabled)` configure subsequent disk loads. `Promise()` loads the shipped Promise implementation. `eq`, `list` and `has` are assertion helpers. Runtime module paths in Crucible's own white-box specs are not game APIs.
+`networkPort()` returns a port that records `fired`, `kicked`, `listeners` and `timers`. `failNext` names the next operation to throw, one of `"create"`, `"publish"`, `"discover"`, `"fireClient"` or `"fireServer"`. The failure is consumed once, before recording a send. It supplies an empty-game discovery catalog; games that exercise declared messages provide a network double implementing the catalog and transport they need.
 
 ## Replace copied BAFM helpers
 
 BAFM's `load.luau`, `engine.luau`, `data-backend.luau` and `network-port.luau` map to this single entry's `loadGame`, `engine`, `Backend` and `networkPort`. Load `PlayerProfile` and `ProfileRules` through `graph.import` on their compiled place instances. Pass the exported profile store to `profileFixture`, and pass `ProfileRules.prepareProfile` through `onLoad`. The fixture no longer queries `internal/data/declarations`, constructs `DataEngine`, or loads `profiles`, `lease`, `envelope` and `admission` by private path. Tests of saved values use `backend:seed` and `backend:envelope`.
+
+## Replace modules and inspect lifecycle
+
+`graph.provideGame(instance, value)` replaces a compiled module before it or a consumer imports it. Imports and requires receive the replacement, including `false`. Replacing an already evaluated module throws. Replacements belong to one graph.
+
+`graph.lifecycle(Class, instance?)` returns `"unconstructed"`, `"constructed"`, `"awake"`, `"enabled"`, `"disabled"`, `"faulted"` or `"destroyed"` for a registered class in this graph. Pass a bound instance for a behaviour. This replaces numeric phase assertions such as FD's private `Phase.Faulted` check. It observes lifecycle driven by boot and engine events; objects constructed manually through `/testing` are outside lifecycle.
+
+## Load a Rojo sourcemap
+
+A game can load its compiled output without building a place. Generate a Rojo sourcemap including scripts, then use:
+
+```luau
+local graph = harness.loadGame({
+    sourcemap = "sourcemap.json",
+    root = ".",
+    output = "out",
+    sourceRoot = "src",
+})
+```
+
+`root` is the folder against which sourcemap file paths resolve. Lua and Luau paths load directly. TypeScript paths below `sourceRoot` load their matching `.luau` file below `output`, preserving folders and `init` modules. Paths already pointing to compiled output need no `output` option. All paths are relative to the current working directory unless absolute. The graph API and isolation match place loading.
+
+Only the game APIs described above are supported. Disk loaders (`module`, `fresh`, `runtime`, `runtimeAt`), their module paths, and backend realm fields exposing runtime internals are unsupported white-box hooks for Crucible's own specs. Games must not depend on them.

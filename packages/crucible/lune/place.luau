@@ -2,6 +2,7 @@ local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
 local task = require("@lune/task")
+local serde = require("@lune/serde")
 local engine = require("./engine")
 local networkPort = require("./network-port")
 
@@ -11,7 +12,36 @@ end)
 
 return function(client: boolean?, path: string?, options)
 	options = options or {}
-	local place = roblox.deserializePlace(fs.readFile(path or "build/sample-game.rbxl"))
+	local place
+	if options.sourcemap then
+		local source = serde.decode("json", fs.readFile(options.sourcemap))
+		place = roblox.Instance.new("DataModel")
+		local root = options.root or "."
+		local function walk(node, parent)
+			local instance = roblox.Instance.new(node.className)
+			instance.Name = node.name
+			instance.Parent = parent
+			for _, file in node.filePaths or {} do
+				file = string.gsub(file, "\\", "/")
+				if string.match(file, "%.lua[u]?$") then
+					instance.Source = fs.readFile(root .. "/" .. file)
+				elseif options.output and string.match(file, "%.tsx?$") and not string.match(file, "%.d%.ts$") then
+					local prefix = (options.sourceRoot or "src") .. "/"
+					assert(string.sub(file, 1, #prefix) == prefix, `source {file} is outside {prefix}`)
+					local relative = string.gsub(string.sub(file, #prefix + 1), "%.tsx?$", ".luau")
+					instance.Source = fs.readFile(options.output .. "/" .. relative)
+				end
+			end
+			for _, child in node.children or {} do
+				walk(child, instance)
+			end
+		end
+		for _, child in source.children or {} do
+			walk(child, place)
+		end
+	else
+		place = roblox.deserializePlace(fs.readFile(path or "build/sample-game.rbxl"))
+	end
 	local e = options.engine or engine.new()
 	local messages = {}
 	local closers = {}
@@ -73,6 +103,7 @@ return function(client: boolean?, path: string?, options)
 	}
 	local realm = {}
 	local loaded = {}
+	local replacements = {}
 	local load
 	local function requireFrom(script)
 		return function(target)
@@ -92,6 +123,9 @@ return function(client: boolean?, path: string?, options)
 		end
 	end
 	function load(module)
+		if replacements[module] then
+			return replacements[module].value
+		end
 		if module.Name == "roblox-port" and module.Parent.Name == "internal" then
 			return {
 				robloxPort = function()
@@ -154,6 +188,18 @@ return function(client: boolean?, path: string?, options)
 		attributes = attributes,
 		runService = runService,
 		load = load,
+		provideGame = function(module, value)
+			assert(loaded[module] == nil, "replace a module before importing it or its consumers")
+			replacements[module] = { value = value }
+		end,
+		lifecycle = function(class, instance)
+			local record = load(crucible.internal.registry).recordOf(class)
+			assert(record, "lifecycle needs a registered class from this graph")
+			local state = if record.bound then record.bound[instance] else record.state
+			return if state
+				then ({ "unconstructed", "constructed", "awake", "enabled", "disabled", "faulted", "destroyed" })[state.phase + 1]
+				else "unconstructed"
+		end,
 		import = function(module)
 			return runtime.import(include.RuntimeLib, module)
 		end,

@@ -291,7 +291,8 @@ function Backend:realm(options)
 	end
 	function realm.wait(seconds: number)
 		local thread = coroutine.running()
-		backend:schedule(backend.now + math.max(seconds, FRAME), realm, function()
+		realm.timers[thread] = backend:schedule(backend.now + math.max(seconds, FRAME), realm, function()
+			realm.timers[thread] = nil
 			backend:resume(thread)
 		end)
 		coroutine.yield()
@@ -309,6 +310,9 @@ function Backend:realm(options)
 		if event then
 			event.cancelled = true
 			realm.timers[thread] = nil
+		end
+		if coroutine.status(thread) == "suspended" then
+			coroutine.close(thread)
 		end
 	end
 	function realm.random()
@@ -411,6 +415,7 @@ function Backend:realm(options)
 	end
 
 	realm.graph = spec.runtime(options.env, engine.loggingPort, nil, nil, realm.port)
+	-- Unsupported white-box access for Crucible's own specs. Games use profileFixture.
 	realm.boot = realm.graph.module("internal/boot")
 	realm.limits = realm.graph.module("internal/data/limits")
 	realm.lease = realm.graph.module("internal/data/lease")
