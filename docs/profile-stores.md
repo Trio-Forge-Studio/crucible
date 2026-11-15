@@ -28,7 +28,9 @@ import type {
 	AfterGrant,
 	LoadReason,
 	ProfileClaim,
+	ProfileEvent,
 	ProfileMessage,
+	ProfileObserver,
 	Purchase,
 	QuarantinedMessage,
 	ReleaseReason,
@@ -202,6 +204,48 @@ export class RewardService extends Subsystem {
 - `grant(product, apply)` owns Roblox's `ProcessReceipt` for that product. It takes a handle from `crucible:experience`, such as `Products.CoinPack`, or a product ID. A purchase is acknowledged only after its change is durably saved, and `afterGrant` effects run once, after that.
 - A Charm atom or published value that a claim or a handle callback writes is not rolled back when its data change fails: when the callback throws, or returns a value the store rejects. A `grant` callback also runs again each time Roblox retries an unsaved purchase. Players can then see a reward their profile does not hold. Write what players see in `afterGrant`, or after a handle write returns true.
 - `quarantined(userId)` and `clearQuarantined(userId, ids, action)` recover messages a receiver kept failing on.
+
+## Profile events
+
+`observe(listener)` reports what happens to each player's profile on this server, for logs and metrics. Like a claim, it is a field initializer of a server Subsystem, and it stops when that Subsystem ends. Unlike a claim, it returns nothing and changes nothing: the listener cannot change data or delay a save.
+
+```ts
+import { profileStore, Subsystem } from "@trioforge/crucible";
+import type { ProfileEvent } from "@trioforge/crucible/server";
+
+const PlayerData = profileStore("Game.Logged", { template: { coins: 0 } });
+
+function line(event: ProfileEvent): string {
+	const who = `${event.player.Name} (${event.player.UserId}) in ${event.store}`;
+	switch (event.kind) {
+		case "writable":
+			return `${who} writable after ${event.seconds} s, ${event.attempts} requests (${event.reason})`;
+		case "save":
+			return event.result.ok
+				? `${who} saved revision ${event.saved} in ${event.seconds} s`
+				: `${who} save of revision ${event.revision} failed: ${event.result.reason}`;
+		case "lost":
+			return `${who} lost (${event.reason}) at revision ${event.revision}, ${event.saved} saved`;
+		case "released":
+			return `${who} released (${event.reason}): ${event.result.ok ? "saved" : event.result.reason}`;
+	}
+}
+
+export class ProfileLog extends Subsystem {
+	private readonly events = PlayerData.observe((event) => print(line(event)));
+}
+```
+
+Every event carries its `kind`, the `store` name, the `player` and the session's `revision`, which counts its changes from 0 as loaded. None carries the profile's data.
+
+- `writable`: the profile turned writable, joined or resumed. `attempts` counts the load's lease requests and `seconds` the whole load.
+- `save`: a save that carried changes finished, automatic or from `save(player)`. `result` is the `SaveResult` that `save()` returns, `saved` the highest revision the store now holds, and `attempts` and `seconds` that write's requests and duration. A lease renewal or a `save` that carries nothing new reports nothing. A failed save keeps its changes, and the next save carries them again.
+- `lost`: the session stopped being writable without a release. `"fenced"` means another server took the profile, and `"authority"` that this server could not confirm its lease in time. The player is kicked.
+- `released`: the release's last write settled, after a leave, a handoff, a shutdown, or `"lost"`. `result` is ok when the store holds every revision.
+
+Each session reports `writable` first and `released` last, once each, with any number of saves between and `lost` at most once before `released`. A save already in flight when the session is lost can finish after `lost`. A load that fails reports nothing.
+
+Each listener sees every event in order. It runs the way a claim does: it must not yield or write data, and a listener that throws, yields or writes is reported once per Subsystem and event kind, while the other listeners and the save carry on. Schedule slow work, such as an HTTP call, from the listener with `task.spawn`.
 
 ## The owner's client
 

@@ -1,3 +1,4 @@
+import type { ProfileEvent, SaveResult as Saved } from "../../data";
 import { bootClock } from "../boot";
 import { runtimeDiagnostic } from "../diagnostics";
 import { loadRecord, sealSchema, type Schema } from "./admission";
@@ -82,6 +83,7 @@ export interface ProfileHooks {
 	readonly onRelease: (session: Session, value: object, reason: ReleaseReason) => object;
 	readonly publish: (player: Player, value: object | undefined) => void;
 	readonly delivered: (session: Session, envelope: Envelope) => void;
+	readonly observe: (event: ProfileEvent) => void;
 }
 
 const NO_HOOKS: ProfileHooks = {
@@ -89,7 +91,27 @@ const NO_HOOKS: ProfileHooks = {
 	onRelease: (_, value) => value,
 	publish: () => {},
 	delivered: () => {},
+	observe: () => {},
 };
+
+const SAVED: Saved = { ok: true };
+
+function writeResult(settled: Settled, committed: boolean, ambiguous: boolean): Saved {
+	if (committed) return SAVED;
+	if (ambiguous || settled.kind === "uncertain") return { ok: false, reason: "uncertain" };
+	return { ok: false, reason: settled.kind === "done" ? "unavailable" : "timeout" };
+}
+
+/** Revision 0 is the record as loaded, which the store already holds. */
+function savedRevision(session: Session): number {
+	return math.max(session.confirmed, 0);
+}
+
+function releaseCause(by: SealReason): ReleaseReason | "lost" {
+	if (by === "retired") return "shutdown";
+	if (by === "authority" || by === "fenced") return "lost";
+	return by;
+}
 
 /** @internal One server's data engine: its port, its scheduler and its shutdown state (rules 32, 50 to 56, 107). */
 export class DataEngine {
@@ -264,9 +286,11 @@ export class ProfileRuntime {
 		)
 			return this.await(player);
 		const port = this.engine.port;
-		const deadline = bootClock() + LOAD_DEADLINE_SECONDS;
+		const started = bootClock();
+		const deadline = started + LOAD_DEADLINE_SECONDS;
 		const session = this.newSession(player);
 		const userId = session.userId;
+		let attempts = 0;
 		let polls = 0;
 		let held = false;
 		let mayHaveCommitted = false;
@@ -299,7 +323,10 @@ export class ProfileRuntime {
 					};
 					return (current) => acquire(current, input, (d) => (decision = d));
 				},
-				onDispatch: (at) => (sentAt = at),
+				onDispatch: (at) => {
+					sentAt = at;
+					attempts += 1;
+				},
 				onResult: (outcome) => {
 					if (outcome.kind === "error" && !outcome.ambiguous) return;
 					earliest ??= sentAt;
@@ -381,6 +408,15 @@ export class ProfileRuntime {
 		const loading = session.authority;
 		if (loading.phase === Phase.Loading) session.authority = activated(loading);
 		this.hooks.publish(player, session.value);
+		this.hooks.observe({
+			kind: "writable",
+			store: this.schema.name,
+			player,
+			revision: session.revision,
+			reason,
+			attempts,
+			seconds: bootClock() - started,
+		});
 		this.hooks.delivered(session, envelope);
 		this.inbox.deliver(session, envelope);
 		session.renewAt = bootClock() + port.random() * RENEW_INTERVAL_SECONDS;
@@ -441,6 +477,14 @@ export class ProfileRuntime {
 				`authority:${this.schema.name}:${session.token}`,
 				`${this.schema.name}: ${session.userId}'s session lost authority (${reason}) at revision ${session.revision}, confirmed ${session.confirmed}`,
 			);
+			this.hooks.observe({
+				kind: "lost",
+				store: this.schema.name,
+				player: session.player,
+				revision: session.revision,
+				reason,
+				saved: savedRevision(session),
+			});
 			if (this.present(session.player)) this.engine.port.players.kick(session.player, SESSION_ENDED_MESSAGE);
 		}
 		this.changed.wake();
@@ -481,6 +525,8 @@ export class ProfileRuntime {
 		let sentAt = 0;
 		let earliest: number | undefined;
 		let carrying = NONE;
+		let attempts = 0;
+		const submittedAt = bootClock();
 		if (!release)
 			session.renewAt = bootClock() + RENEW_INTERVAL_SECONDS + (port.random() * 2 - 1) * RENEW_JITTER_SECONDS;
 		const ticket = this.engine.scheduler.submit({
@@ -507,12 +553,15 @@ export class ProfileRuntime {
 				};
 				return (current) => ownedWrite(current, input, (d) => (decision = d));
 			},
-			onDispatch: (at) => (sentAt = at),
+			onDispatch: (at) => {
+				sentAt = at;
+				attempts += 1;
+			},
 			onResult: (outcome) => {
 				if (outcome.kind === "ok" || outcome.ambiguous) earliest ??= sentAt;
 			},
 		});
-		const write: Write = { ticket, release, carrying: () => carrying };
+		const write: Write = { ticket, release, carrying: () => carrying, attempts: () => attempts, submittedAt };
 		session.writing = write;
 		ticket.onSettled((settled) => this.settleOwned(session, release, settled, decision, earliest));
 	}
@@ -524,8 +573,9 @@ export class ProfileRuntime {
 		decision: OwnedDecision | undefined,
 		earliest: number | undefined,
 	) {
-		const write = session.writing;
-		const ambiguous = write?.ticket.ambiguous === true;
+		const write = session.writing!;
+		const ambiguous = write.ticket.ambiguous;
+		const confirmedBefore = session.confirmed;
 		session.writing = undefined;
 		let outcome: Released = "given up";
 		let lost: SealReason | undefined;
@@ -543,23 +593,46 @@ export class ProfileRuntime {
 				);
 				lost = "authority";
 			}
-		} else if (settled.kind === "uncertain") session.lost = math.max(session.lost, write?.carrying() ?? NONE);
+		} else if (settled.kind === "uncertain") session.lost = math.max(session.lost, write.carrying());
+		const result = writeResult(settled, outcome === "committed", ambiguous);
+		if (!release && write.carrying() > math.max(confirmedBefore, 0))
+			this.hooks.observe({
+				kind: "save",
+				store: this.schema.name,
+				player: session.player,
+				revision: session.revision,
+				result,
+				saved: savedRevision(session),
+				attempts: write.attempts(),
+				seconds: bootClock() - write.submittedAt,
+			});
 		const state = session.authority;
 		if (release && state.phase === Phase.Sealed) {
 			const ended = releaseSettled(state, outcome, outcome !== "committed" && ambiguous);
 			session.authority = ended;
-			this.released(session, ended);
+			this.released(session, ended, write, result);
 		} else if (lost !== undefined) this.lose(session, lost);
 		this.changed.wake();
 		this.pumpWriter(session);
 	}
 
-	private released(session: Session, state: SettledRelease) {
+	private released(session: Session, state: SettledRelease, write: Write, result: Saved) {
 		if (state.released !== "committed")
 			this.engine.diagnose(
 				`release:${this.schema.name}:${session.token}`,
 				`${this.schema.name}: ${session.userId}'s release did not confirm (${state.released}); revisions ${session.confirmed + 1} to ${session.revision} unconfirmed`,
 			);
+		this.hooks.observe({
+			kind: "released",
+			store: this.schema.name,
+			player: session.player,
+			revision: session.revision,
+			reason: releaseCause(state.by),
+			result,
+			saved: savedRevision(session),
+			attempts: write.attempts(),
+			seconds: bootClock() - write.submittedAt,
+		});
 		if (state.by === "retired" && this.present(session.player))
 			this.engine.port.players.kick(session.player, SESSION_ENDED_MESSAGE);
 		const tokens = this.sealed.get(session.userId);

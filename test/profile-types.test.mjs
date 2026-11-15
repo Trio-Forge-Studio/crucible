@@ -239,3 +239,41 @@ test("rule 8 P1 to P18 and N1 to N30 type-check against the runtime package's de
 	const directives = negative.match(/@ts-expect-error N\d+/g) ?? [];
 	assert.equal(directives.length, 33, "every negative case is present");
 });
+
+const events = `import { Subsystem } from "@trioforge/crucible";
+import type { ProfileClaim, ProfileEvent, ProfileObserver, SaveFailure } from "@trioforge/crucible/server";
+import { PlayerData } from "./template";
+
+export class Log extends Subsystem {
+	private readonly events: ProfileObserver = PlayerData.observe((event) => {
+		const userId: number = event.player.UserId;
+		const revision: number = event.revision;
+		if (event.kind === "save" && !event.result.ok) {
+			const reason: SaveFailure = event.result.reason;
+			print(userId, revision, reason, event.attempts, event.seconds, event.saved);
+		}
+		if (event.kind === "released") print(event.reason === "lost", event.result.ok);
+		// @ts-expect-error E1 a writable event has no result
+		print(event.kind === "writable" && event.result);
+		// @ts-expect-error E2 an event never carries the profile's data
+		print(event.data);
+	});
+	// @ts-expect-error E3 an observer is not a claim
+	private readonly claim: ProfileClaim = PlayerData.observe(() => {});
+}
+
+// @ts-expect-error E4 a lost event's reason is fenced or authority
+const reason: Extract<ProfileEvent, { kind: "lost" }>["reason"] = "leave";
+export { reason };
+`;
+
+test("profile events narrow by kind and carry no data", () => {
+	const result = typecheck(
+		new Map([
+			[`${dir}/template.ts`, template],
+			[`${dir}/events.ts`, events],
+		]),
+	);
+	assert.equal(result.status, 0, result.output);
+	assert.equal(events.match(/@ts-expect-error E\d+/g)?.length, 4, "every negative case is present");
+});

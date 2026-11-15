@@ -143,6 +143,8 @@ export interface Write {
 	readonly release: boolean;
 	/** The revision its latest attempt carries, which the scheduler may dispatch before `submit` returns. */
 	readonly carrying: () => number;
+	readonly attempts: () => number;
+	readonly submittedAt: number;
 }
 
 const callbackThreads = new Set<thread>();

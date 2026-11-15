@@ -1,3 +1,4 @@
+import type { ProfileEvent } from "../../data";
 import { Subsystem } from "../../subsystem";
 import { readClaim } from "../construction-claim";
 import { isLive, stateOf } from "../lifecycle";
@@ -27,7 +28,7 @@ import { DataEngine, type LoadReason, type ProfileRuntime, type ReleaseReason } 
 import { bindRecords, unbindRecords } from "./record-bindings";
 import { declaredRecords, sealDeclarations } from "./record-declarations";
 import type { AfterGrant, Purchase } from "./receipts";
-import { assertOutsideCallback, insideDataCallback, type Session } from "./session";
+import { assertOutsideCallback, dataCallback, insideDataCallback, type Session } from "./session";
 import { shutdownData } from "./shutdown";
 import { Waiters } from "./waiters";
 
@@ -39,6 +40,12 @@ interface Claim {
 	readonly callback: Callback;
 	readonly message?: MessageDecl;
 	readonly productId?: number;
+	live: boolean;
+}
+
+interface Observer {
+	readonly owner: string;
+	readonly listener: (event: ProfileEvent) => void;
 	live: boolean;
 }
 
@@ -127,6 +134,10 @@ class ProfileBinding {
 	readonly slots = new Map<Player, Slot>();
 	readonly playersNode = atom<readonly Player[]>(table.freeze(new Array<Player>()));
 	readonly claims = new Array<Claim>();
+	readonly observers = new Array<Observer>();
+	/** Events raised while an observer runs wait here, so every observer sees them in order. */
+	private readonly events = new Array<ProfileEvent>();
+	private notifying = false;
 	/** The players whose own claims are running now, and which kind (rule 123). */
 	readonly claiming = new Map<Player, string>();
 	runtime?: ProfileRuntime;
@@ -307,18 +318,56 @@ class ProfileBinding {
 		this.claiming.delete(session.player);
 	}
 
+	private claimant(kind: ClaimKind | "observe", callback: unknown): ObjectState {
+		const name = this.declaration.name;
+		const owner = readClaim();
+		if (owner === undefined || owner.record.kind !== Kind.Subsystem)
+			error(`${name}.${kind} runs while a server Subsystem is constructed; make it a field initializer`, 4);
+		if (server.activated) error(`${name}.${kind}: claims are frozen once the data runtime has started`, 4);
+		if (!typeIs(callback, "function")) error(`${name}.${kind} takes a function`, 4);
+		return owner;
+	}
+
+	observe(listener: unknown): object {
+		const owner = this.claimant("observe", listener);
+		const observer: Observer = {
+			owner: (owner.record as ClassRecord).id,
+			listener: listener as Observer["listener"],
+			live: true,
+		};
+		this.observers.push(observer);
+		(owner.subscriptions ??= []).push(() => (observer.live = false));
+		return table.freeze({});
+	}
+
+	/** Each observer runs as a data callback, so it cannot yield or write data; one that fails is reported once. */
+	notify(raised: ProfileEvent) {
+		this.events.push(table.freeze(raised));
+		if (this.notifying) return;
+		this.notifying = true;
+		const name = this.declaration.name;
+		while (this.events.size() > 0) {
+			const event = this.events.shift()!;
+			for (const observer of this.observers) {
+				if (!observer.live) continue;
+				const [ok, err] = pcall(() => dataCallback(observer.listener, event, undefined));
+				if (!ok)
+					server.engine!.diagnose(
+						`observe:${name}:${observer.owner}:${event.kind}`,
+						`${name}: the observer of ${observer.owner} failed on ${event.kind} for ${event.player.UserId}: ${tostring(err)}`,
+					);
+			}
+		}
+		this.notifying = false;
+	}
+
 	/** Rule 6: claims are field initializers of server Subsystems, frozen at activation. */
 	claim(
 		kind: ClaimKind,
 		callback: unknown,
 		extra?: { message?: MessageDecl; productId?: number; absent?: true },
 	): object {
-		const name = this.declaration.name;
-		const owner = readClaim();
-		if (owner === undefined || owner.record.kind !== Kind.Subsystem)
-			error(`${name}.${kind} runs while a server Subsystem is constructed; make it a field initializer`, 3);
-		if (server.activated) error(`${name}.${kind}: claims are frozen once the data runtime has started`, 3);
-		if (!typeIs(callback, "function")) error(`${name}.${kind} takes a function`, 3);
+		const owner = this.claimant(kind, callback);
 		if (extra?.absent) return table.freeze({});
 		const label = (owner.record as ClassRecord).id;
 		const claim: Claim = {
@@ -486,6 +535,8 @@ function member(declaration: ProfileDeclaration, key: string): unknown {
 				if (!activated(bootClock() + CALL_DEADLINE_SECONDS)) return storeResult({ kind: "timeout" });
 				return storeResult(binding.runtime!.inbox.clearQuarantined(userId, ids, action));
 			};
+		case "observe":
+			return (_: unknown, listener: unknown) => binding.observe(listener);
 		case "onLoad":
 		case "onRelease":
 			return (_: unknown, callback: unknown) => binding.claim(key, callback);
@@ -562,6 +613,7 @@ function construct() {
 				onRelease: (session, value, reason) => binding.onRelease(session, value, reason),
 				publish: (who, value) => binding.publish(who, value),
 				delivered: () => {},
+				observe: (event) => binding.notify(event),
 			},
 		);
 		claimPublication(declaration.live, (who: Player) => {

@@ -5,6 +5,7 @@ declare const operationKind: unique symbol;
 declare const storeKind: unique symbol;
 declare const messageKind: unique symbol;
 declare const claimKind: unique symbol;
+declare const observerKind: unique symbol;
 declare const serverOnlyKind: unique symbol;
 
 /** A value a save can hold: JSON, with absent keys for values that admit `undefined`. */
@@ -196,6 +197,63 @@ export type SaveFailure = "unavailable" | "timeout" | "uncertain";
 /** A save or handoff result: narrow `ok` first. */
 export type SaveResult = { readonly ok: true } | { readonly ok: false; readonly reason: SaveFailure };
 
+/** A field holding it is the observer. Not callable. */
+export interface ProfileObserver {
+	readonly [observerKind]: true;
+}
+
+/**
+ * Something that happened to one player's profile on this server, for logs and metrics. It never holds the profile's
+ * data. `revision` counts the session's changes, from 0 as loaded, and `saved` is the highest revision a confirmed
+ * save holds, 0 until one does. `attempts` counts the requests sent to the DataStore and `seconds` how long it took.
+ */
+export type ProfileEvent =
+	| {
+			/** The profile turned writable: its load's lease requests and how long the whole load took. */
+			readonly kind: "writable";
+			readonly store: string;
+			readonly player: Player;
+			readonly revision: number;
+			readonly reason: LoadReason;
+			readonly attempts: number;
+			readonly seconds: number;
+	  }
+	| {
+			/** A save carrying new revisions finished, automatic or from `save(player)`. */
+			readonly kind: "save";
+			readonly store: string;
+			readonly player: Player;
+			readonly revision: number;
+			readonly result: SaveResult;
+			readonly saved: number;
+			readonly attempts: number;
+			readonly seconds: number;
+	  }
+	| {
+			/**
+			 * The session stopped being writable without a release: another server took the profile ("fenced"), or this
+			 * one could not confirm its lease in time ("authority"). Its release follows.
+			 */
+			readonly kind: "lost";
+			readonly store: string;
+			readonly player: Player;
+			readonly revision: number;
+			readonly reason: "fenced" | "authority";
+			readonly saved: number;
+	  }
+	| {
+			/** The release's final write settled. `result` is ok when it saved every revision. */
+			readonly kind: "released";
+			readonly store: string;
+			readonly player: Player;
+			readonly revision: number;
+			readonly reason: ReleaseReason | "lost";
+			readonly result: SaveResult;
+			readonly saved: number;
+			readonly attempts: number;
+			readonly seconds: number;
+	  };
+
 /**
  * A profile store: one shared declaration, callable on both sides. The server calls it with a player for that player's
  * writable handle; the client calls it with nothing for the local player's read-only handle.
@@ -230,6 +288,12 @@ export interface ProfileStore<T> {
 	quarantined(userId: number): StoreResult<readonly QuarantinedMessage[]>;
 	/** Server. Moves listed quarantined messages back to the inbox ("retry") or drops them for good ("discard"). */
 	clearQuarantined(userId: number, ids: readonly OperationId[], action: "retry" | "discard"): StoreResult<number>;
+
+	/**
+	 * Server, a Subsystem field initializer: calls `listener` with each of this store's profile events, in order. It runs
+	 * like a claim, without yielding or writing data, and cannot change data or delay a save.
+	 */
+	observe(listener: (event: ProfileEvent) => void): ProfileObserver;
 
 	/** Server claim, a Subsystem field initializer: changes a profile as it loads, before anything reads it. */
 	onLoad(transform: (player: Player, data: ProfileData<T>, reason: LoadReason) => ProfileData<T>): ProfileClaim;

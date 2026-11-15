@@ -31,6 +31,7 @@ function harness.profileFixture(realm, store, options)
 			published[player] = value
 		end,
 		delivered = function() end,
+		observe = function() end,
 	})
 	local fixture = { published = published, reasons = reasons }
 	for _, name in { "load", "write", "save", "writable", "players", "leave", "handoff", "resume", "await" } do
