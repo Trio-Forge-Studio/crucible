@@ -10,8 +10,8 @@ use crucible_compiler::extension::{
 use crate::Code;
 use crate::api::{Macro, normalize};
 use crate::declarations::{
-    DeclarationKind, MAX_ASK_TIMEOUT_SECONDS, MAX_SCHEMA_NODES, MAX_UNION_BRANCHES, Position, RESERVED_HANDLE_NAMES,
-    Side, Spec, TypeArguments, VIEW_NAME_MAX_BYTES, VIEW_NAME_PREFIX,
+    DeclarationKind, MAX_ASK_TIMEOUT_SECONDS, MAX_RATE_PER_SECOND, MAX_SCHEMA_NODES, MAX_UNION_BRANCHES, Position,
+    RESERVED_HANDLE_NAMES, Side, Spec, TypeArguments, VIEW_NAME_MAX_BYTES, VIEW_NAME_PREFIX,
 };
 use crate::facts::{ClassKind, Declaration, Fact, Field, KeyLiteral, Literal, MapKey, Schema, Tail};
 use crate::registration::{Walk, is_global, is_reference};
@@ -245,22 +245,34 @@ fn declaration_file(declaration: Node) -> PathBuf {
     normalize(Path::new(&declaration.file().path()))
 }
 
-fn ask_timeout(options: Node) -> Option<f64> {
+/// The initializer of each property of an options object literal, or `None` unless every property is a plain
+/// assignment to one of `keys`, each at most once, and there is at least one.
+fn option_values(options: Node, keys: &[&'static str]) -> Option<Vec<(&'static str, Option<Node>)>> {
     if options.kind() != Kind::ObjectLiteralExpression {
         return None;
     }
-    let properties = options.properties();
-    let (1, Some(property)) = (properties.len(), properties.get(0)) else { return None };
-    if property.kind() != Kind::PropertyAssignment {
-        return None;
+    let mut values: Vec<(&'static str, Option<Node>)> = Vec::new();
+    for property in options.properties().iter() {
+        if property.kind() != Kind::PropertyAssignment {
+            return None;
+        }
+        let name = property.name()?;
+        if !matches!(name.kind(), Kind::Identifier | Kind::StringLiteral) {
+            return None;
+        }
+        let key = keys.iter().copied().find(|&k| k == name.text())?;
+        if values.iter().any(|&(k, _)| k == key) {
+            return None;
+        }
+        values.push((key, property.initializer()));
     }
-    let name = property.name()?;
-    if !matches!(name.kind(), Kind::Identifier | Kind::StringLiteral) || name.text() != "timeout" {
-        return None;
-    }
-    let value = property.initializer().filter(|i| i.kind() == Kind::NumericLiteral)?;
-    let seconds = js_number(value.text());
-    (seconds > 0.0 && seconds <= MAX_ASK_TIMEOUT_SECONDS).then_some(seconds)
+    (!values.is_empty()).then_some(values)
+}
+
+fn literal_within(value: Option<Node>, max: f64) -> Option<f64> {
+    let value = value.filter(|v| v.kind() == Kind::NumericLiteral)?;
+    let number = js_number(value.text());
+    (number > 0.0 && number <= max).then_some(number)
 }
 
 impl Walk<'_, '_> {
@@ -387,19 +399,41 @@ impl Walk<'_, '_> {
             }
         }
         let mut tail = Tail::None;
-        if kind == DeclarationKind::AskServer {
-            let timeout = arguments.get(1).and_then(|options| {
-                let timeout = ask_timeout(options);
-                if timeout.is_none() {
-                    self.report(
-                        call,
-                        Code::Rule(17),
-                        "askServer options must be { timeout: <number literal in (0, 120]> }.",
-                    );
+        if matches!(kind, DeclarationKind::ToServer | DeclarationKind::AskServer) {
+            let ask = kind == DeclarationKind::AskServer;
+            let shape = if ask {
+                format!(
+                    "askServer options must be {{ timeout?: <number literal in (0, {MAX_ASK_TIMEOUT_SECONDS}]>, rate?: <number literal> }}."
+                )
+            } else {
+                "toServer options must be { rate: <number literal> }.".to_owned()
+            };
+            let keys: &[&'static str] = if ask { &["timeout", "rate"] } else { &["rate"] };
+            let (mut timeout, mut rate) = (None, None);
+            if let Some(options) = arguments.get(1) {
+                match option_values(options, keys) {
+                    None => self.report(call, Code::Rule(17), &shape),
+                    Some(values) => {
+                        for (key, value) in values {
+                            if key == "timeout" {
+                                timeout = literal_within(value, MAX_ASK_TIMEOUT_SECONDS);
+                                if timeout.is_none() {
+                                    self.report(call, Code::Rule(17), &shape);
+                                }
+                            } else {
+                                rate = literal_within(value, MAX_RATE_PER_SECOND);
+                                if rate.is_none() {
+                                    let message = format!(
+                                        "A rate is a number literal of requests per second in (0, {MAX_RATE_PER_SECOND}]."
+                                    );
+                                    self.report(call, Code::Rule(40), &message);
+                                }
+                            }
+                        }
+                    }
                 }
-                timeout
-            });
-            tail = Tail::Timeout(timeout);
+            }
+            tail = if ask { Tail::Ask { timeout, rate } } else { Tail::Rate(rate) };
         }
         if arguments.len() > spec.arguments {
             self.report(call, Code::Rule(17), "Unexpected declaration arguments.");

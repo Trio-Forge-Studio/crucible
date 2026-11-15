@@ -2,6 +2,7 @@ use crucible_abi::Function;
 
 pub const MESSAGE_NAME_MAX_BYTES: usize = 64;
 pub const MAX_ASK_TIMEOUT_SECONDS: f64 = 120.0;
+pub const MAX_RATE_PER_SECOND: f64 = 1000.0;
 pub const MAX_UNION_BRANCHES: usize = 256;
 pub const MAX_SCHEMA_NODES: usize = 4096;
 pub const MAX_DEPTH: u32 = 32;
@@ -130,7 +131,8 @@ impl DeclarationKind {
 
     pub const fn spec(self) -> Spec {
         match self {
-            DeclarationKind::ToServer | DeclarationKind::ToClient => MESSAGE,
+            DeclarationKind::ToServer => Spec { arguments: 2, ..MESSAGE },
+            DeclarationKind::ToClient => MESSAGE,
             DeclarationKind::AskServer => Spec { type_arguments: TypeArguments::Exactly(2), arguments: 2, ..MESSAGE },
             DeclarationKind::Replicated | DeclarationKind::ReplicatedPerPlayer => REPLICATED,
             DeclarationKind::ProfileStore => Spec {
@@ -199,6 +201,7 @@ mod tests {
         vec![
             ("network/limits.ts", "MESSAGE_NAME_MAX_BYTES", MESSAGE_NAME_MAX_BYTES.to_string()),
             ("network/limits.ts", "MAX_ASK_TIMEOUT_SECONDS", MAX_ASK_TIMEOUT_SECONDS.to_string()),
+            ("network/limits.ts", "MAX_RATE_PER_SECOND", MAX_RATE_PER_SECOND.to_string()),
             ("network/limits.ts", "MAX_UNION_BRANCHES", MAX_UNION_BRANCHES.to_string()),
             ("network/limits.ts", "MAX_SCHEMA_NODES", MAX_SCHEMA_NODES.to_string()),
             ("network/limits.ts", "MAX_DEPTH", MAX_DEPTH.to_string()),
@@ -222,7 +225,14 @@ mod tests {
                 compared.push(name);
             }
         }
-        for name in ["MAX_DEPTH", "MAX_SCHEMA_NODES", "SYNC_VALUE_DEPTH", "STORE_NAME_MAX_BYTES", "PERSIST_DEPTH"] {
+        for name in [
+            "MAX_DEPTH",
+            "MAX_RATE_PER_SECOND",
+            "MAX_SCHEMA_NODES",
+            "SYNC_VALUE_DEPTH",
+            "STORE_NAME_MAX_BYTES",
+            "PERSIST_DEPTH",
+        ] {
             assert!(compared.contains(&name), "the runtime declares {name}");
         }
         assert!(compared.contains(&"CONFIG_NAME_MAX_BYTES"));

@@ -31,12 +31,23 @@ export interface Receiver {
 }
 
 export type PayloadArgs<P> = [P] extends [undefined] ? [] : [payload: P];
-export type AskFailure = "timeout" | "disconnected" | "unavailable" | "handler-error" | "overloaded" | "invalid";
+export type AskFailure =
+	| "timeout"
+	| "disconnected"
+	| "unavailable"
+	| "handler-error"
+	| "overloaded"
+	| "invalid"
+	| "limited";
 export type AskResult<T> =
 	| { readonly ok: true; readonly value: T }
 	| { readonly ok: false; readonly reason: AskFailure };
+export interface ToServerOptions {
+	readonly rate?: number;
+}
 export interface AskOptions {
 	readonly timeout?: number;
+	readonly rate?: number;
 }
 
 // `any` is the only argument every invariant token is assignable to.
@@ -52,7 +63,7 @@ export type ReceiveCallback<T extends ReceiveTarget> =
 
 const UNTRANSFORMED = "Crucible networking was not compiled by the Crucible compiler; use crucible build";
 
-export function toServer<P>(_name: string): ToServer<P> {
+export function toServer<P>(_name: string, _options?: ToServerOptions): ToServer<P> {
 	error(UNTRANSFORMED);
 }
 

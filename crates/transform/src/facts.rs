@@ -32,8 +32,13 @@ pub struct Declaration {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tail {
     None,
-    /// An ask's timeout in seconds, or `None` for the runtime's default.
-    Timeout(Option<f64>),
+    /// A `toServer`'s per-player rate in requests per second, or `None` for no limit.
+    Rate(Option<f64>),
+    /// An ask's timeout in seconds, or `None` for the runtime's default, and its rate as `Rate` has it.
+    Ask {
+        timeout: Option<f64>,
+        rate: Option<f64>,
+    },
     /// The paths of a profile store's `serverOnly` fields, each from the value's root.
     ServerOnly(Vec<Vec<Box<str>>>),
 }

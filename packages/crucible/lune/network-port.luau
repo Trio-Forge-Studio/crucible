@@ -73,6 +73,9 @@ return function()
 			port.timers[timer] = nil
 		end
 	end
+	function port.now()
+		return 0
+	end
 	function port.resume(thread, ...)
 		assert(coroutine.resume(thread, ...))
 	end

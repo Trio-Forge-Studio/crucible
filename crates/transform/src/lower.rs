@@ -150,7 +150,8 @@ pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &De
     }
     match &declaration.tail {
         Tail::None => {}
-        Tail::Timeout(seconds) => args.push(seconds.map_or(Expr::Nil, Expr::Number)),
+        Tail::Rate(rate) => args.push(number(*rate)),
+        Tail::Ask { timeout, rate } => args.extend([number(*timeout), number(*rate)]),
         Tail::ServerOnly(paths) => args.push(Expr::Table(
             paths
                 .iter()
@@ -159,6 +160,10 @@ pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &De
         )),
     }
     cx.helper(&EMIT, declaration.kind.name()).call(args)
+}
+
+fn number(value: Option<f64>) -> Expr {
+    value.map_or(Expr::Nil, Expr::Number)
 }
 
 fn n(cx: &mut LowerCx<'_, '_>, name: &'static str) -> Expr {

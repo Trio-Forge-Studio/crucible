@@ -28,6 +28,7 @@ export interface NetworkPort {
 	readonly fireServer: (packet: buffer, sidecar: Readonly<Record<string, Instance>>) => void;
 
 	readonly delay: (seconds: number, callback: () => void) => Cancel;
+	readonly now: () => number;
 	/** `task.spawn(thread, ...)`, which runs the thread to its first yield before returning (rule 52). */
 	readonly resume: (thread: thread, ...args: unknown[]) => void;
 }

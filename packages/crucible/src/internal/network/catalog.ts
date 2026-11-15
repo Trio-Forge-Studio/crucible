@@ -9,6 +9,7 @@ export interface MessageSpec {
 	readonly input: Node;
 	readonly output?: Node;
 	readonly timeout?: number;
+	readonly rate?: number;
 }
 export interface Definition {
 	readonly kind: MessageKind;
@@ -16,6 +17,8 @@ export interface Definition {
 	readonly input: Codec;
 	readonly output?: Codec;
 	readonly timeout: number;
+	/** Requests per second each player may send. */
+	readonly rate?: number;
 	readonly index?: number;
 }
 
@@ -68,6 +71,12 @@ function register(spec: MessageSpec): Definition {
 	);
 	const timeout = spec.timeout ?? L.DEFAULT_ASK_TIMEOUT_SECONDS;
 	assert(timeout > 0 && timeout <= L.MAX_ASK_TIMEOUT_SECONDS, "invalid ask timeout");
+	const rate = spec.rate;
+	assert(
+		rate === undefined ||
+			(spec.kind !== "to-client" && typeIs(rate, "number") && rate > 0 && rate <= L.MAX_RATE_PER_SECOND),
+		"invalid message rate",
+	);
 	const tally = { nodes: 0 };
 	const definition: Definition = table.freeze(
 		setmetatable(
@@ -77,6 +86,7 @@ function register(spec: MessageSpec): Definition {
 				input: compile(spec.input, tally),
 				output: spec.output === undefined ? undefined : compile(spec.output, tally),
 				timeout,
+				rate,
 			},
 			{
 				__index: (_: unknown, key: unknown) => (key === "index" ? indices.get(spec.name) : undefined),

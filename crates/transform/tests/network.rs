@@ -535,6 +535,9 @@ fn descriptors_lower_with_precise_builders_and_keep_request_response_order() {
 export const A = toServer<{{ zebra: u8; alpha: string; flag: boolean }}>(\"X.Object\");
 export const B = askServer<string, u16>(\"X.Ask\", {{ timeout: 37 }});
 export const C = askServer<undefined, unknown>(\"X.Default\");
+export const RatedEvent = toServer<string>(\"X.RatedEvent\", {{ rate: 8 }});
+export const RatedAsk = askServer<string, string>(\"X.RatedAsk\", {{ rate: 0.5, timeout: 5 }});
+export const RateOnly = askServer<string, string>(\"X.RateOnly\", {{ \"rate\": 1000 }});
 export const D = toServer<Map<\"z\" | \"a\", number>>(\"X.Map\");
 export const E = toServer<[string, u32]>(\"X.Tuple\");
 export const F = toClient<{{ maybe: BasePart | undefined; player: Player }}>(\"X.Stream\");
@@ -555,9 +558,14 @@ export const Tagged = toServer<{{Kind:\"A\";Tag:\"A\";x:number}}|{{Kind:\"A\";Ta
         "__crucible.n.object([[\"alpha\", __crucible.n.string], [\"flag\", __crucible.n.bool], [\"zebra\", __crucible.n.u8]])",
         "X.Object",
     );
-    assert_eq!(d["X.Ask"][1..], ["__crucible.n.string", "__crucible.n.u16", "37"]);
+    assert_eq!(d["X.Ask"][1..], ["__crucible.n.string", "__crucible.n.u16", "37", "nil"]);
     let default: Vec<String> = d["X.Default"][1..].iter().map(|a| canon(a)).collect();
-    assert_eq!(default, ["__crucible.n.nil", "__crucible.n.dynamic", "nil"]);
+    assert_eq!(default, ["__crucible.n.nil", "__crucible.n.dynamic", "nil", "nil"]);
+    assert_eq!(d["X.Object"].len(), 3, "a toServer passes its rate");
+    assert_eq!(d["X.Object"][2], "nil", "no rate");
+    assert_eq!(d["X.RatedEvent"][1..], ["__crucible.n.string", "8"]);
+    assert_eq!(d["X.RatedAsk"][1..], ["__crucible.n.string", "__crucible.n.string", "5", "0.5"]);
+    assert_eq!(d["X.RateOnly"][1..], ["__crucible.n.string", "__crucible.n.string", "nil", "1000"]);
     same(
         &first("X.Map"),
         "__crucible.n.map(__crucible.n.union([__crucible.n.literal(\"a\"), __crucible.n.literal(\"z\")]), __crucible.n.f64)",
@@ -590,7 +598,7 @@ export const Tagged = toServer<{{Kind:\"A\";Tag:\"A\";x:number}}|{{Kind:\"A\";Ta
         "__crucible.n.union([__crucible.n.variant(\"Kind\", \"Join\", __crucible.n.object([[\"UserId\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Leave\", __crucible.n.object([]))])",
         "X.Variant",
     );
-    has(&luau, "askServer(\"X.Ask\", __crucible.n.string, __crucible.n.u16, 37)");
+    has(&luau, "askServer(\"X.Ask\", __crucible.n.string, __crucible.n.u16, 37, nil)");
 }
 
 fn negatives() -> Vec<(String, &'static str, String)> {
@@ -629,6 +637,37 @@ fn negatives() -> Vec<(String, &'static str, String)> {
             "computed option".into(),
             "CRU017",
             "export const X = askServer<string, number>(\"X.Test\", {[\"timeout\"]: 2});".into(),
+        ),
+        (
+            "duplicate option".into(),
+            "CRU017",
+            "export const X = askServer<string, number>(\"X.Test\", {timeout: 2, \"timeout\": 3});".into(),
+        ),
+        ("to-server options empty".into(), "CRU017", "export const X = toServer<string>(\"X.Test\", {});".into()),
+        ("to-server timeout".into(), "CRU017", "export const X = toServer<string>(\"X.Test\", {timeout: 2});".into()),
+        (
+            "to-server options variable".into(),
+            "CRU017",
+            "const o = { rate: 3 }; export const X = toServer<string>(\"X.Test\", o);".into(),
+        ),
+        ("to-client options".into(), "CRU017", "export const X = toClient<string>(\"X.Test\", {rate: 2});".into()),
+        ("rate zero".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: 0});".into()),
+        ("rate negative".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: -1});".into()),
+        ("rate ceiling".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: 1001});".into()),
+        (
+            "rate variable".into(),
+            "CRU040",
+            "const r = 4; export const X = toServer<string>(\"X.Test\", {rate: r});".into(),
+        ),
+        (
+            "rate expression".into(),
+            "CRU040",
+            "export const X = askServer<string, number>(\"X.Test\", {timeout: 2, rate: 1 / 5});".into(),
+        ),
+        (
+            "rate string".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: \"8\" as never});".into(),
         ),
         ("name variable".into(), "CRU018", "const n = \"X.Test\"; export const X = toServer<string>(n);".into()),
         ("name template".into(), "CRU018", "export const X = toServer<string>(`X.Test`);".into()),
@@ -691,7 +730,7 @@ fn negatives() -> Vec<(String, &'static str, String)> {
         (
             "extra declaration argument",
             "CRU017: Unexpected declaration arguments.",
-            "export const X = toServer<string>(\"X.Test\", {} as never);".into(),
+            "export const X = toServer<string>(\"X.Test\", {rate: 1}, {} as never);".into(),
         ),
         ("optional tuple element", "CRU019: X.Test payload: tuples must be fixed length", declaration("[string?]")),
         ("empty interface", "CRU019", format!("interface Empty {{}} {}", declaration("Empty"))),
@@ -775,14 +814,16 @@ fn the_diagnostic_catalogue_rejects_every_unsupported_declaration() {
     let (reports, type_errors) = check(&game);
     for (i, (name, code, _)) in cases.iter().enumerate() {
         let file = format!("src/shared/n{i}.ts");
-        if ["extra options", "extra declaration argument"].contains(&name.as_str()) {
+        if ["extra options", "extra declaration argument", "to-server timeout", "to-client options", "duplicate option"]
+            .contains(&name.as_str())
+        {
             assert!(type_errors.contains(&format!("{file}:2")), "{name} is a type error: {type_errors:?}");
             continue;
         }
         let found = messages(&reports, &file);
         assert!(found.iter().any(|m| m.starts_with(code)), "{name} reports {code}: {found:?}");
     }
-    assert_eq!(type_errors.len(), 2, "{type_errors:?}");
+    assert_eq!(type_errors.len(), 5, "{type_errors:?}");
     for side in ["server", "client", "neutral"] {
         let file = format!("src/{side}/wrong.ts");
         assert!(reports.iter().any(|r| r.file == file && r.code == 90017), "{side} placement");
@@ -1557,10 +1598,10 @@ fn declaration_and_receiver_aliases_and_namespaces_keep_macro_symbol_identity() 
     ]);
     none(&reports_of(&game));
     let messages = game.luau("shared/messages.luau");
-    has(&messages, "local Named = __crucible.toServer(\"X.Named\", __crucible.n.string)");
-    has(&messages, "local Namespace = __crucible.toServer(\"X.Namespace\", __crucible.n.f64)");
-    has(&messages, "local Bracket = __crucible.toServer(\"X.Bracket\", __crucible.n.bool)");
-    has(&messages, "local Paren = __crucible.toServer(\"X.Paren\", __crucible.n[\"nil\"])");
+    has(&messages, "local Named = __crucible.toServer(\"X.Named\", __crucible.n.string, nil)");
+    has(&messages, "local Namespace = __crucible.toServer(\"X.Namespace\", __crucible.n.f64, nil)");
+    has(&messages, "local Bracket = __crucible.toServer(\"X.Bracket\", __crucible.n.bool, nil)");
+    has(&messages, "local Paren = __crucible.toServer(\"X.Paren\", __crucible.n[\"nil\"], nil)");
     has(&game.luau("server/service.luau"), "self.r = __crucible.receive(self, \"r\", Named, function(p, value)");
 }
 
@@ -3044,9 +3085,9 @@ export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, v
     none(&reports_of(&game));
     let shared = game.luau("shared/kinds.luau");
     for line in [
-        "local A = __crucible.toServer(\"K.ToServer\", __crucible.n.object({ { \"a\", __crucible.n.string } }))",
+        "local A = __crucible.toServer(\"K.ToServer\", __crucible.n.object({ { \"a\", __crucible.n.string } }), nil)",
         "local B = __crucible.toClient(\"K.ToClient\", __crucible.n.u8)",
-        "local C = __crucible.askServer(\"K.Ask\", __crucible.n.string, __crucible.n.f64, 5)",
+        "local C = __crucible.askServer(\"K.Ask\", __crucible.n.string, __crucible.n.f64, 5, nil)",
         "local D = __crucible.replicated(\"K.Replicated\", 0, __crucible.n.f64)",
         "local E = __crucible.replicatedPerPlayer(\"K.PerPlayer\", false, __crucible.n.bool)",
     ] {

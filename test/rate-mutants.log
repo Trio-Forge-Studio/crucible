@@ -1,0 +1,18 @@
+KILLED the bucket is never checked | server-session.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED a request spends nothing | server-session.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED a refill passes the capacity | server-session.ts | first failure: network-rates.luau: a rated event runs its callback only within the rate and counts each drop
+KILLED a refill ignores the rate | server-session.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED the bucket holds one request | server-session.ts | first failure: network-rates.luau: a rated event runs its callback only within the rate and counts each drop
+KILLED the refill time never moves | server-session.ts | first failure: network-rates.luau: a rated event runs its callback only within the rate and counts each drop
+KILLED a drop is not counted | server-session.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED every drop is reported | server-session.ts | first failure: network-rates.luau: a rated event runs its callback only within the rate and counts each drop
+KILLED players share one bucket | server-session.ts | first failure: network-rates.luau: each player has its own allowance and a new peer starts full
+KILLED an event is never limited | server-session.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED a limited ask answers overloaded | server-session.ts | first failure: network-rates.luau: an ask over its rate answers limited without running its callback
+KILLED the rate spends a token before the nonce check | server-session.ts | first failure: network-rates.luau: a reused nonce is dropped before it spends a token
+KILLED the client reads limited as unavailable | client-session.ts | first failure: network-rates.luau: an ask over its rate answers limited without running its callback
+KILLED a definition drops its rate | catalog.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED define accepts any rate | catalog.ts | first failure: network-rates.luau: a rate is checked when the message is declared
+KILLED toServer drops its rate | network.ts | first failure: network-rates.luau: a rate below one holds one request and refills over its period
+KILLED askServer drops its rate | network.ts | first failure: network-rates.luau: a rate is checked when the message is declared
+17/17 rate mutants killed; restored build 0

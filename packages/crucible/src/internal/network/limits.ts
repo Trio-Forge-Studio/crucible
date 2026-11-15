@@ -30,3 +30,4 @@ export const MAX_PENDING_ASKS = 64;
 export const HANDLER_LIFETIME_SECONDS = 30;
 export const DEFAULT_ASK_TIMEOUT_SECONDS = 10;
 export const MAX_ASK_TIMEOUT_SECONDS = 120;
+export const MAX_RATE_PER_SECOND = 1000;

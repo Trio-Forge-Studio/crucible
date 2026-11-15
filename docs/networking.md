@@ -6,7 +6,8 @@ Declare messages and receivers with the root of `@trioforge/crucible`, which is 
 
 ```ts
 import { askServer, ClientReady, receive, toClient, toServer } from "@trioforge/crucible";
-import type { AskFailure, AskResult, AskServer, PayloadArgs, ToClient, ToServer } from "@trioforge/crucible";
+import type { AskFailure, AskOptions, AskResult, AskServer, PayloadArgs, ToClient, ToServer } from "@trioforge/crucible";
+import type { ToServerOptions } from "@trioforge/crucible";
 import type { f32, f64, u8, u16, u32 } from "@trioforge/crucible";
 ```
 
@@ -30,11 +31,11 @@ export const Profile = askServer<{ readonly userId: number }, { readonly name: s
 
 Each declaration returns a token that carries the direction and the payload type:
 
-- `toServer<P>(name)` returns a `ToServer<P>`. A client sends it and one server Subsystem receives it.
+- `toServer<P>(name, options?)` returns a `ToServer<P>`. A client sends it and one server Subsystem receives it.
 - `toClient<P>(name)` returns a `ToClient<P>`. The server sends it and one client Subsystem receives it.
 - `askServer<Request, Response>(name, options?)` returns an `AskServer<Request, Response>`. A client asks it and one server Subsystem answers it.
 
-A name is 1 to 64 bytes of dot-separated segments, each a letter followed by letters, digits, or underscores. The first segment `Crucible` is reserved. `askServer` options take only `timeout`, a number of seconds in (0, 120]. The default timeout is 10 seconds.
+A name is 1 to 64 bytes of dot-separated segments, each a letter followed by letters, digits, or underscores. The first segment `Crucible` is reserved. `askServer` options take `timeout`, a number of seconds in (0, 120], and `rate`. The default timeout is 10 seconds. `toServer` options take only `rate`, which "Limit how often a player sends" describes.
 
 A payload of exactly `undefined` takes no argument and sends no bytes. `PayloadArgs<P>` is the argument list a token takes: `[]` for `undefined`, `[payload: P]` otherwise.
 
@@ -49,6 +50,39 @@ Payloads can use booleans, `number`, strings, literal types, `Vector3`, `Color3`
 | `u32` | 4 | Integers from 0 to 4,294,967,295 |
 
 Strings must be valid UTF-8 of at most 65,536 bytes. An Instance in a server-to-client payload can stream out on the client, so declare it `T | undefined`, except a `Player`.
+
+## Limit how often a player sends
+
+`toServer` and `askServer` take a `rate`, the requests per second each player may send. The server checks it before the callback runs, so a player who sends too often cannot make the callback run more often than the rate.
+
+```ts
+import { askServer, toServer } from "@trioforge/crucible";
+
+export const Tap = toServer<{ readonly target: string }>("Cannon.Tap", { rate: 8 });
+export const Rebirth = askServer<undefined, boolean>("Cannon.Rebirth", { rate: 1, timeout: 5 });
+```
+
+Each player has an allowance for each rated message. It holds one second of requests, and at least one, and refills at the rate. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. Every request counts, including one that does not decode.
+
+A request over the rate never reaches its callback:
+
+- An event is dropped. The callback does not run and the client is not told.
+- An ask answers `limited`, which no other failure uses, so the client can tell it from `unavailable` and `overloaded`.
+
+A rate never kicks the player. The first request over the rate for each player and message is reported as a warning, such as `Crucible dropped Cannon.Tap from Ann: over its rate of 8 per second`. `Network.limited(message)` on the server returns how many requests of a message the server dropped or refused for their rate since boot, from every player.
+
+```ts
+import { toServer } from "@trioforge/crucible";
+import { Network } from "@trioforge/crucible/server";
+
+const Tap = toServer<undefined>("Cannon.Tap", { rate: 8 });
+
+export function reportTaps() {
+	print(`dropped ${Network.limited(Tap)} taps over their rate`);
+}
+```
+
+A rate is a number literal greater than 0 and at most 1,000. The compiler rejects any other value with CRU040. A message without a rate has no limit. Keep game rules, such as a cooldown that depends on a tool's stats, in the callback.
 
 ## Receive messages
 
@@ -139,6 +173,7 @@ export function nameOf(userId: number): string | undefined {
 | `handler-error` | The server callback threw, returned a Promise, or returned a value the response type rejects. |
 | `overloaded` | 64 asks are already pending, or the server is running 64 callbacks for this player. |
 | `invalid` | The request or the reply did not decode, for example because an Instance it names is gone. |
+| `limited` | The player sent this ask more often than its `rate` allows. |
 
 A timeout does not mean the server did nothing. Call `Network.ask` where yielding is allowed, such as `start` or a spawned thread.
 
@@ -199,4 +234,5 @@ At shutdown the server keeps sending through every `onShutdown`, then closes eve
 | Pending asks per client | 64 |
 | Callback lifetime before a report | 30 seconds |
 | Ask timeout | 10 seconds by default, at most 120 |
+| Rate of a message | No limit by default, at most 1,000 requests per second per player |
 | Client wait for the server at boot | 30 seconds |

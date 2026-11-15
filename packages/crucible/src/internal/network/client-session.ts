@@ -30,7 +30,7 @@ import type { Cancel } from "./port";
 import { newPeer, type Peer, PeerState, Session, Stage } from "./session";
 
 const FAIL_NAMES = ["overflow", "overloaded", "closing", "malformed"];
-const ERROR_REASONS: readonly AskFailure[] = ["unavailable", "handler-error", "overloaded", "invalid"];
+const ERROR_REASONS: readonly AskFailure[] = ["unavailable", "handler-error", "overloaded", "invalid", "limited"];
 
 function failed(reason: AskFailure): AskResult<unknown> {
 	return table.freeze({ ok: false, reason });
