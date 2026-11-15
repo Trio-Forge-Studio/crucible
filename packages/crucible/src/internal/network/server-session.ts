@@ -228,10 +228,19 @@ export class ServerSession extends Session {
 		const event = header.opcode === Opcode.Event;
 		if (definition.kind !== (event ? "to-server" : "ask-server"))
 			return this.reject(peer, definition, `${definition.name} sent as the wrong kind of packet`);
-		if (event && !this.admit(peer, definition)) return;
+		const nonce = event ? 0 : header.nonce;
+		if (!event && nonce <= peer.lastRequestNonce)
+			return this.reject(peer, definition, `${definition.name} with a nonce already used`);
+		const refuse = (reason: ErrorReason) =>
+			this.fire(peer, controlPacket(Opcode.Error, [header.index, nonce], reason));
+		if (!this.admit(peer, definition)) {
+			if (event) return;
+			peer.lastRequestNonce = nonce;
+			return refuse(ErrorReason.Limited);
+		}
 		const [opened, reader] = pcall(openBody, packet as buffer, sidecar as Record<string, Instance>, header);
 		if (!opened) return this.reject(peer, definition, definition.name, failureReason(reader));
-		if (header.opcode === Opcode.Event) {
+		if (event) {
 			const [decoded, value] = pcall(decodeBody, definition.input, "payload", reader);
 			if (!decoded) {
 				if (!missingInstance(value)) this.reject(peer, definition, definition.name, failureReason(value));
@@ -242,13 +251,7 @@ export class ServerSession extends Session {
 			if (peer.counted >= L.MAX_ACTIVE_HANDLERS) return this.fail(peer, FailReason.Overloaded);
 			return this.start(peer, receiver, [player, value]);
 		}
-		const nonce = header.nonce;
-		if (nonce <= peer.lastRequestNonce)
-			return this.reject(peer, definition, `${definition.name} with a nonce already used`);
 		peer.lastRequestNonce = nonce;
-		const refuse = (reason: ErrorReason) =>
-			this.fire(peer, controlPacket(Opcode.Error, [header.index, nonce], reason));
-		if (!this.admit(peer, definition)) return refuse(ErrorReason.Limited);
 		const [decoded, value] = pcall(decodeBody, definition.input, "request", reader);
 		if (!decoded) {
 			if (!missingInstance(value)) this.reject(peer, definition, definition.name, failureReason(value));

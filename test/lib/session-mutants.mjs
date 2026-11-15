@@ -375,7 +375,7 @@ const rules = [
 		[
 			"guard",
 			SS,
-			"\t\tif (nonce <= peer.lastRequestNonce)\n\t\t\treturn this.reject(peer, definition, `${definition.name} with a nonce already used`);\n",
+			"\t\tif (!event && nonce <= peer.lastRequestNonce)\n\t\t\treturn this.reject(peer, definition, `${definition.name} with a nonce already used`);\n",
 			"",
 		],
 		[

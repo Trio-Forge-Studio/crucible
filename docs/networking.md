@@ -62,7 +62,7 @@ export const Tap = toServer<{ readonly target: string }>("Cannon.Tap", { rate: 8
 export const Rebirth = askServer<undefined, boolean>("Cannon.Rebirth", { rate: 1, timeout: 5 });
 ```
 
-Each player has an allowance for each rated message. It holds one second of requests, and at least one, and refills at the rate. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. Every request counts, including one that does not decode.
+Each player has an allowance for each rated message. It holds one second of requests, and at least one, and refills at the rate. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. Every request counts, including one that does not decode or whose sidecar is malformed.
 
 A request over the rate never reaches its callback:
 

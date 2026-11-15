@@ -9,6 +9,7 @@ const src = "packages/crucible/src/";
 const SS = src + "internal/network/server-session.ts";
 const CS = src + "internal/network/client-session.ts";
 const K = src + "internal/network/catalog.ts";
+const SN = src + "internal/network/session.ts";
 const EN = src + "emit/network.ts";
 const specs = ["network-rates", "network-asks", "network-peers"];
 
@@ -43,7 +44,18 @@ const mutants = [
 		"\t\tlet bucket = peer.buckets.get(definition);",
 		"\t\tlet bucket = this.order[0].buckets.get(definition);",
 	],
-	["an event is never limited", SS, "\t\tif (event && !this.admit(peer, definition)) return;\n", ""],
+	[
+		"an event is never limited",
+		SS,
+		"\t\tif (!this.admit(peer, definition)) {",
+		"\t\tif (!event && !this.admit(peer, definition)) {",
+	],
+	[
+		"a malformed body skips the allowance",
+		SS,
+		"\t\tif (!this.admit(peer, definition)) {",
+		"\t\tif (!pcall(openBody, packet as buffer, sidecar as Record<string, Instance>, header)[0]) return;\n\t\tif (!this.admit(peer, definition)) {",
+	],
 	[
 		"a limited ask answers overloaded",
 		SS,
@@ -53,8 +65,8 @@ const mutants = [
 	[
 		"the rate spends a token before the nonce check",
 		SS,
-		"\t\tconst nonce = header.nonce;\n",
-		"\t\tconst nonce = header.nonce;\n\t\tif (nonce <= peer.lastRequestNonce) this.admit(peer, definition);\n",
+		"\t\tconst nonce = event ? 0 : header.nonce;\n",
+		"\t\tconst nonce = event ? 0 : header.nonce;\n\t\tif (!event && nonce <= peer.lastRequestNonce) this.admit(peer, definition);\n",
 	],
 	[
 		"the client reads limited as unavailable",
@@ -63,6 +75,7 @@ const mutants = [
 		'"overloaded", "invalid", "unavailable"];',
 	],
 	["a definition drops its rate", K, "\t\t\t\ttimeout,\n\t\t\t\trate,\n", "\t\t\t\ttimeout,\n"],
+	["end keeps the allowances", SN, "\t\tpeer.buckets.clear();\n", ""],
 	[
 		"define accepts any rate",
 		K,
@@ -70,7 +83,7 @@ const mutants = [
 		'typeIs(rate, "number")',
 	],
 	["toServer drops its rate", EN, "input: payload, rate })", "input: payload })"],
-	["askServer drops its rate", EN, "\t\ttimeout,\n\t\trate,\n\t})", "\t\ttimeout,\n\t})"],
+	["askServer drops its rate", EN, "\t\ttimeout,\n\t\trate,\n", "\t\ttimeout,\n"],
 ];
 
 const missing = mutants.filter(([, file, before]) => {

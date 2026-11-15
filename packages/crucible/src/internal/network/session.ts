@@ -294,6 +294,7 @@ export abstract class Session implements NetworkLifecycle {
 		peer.running.clear();
 		peer.rejected.clear();
 		peer.failedClaims.clear();
+		peer.buckets.clear();
 		const cleanups = [...peer.cleanups];
 		peer.cleanups.clear();
 		for (let i = cleanups.size() - 1; i >= 0; i--) this.deferCleanup(peer, cleanups[i]);
