@@ -2,8 +2,9 @@
 (***************************************************************************)
 (* One client's asks to the server over Crucible's network session: the    *)
 (* client's pending asks, its queue before READY, each ask's timeout, the  *)
-(* server's handlers with their lifetime and active count, the retirement  *)
-(* of the receiving Subsystem, and either side ending the session.         *)
+(* server's rate bucket for the player, its handlers with their lifetime   *)
+(* and active count, the retirement of the receiving Subsystem, and either *)
+(* side ending the session.                                                *)
 (* packages/crucible/src/internal/network/client-session.ts,               *)
 (* server-session.ts and session.ts implement it.                          *)
 (*                                                                         *)
@@ -18,7 +19,8 @@ CONSTANTS
     Nonces,      \* the asks the client makes, in order
     MaxPending,  \* MAX_PENDING_ASKS
     MaxQueued,   \* MAX_QUEUED_PACKETS before READY
-    MaxActive    \* MAX_ACTIVE_HANDLERS
+    MaxActive,   \* MAX_ACTIVE_HANDLERS
+    Burst        \* the requests the ask's rate bucket holds: its rate, and at least one
 
 VARIABLES
     cpeer,    \* the client's peer: "waiting" before its commit sends READY, "ready", or "ended"
@@ -35,10 +37,14 @@ VARIABLES
     live,     \* the receiving claim is live: its Subsystem has not retired
     last,     \* the highest request nonce the server accepted
     asked,    \* the asks made so far
-    replies   \* ghost: replies[n] counts the replies the server sent to ask n
+    replies,  \* ghost: replies[n] counts the replies the server sent to ask n
+    tokens,   \* the requests left in the server peer's bucket for this ask
+    admitted, \* ghost: the requests the bucket let through
+    refills   \* ghost: the requests time has added back to the bucket
 
+rate == <<tokens, admitted, refills>>
 vars == <<cpeer, pending, result, resumed, queue, c2s, s2c, speer, handler, answered, counted, live, last, asked,
-          replies>>
+          replies, rate>>
 
 Waiting == {n \in Nonces : pending[n] = "waiting"}
 Range(s) == {s[i] : i \in 1..Len(s)}
@@ -91,6 +97,7 @@ Ask ==
           /\ result' = [m \in Nonces |-> IF pending[m] = "waiting" \/ m = n THEN "disconnected" ELSE result[m]]
           /\ resumed' = [m \in Nonces |-> IF pending[m] = "waiting" \/ m = n THEN resumed[m] + 1 ELSE resumed[m]]
     /\ UNCHANGED <<s2c, speer, handler, answered, counted, live, last, replies>>
+    /\ UNCHANGED rate
 
 \* The client's commit sends READY and then its queue.
 Commit ==
@@ -99,6 +106,7 @@ Commit ==
     /\ c2s' = (c2s \o <<ReadyPacket>>) \o [i \in 1..Len(queue) |-> Request(queue[i])]
     /\ queue' = <<>>
     /\ UNCHANGED <<pending, result, resumed, s2c, speer, handler, answered, counted, live, last, asked, replies>>
+    /\ UNCHANGED rate
 
 \* The ask's timer: a queued packet leaves the queue, and the ask times out.
 Expire(n) ==
@@ -106,6 +114,7 @@ Expire(n) ==
     /\ queue' = Remove(queue, n)
     /\ Settle(n, "timeout")
     /\ UNCHANGED <<cpeer, c2s, s2c, speer, handler, answered, counted, live, last, asked, replies>>
+    /\ UNCHANGED rate
 
 \* The client closes, or fails the session on a malformed packet.
 CloseClient ==
@@ -113,6 +122,7 @@ CloseClient ==
     /\ EndClient
     /\ c2s' = Append(c2s, FailPacket)
     /\ UNCHANGED <<s2c, speer, handler, answered, counted, live, last, asked, replies>>
+    /\ UNCHANGED rate
 
 \* A reply settles its ask if it still waits. A late or unknown one changes nothing.
 ClientReceive ==
@@ -124,6 +134,7 @@ ClientReceive ==
        ELSE IF pending[p.n] = "waiting" THEN Settle(p.n, p.r) /\ UNCHANGED <<cpeer, queue>>
        ELSE UNCHANGED <<cpeer, pending, result, resumed, queue>>
     /\ UNCHANGED <<c2s, speer, handler, answered, counted, live, last, asked, replies>>
+    /\ UNCHANGED rate
 
 Send(n, r) ==
     /\ s2c' = Append(s2c, Reply(n, r))
@@ -134,16 +145,24 @@ ServerReceive ==
     LET p == Head(c2s) IN
     /\ c2s # <<>>
     /\ c2s' = Tail(c2s)
-    /\ IF speer = "ended" THEN UNCHANGED <<speer, s2c, handler, counted, last, replies>>
+    /\ IF speer = "ended" THEN UNCHANGED <<speer, s2c, handler, counted, last, replies, rate>>
        ELSE IF p.type = "ready" THEN
           /\ speer' = IF speer = "waiting" THEN "ready" ELSE speer
-          /\ UNCHANGED <<s2c, handler, counted, last, replies>>
+          /\ UNCHANGED <<s2c, handler, counted, last, replies, rate>>
        ELSE IF p.type = "fail" THEN
           /\ speer' = "ended"
-          /\ UNCHANGED <<s2c, handler, counted, last, replies>>
-       ELSE IF speer # "ready" \/ p.n <= last THEN UNCHANGED <<speer, s2c, handler, counted, last, replies>>
+          /\ UNCHANGED <<s2c, handler, counted, last, replies, rate>>
+       ELSE IF speer # "ready" \/ p.n <= last THEN UNCHANGED <<speer, s2c, handler, counted, last, replies, rate>>
+       ELSE IF tokens = 0 THEN
+          \* Over its rate: refused before it decodes, and it starts nothing.
+          /\ last' = p.n
+          /\ Send(p.n, "limited")
+          /\ UNCHANGED <<speer, handler, counted, rate>>
        ELSE
           /\ last' = p.n
+          /\ tokens' = tokens - 1
+          /\ admitted' = admitted + 1
+          /\ UNCHANGED refills
           /\ \/ /\ Send(p.n, "invalid")
                 /\ UNCHANGED <<handler, counted>>
              \/ /\ ~live
@@ -171,6 +190,7 @@ Finish(n) ==
             /\ \E r \in {"ok", "handler-error"} : Send(n, r)
        ELSE UNCHANGED <<answered, s2c, replies>>
     /\ UNCHANGED <<cpeer, pending, result, resumed, queue, c2s, speer, live, last, asked>>
+    /\ UNCHANGED rate
 
 \* HANDLER_LIFETIME_SECONDS passed: the handler stops counting and runs on.
 Overrun(n) ==
@@ -178,6 +198,7 @@ Overrun(n) ==
     /\ handler' = [handler EXCEPT ![n] = "overrun"]
     /\ counted' = counted - 1
     /\ UNCHANGED <<cpeer, pending, result, resumed, queue, c2s, s2c, speer, answered, live, last, asked, replies>>
+    /\ UNCHANGED rate
 
 \* The receiving Subsystem retires: each request it still runs is answered "unavailable" now.
 Retire ==
@@ -190,6 +211,15 @@ Retire ==
        /\ s2c' = s2c \o [i \in 1..Cardinality(open) |-> Reply(order[i], "unavailable")]
        /\ replies' = [n \in Nonces |-> IF n \in open THEN replies[n] + 1 ELSE replies[n]]
        /\ UNCHANGED <<cpeer, pending, result, resumed, queue, c2s, speer, handler, counted, last, asked>>
+       /\ UNCHANGED rate
+
+\* Time passes: the player's bucket regains one request, up to Burst.
+Refill ==
+    /\ tokens < Burst
+    /\ tokens' = tokens + 1
+    /\ refills' = refills + 1
+    /\ UNCHANGED <<cpeer, pending, result, resumed, queue, c2s, s2c, speer, handler, answered, counted, live, last, asked,
+                   replies, admitted>>
 
 \* The player leaves, or the server fails the peer and tells the client.
 EndServer ==
@@ -198,6 +228,7 @@ EndServer ==
     /\ \/ s2c' = s2c
        \/ s2c' = Append(s2c, FailPacket)
     /\ UNCHANGED <<cpeer, pending, result, resumed, queue, c2s, handler, answered, counted, live, last, asked, replies>>
+    /\ UNCHANGED rate
 
 Init ==
     /\ cpeer = "waiting"
@@ -215,10 +246,13 @@ Init ==
     /\ last = 0
     /\ asked = 0
     /\ replies = [n \in Nonces |-> 0]
+    /\ tokens = Burst
+    /\ admitted = 0
+    /\ refills = 0
 
 Next ==
     \/ Ask \/ Commit \/ CloseClient \/ ClientReceive
-    \/ ServerReceive \/ Retire \/ EndServer
+    \/ ServerReceive \/ Retire \/ EndServer \/ Refill
     \/ \E n \in Nonces : Expire(n) \/ Finish(n) \/ Overrun(n)
 
 \* Packets are delivered and every armed timer fires; nothing else is promised.
@@ -251,4 +285,13 @@ Counted == speer # "ended" => counted = Cardinality({n \in Nonces : handler[n] =
 
 \* Every ask that waits gets its result.
 Settles == \A n \in Nonces : pending[n] = "waiting" ~> pending[n] = "settled"
+
+\* The bucket never holds fewer than none or more than Burst requests.
+Spent == tokens \in 0..Burst
+
+\* The server lets through no request the bucket did not hold: Burst, plus what time added back.
+Admitted == admitted <= Burst + refills
+
+\* An ask the client sees as limited never started a handler.
+LimitedNeverRuns == \A n \in Nonces : result[n] = "limited" => handler[n] = "none"
 =============================================================================
