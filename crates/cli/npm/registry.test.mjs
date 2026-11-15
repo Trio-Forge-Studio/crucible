@@ -14,7 +14,7 @@ test("preflight rejects live and unpublished versions", () => {
 	assert.throws(() => unused({ time: { "1.2.3": "past" } }, SHIM, "1.2.3"), /already used/);
 });
 
-test("partial staging skips identical published tarballs, stages the shim last, and reports stage failures", async () => {
+test("publication skips identical published tarballs, publishes the shim last, and stops at the first failure", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "crucible-release-"));
 	const cwd = process.cwd();
 	try {
@@ -43,39 +43,40 @@ test("partial staging skips identical published tarballs, stages the shim last, 
 		}
 		const published = [];
 		const publish = (args) => {
-			assert.deepEqual(args.slice(0, 2), ["stage", "publish"]);
+			assert.equal(args[0], "publish");
 			assert.ok(args.includes("--provenance"));
 			assert.equal(args.at(-1), "next");
-			assert.ok(manifests.has(args[2]), `${args[2]} is not an absolute tarball path`);
-			published.push(manifests.get(args[2]));
+			assert.ok(manifests.has(args[1]), `${args[1]} is not an absolute tarball path`);
+			published.push(manifests.get(args[1]));
 		};
 		await assert.rejects(
 			main("preflight", "packages", async (name) => documents[name] ?? {}, publish),
 			/already used/,
 		);
 		assert.deepEqual(published, []);
-		await main("stage", "packages", async (name) => documents[name] ?? {}, publish);
+		await main("publish", "packages", async (name) => documents[name] ?? {}, publish);
 		assert.equal(published.length, names.length - 1);
 		assert.equal(published.at(-1), SHIM);
 		assert.ok(!published.includes(names[2]));
 		published.length = 0;
+		const order = names.filter((name, index) => name !== SHIM && index !== 2).sort((x, y) => x.localeCompare(y));
+		const failing = order.at(-1);
 		await assert.rejects(
 			main(
-				"stage",
+				"publish",
 				"packages",
 				async (name) => documents[name] ?? {},
 				(args) => {
-					if (manifests.get(args[2]) === "@trioforge/crucible") throw new Error("E409 Conflict");
+					if (manifests.get(args[1]) === failing) throw new Error("E409 Conflict");
 					publish(args);
 				},
 			),
-			/Not staged by this run: @trioforge\/crucible@1\.2\.3-beta\.1\. If npmjs\.com > Staged Packages/,
+			/E409 Conflict/,
 		);
-		assert.equal(published.length, names.length - 2);
-		assert.equal(published.at(-1), SHIM);
+		assert.deepEqual(published, order.slice(0, order.indexOf(failing)));
 		documents[names[2]].versions["1.2.3-beta.1"].dist.integrity = "different";
 		await assert.rejects(
-			main("stage", "packages", async (name) => documents[name] ?? {}, publish),
+			main("publish", "packages", async (name) => documents[name] ?? {}, publish),
 			/artifact differs/,
 		);
 		await assert.rejects(
