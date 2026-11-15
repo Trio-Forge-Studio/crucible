@@ -164,4 +164,4 @@ local graph = harness.loadGame({
 
 `root` is the folder against which sourcemap file paths resolve. Lua and Luau paths load directly. TypeScript paths below `sourceRoot` load their matching `.luau` file below `output`, preserving folders and `init` modules. Paths already pointing to compiled output need no `output` option. All paths are relative to the current working directory unless absolute. The graph API and isolation match place loading.
 
-Only the game APIs described above are supported. Disk loaders (`module`, `fresh`, `runtime`, `runtimeAt`), their module paths, and backend realm fields exposing runtime internals are unsupported white-box hooks for Crucible's own specs. Games must not depend on them.
+Only the game APIs described above are supported. Additional entry functions and backend realm fields are unsupported white-box hooks for Crucible's own specs. Games must not depend on them.
