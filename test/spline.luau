@@ -1,5 +1,5 @@
 local golden = require("./lib/spline-golden")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 -- Lune's definitions omit Roblox datatypes.
 local roblox: any = require("@lune/roblox")
 

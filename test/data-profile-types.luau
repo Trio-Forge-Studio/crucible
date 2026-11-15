@@ -1,5 +1,5 @@
 local process = require("@lune/process")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 return {
 	["1 8 K9 the Crucible compiler build type-checks a profile store and rejects a bad template and bad writes"] = function()

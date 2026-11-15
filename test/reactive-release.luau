@@ -1,6 +1,6 @@
 -- A lifetime's releases run as one batch on a shared worker. These pin what each release still gets on its own: its
 -- lifecycle requests, its owner and frame after a neighbour failed, its own blame, and nested releases.
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local realm = require("./lib/reactive-world")
 local life = require("./lib/reactive-life")
 

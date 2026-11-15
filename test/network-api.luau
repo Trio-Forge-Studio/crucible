@@ -1,5 +1,5 @@
 local process = require("@lune/process")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 return {
 	["6 16 25 the declared API accepts every contract form and rejects each wrong direction payload and callback"] = function()

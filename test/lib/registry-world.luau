@@ -1,5 +1,5 @@
-local spec = require("./load")
-local Engine = require("./engine")
+local spec = require("../../packages/crucible/lune")
+local Engine = require("../../packages/crucible/lune").engine
 
 return function()
 	local engine = Engine.new()

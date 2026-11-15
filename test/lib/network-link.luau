@@ -17,8 +17,8 @@
 --   * Raw injection both ways, and fault injection on the port's create, publish, fireServer and discover.
 -- What it does not prove: replication, streaming timing, attribute sizes, kick timing or wire size. Studio does.
 local roblox = require("@lune/roblox")
-local Engine = require("./engine")
-local spec = require("./load")
+local Engine = require("../../packages/crucible/lune").engine
+local spec = require("../../packages/crucible/lune")
 
 local link = {}
 link.__index = link

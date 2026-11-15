@@ -5,15 +5,12 @@ local luau = require("@lune/luau")
 local process = require("@lune/process")
 local roblox = require("@lune/roblox")
 local task = require("@lune/task")
-local engine = require("../../../../test/lib/engine")
-local networkPort = require("../../../../test/lib/network-port")
+local harness = require("../../../../packages/crucible/lune")
+local engine = harness.engine
+local networkPort = harness.networkPort
 
 local placePath, runtime, gameOut = process.args[1], process.args[2], process.args[3]
 assert(placePath and runtime and gameOut, "usage: declarations.luau <place> <runtime out> <game out>")
-
-roblox.implementMethod("Instance", "WaitForChild", function(instance, name: string)
-	return assert(instance:FindFirstChild(name), `{instance:GetFullName()} has no child {name}`)
-end)
 
 local place = roblox.deserializePlace(fs.readFile(placePath))
 

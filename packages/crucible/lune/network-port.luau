@@ -1,7 +1,3 @@
--- The default fake network port for realms that do not exercise networking. A client realm's discovery returns at once
--- with the catalog every Crucible server publishes when its game declares no messages: sync's two framework messages.
--- It records what the session asked of it so specs can assert a closed session.
--- `failNext` makes the next call of that name throw once. Network specs install `network-link.luau` instead.
 return function()
 	local port = {
 		installed = false,
@@ -38,6 +34,7 @@ return function()
 		port.published = { protocol = protocol, catalog = catalog }
 	end
 	function port.fireClient(player, packet, sidecar)
+		failing("fireClient")
 		table.insert(port.fired, { player = player, packet = packet, sidecar = sidecar })
 	end
 	function port.players()

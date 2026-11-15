@@ -1,7 +1,7 @@
-local Engine = require("./lib/engine")
+local Engine = require("../packages/crucible/lune").engine
 local World = require("./lib/profile-world")
 local fixture = require("./lib/profile-fixture")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local UNTRANSFORMED = "Crucible data was not compiled by the Crucible compiler; use crucible build"
 

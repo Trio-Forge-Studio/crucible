@@ -1,7 +1,7 @@
 local DM = require("./lib/data-migrations")
 local World = require("./lib/profile-world")
 local fixture = require("./lib/profile-fixture")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local function declare(r)
 	return { PlayerData = fixture.declare(r) }
@@ -204,7 +204,7 @@ return {
 	end,
 
 	["E7 12 a root update changes two fields in one revision and keeps the root's unknown key"] = function()
-		local backend = require("./lib/data-backend").new()
+		local backend = require("../packages/crucible/lune").Backend.new()
 		seedUnknown(backend)
 		local w, _, player, data = loaded({ backend = backend })
 		spec.eq(
@@ -227,7 +227,7 @@ return {
 	end,
 
 	["E8 118 78 a path copy keeps unknown keys in a nested object and an array element"] = function()
-		local backend = require("./lib/data-backend").new()
+		local backend = require("../packages/crucible/lune").Backend.new()
 		seedUnknown(backend)
 		local w, _, player, data = loaded({ backend = backend })
 		spec.eq(data(player).settings.volume:set(0.9), true, "nested set")
@@ -621,7 +621,7 @@ return {
 	end,
 
 	["116 an optional field and object clear with set(undefined) and the clear survives a reload"] = function()
-		local backend = require("./lib/data-backend").new()
+		local backend = require("../packages/crucible/lune").Backend.new()
 		local w, ann, player, data = loaded({ backend = backend })
 		spec.eq(data(player).nickname:set("Ace"), true, "set an optional field")
 		spec.eq(data(player).nickname(), "Ace", "read it")

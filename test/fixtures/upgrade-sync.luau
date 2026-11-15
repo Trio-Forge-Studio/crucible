@@ -1,5 +1,5 @@
 local process = require("@lune/process")
-local loadPlace = require("../lib/place")
+local loadPlace = require("../../packages/crucible/lune").loadPlace
 local h = loadPlace(false, process.args[1])
 h.import(h.crucible.server)
 local state = h.import(h.place:GetService("ReplicatedStorage").TS.state)

@@ -1,5 +1,5 @@
-local spec = require("./lib/load")
-local Engine = require("./lib/engine")
+local spec = require("../packages/crucible/lune")
+local Engine = require("../packages/crucible/lune").engine
 local Backend = require("./lib/config-backend")
 local task = require("@lune/task")
 

@@ -1,5 +1,3 @@
--- A fake engine behind the runtime's EnginePort. State changes apply at once; their signals queue like Roblox's
--- Deferred signal behaviour, which FD's places set, and run with task.defer callbacks when the test calls flush.
 local task = require("@lune/task")
 
 local FrameEvent =
@@ -83,8 +81,6 @@ function engine.new()
 		table.insert(e.instances, instance)
 		return instance
 	end
-
-	-- CollectionService signals only for instances in the DataModel.
 	function e.addTag(instance, tag: string)
 		if instance.tags[tag] then
 			return
@@ -109,9 +105,6 @@ function engine.new()
 		instance.attributes[name] = value
 		fire(group(instance.attributeChanged, name))
 	end
-
-	-- Leaving the DataModel fires each tag's removed signal and returning fires its added signal, as
-	-- CollectionService does. C4's Studio probe S1 confirms the removal signal on reparent to nil.
 	function e.setInWorld(instance, inWorld: boolean)
 		local changed = instance.inWorld ~= inWorld
 		instance.inWorld = inWorld
@@ -139,8 +132,6 @@ function engine.new()
 		clone.tags = table.clone(instance.tags)
 		return clone
 	end
-
-	-- Runs queued signals and task.defer callbacks, including ones they queue, in order.
 	function e.flush()
 		while #e.deferred > 0 do
 			table.remove(e.deferred, 1)()

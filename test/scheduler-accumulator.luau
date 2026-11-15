@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local scheduler = spec.module("internal/scheduler")
 local tests = {}

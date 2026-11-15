@@ -1,5 +1,5 @@
-local spec = require("./lib/load")
-local Engine = require("./lib/engine")
+local spec = require("../packages/crucible/lune")
+local Engine = require("../packages/crucible/lune").engine
 local World = require("./lib/world")
 local new = require("./lib/scheduler-world")
 local meter = require("./lib/meter")

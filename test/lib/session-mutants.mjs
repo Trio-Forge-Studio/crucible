@@ -55,10 +55,15 @@ const rules = [
 		],
 		["swap", "isolation is an import graph with no call to swap"],
 		["pair", "isolation is an import graph with no paired operation"],
-		["guard installed marker (A17 L03)", "test/lib/load.luau", "\t\t\t\tnetwork.installed = true\n", "\n"],
+		[
+			"guard installed marker (A17 L03)",
+			"packages/crucible/lune/load.luau",
+			"\t\t\t\tnetwork.installed = true\n",
+			"\n",
+		],
 		[
 			"swap config slot (A17 L05)",
-			"test/lib/load.luau",
+			"packages/crucible/lune/load.luau",
 			"loaded[path].installNetworkPort(network)",
 			"loaded[path].installNetworkPort(configPort or network)",
 		],

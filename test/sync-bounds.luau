@@ -1,6 +1,6 @@
 local roblox = require("@lune/roblox")
 local World = require("./lib/sync-world")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 
 local function newWorld(descriptor)
 	return World.new({
@@ -25,7 +25,7 @@ end
 
 local tests = {}
 tests["pre-encoded sends retain session guards and queue the supplied packet"] = function()
-	local port = require("./lib/network-port")()
+	local port = require("../packages/crucible/lune").networkPort()
 	local player = { Name = "Ann" }
 	port.players = function()
 		return { player }

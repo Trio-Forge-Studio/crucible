@@ -1,4 +1,4 @@
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local D2 = require("./lib/data-d2")
 
 local PRODUCT = D2.PRODUCT

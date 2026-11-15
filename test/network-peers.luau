@@ -1,8 +1,8 @@
-local Engine = require("./lib/engine")
+local Engine = require("../packages/crucible/lune").engine
 local Link = require("./lib/network-link")
 local h = require("./lib/network-codec")
-local loadPlace = require("./lib/place")
-local spec = require("./lib/load")
+local loadPlace = require("../packages/crucible/lune").loadPlace
+local spec = require("../packages/crucible/lune")
 
 local KICK = "Connection problem, please rejoin."
 

@@ -1,7 +1,7 @@
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local process = require("@lune/process")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local h = require("./lib/network-codec")
 
 return {

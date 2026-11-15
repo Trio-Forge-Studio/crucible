@@ -4,7 +4,7 @@
 --
 --   lune run bench-effects [runs]
 local process = require("@lune/process")
-local spec = require("../test/lib/load")
+local spec = require("../packages/crucible/lune")
 local realm = require("../test/lib/reactive-world")
 
 local COUNT = 10000

@@ -85,3 +85,83 @@ assert(got.size == 3)
 ## What it does not do
 
 The entry builds an object and stops. It does not run `boot`, the lifecycle phases, `accepts`, tag binding or the scheduler. Built objects are not in the lifecycle's state, so `Behaviour.get`, `isEnabled` and `setEnabled` do not see them. Nothing calls a hook for the spec.
+
+## Load a compiled place in Lune
+
+The npm package ships the Lune entry at `node_modules/@trioforge/crucible/lune`. It runs outside Roblox and needs Lune on `PATH`. Build your place with `crucible build` first.
+
+```luau
+local harness = require("../node_modules/@trioforge/crucible/lune")
+local graph = harness.loadGame({
+	place = "build/game.rbxl",
+	client = false,
+	services = { Workspace = workspaceDouble },
+})
+local shared = graph.place:GetService("ReplicatedStorage").TS
+local PlayerData = graph.import(shared.profile).PlayerData
+local testing = graph.import(graph.crucible.testing)
+```
+
+`loadGame(options)` reads a compiled `.rbxl` or `.rbxlx` place. Each call owns its place, module cache and `_G`. Repeated imports return the same value in that graph. `services` maps service names to doubles, `globals` overrides module globals, and `task` replaces the task library. `engine`, `network` and `dataPort` replace the corresponding runtime ports. `client` defaults to false. `loadPlace(client?, path?, options?)` is the positional form and defaults to `build/sample-game.rbxl`.
+
+The result exposes `place`, `crucible`, `import(instance)` and `load(instance)`. Use `import` for compiled modules so RuntimeLib registers them. `load` evaluates a script directly. `engine` is the installed engine fake, `messages` captures printed lines, `closers` holds shutdown callbacks, `attributes` records the default local player's attributes and `runService` is the default realm double. `loaded` records evaluated modules. Call `graph.place:Destroy()` after the spec.
+
+The loader supplies RunService realm checks, an empty ReflectionService class list and a local-player attribute double. Other services come from the deserialized place unless overridden. It replaces the runtime engine port and installs logging and network fakes. It does not emulate Roblox physics, run boot automatically or prove gameplay behavior in Studio. A game's include folder must be mapped at `ReplicatedStorage.rbxts_include`, with Crucible under `node_modules.@trioforge.crucible`, either directly or with an `out` child.
+
+## Build a profile fixture from a compiled store
+
+```luau
+local backend = harness.Backend.new()
+local realm = backend:realm()
+local profile = harness.profileFixture(realm, PlayerData, {
+	onLoad = function(player, value, reason)
+		return value
+	end,
+})
+local player = realm.join(4120)
+local pending = realm.run(function()
+	return profile:load(player, "join")
+end)
+backend:advance(1)
+assert(pending.done and pending.value == true)
+assert(profile.published[player] ~= nil)
+```
+
+`profileFixture(realm, compiledStore, options?)` uses the compiled store's sealed defaults, persistence schema and migrations, including server-only fields. It returns a player-facing fixture with `published[player]` snapshots and a `reasons` list. Optional `onLoad(player, value, reason)` and `onRelease(player, value, reason)` callbacks transform values under the runtime's normal claim rules. `load(player, reason)`, `write(player, change)`, `save(player, timeout?)`, `release(player, reason?)`, `writable(player)`, `leave(player)`, `handoff(player)`, `resume(player)` and `await(player)` run through the production engine. `players()` lists writable players. `state(player)` returns `"absent"`, `"loading"`, `"active"`, `"sealed"` or `"ended"`. Release defaults to `"leave"`. Yielding methods run through `realm.run`, whose result has `done` and `value`.
+
+`Backend.new()` creates committed storage and virtual time. `backend:realm({ id?, mono?, wall?, latency?, seed? })` creates an independent server realm. `realm.join(userId)`, `leave(player)`, `crash()` and `suspended` control presence and execution. `realm.clock()`, `wall()`, `spawn`, `wait`, `delay` and `cancel` form its fake clock and scheduler. `backend:advance(seconds)` runs due events and reports coroutine failures. `seed(store, key, value, userIds?, metadata?)`, `envelope(store, key)` and `stored(store, key)` seed or inspect copied committed values. `callsTo(filter)` lists calls matching fields such as `server`, `kind`, `store` and `key`.
+
+`backend:fail(kind, filter?, times?, options?)` injects `throttle`, `transient`, `committed`, `conflict`, `late`, `stall` or `reject` failures. Options include `seconds`, `code` and `after`. `gate(point, filter?)` parks future calls at `transform`, `commit`, `committed` or `response`; call the returned `release()` to continue. A crashed realm never runs again, but an already-sent write can still commit.
+
+## Use the engine and network doubles
+
+`engine.new()` returns an engine with `port` and `loggingPort`. It supports `instance`, `addTag`, `removeTag`, `setAttribute`, `setInWorld`, `move`, `destroy`, `clone`, `flush`, `frame`, `cycle` and `logged`. Signals queue until `flush()`. `frame(engine.FrameEvent.Heartbeat, dt)` and `cycle(dt, renders)` drive frame callbacks. `logs` and `gameLogs` capture output.
+
+`networkPort()` returns a port that records `fired`, `kicked`, `listeners` and `timers`. `failNext` names the next operation to throw, one of `"create"`, `"publish"`, `"discover"`, `"fireClient"` or `"fireServer"`. The failure is consumed once, before recording a send. It supplies an empty-game discovery catalog; games that exercise declared messages provide a network double implementing the catalog and transport they need.
+
+## Replace copied BAFM helpers
+
+BAFM's `load.luau`, `engine.luau`, `data-backend.luau` and `network-port.luau` map to this single entry's `loadGame`, `engine`, `Backend` and `networkPort`. Load `PlayerProfile` and `ProfileRules` through `graph.import` on their compiled place instances. Pass the exported profile store to `profileFixture`, and pass `ProfileRules.prepareProfile` through `onLoad`. The fixture no longer queries `internal/data/declarations`, constructs `DataEngine`, or loads `profiles`, `lease`, `envelope` and `admission` by private path. Tests of saved values use `backend:seed` and `backend:envelope`.
+
+## Replace modules and inspect lifecycle
+
+`graph.provideGame(instance, value)` replaces a compiled module before it or a consumer imports it. Imports and requires receive the replacement, including `false`. Replacing an already evaluated module or a replacement already read by a consumer throws. Replacements belong to one graph.
+
+`graph.lifecycle(Class, instance?)` returns `"unconstructed"`, `"constructed"`, `"awake"`, `"enabled"`, `"disabled"`, `"faulted"` or `"destroyed"` for a registered class in this graph. Pass an instance for a behaviour. Its latest generation remains observable after fault or destruction until a new generation binds. Terminal history does not keep the behaviour object alive. This replaces numeric phase assertions such as FD's private `Phase.Faulted` check. It observes lifecycle driven by boot and engine events; objects constructed manually through `/testing` are outside lifecycle.
+
+## Load a Rojo sourcemap
+
+A game can load its compiled output without building a place. Generate a Rojo sourcemap including scripts, then use:
+
+```luau
+local graph = harness.loadGame({
+    sourcemap = "sourcemap.json",
+    root = ".",
+    output = "out",
+    sourceRoot = "src",
+})
+```
+
+`root` is the folder against which sourcemap file paths resolve. Lua and Luau paths load directly. TypeScript paths below `sourceRoot` load their matching `.luau` file below `output`, preserving folders and `init` modules. Paths already pointing to compiled output need no `output` option. `sourcemap`, `root` and `output` resolve against the current working directory. Sourcemap file paths and `sourceRoot` resolve against `root`. Absolute paths load directly, including Windows drive paths with either slash style and Linux paths. Source-root comparisons ignore case on Windows and remain case-sensitive on Linux. The graph API and isolation match place loading.
+
+Only the game APIs described above are supported. Additional entry functions and backend realm fields are unsupported white-box hooks for Crucible's own specs. Games must not depend on them.

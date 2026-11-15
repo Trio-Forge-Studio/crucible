@@ -1,5 +1,5 @@
-local spec = require("./lib/load")
-local Backend = require("./lib/data-backend")
+local spec = require("../packages/crucible/lune")
+local Backend = require("../packages/crucible/lune").Backend
 
 local function realm()
 	return Backend.new():realm()

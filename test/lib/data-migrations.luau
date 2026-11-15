@@ -1,7 +1,7 @@
 -- Fixtures for the migration, admission and unknown-key specs: persist descriptors built outside any realm (admission
 -- reads a node's shape and never its provenance), loads and writes on realm threads, and expected envelopes written by
 -- hand from the contract's layout (data rule 38), never computed by the engine under test.
-local spec = require("./load")
+local spec = require("../../packages/crucible/lune")
 local D2 = require("./data-d2")
 
 local DM = {}

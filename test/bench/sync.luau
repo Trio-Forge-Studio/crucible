@@ -8,7 +8,7 @@ local process = require("@lune/process")
 local roblox = require("@lune/roblox")
 local serde = require("@lune/serde")
 local World = require("../lib/sync-world")
-local spec = require("../lib/load")
+local spec = require("../../packages/crucible/lune")
 local referenceEquality = fs.readFile("test/bench/trunk/equal.txt")
 
 local PEERS, FRAMES, HZ = 4, 600, 60

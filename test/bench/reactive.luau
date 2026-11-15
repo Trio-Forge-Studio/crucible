@@ -4,8 +4,8 @@
 -- with Charm atoms and Crucible's `effect`, which runs inside the write.
 local process = require("@lune/process")
 local serde = require("@lune/serde")
-local Engine = require("../lib/engine")
-local spec = require("../lib/load")
+local Engine = require("../../packages/crucible/lune").engine
+local spec = require("../../packages/crucible/lune")
 
 local VALUES = 1_000
 local WRITES = 100_000

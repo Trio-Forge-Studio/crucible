@@ -2,7 +2,7 @@
 -- data port served by one shared data backend (data rule 108). The backend runs on the link's timeline, so data's
 -- timers, storage latency, sync frames and network delivery advance together, and data's monotonic clock is the
 -- link's boot clock (rule 25).
-local Backend = require("./data-backend")
+local Backend = require("../../packages/crucible/lune").Backend
 local SyncWorld = require("./sync-world")
 
 local FRAME = 1 / 60

@@ -1,7 +1,7 @@
 -- Fixtures for the generic store specs (data rules 85 to 91): a world with one record store, hand-written records
 -- envelopes, and an encoder and decoder for operation ids and sizes that are the spec's own, not the engine's.
 local serde = require("@lune/serde")
-local Backend = require("./data-backend")
+local Backend = require("../../packages/crucible/lune").Backend
 local D2 = require("./data-d2")
 
 local R = {}

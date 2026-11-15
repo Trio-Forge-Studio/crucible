@@ -1,4 +1,4 @@
-local spec = require("./load")
+local spec = require("../../packages/crucible/lune")
 
 return function(client)
 	local p = {

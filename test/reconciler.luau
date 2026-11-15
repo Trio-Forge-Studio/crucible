@@ -1,5 +1,5 @@
 local meter = require("./lib/meter")
-local spec = require("./lib/load")
+local spec = require("../packages/crucible/lune")
 local world = require("./lib/world")
 
 local Phase, Hook = world.Phase, world.Hook
