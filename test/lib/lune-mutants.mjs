@@ -6,7 +6,19 @@ import path from "node:path";
 const repo = process.cwd();
 const scratch = fs.mkdtempSync(path.join(repo, "build/lune-mutants-"));
 const mutants = [
-	["terminal behaviour state", "place.luau", "(generations[record] or {})[instance]", "record.bound[instance]"],
+	[
+		"retained behaviour object",
+		"place.luau",
+		"generations[record][state.instance] = state.phase",
+		"generations[record][state.instance] = state.phase; generations[state] = state",
+	],
+	[
+		"lifecycle name collision",
+		"place.luau",
+		"module == crucible.internal.lifecycle",
+		'module.Name == "lifecycle" and module.Parent.Name == "internal"',
+	],
+	["terminal behaviour state", "place.luau", "else (generations[record] or {})[instance]", "else nil"],
 	["consumed replacement", "place.luau", "loaded[module] = replacements[module]", ""],
 	[
 		"wait timer tracking",

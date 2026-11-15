@@ -1,6 +1,70 @@
 local harness = require("../packages/crucible/lune")
 
 return {
+	["Lune destroyed behaviours are collectable while terminal phases remain readable"] = function()
+		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
+		local Member = graph.import(graph.place:GetService("ServerScriptService").TS.systems.member).Member
+		local weak = setmetatable({}, { __mode = "v" })
+		local created = 0
+		Member.awake = function(self)
+			self.payload = table.create(10000, 42)
+			created += 1
+			if created <= 200 then
+				weak[created] = self
+			end
+		end
+		Member.start = function() end
+		Member.onEnable = function() end
+		Member.onDisable = function() end
+		Member.onDestroy = function() end
+		graph.import(graph.crucible.server).boot({ load = {} })
+		local instances = {}
+		local function churn()
+			for i = 1, 200 do
+				local instance = graph.engine.instance("Member", "Part", { Identity = "test" })
+				instances[i] = instance
+				graph.engine.addTag(instance, "S2Member")
+				graph.engine.flush()
+				assert(graph.lifecycle(Member, instance) == "enabled", "created behaviour is live")
+				graph.engine.removeTag(instance, "S2Member")
+				graph.engine.flush()
+			end
+		end
+		churn()
+		local live = graph.engine.instance("Live", "Part", { Identity = "live" })
+		graph.engine.addTag(live, "S2Member")
+		graph.engine.flush()
+		assert(graph.lifecycle(Member, live) == "enabled", "next construction replaces the runner cached result")
+		assert(created == 201, "probe observed every behaviour object")
+		require("@lune/task").wait(0.1)
+		for _ = 1, 400 do
+			local garbage = {}
+			for i = 1, 4000 do
+				garbage[i] = { i }
+			end
+			if next(weak) == nil then
+				break
+			end
+		end
+		assert(next(weak) == nil, "destroyed behaviour objects are collectable")
+		for _, instance in instances do
+			assert(graph.lifecycle(Member, instance) == "destroyed", "history survives object collection")
+		end
+		graph.place:Destroy()
+	end,
+	["Lune game modules cannot impersonate runtime lifecycle"] = function()
+		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
+		local roblox = require("@lune/roblox")
+		local folder = roblox.Instance.new("Folder")
+		folder.Name = "internal"
+		local module = roblox.Instance.new("ModuleScript")
+		module.Name = "lifecycle"
+		module.Source = "return 42"
+		module.Parent = folder
+		assert(graph.load(module) == 42, "game lifecycle module evaluates normally")
+		folder:Destroy()
+		graph.place:Destroy()
+	end,
 	["Lune behaviour lifecycle retains terminal states and follows rebinding"] = function()
 		for _, fails in { false, true } do
 			local graph = harness.loadGame({ place = "build/sample-game.rbxl" })

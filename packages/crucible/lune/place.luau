@@ -47,7 +47,11 @@ return function(client: boolean?, path: string?, options)
 					instance.Source = fs.readFile(file)
 				elseif options.output and string.match(file, "%.tsx?$") and not string.match(file, "%.d%.ts$") then
 					local prefix = sourceRoot .. "/"
-					assert(string.sub(file, 1, #prefix) == prefix, `source {file} is outside {prefix}`)
+					local candidate = string.sub(file, 1, #prefix)
+					local matches = if process.os == "windows"
+						then string.lower(candidate) == string.lower(prefix)
+						else candidate == prefix
+					assert(matches, `source {file} is outside {prefix}`)
 					local relative = string.gsub(string.sub(file, #prefix + 1), "%.tsx?$", ".luau")
 					instance.Source = fs.readFile(options.output .. "/" .. relative)
 				end
@@ -125,6 +129,9 @@ return function(client: boolean?, path: string?, options)
 	local loaded = {}
 	local replacements = {}
 	local generations = {}
+	local include = place:GetService("ReplicatedStorage").rbxts_include
+	local crucible = include.node_modules["@trioforge"].crucible
+	crucible = crucible:FindFirstChild("out") or crucible
 	local load
 	local function requireFrom(script)
 		return function(target)
@@ -183,16 +190,20 @@ return function(client: boolean?, path: string?, options)
 				environment = environment,
 			})
 			loaded[module] = { value = chunk() }
-			if module.Name == "lifecycle" and module.Parent.Name == "internal" then
+			if module == crucible.internal.lifecycle then
 				local lifecycle = loaded[module].value
-				local track = lifecycle.track
-				lifecycle.track = function(record, instance, ...)
-					local state = track(record, instance, ...)
-					if instance then
-						generations[record] = generations[record] or {}
-						generations[record][instance] = state
+				local useEffects = lifecycle.useEffects
+				lifecycle.useEffects = function(effects)
+					local observed = table.clone(effects)
+					observed.ended = function(state)
+						if state.instance then
+							local record = state.record
+							generations[record] = generations[record] or setmetatable({}, { __mode = "k" })
+							generations[record][state.instance] = state.phase
+						end
+						return effects.ended(state)
 					end
-					return state
+					return useEffects(observed)
 				end
 			end
 			if module.Name == "log-output" and module.Parent.Name == "internal" then
@@ -207,10 +218,7 @@ return function(client: boolean?, path: string?, options)
 		end
 		return loaded[module].value
 	end
-	local include = place:GetService("ReplicatedStorage").rbxts_include
 	local runtime = load(include.RuntimeLib)
-	local crucible = include.node_modules["@trioforge"].crucible
-	crucible = crucible:FindFirstChild("out") or crucible
 
 	return {
 		place = place,
@@ -229,9 +237,10 @@ return function(client: boolean?, path: string?, options)
 		lifecycle = function(class, instance)
 			local record = load(crucible.internal.registry).recordOf(class)
 			assert(record, "lifecycle needs a registered class from this graph")
-			local state = if record.bound then (generations[record] or {})[instance] else record.state
-			return if state
-				then ({ "unconstructed", "constructed", "awake", "enabled", "disabled", "faulted", "destroyed" })[state.phase + 1]
+			local state = if record.bound then record.bound[instance] else record.state
+			local phase = if state then state.phase else (generations[record] or {})[instance]
+			return if phase ~= nil
+				then ({ "unconstructed", "constructed", "awake", "enabled", "disabled", "faulted", "destroyed" })[phase + 1]
 				else "unconstructed"
 		end,
 		import = function(module)

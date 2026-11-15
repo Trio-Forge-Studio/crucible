@@ -73,6 +73,16 @@ test("packed Lune entry runs in a pnpm-installed game", { timeout: 180_000 }, ()
 			mapped.replaceAll('sourcemap = "sourcemap.json"', 'sourcemap = "typescript-map.json", output = "out"'),
 		);
 		assert.match(run("lune", ["run", "typescript"], game), /packed harness passed/);
+		if (process.platform !== "win32") {
+			writeFileSync(
+				path.join(game, "case-sensitive.luau"),
+				mapped.replaceAll(
+					'sourcemap = "sourcemap.json"',
+					'sourcemap = "typescript-map.json", sourceRoot = "SRC", output = "out"',
+				),
+			);
+			assert.throws(() => run("lune", ["run", "case-sensitive"], game), /is outside/);
+		}
 		for (const [name, map] of [
 			["compiled", JSON.parse(readFileSync(path.join(game, "sourcemap.json"), "utf8"))],
 			["typescript", sourcemap],
@@ -81,7 +91,10 @@ test("packed Lune entry runs in a pnpm-installed game", { timeout: 180_000 }, ()
 				const absolute = structuredClone(map);
 				function absolutePaths(node) {
 					node.filePaths = node.filePaths?.map((file) =>
-						path.resolve(game, file).replaceAll(path.sep, separator),
+						(process.platform === "win32" && name === "typescript" && file.startsWith("src/")
+							? path.resolve(game, file).toLowerCase()
+							: path.resolve(game, file)
+						).replaceAll(path.sep, separator),
 					);
 					for (const child of node.children ?? []) absolutePaths(child);
 				}
