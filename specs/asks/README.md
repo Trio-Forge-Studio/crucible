@@ -56,4 +56,4 @@ The model has one ask message, so one bucket, and leaves out that a player has o
 | `limit-spends-nothing` | A request the bucket lets through takes nothing out of it, so the bucket never empties. | `Admitted`, 7 states |
 | `refill-past-burst` | Time refills the bucket past what it holds, so a long pause lets a burst through. | `Spent`, 2 states |
 | `limited-still-starts` | The server answers `limited` and also starts the handler. | `LimitedNeverRuns`, 8 states |
-| `start-past-burst` | A new bucket starts with more requests than its burst, as one that starts at its rate would. | `Spent`, 1 state |
+| `first-request-past-burst` | The bucket a player's first request creates holds more than its burst, as one that starts at its rate would. | `Admitted`, 7 states |

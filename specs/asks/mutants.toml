@@ -152,12 +152,12 @@ replace = '''
 '''
 
 [[mutant]]
-name = "start-past-burst"
-why = "A new bucket starts with more requests than its burst, as one that starts at its rate would."
-breaks = "Spent"
+name = "first-request-past-burst"
+why = "The bucket a player's first request creates holds more than its burst, as one that starts at its rate would."
+breaks = "Admitted"
 find = '''
-    /\ tokens = Burst
+          /\ tokens' = tokens - 1
 '''
 replace = '''
-    /\ tokens = Burst + 1
+          /\ tokens' = IF admitted = 0 THEN Burst ELSE tokens - 1
 '''
