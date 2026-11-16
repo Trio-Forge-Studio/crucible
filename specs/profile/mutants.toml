@@ -110,3 +110,69 @@ find = '''
 replace = '''
     /\ IF TRUE
 '''
+
+[[mutant]]
+name = "import-ignores-the-mark"
+why = "A load runs the legacy import even when the record holds the import's mark."
+breaks = "ImportOnce"
+find = '''
+    [x EXCEPT !.phase = IF env.imported THEN "active" ELSE "importing", !.epoch = env.epoch, !.safe = safe,
+'''
+replace = '''
+    [x EXCEPT !.phase = "importing", !.epoch = env.epoch, !.safe = safe,
+'''
+
+[[mutant]]
+name = "mark-apart-from-the-import"
+why = "An owned write stores the imported record without the import's mark, so a later load imports it again."
+breaks = "ImportOnce"
+find = '''
+                     !.imported = IF newer THEN @ \/ r.snap.imported ELSE @,
+'''
+replace = '''
+                     !.imported = @,
+'''
+
+[[mutant]]
+name = "carry-drops-the-mark"
+why = "An acquire that carries a sealed session's imported record leaves its mark behind."
+breaks = "ImportOnce"
+find = '''
+                         !.imported = @ \/ x.snap.imported]
+'''
+replace = '''
+                         !.imported = @]
+'''
+
+[[mutant]]
+name = "import-outlives-authority"
+why = "An import that returns after its safe bound still makes its session writable."
+breaks = "NoWriteAfterLoss"
+find = '''
+              IF now >= x.safe THEN EndLoad(x)
+'''
+replace = '''
+              IF FALSE THEN EndLoad(x)
+'''
+
+[[mutant]]
+name = "leave-keeps-the-import"
+why = "A player who leaves while the import runs does not end the load, so the import still makes it writable."
+breaks = "NoWriteAfterLoss"
+find = '''
+               ELSE IF sess[cur[s]].phase \in {"loading", "importing"} THEN [sess EXCEPT ![cur[s]] = EndLoad(@)]
+'''
+replace = '''
+               ELSE IF sess[cur[s]].phase = "loading" THEN [sess EXCEPT ![cur[s]] = EndLoad(@)]
+'''
+
+[[mutant]]
+name = "writable-before-admission"
+why = "An import result that admission refuses still makes its session writable."
+breaks = "AdmittedBeforeWritable"
+find = '''
+              ELSE IF res = "bad" THEN EndLoad(x)
+'''
+replace = '''
+              ELSE IF FALSE THEN EndLoad(x)
+'''
