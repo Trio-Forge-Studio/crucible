@@ -141,7 +141,7 @@ function specRun(cwd) {
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-rate-mutants-"));
 try {
-	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	for (const name of [".lune", "test"])
 		fs.cpSync(path.join(repo, name), path.join(scratch, name), { recursive: true });
