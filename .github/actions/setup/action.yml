@@ -1,0 +1,36 @@
+name: Set up tools
+description: Installs Rokit and the tools pinned in rokit.toml.
+
+runs:
+  using: composite
+  steps:
+    # Only the installed tools are cached. Rokit's auth file, which holds the token, stays out.
+    - name: Cache Rokit tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.rokit/bin
+          ~/.rokit/tool-storage
+        key: rokit-${{ runner.os }}-${{ hashFiles('rokit.toml') }}
+
+    - name: Install Rokit
+      shell: bash
+      env:
+        ROKIT_VERSION: 1.2.0
+      run: |
+        if [[ ! -x "$HOME/.rokit/bin/rokit" ]]; then
+          curl -fsSL -o "$RUNNER_TEMP/rokit.zip" \
+            "https://github.com/rojo-rbx/rokit/releases/download/v$ROKIT_VERSION/rokit-$ROKIT_VERSION-linux-x86_64.zip"
+          unzip -q -o "$RUNNER_TEMP/rokit.zip" -d "$RUNNER_TEMP/rokit"
+          "$RUNNER_TEMP/rokit/rokit" self-install
+        fi
+        echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+
+    # Authenticated GitHub requests avoid the anonymous rate limit when Rokit downloads tools.
+    - name: Install tools
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        rokit authenticate github --token "$GITHUB_TOKEN"
+        rokit install --no-trust-check

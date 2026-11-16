@@ -714,7 +714,7 @@ if (process.env.SHOW !== undefined) {
 }
 try {
 	for (const line of K3) console.log(`K3 ${line}`);
-	for (const name of ["tsconfig.json", ".luaurc", "rokit.toml"])
+	for (const name of ["tsconfig.json", "rokit.toml"])
 		fs.copyFileSync(path.join(repo, name), path.join(scratch, name));
 	fs.cpSync(path.join(repo, ".lune"), path.join(scratch, ".lune"), { recursive: true });
 	fs.cpSync(path.join(repo, "crates/compiler/roblox-ts"), path.join(scratch, "crates/compiler/roblox-ts"), {
