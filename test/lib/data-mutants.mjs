@@ -1617,6 +1617,14 @@ const mutants = [
 	[
 		"import",
 		"guard",
+		D + "receipts.ts",
+		"session.authority.phase === Phase.Importing ||",
+		"",
+		"legacy import: a purchase while the import yields",
+	],
+	[
+		"import",
+		"guard",
 		D + "profiles.ts",
 		'if (!returned.ok) return { kind: "failed", reason: `threw: ${tostring(returned.value)}` };',
 		"",

@@ -3,6 +3,7 @@ local fixture = require("./lib/profile-fixture")
 local spec = require("../packages/crucible/lune")
 
 local USER = 4120
+local PRODUCT = 77
 local LOAD_FAILED = "Your data could not load. Please rejoin."
 local SESSION_ENDED = "Your data session ended. Please rejoin."
 
@@ -57,6 +58,7 @@ local function newWorld(legacy, options)
 	local events = {}
 	local w = World.new({
 		declare = declare,
+		globals = { Enum = { ProductPurchaseDecision = { PurchaseGranted = "GRANTED", NotProcessedYet = "NOTYET" } } },
 		mustBoot = options.mustBoot,
 		serve = function(s, d)
 			s.service("Logger", function(self)
@@ -402,6 +404,75 @@ return {
 		spec.eq(resumed.value, true, "resumed")
 		spec.eq(legacy.reads, 1, "without importing again")
 		spec.eq(profile(w, ann.player).currency, 6, "with the imported record")
+		w:finish()
+	end,
+
+	["legacy import: a release that never saved the import carries it and its mark into the next acquire"] = function()
+		local legacy = legacyStore({ [USER] = { gold = 6 } })
+		local w = newWorld(legacy)
+		local data = w.server.d.PlayerData
+		w.backend:fail("transient", { kind = "update" }, 1000, { after = 1 })
+		local ann = w:player("Ann", USER)
+		w:settle(1)
+		spec.eq(profile(w, ann.player).currency, 6, "imported")
+		local handed = w:run(function()
+			return data:handoff(ann.player)
+		end)
+		w:advance(80)
+		spec.eq(handed.value.ok, false, "the release gave up")
+		local envelope = w:envelope(fixture.STORE, USER)
+		spec.eq(envelope.payload, nil, "so the store has no record")
+		spec.eq(envelope.imported, nil, "and no mark")
+		for _, plan in w.backend.plans do
+			plan.remaining = 0
+		end
+		local resumed = w:run(function()
+			return data:resume(ann.player)
+		end)
+		w:settle(10)
+		spec.eq(resumed.value, true, "resumed")
+		envelope = w:envelope(fixture.STORE, USER)
+		spec.eq(envelope.imported, true, "the acquire carried the mark")
+		spec.eq(envelope.payload.currency, 6, "with the imported record")
+		spec.eq(legacy.reads, 1, "so the import did not run again")
+		spec.eq(profile(w, ann.player).currency, 6, "and the profile holds it")
+		w:finish()
+	end,
+
+	["legacy import: a purchase while the import yields waits for it, then is granted on the imported record"] = function()
+		local legacy = legacyStore({ [USER] = { gold = 8 } })
+		legacy.held = true
+		local w = newWorld(legacy, {
+			serve = function(s, d)
+				s.service("Shop", function(self)
+					self.claim = d.PlayerData:grant(PRODUCT, function(_, data)
+						local copy = table.clone(data)
+						copy.xp += 10
+						return copy
+					end)
+				end)
+			end,
+		})
+		w:advance(0.05)
+		local ann = w:player("Ann", USER)
+		w:settle(3)
+		spec.eq(#legacy.waiting, 1, "the import is reading")
+		local bought = w:run(function()
+			return w.marketplace.ProcessReceipt({
+				PlayerId = USER,
+				PurchaseId = "buy-1",
+				ProductId = PRODUCT,
+				CurrencySpent = 10,
+			})
+		end)
+		w:settle(5)
+		spec.eq(bought.done, nil, "the purchase waits for the import")
+		legacy.release()
+		w:settle(2)
+		spec.eq(bought.value, "GRANTED", "then is granted")
+		spec.eq(profile(w, ann.player).currency, 8, "on the imported record")
+		spec.eq(profile(w, ann.player).xp, 10, "with the grant's change")
+		spec.list(w:envelope(fixture.STORE, USER).receipts, { "buy-1" }, "and its receipt stored")
 		w:finish()
 	end,
 
