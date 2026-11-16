@@ -2357,15 +2357,36 @@ const mutants = [
 		"data-record-declarations.luau: rule 104 after binding read and update return the public shapes",
 	]),
 	// The load path in profiles.ts and session.ts.
-	m("74", "swap", P, "session.revision = loaded.migrated ? 1 : 0;", "session.revision = loaded.migrated ? 0 : 1;", [
-		"data-migrations.luau: rule 18 and 74 a key with no envelope, and one with only inbox entries, take the defaults at version N and run no step",
-	]),
-	m("74", "guard", P, "session.revision = loaded.migrated ? 1 : 0;", "session.revision = 0;", [
-		"data-migrations.luau: rule 27 and 74 an ambiguous commit never stores the migrated payload under version 0 or the old one under 2",
-	]),
-	m("74", "pair", P, "session.revision = loaded.migrated ? 1 : 0;", "session.revision = 1;", [
-		"data-migrations.luau: rule 18 and 74 a key with no envelope, and one with only inbox entries, take the defaults at version N and run no step",
-	]),
+	m(
+		"74",
+		"swap",
+		P,
+		"session.revision = loaded.migrated || importer !== undefined ? 1 : 0;",
+		"session.revision = loaded.migrated || importer !== undefined ? 0 : 1;",
+		[
+			"data-migrations.luau: rule 18 and 74 a key with no envelope, and one with only inbox entries, take the defaults at version N and run no step",
+		],
+	),
+	m(
+		"74",
+		"guard",
+		P,
+		"session.revision = loaded.migrated || importer !== undefined ? 1 : 0;",
+		"session.revision = 0;",
+		[
+			"data-migrations.luau: rule 27 and 74 an ambiguous commit never stores the migrated payload under version 0 or the old one under 2",
+		],
+	),
+	m(
+		"74",
+		"pair",
+		P,
+		"session.revision = loaded.migrated || importer !== undefined ? 1 : 0;",
+		"session.revision = 1;",
+		[
+			"data-migrations.luau: rule 18 and 74 a key with no envelope, and one with only inbox entries, take the defaults at version N and run no step",
+		],
+	),
 	m(
 		"77",
 		"swap",
@@ -2418,8 +2439,8 @@ const mutants = [
 		"75",
 		"pair",
 		P,
-		'const loaded = loadRecord(this.schema, envelope.payload, envelope.schemaVersion);\n\t\tif (loaded.kind !== "ok") {',
-		'const loaded = loadRecord(this.schema, envelope.payload, this.schema.version);\n\t\tif (loaded.kind !== "ok") {',
+		"? loadRecord(this.schema, envelope.payload, envelope.schemaVersion)\n: this.loadImported(session, imported);",
+		"? loadRecord(this.schema, envelope.payload, this.schema.version)\n: this.loadImported(session, imported);",
 		[
 			"data-migrations.luau: rule 110 a failed migration is diagnosed once for a user who rejoins, with the store, user and step",
 		],

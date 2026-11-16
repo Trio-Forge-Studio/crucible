@@ -21,6 +21,7 @@ import type {
 	ReadHandle,
 	ReservedName,
 	ServerOnly,
+	VersionedRecord,
 	WriteHandle,
 } from "@trioforge/crucible";
 import { profileMessage } from "@trioforge/crucible/server";
@@ -257,6 +258,60 @@ Every event carries its `kind`, the `store` name, the `player` and the session's
 Each session reports `writable` first and `released` last, once each, with any number of saves between and `lost` at most once before `released`. A save already in flight when the session is lost can finish after `lost`. A load that fails reports nothing.
 
 Each listener sees every event in order. It runs the way a claim does: it must not yield or write data, and a listener that throws, yields or writes is reported once per Subsystem and event kind, across every store it observes, while the other listeners and the save carry on. Schedule slow work, such as an HTTP call, from the listener with `task.spawn`.
+
+## Import a legacy store
+
+`importLegacy(read)` brings a player's data in from a store Crucible did not write, once per player. Like a claim, it is a field initializer of a server Subsystem, and a store takes at most one: a second fails boot, naming both Subsystems. Unlike a claim, `read` may yield, so it can call `GetAsync`.
+
+`read(player, stored)` gets the record the store holds, or `undefined` for a player Crucible has never saved. It returns the record to start from, or `undefined` to keep the stored one. Both are a `VersionedRecord`: `record` is the JSON, and `version` counts the store's migrations the record has already been through. Version 0 runs every migration on it, so a legacy save in its old shape returns at version 0 and the migrations, `migrationDelete` and `migrationReplace` included, turn it into the template's shape. `stored` is a private copy at its stored version, so a merge returns `stored.version`.
+
+This one brings in Roll a Cannon's saves, which sit under `player_<UserId>` in their own envelope, for players who have no Crucible profile yet:
+
+```ts
+// src/server/legacy-import.ts
+import { Subsystem, type JsonRecord } from "@trioforge/crucible";
+import { PlayerData } from "../shared/profile";
+
+interface OldRecord {
+	readonly save?: JsonRecord;
+	readonly owner?: string;
+	readonly heartbeat?: number;
+}
+
+export class LegacyImport extends Subsystem {
+	private readonly legacy = PlayerData.importLegacy((player, stored) => {
+		if (stored !== undefined) return undefined;
+		const [old] = game.GetService("DataStoreService").GetDataStore("RollACannon_v1").GetAsync<OldRecord>(`player_${player.UserId}`);
+		if (old?.save === undefined) return undefined;
+		if (old.owner !== undefined && os.time() - (old.heartbeat ?? 0) < 90) error("the old save is still open");
+		return { record: old.save, version: 0 };
+	});
+}
+```
+
+This one merges an old stat into profiles that already exist, at the version they are stored in:
+
+```ts
+// src/server/stats-import.ts
+import { Subsystem } from "@trioforge/crucible";
+import { PlayerData } from "../shared/profile";
+
+export class StatsImport extends Subsystem {
+	private readonly legacy = PlayerData.importLegacy((player, stored) => {
+		const [strength] = game.GetService("DataStoreService").GetDataStore("Stats").GetAsync<number>(`Strength_${player.UserId}`);
+		if (strength === undefined) return undefined;
+		return { record: { ...stored?.record, strength }, version: stored?.version ?? 0 };
+	});
+}
+```
+
+- **Order.** The import runs after the session takes the profile's lease and before `onLoad`, so `onLoad` claims see the imported record. The profile turns writable after both, and `await(player)` waits for the import.
+- **Once.** Crucible stores a mark beside the record, in the same write that saves the import's result. Once a save holds it, the import never runs again for that player, even if the legacy store still holds data. Returning `undefined` sets the mark too. A profile written before the store had an import has no mark, so the import runs for it once, with that profile as `stored`.
+- **Retries.** An import that throws, returns something other than a `VersionedRecord` or `undefined`, or returns a record that the migrations or admission refuse fails the load: the player is kicked with the load-failed message, nothing is written, and the next join runs the import again. Crucible calls `read` once per load; retry a flaky read inside it.
+- **Deadline and authority.** The import has until the session's safe bound, about 70 seconds after the lease request was sent. Past it, or when the player leaves or the server closes first, the load ends and removes only its own lease. A result that arrives later is dropped, so nothing the import read is written. The import's thread is not stopped, so give its own retries an end.
+- **Events.** A profile that imports reports `writable` once the import and `onLoad` are done, at revision 1, and a `save` when the imported record is stored. A failed import reports nothing, as any failed load does.
+- **Writes.** The player's profile is not writable while the import runs, so `read` gets the stored record as its argument rather than through handles.
+- `inspect(userId)` never runs the import. An older Crucible that saves the profile drops the mark, so rolling back and forward runs the import once more for players saved in between; check `stored` for your own sign of an earlier import if that matters.
 
 ## The owner's client
 

@@ -4,7 +4,7 @@ local Backend = require("../packages/crucible/lune").Backend
 local STORE = "FD.Players"
 local USER = 4120
 local KEY = tostring(USER)
-local SEALED, ENDED = 2, 3
+local SEALED, ENDED = 3, 4
 local LOAD, ORDINARY = 4, 5
 local PENDING_PER_KEY = 32
 

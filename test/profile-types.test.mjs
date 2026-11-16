@@ -278,6 +278,39 @@ test("profile events narrow by kind and carry no data", () => {
 	assert.equal(events.match(/@ts-expect-error E\d+/g)?.length, 4, "every negative case is present");
 });
 
+const legacy = `import { Subsystem, type JsonRecord, type VersionedRecord } from "@trioforge/crucible";
+import type { ProfileClaim } from "@trioforge/crucible/server";
+import { PlayerData } from "./template";
+
+declare function readOld(userId: number): JsonRecord | undefined;
+
+export class Import extends Subsystem {
+	private readonly legacy: ProfileClaim = PlayerData.importLegacy((player, stored) => {
+		const old = readOld(player.UserId);
+		if (old === undefined) return undefined;
+		const merged: VersionedRecord = { record: { ...stored?.record, ...old }, version: stored?.version ?? 0 };
+		return merged;
+	});
+	// @ts-expect-error L1 the result names the version its record is at
+	private readonly unversioned = PlayerData.importLegacy(() => ({ record: {} }));
+	// @ts-expect-error L2 the result is the record wrapped with its version, not the profile's data
+	private readonly bare = PlayerData.importLegacy(() => ({ currency: 1 }));
+	// @ts-expect-error L3 the stored record may be absent
+	private readonly assumed = PlayerData.importLegacy((_player, stored) => ({ record: stored.record, version: 0 }));
+}
+`;
+
+test("a legacy import returns a versioned record or nothing", () => {
+	const result = typecheck(
+		new Map([
+			[`${dir}/template.ts`, template],
+			[`${dir}/legacy.ts`, legacy],
+		]),
+	);
+	assert.equal(result.status, 0, result.output);
+	assert.equal(legacy.match(/@ts-expect-error L\d+/g)?.length, 3, "every negative case is present");
+});
+
 test("migration operations accept nested patches and whole records while literal JSON excludes operations", () => {
 	const source = `import { migrationDelete, migrationReplace, type Migration, type MigrationPatch } from "@trioforge/crucible";
 const patch: MigrationPatch = { removed: migrationDelete, nested: { renamed: migrationReplace({ kept: 1 }) } };

@@ -32,6 +32,9 @@ function harness.profileFixture(realm, store, options)
 		end,
 		delivered = function() end,
 		observe = function() end,
+		importer = function()
+			return options.importLegacy
+		end,
 	})
 	local fixture = { published = published, reasons = reasons }
 	for _, name in { "load", "write", "save", "writable", "players", "leave", "handoff", "resume", "await" } do
@@ -47,7 +50,9 @@ function harness.profileFixture(realm, store, options)
 	end
 	function fixture:state(player)
 		local session = profile.sessions[player]
-		return if session then ({ "loading", "active", "sealed", "ended" })[session.authority.phase + 1] else "absent"
+		return if session
+			then ({ "loading", "importing", "active", "sealed", "ended" })[session.authority.phase + 1]
+			else "absent"
 	end
 	return fixture
 end

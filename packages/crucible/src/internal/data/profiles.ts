@@ -1,7 +1,7 @@
-import type { ProfileEvent, SaveResult as Saved } from "../../data";
+import type { ProfileEvent, SaveResult as Saved, VersionedRecord } from "../../data";
 import { bootClock } from "../boot";
 import { runtimeDiagnostic } from "../diagnostics";
-import { loadRecord, sealSchema, type Schema } from "./admission";
+import { copyJson, loadRecord, sealSchema, type Loaded, type Schema } from "./admission";
 import { jsonBytes, parseEnvelope, type Envelope } from "./envelope";
 import {
 	abandonAcquisition,
@@ -39,6 +39,7 @@ import {
 	activated,
 	NONE,
 	assertOutsideCallback,
+	importing,
 	loadEnded,
 	Phase,
 	releaseOutcome,
@@ -46,6 +47,7 @@ import {
 	releasing,
 	sealed,
 	Session,
+	unloaded,
 	type Released,
 	type SettledRelease,
 	type SealReason,
@@ -74,6 +76,15 @@ export type StoreResult<T> =
 				| "reused";
 	  };
 
+/** @internal */
+export type Importer = (player: Player, stored: VersionedRecord | undefined) => unknown;
+
+type Imported =
+	| { readonly kind: "ok"; readonly record?: VersionedRecord }
+	| { readonly kind: "stopped" }
+	| { readonly kind: "expired" }
+	| { readonly kind: "failed"; readonly reason: string };
+
 /**
  * @internal The seams later units fill. D4 runs the claims and owns the slot's node; D2 delivers the inbox and receipts
  * from every envelope the session reads. Each defaults to doing nothing.
@@ -84,6 +95,7 @@ export interface ProfileHooks {
 	readonly publish: (player: Player, value: object | undefined) => void;
 	readonly delivered: (session: Session, envelope: Envelope) => void;
 	readonly observe: (event: ProfileEvent) => void;
+	readonly importer: () => Importer | undefined;
 }
 
 const NO_HOOKS: ProfileHooks = {
@@ -92,7 +104,18 @@ const NO_HOOKS: ProfileHooks = {
 	publish: () => {},
 	delivered: () => {},
 	observe: () => {},
+	importer: () => undefined,
 };
+
+function versioned(value: unknown, latest: number): VersionedRecord | string {
+	if (!typeIs(value, "table")) return `returned ${typeOf(value)}, not a VersionedRecord or undefined`;
+	const { record, version } = value as { readonly record?: unknown; readonly version?: unknown };
+	if (!typeIs(record, "table")) return `returned a record of ${typeOf(record)}, not a table`;
+	if (!typeIs(version, "number") || version < 0 || version % 1 !== 0)
+		return "returned a version that is not a whole number from 0";
+	if (version > latest) return `returned version ${version}, above the store's ${latest}`;
+	return { record: record as VersionedRecord["record"], version };
+}
 
 /** Frozen: observers receive it, and every successful write shares it. */
 const SAVED: Saved = table.freeze({ ok: true });
@@ -156,7 +179,7 @@ export class DataEngine {
 		for (const runtime of this.profiles)
 			for (const [, session] of runtime.sessions) {
 				const state = session.authority;
-				if (state.phase === Phase.Loading) session.authority = abandoned(state);
+				if (unloaded(state)) session.authority = abandoned(state);
 				else if (state.phase === Phase.Active) {
 					runtime.seal(session, "retired");
 					runtime.startRelease(session);
@@ -249,14 +272,12 @@ export class ProfileRuntime {
 
 	private stopped(session: Session): boolean {
 		const state = session.authority;
-		return (
-			(state.phase === Phase.Loading && state.abandoned) || this.engine.closing || !this.present(session.player)
-		);
+		return (unloaded(state) && state.abandoned) || this.engine.closing || !this.present(session.player);
 	}
 
 	private end(session: Session, mayHaveCommitted: boolean, message?: string): boolean {
 		const state = session.authority;
-		if (state.phase === Phase.Loading) session.authority = loadEnded(state);
+		if (unloaded(state)) session.authority = loadEnded(state);
 		if (mayHaveCommitted)
 			this.engine.scheduler.submit({
 				store: this.schema.name,
@@ -281,10 +302,7 @@ export class ProfileRuntime {
 	/** Rules 17 to 21, 29 and 30. Yields; true once the session is writable. */
 	load(player: Player, reason: LoadReason): boolean {
 		const existing = this.sessions.get(player);
-		if (
-			existing !== undefined &&
-			(existing.authority.phase === Phase.Loading || existing.authority.phase === Phase.Active)
-		)
+		if (existing !== undefined && (unloaded(existing.authority) || existing.authority.phase === Phase.Active))
 			return this.await(player);
 		const port = this.engine.port;
 		const started = bootClock();
@@ -378,7 +396,28 @@ export class ProfileRuntime {
 		if (superseded !== undefined)
 			for (const [token, old] of superseded)
 				if (releaseOutcome(old.authority) !== undefined) superseded.delete(token);
-		const loaded = loadRecord(this.schema, envelope.payload, envelope.schemaVersion);
+		session.imported = envelope.imported === true;
+		const importer = session.imported ? undefined : this.hooks.importer();
+		let imported: VersionedRecord | undefined;
+		if (importer !== undefined) {
+			const outcome = this.runImport(session, importer, envelope);
+			if (outcome.kind === "stopped") return this.end(session, true);
+			if (outcome.kind === "expired") {
+				this.importFailed(session, "ran past the session's safe bound");
+				return this.end(session, true, SESSION_ENDED_MESSAGE);
+			}
+			if (outcome.kind === "failed") {
+				this.importFailed(session, outcome.reason);
+				return this.end(session, true, LOAD_FAILED_MESSAGE);
+			}
+			imported = outcome.record;
+			session.imported = true;
+		}
+		const loaded =
+			imported === undefined
+				? loadRecord(this.schema, envelope.payload, envelope.schemaVersion)
+				: this.loadImported(session, imported);
+		if (loaded === undefined) return this.end(session, true, LOAD_FAILED_MESSAGE);
 		if (loaded.kind !== "ok") {
 			this.engine.diagnose(
 				`load:${this.schema.name}:${loaded.kind === "newer" ? "newer" : loaded.code}`,
@@ -389,7 +428,7 @@ export class ProfileRuntime {
 			return this.end(session, true, loaded.kind === "newer" ? SERVER_UPDATING_MESSAGE : LOAD_FAILED_MESSAGE);
 		}
 		session.value = loaded.value;
-		session.revision = loaded.migrated ? 1 : 0;
+		session.revision = loaded.migrated || importer !== undefined ? 1 : 0;
 		for (const id of envelope.receipts) session.stage(id);
 		session.confirmReceipts(envelope.receipts);
 		const [ok, claimed] = pcall(() => {
@@ -407,7 +446,7 @@ export class ProfileRuntime {
 		if (this.stopped(session)) return this.end(session, true);
 		if (bootClock() >= session.safeUntil) return this.end(session, true, SESSION_ENDED_MESSAGE);
 		const loading = session.authority;
-		if (loading.phase === Phase.Loading) session.authority = activated(loading);
+		if (unloaded(loading)) session.authority = activated(loading);
 		this.hooks.publish(player, session.value);
 		this.hooks.observe({
 			kind: "writable",
@@ -426,6 +465,49 @@ export class ProfileRuntime {
 		if (session.revision > 0) this.requestWrite(session, Priority.Renew);
 		this.changed.wake();
 		return true;
+	}
+
+	/**
+	 * Runs the store's legacy import on its own thread, and waits for it, for the load's stop, or for the safe bound,
+	 * past which another server may take the profile. A late result is dropped, so nothing it read is written.
+	 */
+	private runImport(session: Session, importer: Importer, envelope: Envelope): Imported {
+		const state = session.authority;
+		if (state.phase === Phase.Loading) session.authority = importing(state);
+		const stored =
+			envelope.payload === undefined
+				? undefined
+				: { record: copyJson(envelope.payload) as VersionedRecord["record"], version: envelope.schemaVersion };
+		const result: { returned?: { readonly ok: boolean; readonly value: unknown } } = {};
+		this.engine.port.spawn(() => {
+			const [ok, value] = pcall(importer, session.player, stored);
+			result.returned = { ok, value };
+			this.changed.wake();
+		});
+		while (result.returned === undefined && !this.stopped(session) && bootClock() < session.safeUntil)
+			this.changed.park(session.safeUntil);
+		const returned = result.returned;
+		if (this.stopped(session)) return { kind: "stopped" };
+		if (returned === undefined || bootClock() >= session.safeUntil) return { kind: "expired" };
+		if (!returned.ok) return { kind: "failed", reason: "threw" };
+		if (returned.value === undefined) return { kind: "ok" };
+		const record = versioned(returned.value, this.schema.version);
+		return typeIs(record, "string") ? { kind: "failed", reason: record } : { kind: "ok", record };
+	}
+
+	/** A cycle in an imported record can make its migrations throw. */
+	private loadImported(session: Session, imported: VersionedRecord): Loaded | undefined {
+		const [ok, loaded] = pcall(() => loadRecord(this.schema, imported.record, imported.version));
+		if (ok && loaded.kind === "ok") return loaded;
+		this.importFailed(session, `did not load: ${ok && loaded.kind === "unreadable" ? loaded.reason : "it threw"}`);
+		return undefined;
+	}
+
+	private importFailed(session: Session, reason: string) {
+		this.engine.diagnose(
+			`import:${this.schema.name}:${session.token}`,
+			`${this.schema.name}: ${session.userId}'s legacy import ${reason}; the load failed`,
+		);
 	}
 
 	private armSeal(session: Session) {
@@ -463,7 +545,7 @@ export class ProfileRuntime {
 	/** Seals at once: the slot reads undefined, writes return false and waiters wake (rule 26). */
 	seal(session: Session, reason: SealReason) {
 		const state = session.authority;
-		if (state.phase === Phase.Loading) session.authority = abandoned(state);
+		if (unloaded(state)) session.authority = abandoned(state);
 		if (state.phase !== Phase.Active) return;
 		session.authority = sealed(state, reason);
 		this.hooks.publish(session.player, undefined);
@@ -672,7 +754,7 @@ export class ProfileRuntime {
 	release(session: Session, reason: ReleaseReason) {
 		while (session.busy) this.changed.park();
 		const state = session.authority;
-		if (state.phase === Phase.Loading) {
+		if (unloaded(state)) {
 			session.authority = abandoned(state);
 			this.changed.wake();
 			return;
@@ -728,7 +810,7 @@ export class ProfileRuntime {
 			const session = this.sessions.get(player);
 			if (session !== undefined && this.accept(session)) return true;
 			if (!this.present(player) || this.engine.closing || bootClock() >= deadline) return false;
-			if (session !== undefined && session.authority.phase !== Phase.Loading) return false;
+			if (session !== undefined && !unloaded(session.authority)) return false;
 			this.changed.park(deadline);
 		}
 	}

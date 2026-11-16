@@ -24,7 +24,7 @@ import {
 import { messageOf } from "./messages";
 import { getPath, type Segment } from "./paths";
 import { dataPort, type DataPort } from "./port";
-import { DataEngine, type LoadReason, type ProfileRuntime, type ReleaseReason } from "./profiles";
+import { DataEngine, type Importer, type LoadReason, type ProfileRuntime, type ReleaseReason } from "./profiles";
 import { bindRecords, unbindRecords } from "./record-bindings";
 import { declaredRecords, sealDeclarations } from "./record-declarations";
 import type { AfterGrant, Purchase } from "./receipts";
@@ -32,7 +32,7 @@ import { assertOutsideCallback, dataCallback, insideDataCallback, type Session }
 import { shutdownData } from "./shutdown";
 import { Waiters } from "./waiters";
 
-type ClaimKind = "onLoad" | "onRelease" | "receive" | "grant";
+type ClaimKind = "onLoad" | "onRelease" | "receive" | "grant" | "importLegacy";
 
 interface Claim {
 	readonly kind: ClaimKind;
@@ -318,6 +318,12 @@ class ProfileBinding {
 		this.claiming.delete(session.player);
 	}
 
+	/** The live import claim; its Subsystem may have ended since activation. */
+	importer(): Importer | undefined {
+		for (const claim of this.claims) if (claim.kind === "importLegacy" && claim.live) return claim.callback;
+		return undefined;
+	}
+
 	private claimant(kind: ClaimKind | "observe", callback: unknown): ObjectState {
 		const name = this.declaration.name;
 		const owner = readClaim();
@@ -386,6 +392,14 @@ class ProfileBinding {
 					3,
 				);
 			server.receivers.set(claim.message.name, label);
+		}
+		if (kind === "importLegacy") {
+			const other = this.claims.find((c) => c.kind === "importLegacy" && c.live);
+			if (other !== undefined)
+				error(
+					`${this.declaration.name} is imported by ${other.owner} and ${label}; one Subsystem imports each store`,
+					3,
+				);
 		}
 		if (claim.productId !== undefined) {
 			const other = server.grants.get(claim.productId);
@@ -539,6 +553,7 @@ function member(declaration: ProfileDeclaration, key: string): unknown {
 			return (_: unknown, listener: unknown) => binding.observe(listener);
 		case "onLoad":
 		case "onRelease":
+		case "importLegacy":
 			return (_: unknown, callback: unknown) => binding.claim(key, callback);
 		case "receive":
 			return (_: unknown, message: unknown, callback: unknown) =>
@@ -614,6 +629,7 @@ function construct() {
 				publish: (who, value) => binding.publish(who, value),
 				delivered: () => {},
 				observe: (event) => binding.notify(event),
+				importer: () => binding.importer(),
 			},
 		);
 		claimPublication(declaration.live, (who: Player) => {

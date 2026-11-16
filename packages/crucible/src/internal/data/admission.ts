@@ -363,7 +363,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 	return typeIs(value, "table") && hasOnlyStringKeys(value);
 }
 
-function copyJson(value: unknown): unknown {
+/** @internal A private copy, so a callback can change what it is given without touching what the session holds. */
+export function copyJson(value: unknown): unknown {
 	if (!typeIs(value, "table")) return value;
 	const result: Record<string | number, unknown> = {};
 	for (const [key, entry] of pairs(value)) result[key as string] = copyJson(entry);

@@ -116,6 +116,7 @@ export class ReceiptRouter {
 			if (
 				session === undefined ||
 				session.authority.phase === Phase.Loading ||
+				session.authority.phase === Phase.Importing ||
 				sealedBy(session.authority) === "handoff"
 			) {
 				if (bootClock() >= holdUntil) return "notYet";

@@ -118,7 +118,7 @@ return {
 		spec.eq(stored(backend).epoch, 2, "a new acquisition")
 		spec.eq(current.value.pendingRewards, 57, "the payout survived the trip")
 		spec.list(a.store.reasons, { "join", "resume" }, "onLoad ran with reason resume")
-		spec.eq(old.authority.phase, 3, "rule 48: the sealed session never became writable again")
+		spec.eq(old.authority.phase, 4, "rule 48: the sealed session never became writable again")
 		spec.eq(call(a, "resume", pa).value, true, "resume of a writable session is true at once")
 	end,
 	["rule 47 resume after the destination took over is refused busy"] = function()

@@ -327,16 +327,32 @@ function Backend:realm(options)
 		end)
 		return handle
 	end
+	local added, removing = {}, {}
+	local function listen(listeners, listener)
+		table.insert(listeners, listener)
+		return function()
+			local index = table.find(listeners, listener)
+			if index then
+				table.remove(listeners, index)
+			end
+		end
+	end
 	function realm.join(userId: number)
 		local player = { UserId = userId, Name = `Player{userId}` }
 		realm.present[player] = true
 		realm.population += 1
+		for _, listener in table.clone(added) do
+			listener(player)
+		end
 		return player
 	end
 	function realm.leave(player)
 		if realm.present[player] then
 			realm.present[player] = nil
 			realm.population -= 1
+			for _, listener in table.clone(removing) do
+				listener(player)
+			end
 		end
 	end
 	function realm.kicked(player)
@@ -395,6 +411,22 @@ function Backend:realm(options)
 			end,
 			kick = function(player, message)
 				table.insert(realm.kicks, { player = player, message = message, at = backend.now })
+			end,
+			all = function()
+				local players = {}
+				for player in realm.present do
+					table.insert(players, player)
+				end
+				table.sort(players, function(a, b)
+					return a.UserId < b.UserId
+				end)
+				return players
+			end,
+			onAdded = function(listener)
+				return listen(added, listener)
+			end,
+			onRemoving = function(listener)
+				return listen(removing, listener)
 			end,
 		},
 	}
@@ -476,6 +508,7 @@ function Backend:realm(options)
 			end,
 			delivered = function() end,
 			observe = function() end,
+			importer = function() end,
 		})
 		runtime.published = published
 		runtime.reasons = reasons

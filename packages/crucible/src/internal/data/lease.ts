@@ -13,6 +13,8 @@ export interface Snapshot {
 	readonly acks: readonly string[];
 	/** Staged attempt counts and quarantine moves, applied whatever the payload revision (rule 72). */
 	readonly marks: readonly InboxMark[];
+	/** The legacy import ran: stored with the payload it produced, in the same write. */
+	readonly imported: boolean;
 }
 
 /** @internal A sealed session of this server whose release settled, keyed by its token in `supersedes` (rule 29). */
@@ -86,6 +88,7 @@ function withSnapshot(envelope: Envelope, snapshot: Snapshot, commit: Envelope["
 				payload: snapshot.payload,
 				schemaVersion: snapshot.schemaVersion,
 				receipts: union(envelope.receipts, snapshot.receipts),
+				imported: envelope.imported || snapshot.imported ? true : undefined,
 				commit,
 			},
 			snapshot.acks,
