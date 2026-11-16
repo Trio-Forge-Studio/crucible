@@ -308,9 +308,10 @@ export interface ProfileStore<T> {
 	/**
 	 * Server claim, a Subsystem field initializer, at most one per store: brings in a player's data from a store Crucible
 	 * did not write, once. It runs after the profile's lease is taken and before onLoad, and may yield. It gets the
-	 * stored record, or undefined for a new player, and returns the record to start from, or undefined to keep the
-	 * stored one. Its result goes through the store's migrations and admission. Once a save holds it, it never runs
-	 * again for that player; a load that fails or ends first runs it again next time.
+	 * stored record at its stored version, before migrations, or undefined for a new player, and returns the record to
+	 * start from, or undefined to keep the stored one. Its result goes through the store's migrations and admission.
+	 * Once a save holds it, it never runs again for that player; a load that fails or ends first runs it again next
+	 * time.
 	 */
 	importLegacy(
 		read: (player: Player, stored: VersionedRecord | undefined) => VersionedRecord | undefined,

@@ -289,7 +289,7 @@ export class LegacyImport extends Subsystem {
 }
 ```
 
-This one merges an old stat into profiles that already exist, at the version they are stored in, and leaves new players to the template:
+This one adds an old pickup count to profiles that already exist and leaves new players to the template. Its own `statsImported` field, a server-only `false` in the template, records that the count is in, so a second run adds nothing:
 
 ```ts
 // src/server/stats-import.ts
@@ -298,22 +298,31 @@ import { PlayerData } from "../shared/profile";
 
 export class StatsImport extends Subsystem {
 	private readonly legacy = PlayerData.importLegacy((player, stored) => {
-		if (stored === undefined) return undefined;
-		const [strength] = game.GetService("DataStoreService").GetDataStore("Stats").GetAsync<number>(`Strength_${player.UserId}`);
-		if (strength === undefined) return undefined;
-		return { record: { ...stored.record, strength }, version: stored.version };
+		if (stored === undefined || stored.record.statsImported === true) return undefined;
+		const store = game.GetService("DataStoreService").GetDataStore("Sample.Stats");
+		const [old] = store.GetAsync<number>(`Pickups_${player.UserId}`);
+		if (old === undefined) return undefined;
+		const pickups = typeIs(stored.record.pickups, "number") ? stored.record.pickups : 0;
+		return {
+			record: { ...stored.record, pickups: pickups + old, statsImported: true },
+			version: stored.version,
+		};
 	});
 }
 ```
 
 - **Versions.** Return a record at the version whose shape it has. A record built for a new player in the template's current shape is at the store's current version, the length of its `migrations` list, so keep that list in a constant the import can read. A partial record at version 0 meets every migration, and one that expects a field the record lacks refuses it.
+- **Merge into existing profiles.** An import over a profile that exists must build its record on `stored.record`, as `StatsImport` does, and never replace it. A product's grant changes the profile, and its purchase id stays stored beside the record, so a record that replaces the profile drops what granted purchases gave, and Roblox never sends those purchases again.
 - **Order.** The import runs after the session takes the profile's lease and before `onLoad`, so `onLoad` claims see the imported record. The profile turns writable after both, and `await(player)` waits for the import.
 - **Once.** Crucible stores a mark beside the record, in the same write that saves the import's result. Once a save holds it, the import never runs again for that player, even if the legacy store still holds data. Returning `undefined` sets the mark too. A profile written before the store had an import has no mark, so the import runs for it once, with that profile as `stored`.
-- **Retries.** An import that throws, returns something other than a `VersionedRecord` or `undefined`, or returns a record that the migrations or admission refuse fails the load: the player is kicked with the load-failed message, a diagnostic names the error, nothing is written, and the next join runs the import again. Crucible calls `read` once per load; retry a flaky read inside it.
+- **Older Crucible servers.** Crucible 0.6 and earlier do not know the mark, and any write one makes to the profile drops it: a save or release by an old server still running during a rollout, an inbox `send` from one, or every write after a rollback. The next join on a new server runs the import again. Finish rolling the new Crucible out to every server before you turn an import on, by shipping the upgrade in one update and the import in a later one.
+- **Twice.** Even then, write each import so that a second run against `stored` changes nothing. Check a mark of your own in `stored`, as `StatsImport` checks `statsImported`, and never reset or add to progress the profile already holds. An import that skips existing profiles, such as the first example, is safe as it is.
+- **Retries.** An import that throws, returns something other than a `VersionedRecord` or `undefined`, or returns a record that the migrations or admission refuse fails the load: the player is kicked with the load-failed message, a diagnostic names the error, nothing is written, and the next join runs the import again. Crucible calls `read` once per load; retry a flaky read inside it. A failed or ended load runs `read` again on the next join, so never delete or change the legacy data from `read`.
 - **Deadline and authority.** The import has until the session's safe bound, about 70 seconds after the lease request was sent. Past it, or when the player leaves or the server closes first, the load ends and removes only its own lease. A result that arrives later is dropped, so nothing the import read is written. The import's thread is not stopped, so give its own retries an end.
 - **Events.** A profile that imports reports `writable` once the import and `onLoad` are done, at revision 1, and a `save` when the imported record is stored. A failed import reports nothing, as any failed load does.
-- **Writes.** The player's profile is not writable while the import runs, so `read` gets the stored record as its argument rather than through handles.
-- `inspect(userId)` never runs the import. An older Crucible that saves the profile drops the mark, so rolling back and forward runs the import once more for players saved in between; check `stored` for your own sign of an earlier import if that matters.
+- **Writes.** The player's profile is not writable while the import runs, so `read` gets the stored record as its argument rather than through handles. `read` must not call `PlayerData.await` for the player it imports: it waits for the load, which waits for `read`, so the load runs to the safe bound and the player is kicked. `save` for that player returns `unavailable` at once, and writes return false.
+- **Purchases.** A purchase that arrives while the import runs waits for it, then is granted on the imported record.
+- `inspect(userId)` never runs the import.
 
 ## The owner's client
 

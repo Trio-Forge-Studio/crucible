@@ -15,7 +15,7 @@ The sample lives in `examples/sample-game`. Its coins feature is a copy-ready re
 
 The shared declarations load on both sides because the Subsystems import them. The sample's Rojo project maps `src/shared` to `ReplicatedStorage.TS`.
 
-`src/server/legacy.ts` holds `LegacyImport`, which brings in saves from before Crucible through `importLegacy`. It sits outside `src/server/systems`, so the sample's boot leaves it out: the sample has no legacy saves. `test/sample-legacy-import.luau` loads it to run the import on the built place. `crucible docs profile-stores` explains the import.
+`src/server/legacy.ts` holds `LegacyImport`, which brings in saves from before Crucible through `importLegacy`, and `src/server/stats-import.ts` holds `StatsImport`, which adds an old pickup count to existing profiles once, under the profile's own `statsImported` mark. Both sit outside `src/server/systems`, so the sample's boot leaves them out: the sample has no legacy saves. `test/sample-legacy-import.luau` loads one at a time to run it on the built place. `crucible docs profile-stores` explains the import.
 
 Each snippet below is a whole file from `examples/sample-game`, named above it. `test/docs.test.mjs` fails when a snippet differs from its file. Import the shared declarations on both sides instead of redeclaring them. A profile store is keyed by its name, so a client that declares a store under another name never receives what the server published.
 
@@ -50,7 +50,7 @@ import type { Migration } from "@trioforge/crucible";
 const fromGold: Migration = (old) => ({ coins: typeIs(old.gold, "number") ? old.gold : 0 });
 
 export const PlayerData = profileStore("Sample.Players", {
-	template: { coins: 0, pickups: serverOnly(0) },
+	template: { coins: 0, pickups: serverOnly(0), statsImported: serverOnly(false) },
 	migrations: [fromGold],
 });
 ```

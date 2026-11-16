@@ -121,6 +121,7 @@ fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
             "client/systems/renderer.luau",
             "server/legacy.luau",
             "server/main.server.luau",
+            "server/stats-import.luau",
             "server/systems/controller.luau",
             "server/systems/event.luau",
             "server/systems/member.luau",

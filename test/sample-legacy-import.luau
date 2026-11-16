@@ -7,8 +7,9 @@ local STORE = "Sample.Players"
 local USER = 4120
 local KEY = `player_{USER}`
 
--- `Sample.Legacy` holding `records` by key. A held read parks until `release`, as a slow GetAsync yields.
-local function legacyService(records)
+-- `storeName`, default `Sample.Legacy`, holding `records` by key. A held read parks until `release`, as a slow GetAsync
+-- yields.
+local function legacyService(records, storeName: string?)
 	local service = { reads = 0, held = false, waiting = {} }
 	function service.release()
 		service.held = false
@@ -20,7 +21,7 @@ local function legacyService(records)
 		end
 	end
 	function service.GetDataStore(_, name: string)
-		assert(name == "Sample.Legacy", `unexpected DataStore {name}`)
+		assert(name == (storeName or "Sample.Legacy"), `unexpected DataStore {name}`)
 		return {
 			GetAsync = function(_, key: string)
 				service.reads += 1
@@ -35,8 +36,8 @@ local function legacyService(records)
 	return service
 end
 
--- One server: the built place on `realm`'s clock and DataStore, booted with only LegacyImport.
-local function server(realm, legacy)
+-- One server: the built place on `realm`'s clock and DataStore, booted with only `module`, default LegacyImport.
+local function server(realm, legacy, module: string?)
 	local engine = harness.engine.new()
 	engine.port.clock = realm.clock
 	engine.port.wait = realm.wait
@@ -49,7 +50,7 @@ local function server(realm, legacy)
 		dataPort = realm.port,
 		services = { DataStoreService = legacy },
 	})
-	graph.import(graph.place:GetService("ServerScriptService").TS.legacy)
+	graph.import(graph.place:GetService("ServerScriptService").TS[module or "legacy"])
 	graph.import(graph.crucible.server).boot({ load = {} })
 	graph.PlayerData = graph.import(graph.place:GetService("ReplicatedStorage").TS.profile).PlayerData
 	return graph
@@ -61,6 +62,27 @@ end
 
 local function envelope(backend)
 	return backend:envelope(STORE, tostring(USER))
+end
+
+local function seeded(payload, fields)
+	local value = {
+		format = 1,
+		kind = "profiles",
+		schemaVersion = 1,
+		payload = payload,
+		epoch = 2,
+		receipts = {},
+		inbox = {},
+		quarantine = {},
+		seen = {},
+		seenFloor = 0,
+		operations = {},
+		operationFloor = 0,
+	}
+	for key, field in fields or {} do
+		value[key] = field
+	end
+	return value
 end
 
 return {
@@ -120,21 +142,7 @@ return {
 		local backend = harness.Backend.new()
 		local realm = backend:realm()
 		local legacy = legacyService({ [KEY] = { save = { gold = 40 } } })
-		backend:seed(STORE, tostring(USER), {
-			format = 1,
-			kind = "profiles",
-			schemaVersion = 1,
-			payload = { coins = 3 },
-			imported = true,
-			epoch = 2,
-			receipts = {},
-			inbox = {},
-			quarantine = {},
-			seen = {},
-			seenFloor = 0,
-			operations = {},
-			operationFloor = 0,
-		})
+		backend:seed(STORE, tostring(USER), seeded({ coins = 3 }, { imported = true }))
 		local graph = server(realm, legacy)
 		backend:advance(1)
 		local player = realm.join(USER)
@@ -162,6 +170,38 @@ return {
 		assert(stored.payload == nil, "nothing the import read was written")
 		assert(stored.imported == nil, "and no mark")
 		assert(stored.lease == nil, "the load removed only its own lease")
+		graph.place:Destroy()
+	end,
+
+	["sample stats import: a second run on a profile that already holds the count adds nothing"] = function()
+		local backend = harness.Backend.new()
+		local realm = backend:realm()
+		local stats = legacyService({ [`Pickups_{USER}`] = 4 }, "Sample.Stats")
+		backend:seed(STORE, tostring(USER), seeded({ coins = 3, pickups = 5 }))
+		local graph = server(realm, stats, "stats-import")
+		backend:advance(1)
+		local player = realm.join(USER)
+		backend:advance(2)
+		assert(graph.PlayerData:loaded(player), "writable after the import")
+		local pickups = graph.PlayerData(player).pickups()
+		assert(pickups == 9, `the old count was added to the profile's, got {pickups}`)
+		local stored = envelope(backend)
+		assert(stored.imported == true and stored.payload.statsImported == true, "both marks are stored")
+		assert(stored.payload.pickups == 9 and stored.payload.coins == 3, "with the merged record")
+		realm.leave(player)
+		backend:advance(3)
+		stored = envelope(backend)
+		assert(stored.lease == nil, "released")
+		-- Crucible 0.6 rewrites the envelope without the import's mark, as an old server does during a rollout.
+		stored.imported = nil
+		backend:seed(STORE, tostring(USER), stored)
+		local again = realm.join(USER)
+		backend:advance(2)
+		assert(graph.PlayerData:loaded(again), "writable after the second run")
+		pickups = graph.PlayerData(again).pickups()
+		assert(pickups == 9, `the second run left the count alone, got {pickups}`)
+		assert(stats.reads == 1, `the second run stopped at statsImported, read {stats.reads} times`)
+		assert(envelope(backend).imported == true, "and Crucible's mark is back")
 		graph.place:Destroy()
 	end,
 }

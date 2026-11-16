@@ -144,3 +144,10 @@ test("the sample guide declares each store and message once, under the name the 
 		assert.match(code, /from "\.\.\/\.\.\/shared\//, `${file} imports the shared declarations`);
 	}
 });
+
+test("the profile store guide's StatsImport is the sample's, which test/sample-legacy-import.luau runs twice", () => {
+	const markdown = read(path.join(repo, "docs/profile-stores.md"));
+	const block = [...markdown.matchAll(/^```ts\n\/\/ (src\/server\/stats-import\.ts)\n([\s\S]*?)^```$/gm)];
+	assert.equal(block.length, 1, "the guide has one StatsImport block, headed by its file");
+	assert.equal(block[0][2], read(path.join(repo, "examples/sample-game", block[0][1])));
+});
