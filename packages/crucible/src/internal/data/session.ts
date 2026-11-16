@@ -70,9 +70,9 @@ export function abandoned(state: Unloaded): Unloaded {
 	return state.phase === Phase.Loading ? ABANDONED : ABANDONED_IMPORT;
 }
 
-/** @internal The lease is held and the record lacks the import's mark: the legacy import runs. */
-export function importing(_state: In<Phase.Loading>): In<Phase.Importing> {
-	return IMPORTING;
+/** @internal The lease is held and the record lacks the import's mark: the legacy import runs, unless abandoned. */
+export function importing(state: In<Phase.Loading>): In<Phase.Importing> {
+	return state.abandoned ? ABANDONED_IMPORT : IMPORTING;
 }
 
 /** @internal Rules 17 to 21: the acquired lease, the import's result and onLoad's value make the session writable. */

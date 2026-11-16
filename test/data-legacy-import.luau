@@ -331,6 +331,55 @@ return {
 		w:finish()
 	end,
 
+	["legacy import: a retire that lands between the acquire's reply and the import starts no import and activates nothing"] = function()
+		local legacy = legacyStore({ [USER] = { gold = 50 } })
+		local w = newWorld(legacy)
+		local gate = w.backend:gate("response", { key = tostring(USER) })
+		local ann = w:player("Ann", USER)
+		w:settle(1)
+		spec.eq(w:envelope(fixture.STORE, USER).lease ~= nil, true, "the acquire committed, and its reply is held")
+		-- The reply settles the acquire's ticket, and its wake resumes the load. Retire first, as a fault on a
+		-- thread woken ahead of the load would.
+		local port = w.dataPort
+		local resume = port.resume
+		port.resume = function(thread)
+			port.resume = resume
+			w:retireData()
+			resume(thread)
+		end
+		gate.release()
+		w:settle(5)
+		spec.eq(port.resume, resume, "the retire ran")
+		spec.eq(legacy.reads, 0, "the import never ran")
+		spec.eq(#w.events, 0, "nothing turned writable")
+		spec.eq(w.server.d.PlayerData:loaded(ann.player), false, "nor loaded")
+		local envelope = w:envelope(fixture.STORE, USER)
+		spec.eq(envelope.payload, nil, "nothing written")
+		spec.eq(envelope.imported, nil, "no mark")
+		spec.eq(envelope.lease, nil, "the load removed its own lease")
+		w:finish()
+	end,
+
+	["legacy import: a retire while the import yields ends the load, and nothing it read is written"] = function()
+		local legacy = legacyStore({ [USER] = { gold = 50 } })
+		legacy.held = true
+		local w = newWorld(legacy)
+		local ann = w:player("Ann", USER)
+		w:settle(3)
+		spec.eq(#legacy.waiting, 1, "the import is reading")
+		w:retireData()
+		w:settle(2)
+		legacy.release()
+		w:settle(5)
+		spec.eq(#w.events, 0, "nothing turned writable")
+		spec.eq(w.server.d.PlayerData:loaded(ann.player), false, "nor loaded")
+		local envelope = w:envelope(fixture.STORE, USER)
+		spec.eq(envelope.payload, nil, "nothing the import read was written")
+		spec.eq(envelope.imported, nil, "no mark")
+		spec.eq(envelope.lease, nil, "the load removed its own lease")
+		w:finish()
+	end,
+
 	["legacy import: a handoff carries the mark, so a resume does not import again"] = function()
 		local legacy = legacyStore({ [USER] = { gold = 6 } })
 		local w = newWorld(legacy)

@@ -474,6 +474,7 @@ export class ProfileRuntime {
 	private runImport(session: Session, importer: Importer, envelope: Envelope): Imported {
 		const state = session.authority;
 		if (state.phase === Phase.Loading) session.authority = importing(state);
+		if (this.stopped(session)) return { kind: "stopped" };
 		const stored =
 			envelope.payload === undefined
 				? undefined
