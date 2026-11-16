@@ -1,3 +1,4 @@
+import type { MigrationPatch, MigrationReplacement } from "./migrations";
 import type { ProductHandle } from "./experience";
 import { markServerOnly, replicatedPathsOf } from "./internal/data/declarations";
 
@@ -19,9 +20,9 @@ export interface JsonRecord {
 /**
  * One schema step. It gets a private copy of the stored record, unknown keys included, as plain JSON, and returns a
  * patch: an object merges into the stored object, any other value replaces the stored one, and an omitted key is kept.
- * A step cannot delete a key. Steps are append-only and must be pure.
+ * Use migrationDelete to remove a key and migrationReplace to replace a value whole. Steps are append-only and pure.
  */
-export type Migration = (old: JsonRecord) => JsonRecord;
+export type Migration = (old: JsonRecord) => MigrationPatch | MigrationReplacement<JsonRecord>;
 
 /**
  * The identity of one logical operation, kept across its retries. Only `operationId()` makes one; a plain string does

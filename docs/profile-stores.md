@@ -280,3 +280,20 @@ export class HudController extends Subsystem {
 - A write sends only the fields whose content changed. Fields changed in one write arrive in one update, and a write that touches only server-only fields or unknown keys sends nothing.
 
 Each store's views are bounded so they cannot fill a sync frame. A write that would make a public field unsendable, such as a string over 49,152 bytes, throws at the write and stores nothing. All profile stores' views together take at most 65,536 bytes, 4,000 entries and 16,000 visits, divided evenly between the realm's stores.
+
+## Delete and replace data in migrations
+
+A migration returns a `MigrationPatch`. Ordinary objects merge recursively, arrays and scalars replace, and omitted keys stay in place. A patch without operations merges as it did before these operations existed, with exceptions for table keys and cycles. A patch that uses a table as a key refuses the load, even when a later step overwrites that table.
+
+`migrationDelete` removes a key at any object depth. `migrationReplace(value)` replaces that entire value, including an object or an empty map. Both helpers and the `MigrationPatch`, `MigrationDelete`, and `MigrationReplacement` types are exported from `@trioforge/crucible`. A step can return `migrationReplace(record)` to replace the entire record and delete omitted keys.
+
+```ts
+import { migrationDelete, migrationReplace, type Migration } from "@trioforge/crucible";
+
+const renameDiscoveries: Migration = (old) => ({
+	discoveries: migrationReplace({ renamed: (old.discoveries as Record<string, number> | undefined)?.legacy ?? 0 }),
+	obsolete: migrationDelete,
+});
+```
+
+Operations belong at object keys in a patch, outside arrays and replacement values. Replacement values are literal JSON. `migrationReplace(undefined)` throws, including when a missing field is cast to `Json`. The delete marker is frozen. Returning only `migrationDelete`, returning a cyclic patch, or placing an operation inside a literal refuses the load before the next step runs. The next step sees plain data with the operations applied. A step before the last can return objects deeper than the persistence limit of 28 levels if a later step flattens them. At the stack boundary, earlier plain chains previously loaded through 19,991 levels and now load through 19,988, because patch validation adds three frames. Cycles in earlier steps are refused instead of overflowing the stack; final-step cycles go through schema admission, which checks declared fields first and uses zero-based array paths. The last step cannot, because admission refuses anything deeper in the final record. The final record still passes schema admission, which fills missing required object fields from defaults and validates the result before it becomes writable. To remove a required field permanently, remove it from the template too. An operation never goes into saved data. Steps remain pure, must not yield, and receive private copies. No `onLoad` cleanup is needed for a renamed map or a removed key.
