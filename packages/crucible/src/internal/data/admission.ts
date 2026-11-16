@@ -1,3 +1,4 @@
+import { isMigrationDelete, isMigrationReplacement, replacementValue } from "../../migrations";
 import { call, CallResult } from "../runner";
 import { admitsNil, n, runtimeKind, type Branch, type Node, type ObjectNode } from "../network/schema";
 import { PERSIST_ADMISSION_VISITS, PERSIST_DEPTH, PERSIST_STRING_BYTES } from "./limits";
@@ -369,12 +370,73 @@ function copyJson(value: unknown): unknown {
 	return result;
 }
 
-/** Rule 75: objects merge into the stored object, anything else replaces it verbatim. */
-function merge(base: unknown, patch: unknown): unknown {
-	if (!isObject(base) || !isObject(patch)) return patch;
-	const result: Record<string, unknown> = { ...base };
-	for (const [key, entry] of pairs(patch)) result[key] = merge(base[key], entry);
-	return result;
+type Checked =
+	| { readonly ok: true; readonly marked: ReadonlySet<object> }
+	| { readonly ok: false; readonly path: string; readonly reason: string };
+
+/** In the last step a table deeper than the limit fails admission wherever it lands, so the walk leaves it there. */
+function checkPatch(patch: object, last: boolean): Checked {
+	const open = new Set<object>();
+	const marked = new Set<object>();
+	const checkedPatch = new Set<object>();
+	const checkedLiteral = new Set<object>();
+	const keys = new Array<string>();
+	const refuse = (reason: string) => fail(keys.join(""), reason);
+	function walk(value: unknown, literal: boolean, depth: number): boolean {
+		if (!typeIs(value, "table")) return false;
+		const metatable = getmetatable(value);
+		if (metatable !== undefined && (isMigrationDelete(value) || isMigrationReplacement(value))) {
+			if (literal) refuse("a table with a metatable");
+			if (isMigrationReplacement(value)) walk(replacementValue(value as object), true, depth);
+			return true;
+		}
+		if (last && depth > PERSIST_DEPTH) return false;
+		if (open.has(value)) {
+			if (last) return false;
+			refuse("a cycle");
+		}
+		const checked = literal ? checkedLiteral : checkedPatch;
+		if (checked.has(value)) return marked.has(value);
+		open.add(value);
+		const childrenLiteral = literal || !isObject(value) || metatable !== undefined;
+		let holds = false;
+		for (const [key, entry] of pairs(value)) {
+			if (typeIs(key, "table")) refuse("a table key");
+			keys.push(typeIs(key, "number") ? `[${key - 1}]` : `.${key}`);
+			if (walk(entry, childrenLiteral, depth + 1)) holds = true;
+			keys.pop();
+		}
+		open.delete(value);
+		checked.add(value);
+		if (holds) marked.add(value);
+		return holds;
+	}
+	const [ok, result] = pcall(walk, patch, false, 1);
+	if (ok) return { ok: true, marked };
+	const [marker, path, reason] = result as [unknown, string, string];
+	if (marker === FAILURE) return { ok: false, path, reason };
+	throw result;
+}
+
+/**
+ * Rule 75: objects merge into the stored object, anything else replaces it verbatim. A table without operations is
+ * attached as before operations existed, and one with them is built once, so a shared graph costs one visit per table.
+ */
+function merge(base: unknown, patch: unknown, marked: ReadonlySet<object>, built: Map<object, object>): unknown {
+	if (isMigrationDelete(patch)) return undefined;
+	if (isMigrationReplacement(patch)) return replacementValue(patch as object);
+	if (isObject(base) && isObject(patch)) {
+		const result: Record<string, unknown> = { ...base };
+		for (const [key, entry] of pairs(patch)) result[key] = merge(base[key], entry, marked, built);
+		return result;
+	}
+	if (!typeIs(patch, "table") || !marked.has(patch)) return patch;
+	const cached = built.get(patch);
+	if (cached !== undefined) return cached;
+	const added: Record<string, unknown> = {};
+	built.set(patch, added);
+	for (const [key, entry] of pairs(patch)) added[key as string] = merge(undefined, entry, marked, built);
+	return added;
 }
 
 /**
@@ -401,7 +463,16 @@ export function loadRecord(schema: Schema, payload: object | undefined, version:
 				code: "migration",
 				reason: `${label} returned ${typeOf(patch)}, not a record`,
 			};
-		current = merge(current, patch);
+		if (isMigrationDelete(patch))
+			return { kind: "unreadable", code: "migration", reason: `${label} returned migrationDelete, not a record` };
+		const checked = checkPatch(patch, index === schema.version - 1);
+		if (!checked.ok)
+			return {
+				kind: "unreadable",
+				code: "admission",
+				reason: `${schema.name}${checked.path}: ${checked.reason} (after migrating from version ${version})`,
+			};
+		current = merge(current, patch, checked.marked, new Map());
 		migrated = true;
 	}
 	const result = admit(schema.node ?? OPEN, current, schema.defaults);

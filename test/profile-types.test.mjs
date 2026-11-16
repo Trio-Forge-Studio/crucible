@@ -277,3 +277,23 @@ test("profile events narrow by kind and carry no data", () => {
 	assert.equal(result.status, 0, result.output);
 	assert.equal(events.match(/@ts-expect-error E\d+/g)?.length, 4, "every negative case is present");
 });
+
+test("migration operations accept nested patches and whole records while literal JSON excludes operations", () => {
+	const source = `import { migrationDelete, migrationReplace, type Migration, type MigrationPatch } from "@trioforge/crucible";
+const patch: MigrationPatch = { removed: migrationDelete, nested: { renamed: migrationReplace({ kept: 1 }) } };
+const legacy: Migration = (old) => ({ ...old, coins: 1 });
+const nested: Migration = () => patch;
+const whole: Migration = () => migrationReplace({ coins: 1 });
+// @ts-expect-error An array is a literal JSON value.
+const array: Migration = () => ({ values: [migrationDelete] });
+// @ts-expect-error A replacement holds literal JSON.
+const replacement = migrationReplace({ removed: migrationDelete });
+// @ts-expect-error The profile root remains a record.
+const deletedRoot: Migration = () => migrationDelete;
+// @ts-expect-error A root replacement must hold a record.
+const scalarRoot: Migration = () => migrationReplace(1);
+export { legacy, nested, whole, array, replacement, deletedRoot, scalarRoot };
+`;
+	const result = typecheck(new Map([[`${dir}/migrations.ts`, source]]));
+	assert.equal(result.status, 0, result.output);
+});

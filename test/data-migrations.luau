@@ -85,7 +85,512 @@ local function failingShape(mode: string, failing: number, holder, ran)
 	return { migrations = migrations }
 end
 
+local function nest(value, depth)
+	for _ = 1, depth do
+		value = { child = value }
+	end
+	return value
+end
+
+local function deepest(value)
+	while value.child do
+		value = value.child
+	end
+	return value
+end
+
+-- `levels` tables, each holding the next under both `left` and `right`, so a tree copy would hold 2^levels leaves.
+local function shared(levels, leaf)
+	local graph = leaf
+	for _ = 1, levels do
+		graph = { left = graph, right = graph }
+	end
+	return graph
+end
+
+-- One step, the last, returning `make(api)` over the stored record `{ coins = 1 }`, timed from the load.
+local function lastStep(make, node)
+	local backend, a = D2.world(1)
+	local patch = make(a.graph.module(""))
+	a.store = a.profile(STORE, { coins = 0 }, { node = node, migrations = {
+		function()
+			return patch
+		end,
+	} })
+	D2.seed(backend, nil, { payload = { coins = 1 } })
+	local started = os.clock()
+	local player, handle = DM.load(backend, a)
+	return backend, a, player, handle, os.clock() - started
+end
+
+local function diagnostic(path, reason)
+	return `{STORE}{path}: {reason} (after migrating from version 0)`
+end
+
 return {
+	["rule 75 nil replacements throw in every position"] = function()
+		for _, position in { "object", "root", "earlier-scalar", "last" } do
+			local backend, a = D2.world(1)
+			local api = a.graph.module("")
+			local caught
+			local later = false
+			local function step()
+				local ok, reason = pcall(api.migrationReplace, nil)
+				spec.eq(ok, false, position)
+				assert(string.find(tostring(reason), "migrationReplace requires a JSON value, got nil", 1, true))
+				caught = true
+				if position == "root" then
+					return api.migrationReplace(nil)
+				end
+				return { field = api.migrationReplace(nil) }
+			end
+			a.store = a.profile(STORE, { coins = 0 }, {
+				migrations = if position == "last"
+					then { step }
+					else {
+						step,
+						function()
+							later = true
+							return {}
+						end,
+					},
+			})
+			D2.seed(backend, nil, { payload = { coins = 1, field = if position == "earlier-scalar" then 7 else {} } })
+			local _, handle = DM.load(backend, a)
+			spec.eq(caught, true, "guard was exercised")
+			spec.eq(handle.value, false, "nil replacement refuses migration")
+			spec.eq(later, false, "next step never runs")
+		end
+	end,
+	["rule 75 deletion marker cannot be mutated"] = function()
+		local _, a, _, handle = lastStep(function(api)
+			local ok = pcall(function()
+				api.migrationDelete[1] = true
+			end)
+			spec.eq(ok, false, "delete marker is frozen")
+			return api.migrationDelete
+		end)
+		spec.eq(handle.value, false, "root deletion refuses")
+		spec.eq(#DM.logged(a, "returned migrationDelete, not a record"), 1, "delete diagnostic")
+	end,
+	["rule 75 depth takes priority over invalid deep keys"] = function()
+		local _, a, _, handle = lastStep(function()
+			return nest({ [{}] = 1 }, 28)
+		end)
+		spec.eq(handle.value, false, "deep key refused")
+		spec.eq(#DM.logged(a, diagnostic(string.rep(".child", 28), "deeper than 28")), 1, "depth diagnostic")
+	end,
+	["rule 75 final cycles keep admission paths and declared field priority"] = function()
+		for _, mode in { "array", "root", "declared" } do
+			local _, a, _, handle = lastStep(function()
+				local cycle = {}
+				if mode == "array" then
+					cycle[1] = cycle
+					return { added = cycle }
+				end
+				cycle.left = cycle
+				if mode == "root" then
+					return cycle
+				end
+				return { coins = "x", added = cycle }
+			end, DM.object({ coins = n.f64 }))
+			spec.eq(handle.value, false, "cycle refused")
+			local path = if mode == "array" then ".added[0]" elseif mode == "root" then ".left.left" else ".coins"
+			local reason = if mode == "declared" then "expected number, got string" else "a cycle"
+			spec.eq(#DM.logged(a, diagnostic(path, reason)), 1, mode)
+		end
+	end,
+	["rule 75 a refusal the patch walk finds inside an array names its zero-based position"] = function()
+		for _, mode in { "marker", "table-key" } do
+			local _, a, _, handle = lastStep(function(api)
+				if mode == "marker" then
+					return { list = { 1, api.migrationDelete } }
+				end
+				return { list = { { [{}] = 1 } } }
+			end)
+			spec.eq(handle.value, false, `{mode} refused`)
+			local expected = if mode == "marker"
+				then diagnostic(".list[1]", "a table with a metatable")
+				else diagnostic(".list[0]", "a table key")
+			spec.eq(#DM.logged(a, expected), 1, mode)
+		end
+		local backend, a = D2.world(1)
+		a.store = a.profile(STORE, { coins = 0 }, {
+			migrations = {
+				function()
+					local list = { 1 }
+					list[2] = list
+					return { added = list }
+				end,
+				function()
+					return {}
+				end,
+			},
+		})
+		D2.seed(backend, nil, { payload = { coins = 1 } })
+		local _, handle = DM.load(backend, a)
+		spec.eq(handle.value, false, "earlier cycle refused")
+		spec.eq(#DM.logged(a, diagnostic(".added[1]", "a cycle")), 1, "earlier cycle path")
+	end,
+	["rule 75 a final cycle containing operations still reaches admission"] = function()
+		local _, a, _, handle = lastStep(function(api)
+			local cycle = { gone = api.migrationDelete }
+			cycle.self = cycle
+			return { added = cycle }
+		end)
+		spec.eq(handle.value, false, "marked cycle refused")
+		spec.eq(#DM.logged(a, diagnostic(".added.self", "a cycle")), 1, "cycle path")
+	end,
+
+	["rule 75 temporary deep patches preserve merging and consume operations before the next step"] = function()
+		for _, depth in { 27, 28, 29, 40 } do
+			for _, mode in { "plain", "delete", "replace", "scalar" } do
+				local expected = if mode == "plain"
+					then { a = 3, b = 2 }
+					elseif mode == "scalar" then { a = 3, b = 4 }
+					else { a = 3 }
+				local backend, a = D2.world(1)
+				local api = a.graph.module("")
+				a.store = a.profile(STORE, { coins = 0 }, {
+					migrations = {
+						function()
+							return nest({ a = 1, b = 2 }, depth)
+						end,
+						function()
+							local patch = { a = 3 }
+							if mode == "delete" then
+								patch.b = api.migrationDelete
+							elseif mode == "scalar" then
+								patch.b = api.migrationReplace(4)
+							elseif mode == "replace" then
+								patch = api.migrationReplace({ a = 3 })
+							end
+							return nest(patch, depth)
+						end,
+						function(old)
+							local result = deepest(old)
+							DM.deepEq(result, expected, "next step")
+							return api.migrationReplace({ coins = 0, result = result })
+						end,
+					},
+				})
+				D2.seed(backend, nil, { payload = { coins = 1 } })
+				local player, handle = DM.load(backend, a)
+				spec.eq(handle.value, true, `{mode} at {depth} loads after flattening`)
+				DM.deepEq(DM.session(a, player).value.result, expected, "saved result")
+			end
+		end
+	end,
+	["rule 75 markers in literals and a root deletion refuse the record before another step"] = function()
+		for _, mode in { "root", "array", "replacement", "replacement-array", "metatable", "table-key" } do
+			local backend, a = D2.world(1)
+			local api = a.graph.module("")
+			local later = false
+			a.store = a.profile(STORE, { coins = 0 }, {
+				migrations = {
+					function()
+						if mode == "root" then
+							return api.migrationDelete
+						elseif mode == "array" then
+							return { items = { api.migrationDelete } }
+						elseif mode == "metatable" then
+							return { added = setmetatable({ gone = api.migrationDelete }, {}) }
+						elseif mode == "table-key" then
+							return { added = { [api.migrationDelete] = 1 } }
+						elseif mode == "replacement" then
+							return { items = api.migrationReplace({ nested = api.migrationReplace(1) }) }
+						end
+						return api.migrationReplace({ items = { api.migrationDelete } })
+					end,
+					function()
+						later = true
+						return {}
+					end,
+				},
+			})
+			D2.seed(backend, nil, { payload = { coins = 1 } })
+			local _, handle = DM.load(backend, a)
+			spec.eq(handle.value, false, `{mode} refused`)
+			spec.eq(later, false, "no marker reaches another step")
+			spec.eq(
+				#DM.logged(
+					a,
+					if mode == "root"
+						then "returned migrationDelete, not a record"
+						elseif mode == "table-key" then "a table key"
+						else "a table with a metatable"
+				),
+				1,
+				"diagnostic"
+			)
+			DM.deepEq(DM.stored(backend).payload, { coins = 1 }, "stored data unchanged")
+		end
+	end,
+	["rule 75 operations beneath scalars and arrays produce clean objects"] = function()
+		for _, previous in { 7, { 1, 2 } } do
+			local backend, a = D2.world(1)
+			local api = a.graph.module("")
+			a.store = a.profile(STORE, { coins = 0 }, {
+				migrations = {
+					function()
+						return { field = { gone = api.migrationDelete, kept = api.migrationReplace({ 3 }) } }
+					end,
+					function(old)
+						DM.deepEq(old.field, { kept = { 3 } }, "operations consumed")
+						return {}
+					end,
+				},
+			})
+			D2.seed(backend, nil, { payload = { coins = 1, field = previous } })
+			local player, handle = DM.load(backend, a)
+			spec.eq(handle.value, true, "loaded")
+			DM.deepEq(DM.session(a, player).value.field, { kept = { 3 } }, "saved object")
+		end
+	end,
+	["rule 75 a shared added graph is walked once per table and refused with the diagnostic a tree gets"] = function()
+		for _, case in
+			{
+				{
+					levels = 20,
+					marked = false,
+					path = string.rep(".left", 20) .. ".bad",
+					reason = "expected a finite number",
+				},
+				{ levels = 20, marked = true },
+				{ levels = 40, marked = false, path = string.rep(".left", 27), reason = "deeper than 28" },
+			}
+		do
+			local _, a, _, handle, seconds = lastStep(function(api)
+				return {
+					added = shared(case.levels, { bad = 0 / 0, gone = case.marked and api.migrationDelete or nil }),
+				}
+			end)
+			local label = `{case.levels} levels{if case.marked then " with an operation" else ""}`
+			assert(seconds < 0.5, `{label}: refused in {seconds} s, not after expanding the graph`)
+			spec.eq(handle.value, false, `{label}: refused`)
+			if case.path then
+				spec.eq(#DM.logged(a, diagnostic(".added" .. case.path, case.reason)), 1, `{label}: diagnostic`)
+			end
+		end
+	end,
+	["rule 75 a table without operations is attached as the step returned it"] = function()
+		local frozen = table.freeze({ value = 1 })
+		local backend, a, player, handle = lastStep(function()
+			return { added = shared(3, { value = 1 }), kept = frozen }
+		end)
+		spec.eq(handle.value, true, "loaded")
+		assert(rawequal(DM.session(a, player).value.kept, frozen), "a frozen table is admitted in place")
+		local tree = { value = 1 }
+		for _ = 1, 3 do
+			tree = { left = table.clone(tree), right = table.clone(tree) }
+		end
+		DM.deepEq(DM.stored(backend).payload, { coins = 1, added = tree, kept = { value = 1 } }, "saved as a tree")
+	end,
+	["rule 75 a last step's patch deeper than the stack is refused with admission's depth diagnostic"] = function()
+		for _, marked in { false, true } do
+			local _, a, _, handle = lastStep(function(api)
+				local chain = if marked then { gone = api.migrationDelete } else { value = 1 }
+				for _ = 1, 30000 do
+					chain = { child = chain }
+				end
+				return { added = chain }
+			end)
+			local label = if marked then "with an operation at the bottom" else "plain"
+			spec.eq(handle.value, false, `{label}: refused, not thrown`)
+			spec.eq(
+				#DM.logged(a, diagnostic(".added" .. string.rep(".child", 27), "deeper than 28")),
+				1,
+				`{label}: diagnostic`
+			)
+		end
+	end,
+	["rule 75 the last step applies operations down to the persistence limit"] = function()
+		local _, a, player, handle = lastStep(function(api)
+			return nest({ a = 1, b = api.migrationDelete }, 27)
+		end)
+		spec.eq(handle.value, true, "an operation at depth 29 applies")
+		DM.deepEq(deepest(DM.session(a, player).value), { a = 1 }, "the key is removed")
+		local _, deeper, _, refused = lastStep(function(api)
+			return nest({ a = 1, b = api.migrationDelete }, 28)
+		end)
+		spec.eq(refused.value, false, "a table at depth 29 is refused")
+		spec.eq(#DM.logged(deeper, diagnostic(string.rep(".child", 28), "deeper than 28")), 1, "by admission")
+	end,
+	["rule 75 only migrationReplace makes a replacement, and its metatable is hidden and locked"] = function()
+		local backend, a, _, handle = lastStep(function(api)
+			local real = api.migrationReplace(5)
+			spec.eq(typeof(getmetatable(real)), "string", "the metatable is hidden")
+			spec.eq((pcall(setmetatable, real, nil)), false, "and cannot be replaced")
+			spec.eq((pcall(setmetatable, api.migrationDelete, nil)), false, "nor can the deletion's")
+			return { coins = setmetatable({ value = 5 }, { __metatable = getmetatable(real) }) }
+		end)
+		spec.eq(handle.value, false, "a forged replacement is refused, not honoured")
+		spec.eq(#DM.logged(a, diagnostic(".coins", "a table with a metatable")), 1, "as a table with a metatable")
+		DM.deepEq(DM.stored(backend).payload, { coins = 1 }, "stored data unchanged")
+	end,
+	["rule 75 a table key is refused even when a later step overwrites it"] = function()
+		local cyclic = {}
+		cyclic.self = cyclic
+		for _, key in { cyclic, {} } do
+			local later = false
+			local backend, a = D2.world(1, {
+				version = {
+					migrations = {
+						function()
+							return { temporary = { [key] = 1 } }
+						end,
+						function()
+							later = true
+							return { temporary = 0 }
+						end,
+					},
+				},
+			})
+			D2.seed(backend, nil, { payload = { coins = 1 } })
+			local _, handle = DM.load(backend, a)
+			spec.eq(handle.value, false, "refused")
+			spec.eq(later, false, "before the next step")
+			spec.eq(#DM.logged(a, diagnostic(".temporary", "a table key")), 1, "diagnostic")
+			DM.deepEq(DM.stored(backend).payload, { coins = 1 }, "stored data unchanged")
+		end
+	end,
+	["rule 75 cyclic additions are unreadable and leave stored data untouched"] = function()
+		local cycle = {}
+		cycle.left, cycle.right = cycle, cycle
+		for _, earlier in { false, true } do
+			local later = false
+			local migrations = {
+				function()
+					return { added = cycle }
+				end,
+			}
+			if earlier then
+				table.insert(migrations, function()
+					later = true
+					return { added = 0 }
+				end)
+			end
+			local backend, a = D2.world(1, { version = { migrations = migrations } })
+			D2.seed(backend, nil, { payload = { coins = 1, gems = 5 } })
+			local label = if earlier then "in an earlier step" else "in the last step"
+			local started = os.clock()
+			local _, handle = DM.load(backend, a)
+			assert(os.clock() - started < 1, `{label}: a branching cycle is refused promptly`)
+			spec.eq(#DM.logged(a, "a cycle"), 1, `{label}: the cycle diagnostic`)
+			spec.eq(handle.value, false, `{label}: a cycle fails admission`)
+			spec.eq(later, false, `{label}: before another step`)
+			DM.deepEq(DM.stored(backend).payload, { coins = 1, gems = 5 }, `{label}: old data`)
+		end
+	end,
+	["rule 75 an earlier step's operations apply in a new subtree below the persistence limit"] = function()
+		local backend, a = D2.world(1)
+		local api = a.graph.module("")
+		a.store = a.profile(STORE, { coins = 0 }, {
+			migrations = {
+				function()
+					return { added = nest({ a = 1, b = api.migrationDelete, c = api.migrationReplace({ 2 }) }, 40) }
+				end,
+				function(old)
+					DM.deepEq(deepest(old.added), { a = 1, c = { 2 } }, "applied before the next step")
+					return { added = api.migrationDelete }
+				end,
+			},
+		})
+		D2.seed(backend, nil, { payload = { coins = 1 } })
+		local player, handle = DM.load(backend, a)
+		spec.eq(handle.value, true, "loaded")
+		DM.deepEq(DM.session(a, player).value, { coins = 1 }, "the temporary subtree is gone")
+	end,
+	["rule 75 replacement literals still fail schema admission without saving"] = function()
+		for _, value in { "bad", { coins = "bad" } } do
+			local backend, a = D2.world(1)
+			local api = a.graph.module("")
+			a.store = a.profile(STORE, { coins = 0, gems = 0 }, {
+				node = recordNode(),
+				migrations = {
+					function()
+						return api.migrationReplace(value)
+					end,
+				},
+			})
+			D2.seed(backend, nil, { payload = { coins = 1, gems = 5 } })
+			local _, handle = DM.load(backend, a)
+			spec.eq(handle.value, false, "invalid replacement is unreadable")
+			DM.deepEq(DM.stored(backend).payload, { coins = 1, gems = 5 }, "old data stays stored")
+		end
+	end,
+	["rule 75 explicit operations rename maps and delete keys before admission and persist once"] = function()
+		local backend, a, b = D2.world(2)
+		local api = a.graph.module("")
+		local ran = 0
+		local shape = {
+			node = DM.object({ coins = n.f64, gems = n.f64, discoveries = n.map(n.string, n.f64) }),
+			migrations = {
+				function(old)
+					ran += 1
+					return {
+						discoveries = api.migrationReplace({ renamed = old.discoveries.legacy }),
+						obsolete = api.migrationDelete,
+						nested = { removed = api.migrationDelete },
+						newMap = { absent = api.migrationDelete, present = api.migrationReplace({ value = 7 }) },
+						empty = api.migrationReplace({}),
+					}
+				end,
+				function(old)
+					ran += 1
+					spec.eq(old.obsolete, nil, "removed before the next step")
+					spec.eq(old.discoveries.legacy, nil, "renamed before the next step")
+					return { coins = old.discoveries.renamed }
+				end,
+			},
+		}
+		a.store = a.profile(STORE, { coins = 0, gems = 0, discoveries = {} }, shape)
+		b.store = b.profile(STORE, { coins = 0, gems = 0, discoveries = {} }, shape)
+		local payload = {
+			coins = 1,
+			gems = 3,
+			discoveries = { legacy = 8 },
+			obsolete = 9,
+			nested = { removed = 1, kept = 2 },
+			empty = { stale = 1 },
+			literal = { kind = "replace", value = { kept = true } },
+		}
+		D2.seed(backend, nil, { payload = payload })
+		local player, handle = DM.load(backend, a)
+		spec.eq(handle.value, true, "loads without onLoad cleanup")
+		local expected = {
+			coins = 8,
+			gems = 3,
+			discoveries = { renamed = 8 },
+			nested = { kept = 2 },
+			empty = {},
+			newMap = { present = { value = 7 } },
+			literal = { kind = "replace", value = { kept = true } },
+		}
+		DM.deepEq(DM.session(a, player).value, expected, "live data")
+		DM.deepEq(DM.stored(backend).payload, expected, "saved data contains no operations")
+		DM.leave(backend, a, player)
+		local second = D2.join(backend, b)
+		DM.deepEq(DM.session(b, second).value, expected, "reload")
+		spec.eq(ran, 2, "no migration reruns")
+	end,
+	["rule 75 a whole record replacement removes omitted keys and still admits defaults"] = function()
+		local backend, a = D2.world(1)
+		local api = a.graph.module("")
+		a.store = a.profile(STORE, { coins = 0, gems = 0 }, {
+			node = recordNode(),
+			migrations = {
+				function()
+					return api.migrationReplace({ coins = 9 })
+				end,
+			},
+		})
+		D2.seed(backend, nil, { payload = { coins = 1, gems = 5, obsolete = 10 } })
+		local player, handle = DM.load(backend, a)
+		spec.eq(handle.value, true, "loaded")
+		DM.deepEq(DM.session(a, player).value, { coins = 9, gems = 0 }, "omitted field uses defaults")
+		DM.deepEq(DM.stored(backend).payload, { coins = 9, gems = 0 }, "saved")
+	end,
 	["rule 74 a version 0 record with two steps migrates, counts one revision and saves schemaVersion 2 with the payload"] = function()
 		local log = {}
 		local backend, a, b = D2.world(2, { version = twoSteps(log) })
@@ -299,6 +804,7 @@ return {
 					renamed = old.gone,
 					profile = { stats = { hp = 9 }, tags = { "q" }, scalar = { deep = true } },
 					list = {},
+					grid = { 7 },
 				}
 			end,
 			function()
@@ -313,6 +819,7 @@ return {
 				gone = 1,
 				profile = { name = "a", tags = { "x", "y", "z" }, stats = { hp = 1, mp = 2 }, scalar = 4 },
 				list = { 1, 2, 3 },
+				grid = { x = 1 },
 			},
 		})
 		local pa = D2.join(backend, a)
@@ -323,6 +830,7 @@ return {
 			renamed = 1,
 			profile = { name = "a", tags = { "q" }, stats = 5, scalar = { deep = true } },
 			list = {},
+			grid = { 7 },
 		}, "the merged record")
 		backend:advance(1)
 		spec.eq(DM.stored(backend).payload.gone, 1, "a step cannot delete a key: the old name of a rename stays")

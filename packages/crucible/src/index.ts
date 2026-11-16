@@ -59,3 +59,6 @@ export type {
 	JsonRecord,
 	Migration,
 } from "./data";
+
+export { migrationDelete, migrationReplace } from "./migrations";
+export type { MigrationPatch, MigrationDelete, MigrationReplacement } from "./migrations";

@@ -16,12 +16,14 @@ const P = D + "profiles.ts";
 const S = D + "session.ts";
 const I = D + "inbox.ts";
 const O = D + "operation-id.ts";
+const MI = "packages/crucible/src/migrations.ts";
 const ADM = "data-admission.luau";
 const MIG = "data-migrations.luau";
 const UNK = "data-unknown-keys.luau";
 const REC = "data-records.luau";
 const LIM = "data-records-limits.luau";
-const m = (rule, kind, file, before, after, spec) => [rule, kind, file, before, after, spec];
+// `expect` names a mutant that is detected by hanging ("hang") or by ending its spec run without a summary ("crash").
+const m = (rule, kind, file, before, after, spec, expect) => [rule, kind, file, before, after, spec, expect];
 // A pattern ignores how deep its lines are indented, so a row names the code and not the nesting around it.
 const matcher = (before) =>
 	new RegExp(
@@ -165,13 +167,18 @@ const mutants = [
 	m("15", "pair", A, "\t\topen.delete(source);\n", "", [
 		"data-admission.luau: rule 14 a table shared by two fields is not a cycle",
 	]),
-	m("14", "pair", A, "\t\topen.add(value);\n", "", [
+	m("14", "pair", A, "\t\topen.add(value);\n\t}", "\t}", [
 		"data-admission.luau: rule 76 a table with a metatable and a cycle are refused at the engine boundary",
 	]),
-	m("14", "guard", A, '\t\tif (open.has(value)) fail(path, "a cycle");\n', "", [
-		"data-admission.luau: rule 76 a table with a metatable and a cycle are refused at the engine boundary",
-	]),
-	m("14", "swap", A, 'fail(path, "a cycle");', 'fail("a cycle", path);', [
+	m(
+		"14",
+		"guard",
+		A,
+		'\t\tif (open.has(value)) fail(path, "a cycle");\n\t\topen.add(value);',
+		"\t\topen.add(value);",
+		["data-admission.luau: rule 76 a table with a metatable and a cycle are refused at the engine boundary"],
+	),
+	m("14", "swap", A, 'fail(path, "a cycle");\n\t\topen.add(value);', 'fail("a cycle", path);\n\t\topen.add(value);', [
 		"data-admission.luau: rule 76 a table with a metatable and a cycle are refused at the engine boundary",
 	]),
 	m("14", "guard", A, '\t\tif (getmetatable(value) !== undefined) fail(path, "a table with a metatable");\n', "", [
@@ -909,8 +916,8 @@ const mutants = [
 		"14",
 		"swap",
 		A,
-		"if (marker === FAILURE) return { ok: false, path, reason };",
-		"if (marker === FAILURE) return { ok: false, path: reason, reason: path };",
+		"if (marker === FAILURE) return { ok: false, path, reason };\n\tthrow result;\n}\n\n/** @internal The schema",
+		"if (marker === FAILURE) return { ok: false, path: reason, reason: path };\n\tthrow result;\n}\n\n/** @internal The schema",
 		[
 			"data-admission.luau: rule 14 a write whose result has a wrong declared value throws at the call with the store and path, never the value, and changes nothing",
 		],
@@ -1029,38 +1036,15 @@ const mutants = [
 			"data-migrations.luau: rule 110 a failed migration is diagnosed once for a user who rejoins, with the store, user and step",
 		],
 	),
-	m("75", "pair", A, "\t\tcurrent = merge(current, patch);\n", "\t\tcurrent = patch;\n", [
+	m("75", "pair", A, "current = merge(current, patch, checked.marked, new Map());", "current = patch;", [
 		"data-migrations.luau: rule 27 and 74 an ambiguous commit never stores the migrated payload under version 0 or the old one under 2",
 	]),
-	m("75", "swap", A, "\t\tcurrent = merge(current, patch);\n", "\t\tcurrent = merge(patch, current);\n", [
-		"data-migrations.luau: rule 27 and 74 an ambiguous commit never stores the migrated payload under version 0 or the old one under 2",
-	]),
-	m(
-		"75",
-		"guard",
-		A,
-		"if (!isObject(base) || !isObject(patch)) return patch;\n\tconst result: Record<string, unknown> = { ...base };\n\tfor (const [key, entry] of pairs(patch)) result[key] = merge(base[key], entry);",
-		"if (!isObject(patch)) return patch;\n\tconst old = base as Record<string, unknown>;\n\tconst result: Record<string, unknown> = { ...old };\n\tfor (const [key, entry] of pairs(patch)) result[key] = merge(old[key], entry);",
-		[
-			"data-migrations.luau: rule 75 a patch merges objects, replaces everything else verbatim and keeps omitted keys",
-		],
-	),
-	m(
-		"75",
-		"guard",
-		A,
-		"if (!isObject(base) || !isObject(patch)) return patch;\n\tconst result: Record<string, unknown> = { ...base };\n\tfor (const [key, entry] of pairs(patch)) result[key] = merge(base[key], entry);",
-		"if (!isObject(base)) return patch;\n\tconst added = patch as Record<string, unknown>;\n\tconst result: Record<string, unknown> = { ...base };\n\tfor (const [key, entry] of pairs(added)) result[key] = merge(base[key], entry);",
-		[
-			"data-migrations.luau: rule 75 a patch merges objects, replaces everything else verbatim and keeps omitted keys",
-		],
-	),
 	m(
 		"75",
 		"swap",
 		A,
-		"for (const [key, entry] of pairs(patch)) result[key] = merge(base[key], entry);",
-		"for (const [key, entry] of pairs(patch)) result[key] = merge(entry, base[key]);",
+		"merge(current, patch, checked.marked, new Map())",
+		"merge(patch, current, checked.marked, new Map())",
 		[
 			"data-migrations.luau: rule 27 and 74 an ambiguous commit never stores the migrated payload under version 0 or the old one under 2",
 		],
@@ -1069,12 +1053,35 @@ const mutants = [
 		"75",
 		"guard",
 		A,
-		"for (const [key, entry] of pairs(patch)) result[key] = merge(base[key], entry);",
-		"for (const [key, entry] of pairs(patch)) result[key] = entry;",
+		'if (!typeIs(patch, "table") || !marked.has(patch)) return patch;',
+		'if (!typeIs(patch, "table") || !marked.has(patch)) return base;',
 		[
 			"data-migrations.luau: rule 75 a patch merges objects, replaces everything else verbatim and keeps omitted keys",
 		],
 	),
+	m(
+		"75",
+		"guard",
+		A,
+		"if (isObject(base) && isObject(patch)) {\n\t\tconst result: Record<string, unknown> = { ...base };\n\t\tfor (const [key, entry] of pairs(patch))",
+		'if (isObject(base) && typeIs(patch, "table")) {\n\t\tconst result: Record<string, unknown> = { ...base };\n\t\tfor (const [key, entry] of pairs(patch as Record<string, unknown>))',
+		[
+			"data-migrations.luau: rule 75 a patch merges objects, replaces everything else verbatim and keeps omitted keys",
+		],
+	),
+	m(
+		"75",
+		"swap",
+		A,
+		"result[key] = merge(base[key], entry, marked, built);",
+		"result[key] = merge(entry, base[key], marked, built);",
+		[
+			"data-migrations.luau: rule 27 and 74 an ambiguous commit never stores the migrated payload under version 0 or the old one under 2",
+		],
+	),
+	m("75", "guard", A, "result[key] = merge(base[key], entry, marked, built);", "result[key] = entry;", [
+		"data-migrations.luau: rule 75 a patch merges objects, replaces everything else verbatim and keeps omitted keys",
+	]),
 	m(
 		"75",
 		"pair",
@@ -1409,6 +1416,7 @@ const mutants = [
 		"false",
 		["data-migrations.luau: rule 77 a save never overwrites a record that became newer while the session was live"],
 	),
+	// Rule 87 a change that yields escapes into the runner without a summary.
 	m(
 		"87",
 		"guard",
@@ -1416,6 +1424,7 @@ const mutants = [
 		"const changed = dataCallback(input.change, loaded.value, undefined);",
 		"const changed = input.change(loaded.value);",
 		[REC, LIM],
+		"crash",
 	),
 	m(
 		"87",
@@ -2632,10 +2641,118 @@ const mutants = [
 		"return created === undefined || now - created > ID_EVICT_MIN_AGE_SECONDS + 1;",
 		["data-inbox-pins.luau: A16 rule 69 a seen ring's head is refused at 59.9 seconds old and accepted at 60.1"],
 	),
+	m(
+		"75",
+		"guard",
+		A,
+		"if (isMigrationDelete(patch)) return undefined;",
+		"if (isMigrationDelete(patch)) return base;",
+		[
+			"data-migrations.luau: rule 75 explicit operations rename maps and delete keys before admission and persist once",
+		],
+	),
+	m(
+		"75",
+		"pair",
+		A,
+		"if (isMigrationReplacement(patch)) return replacementValue(patch as object);",
+		"if (isMigrationReplacement(patch)) return merge(base, replacementValue(patch as object), marked, built);",
+		[
+			"data-migrations.luau: rule 75 explicit operations rename maps and delete keys before admission and persist once",
+		],
+	),
+	m(
+		"75",
+		"guard",
+		A,
+		"added[key as string] = merge(undefined, entry, marked, built);",
+		"added[key as string] = entry;",
+		[
+			"data-migrations.luau: rule 75 explicit operations rename maps and delete keys before admission and persist once",
+		],
+	),
+	m("75", "guard", A, "\t\tif (holds) marked.add(value);\n", "", [
+		"data-migrations.luau: rule 75 explicit operations rename maps and delete keys before admission and persist once",
+	]),
+	m("75", "guard", A, "\tconst cached = built.get(patch);\n\tif (cached !== undefined) return cached;\n", "", [
+		"data-migrations.luau: rule 75 a shared added graph is walked once per table",
+	]),
+	m(
+		"75",
+		"guard",
+		A,
+		'if (!typeIs(patch, "table") || !marked.has(patch)) return patch;',
+		"if (!isObject(patch) || getmetatable(patch) !== undefined) return patch;",
+		["data-migrations.luau: rule 75 a table without operations is attached as the step returned it"],
+	),
+	m("75", "guard", A, "\t\tif (last && depth > PERSIST_DEPTH) return false;\n", "", [
+		"data-migrations.luau: rule 75 a last step's patch deeper than the stack is refused",
+	]),
+	m(
+		"75",
+		"guard",
+		A,
+		"if (last && depth > PERSIST_DEPTH) return false;",
+		"if (depth > PERSIST_DEPTH) return false;",
+		[
+			"data-migrations.luau: rule 75 an earlier step's operations apply in a new subtree below the persistence limit",
+		],
+	),
+	m(
+		"75",
+		"swap",
+		A,
+		"if (last && depth > PERSIST_DEPTH) return false;",
+		"if (last && depth >= PERSIST_DEPTH) return false;",
+		["data-migrations.luau: rule 75 the last step applies operations down to the persistence limit"],
+	),
+	m("75", "guard", A, '\t\t\trefuse("a cycle");\n', "", [
+		"data-migrations.luau: rule 75 cyclic additions are unreadable and leave stored data untouched",
+	]),
+	m("75", "guard", A, 'if (literal) refuse("a table with a metatable");', "", [
+		"data-migrations.luau: rule 75 markers in literals and a root deletion refuse the record before another step",
+	]),
+	m("75", "guard", A, "literal || !isObject(value) || metatable !== undefined", "literal || !isObject(value)", [
+		"data-migrations.luau: rule 75 markers in literals and a root deletion refuse the record before another step",
+	]),
+	m("75", "guard", A, '\t\t\tif (typeIs(key, "table")) refuse("a table key");\n', "", [
+		"data-migrations.luau: rule 75 a table key is refused even when a later step overwrites it",
+	]),
+	m(
+		"75",
+		"guard",
+		MI,
+		'return typeIs(value, "table") && replacements.has(value);',
+		'return typeIs(value, "table") && value !== migrationDelete && (getmetatable(value) as unknown) === LOCKED.__metatable;',
+		["data-migrations.luau: rule 75 only migrationReplace makes a replacement"],
+	),
+	m("75", "guard", MI, 'const LOCKED = { __metatable: "a migration operation" };', "const LOCKED = {};", [
+		"data-migrations.luau: rule 75 only migrationReplace makes a replacement",
+	]),
 ];
-// Type-checks every mutant in one language service, so a mutant that cannot compile fails before the slow runs.
+mutants.push(
+	m("75", "guard", MI, 'if (value === undefined) error("migrationReplace requires a JSON value, got nil", 0);', "", [
+		"data-migrations.luau: rule 75 nil replacements throw in every position",
+	]),
+	m("75", "guard", MI, "table.freeze(setmetatable({}, table.freeze({})))", "setmetatable({}, LOCKED)", [
+		"data-migrations.luau: rule 75 deletion marker cannot be mutated",
+	]),
+	m(
+		"75",
+		"swap",
+		A,
+		"if (last && depth > PERSIST_DEPTH) return false;",
+		"if (last && depth > PERSIST_DEPTH + 1) return false;",
+		["data-migrations.luau: rule 75 depth takes priority over invalid deep keys"],
+	),
+);
+const start = Number(process.argv[2] ?? 0);
+const only = process.env.ONLY?.split(",").map(Number);
+const end = Number(process.env.END ?? mutants.length);
+const selected = (index) => index >= start && index < end && (only === undefined || only.includes(index));
 function typecheck(originals) {
 	for (const [index, [rule, kind, file, before, after]] of mutants.entries()) {
+		if (!selected(index)) continue;
 		if (!file.endsWith(".ts")) continue;
 		const absolute = path.join(scratch, file);
 		try {
@@ -2666,7 +2783,6 @@ function run(command, args, timeout = 600000) {
 	return result;
 }
 const targetsOf = (target) => (Array.isArray(target) ? target : [target]);
-// A mutant that hangs its spec is detected, so a timed-out spec counts as killed.
 function spec(target) {
 	const result = spawnSync("lune", ["run", "test", ...targetsOf(target)], {
 		cwd: scratch,
@@ -2701,6 +2817,12 @@ try {
 		path.join(scratch, "packages/crucible/node_modules"),
 		"junction",
 	);
+	fs.mkdirSync(path.join(scratch, "examples/sample-game"), { recursive: true });
+	fs.symlinkSync(
+		path.join(repo, "examples/sample-game/node_modules"),
+		path.join(scratch, "examples/sample-game/node_modules"),
+		"junction",
+	);
 	const files = [...new Set(mutants.map(([, , file]) => file))];
 	const originals = new Map(files.map((file) => [file, fs.readFileSync(path.join(scratch, file), "utf8")]));
 	const unmatched = [];
@@ -2716,16 +2838,14 @@ try {
 	}
 	const build = () => run(process.execPath, [path.join(repo, "test/lib/compile.mjs"), "packages/crucible"]);
 	assert.equal(build().status, 0, "baseline build");
-	const targets = [...new Set(mutants.flatMap((row) => targetsOf(row[5])))];
+	const targets = [...new Set(mutants.filter((_, index) => selected(index)).flatMap((row) => targetsOf(row[5])))];
 	const baseline = run("lune", ["run", "test", ...targets]);
 	assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
-	const start = Number(process.argv[2] ?? 0);
-	const only = process.env.ONLY?.split(",").map(Number);
-	const end = Number(process.env.END ?? mutants.length);
-	let killed = 0;
+	const killed = { failed: 0, hang: 0, crash: 0 };
 	const survivors = [];
-	for (const [index, [rule, kind, file, before, after, target]] of mutants.entries()) {
-		if (index < start || index >= end || (only !== undefined && !only.includes(index))) continue;
+	const unexpected = [];
+	for (const [index, [rule, kind, file, before, after, target, expect]] of mutants.entries()) {
+		if (!selected(index)) continue;
 		const original = originals.get(file);
 		fs.writeFileSync(path.join(scratch, file), apply(original, before, after));
 		const compiled = build();
@@ -2739,10 +2859,9 @@ try {
 		const output = tested.output;
 		const failed = output.split("\n").find((line) => line.startsWith("FAIL "));
 		const label = targetsOf(target).join(" + ");
-		const cutShort = !tested.hung && !/[0-9]+ passed, [0-9]+ failed/.test(output);
+		const how = tested.hung ? "hang" : /[0-9]+ passed, [0-9]+ failed/.test(output) ? "failed" : "crash";
 		if (
-			!tested.hung &&
-			!cutShort &&
+			how === "failed" &&
 			(tested.status === 0 || failed === undefined || !targetsOf(target).some((t) => output.includes(t)))
 		) {
 			survivors.push(`${index} rule ${rule} ${kind}`);
@@ -2750,16 +2869,16 @@ try {
 			if (process.env.VERBOSE !== undefined) console.log(`status ${tested.status}`, output.slice(-600));
 			continue;
 		}
-		console.log(
-			`KILLED ${index} | rule ${rule} | ${kind} | ${label} | ${tested.hung ? "hung" : (failed ?? "no summary")}`,
-		);
-		killed++;
+		console.log(`KILLED ${index} | rule ${rule} | ${kind} | ${label} | ${how === "failed" ? failed : how}`);
+		killed[how]++;
+		if (how !== "failed" && how !== expect) unexpected.push(`${index} rule ${rule} ${kind}: ${how}`);
 	}
 	assert.equal(build().status, 0, "restored build");
 	console.log(
-		`${killed}/${only?.length ?? Math.min(end, mutants.length) - start} migration, admission and record mutants killed; restored build 0`,
+		`${killed.failed + killed.hang + killed.crash}/${only?.length ?? Math.min(end, mutants.length) - start} migration, admission and record mutants killed: ${killed.failed} by a failed spec, ${killed.hang} by a hang, ${killed.crash} by a run without a summary; restored build 0`,
 	);
 	assert.deepEqual(survivors, [], "every mutant is killed");
+	assert.deepEqual(unexpected, [], "every hang and crash is one its mutant expects");
 } finally {
 	fs.rmSync(scratch, { recursive: true, force: true });
 }
