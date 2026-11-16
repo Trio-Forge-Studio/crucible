@@ -535,6 +535,11 @@ fn descriptors_lower_with_precise_builders_and_keep_request_response_order() {
 export const A = toServer<{{ zebra: u8; alpha: string; flag: boolean }}>(\"X.Object\");
 export const B = askServer<string, u16>(\"X.Ask\", {{ timeout: 37 }});
 export const C = askServer<undefined, unknown>(\"X.Default\");
+export const RatedEvent = toServer<string>(\"X.RatedEvent\", {{ rate: 8 }});
+export const RatedAsk = askServer<string, string>(\"X.RatedAsk\", {{ rate: 0.5, timeout: 5 }});
+export const RateOnly = askServer<string, string>(\"X.RateOnly\", {{ \"rate\": 1000 }});
+export const Spaced = toServer<undefined>(\"X.Spaced\", {{ rate: 5, burst: 1 }});
+export const SpacedAsk = askServer<string, string>(\"X.SpacedAsk\", {{ burst: 1000, timeout: 2, rate: 1e3 }});
 export const D = toServer<Map<\"z\" | \"a\", number>>(\"X.Map\");
 export const E = toServer<[string, u32]>(\"X.Tuple\");
 export const F = toClient<{{ maybe: BasePart | undefined; player: Player }}>(\"X.Stream\");
@@ -555,9 +560,16 @@ export const Tagged = toServer<{{Kind:\"A\";Tag:\"A\";x:number}}|{{Kind:\"A\";Ta
         "__crucible.n.object([[\"alpha\", __crucible.n.string], [\"flag\", __crucible.n.bool], [\"zebra\", __crucible.n.u8]])",
         "X.Object",
     );
-    assert_eq!(d["X.Ask"][1..], ["__crucible.n.string", "__crucible.n.u16", "37"]);
+    assert_eq!(d["X.Ask"][1..], ["__crucible.n.string", "__crucible.n.u16", "37", "nil", "nil"]);
     let default: Vec<String> = d["X.Default"][1..].iter().map(|a| canon(a)).collect();
-    assert_eq!(default, ["__crucible.n.nil", "__crucible.n.dynamic", "nil"]);
+    assert_eq!(default, ["__crucible.n.nil", "__crucible.n.dynamic", "nil", "nil", "nil"]);
+    assert_eq!(d["X.Object"].len(), 4, "a toServer passes its rate and burst");
+    assert_eq!(d["X.Object"][2..], ["nil", "nil"], "no rate");
+    assert_eq!(d["X.RatedEvent"][1..], ["__crucible.n.string", "8", "nil"]);
+    assert_eq!(d["X.RatedAsk"][1..], ["__crucible.n.string", "__crucible.n.string", "5", "0.5", "nil"]);
+    assert_eq!(d["X.RateOnly"][1..], ["__crucible.n.string", "__crucible.n.string", "nil", "1000", "nil"]);
+    assert_eq!(d["X.Spaced"][2..], ["5", "1"]);
+    assert_eq!(d["X.SpacedAsk"][3..], ["2", "1000", "1000"]);
     same(
         &first("X.Map"),
         "__crucible.n.map(__crucible.n.union([__crucible.n.literal(\"a\"), __crucible.n.literal(\"z\")]), __crucible.n.f64)",
@@ -590,7 +602,7 @@ export const Tagged = toServer<{{Kind:\"A\";Tag:\"A\";x:number}}|{{Kind:\"A\";Ta
         "__crucible.n.union([__crucible.n.variant(\"Kind\", \"Join\", __crucible.n.object([[\"UserId\", __crucible.n.f64]])), __crucible.n.variant(\"Kind\", \"Leave\", __crucible.n.object([]))])",
         "X.Variant",
     );
-    has(&luau, "askServer(\"X.Ask\", __crucible.n.string, __crucible.n.u16, 37)");
+    has(&luau, "askServer(\"X.Ask\", __crucible.n.string, __crucible.n.u16, 37, nil, nil)");
 }
 
 fn negatives() -> Vec<(String, &'static str, String)> {
@@ -629,6 +641,103 @@ fn negatives() -> Vec<(String, &'static str, String)> {
             "computed option".into(),
             "CRU017",
             "export const X = askServer<string, number>(\"X.Test\", {[\"timeout\"]: 2});".into(),
+        ),
+        (
+            "duplicate option".into(),
+            "CRU017",
+            "export const X = askServer<string, number>(\"X.Test\", {timeout: 2, \"timeout\": 3});".into(),
+        ),
+        ("to-server options empty".into(), "CRU017", "export const X = toServer<string>(\"X.Test\", {});".into()),
+        ("to-server timeout".into(), "CRU017", "export const X = toServer<string>(\"X.Test\", {timeout: 2});".into()),
+        (
+            "to-server options variable".into(),
+            "CRU017",
+            "const o = { rate: 3 }; export const X = toServer<string>(\"X.Test\", o);".into(),
+        ),
+        ("to-client options".into(), "CRU017", "export const X = toClient<string>(\"X.Test\", {rate: 2});".into()),
+        ("rate zero".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: 0});".into()),
+        ("rate negative".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: -1});".into()),
+        ("rate ceiling".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: 1001});".into()),
+        (
+            "rate variable".into(),
+            "CRU040",
+            "const r = 4; export const X = toServer<string>(\"X.Test\", {rate: r});".into(),
+        ),
+        (
+            "rate expression".into(),
+            "CRU040",
+            "export const X = askServer<string, number>(\"X.Test\", {timeout: 2, rate: 1 / 5});".into(),
+        ),
+        (
+            "rate string".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: \"8\" as never});".into(),
+        ),
+        (
+            "rate above the ceiling".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: 1000.0001});".into(),
+        ),
+        ("rate NaN".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: NaN});".into()),
+        ("rate Infinity".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: Infinity});".into()),
+        ("rate negative zero".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: -0});".into()),
+        (
+            "rate spread".into(),
+            "CRU017",
+            "const o = { rate: 3 }; export const X = toServer<string>(\"X.Test\", {...o});".into(),
+        ),
+        (
+            "duplicate rate".into(),
+            "CRU017",
+            "export const X = toServer<string>(\"X.Test\", {rate: 2, rate: 3});".into(),
+        ),
+        ("burst without rate".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {burst: 1});".into()),
+        (
+            "ask burst without rate".into(),
+            "CRU040",
+            "export const X = askServer<string, number>(\"X.Test\", {timeout: 2, burst: 1});".into(),
+        ),
+        ("burst zero".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: 0});".into()),
+        (
+            "burst fraction".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: 1.5});".into(),
+        ),
+        (
+            "burst ceiling".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: 1001});".into(),
+        ),
+        (
+            "burst above the ceiling".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: 1000.0001});".into(),
+        ),
+        ("burst NaN".into(), "CRU040", "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: NaN});".into()),
+        (
+            "burst Infinity".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: Infinity});".into(),
+        ),
+        (
+            "burst negative zero".into(),
+            "CRU040",
+            "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: -0});".into(),
+        ),
+        (
+            "burst variable".into(),
+            "CRU040",
+            "const b = 1; export const X = toServer<string>(\"X.Test\", {rate: 5, burst: b});".into(),
+        ),
+        (
+            "burst spread".into(),
+            "CRU017",
+            "const o = { burst: 1 }; export const X = toServer<string>(\"X.Test\", {rate: 5, ...o});".into(),
+        ),
+        (
+            "duplicate burst".into(),
+            "CRU017",
+            "export const X = toServer<string>(\"X.Test\", {rate: 5, burst: 1, burst: 2});".into(),
         ),
         ("name variable".into(), "CRU018", "const n = \"X.Test\"; export const X = toServer<string>(n);".into()),
         ("name template".into(), "CRU018", "export const X = toServer<string>(`X.Test`);".into()),
@@ -691,7 +800,7 @@ fn negatives() -> Vec<(String, &'static str, String)> {
         (
             "extra declaration argument",
             "CRU017: Unexpected declaration arguments.",
-            "export const X = toServer<string>(\"X.Test\", {} as never);".into(),
+            "export const X = toServer<string>(\"X.Test\", {rate: 1}, {} as never);".into(),
         ),
         ("optional tuple element", "CRU019: X.Test payload: tuples must be fixed length", declaration("[string?]")),
         ("empty interface", "CRU019", format!("interface Empty {{}} {}", declaration("Empty"))),
@@ -760,6 +869,27 @@ fn negatives() -> Vec<(String, &'static str, String)> {
 }
 
 #[test]
+fn a_rate_and_a_burst_report_one_message_each() {
+    let game = fresh();
+    let cases = [
+        ("{rate: 0, burst: 1}", "CRU040: A rate is a number literal of requests per second in (0, 1000]."),
+        ("{rate: 5, burst: 2.5}", "CRU040: A burst is an integer literal of requests in [1, 1000]."),
+        ("{burst: 2}", "CRU040: A burst needs a rate beside it."),
+    ];
+    for (i, (options, _)) in cases.iter().enumerate() {
+        game.write(
+            &format!("src/shared/r{i}.ts"),
+            &format!("{IMPORTS}export const X{i} = toServer<string>(\"X.R{i}\", {options});"),
+        );
+    }
+    let (reports, type_errors) = check(&game);
+    assert_eq!(type_errors, Vec::<String>::new());
+    for (i, (options, message)) in cases.iter().enumerate() {
+        assert_eq!(messages(&reports, &format!("src/shared/r{i}.ts")), [*message], "{options}");
+    }
+}
+
+#[test]
 fn the_diagnostic_catalogue_rejects_every_unsupported_declaration() {
     let cases = negatives();
     let game = fresh();
@@ -775,14 +905,28 @@ fn the_diagnostic_catalogue_rejects_every_unsupported_declaration() {
     let (reports, type_errors) = check(&game);
     for (i, (name, code, _)) in cases.iter().enumerate() {
         let file = format!("src/shared/n{i}.ts");
-        if ["extra options", "extra declaration argument"].contains(&name.as_str()) {
+        if [
+            "extra options",
+            "extra declaration argument",
+            "to-server timeout",
+            "to-client options",
+            "duplicate option",
+            "duplicate rate",
+            "duplicate burst",
+            "rate NaN",
+            "rate Infinity",
+            "burst NaN",
+            "burst Infinity",
+        ]
+        .contains(&name.as_str())
+        {
             assert!(type_errors.contains(&format!("{file}:2")), "{name} is a type error: {type_errors:?}");
             continue;
         }
         let found = messages(&reports, &file);
         assert!(found.iter().any(|m| m.starts_with(code)), "{name} reports {code}: {found:?}");
     }
-    assert_eq!(type_errors.len(), 2, "{type_errors:?}");
+    assert_eq!(type_errors.len(), 11, "{type_errors:?}");
     for side in ["server", "client", "neutral"] {
         let file = format!("src/{side}/wrong.ts");
         assert!(reports.iter().any(|r| r.file == file && r.code == 90017), "{side} placement");
@@ -1557,10 +1701,10 @@ fn declaration_and_receiver_aliases_and_namespaces_keep_macro_symbol_identity() 
     ]);
     none(&reports_of(&game));
     let messages = game.luau("shared/messages.luau");
-    has(&messages, "local Named = __crucible.toServer(\"X.Named\", __crucible.n.string)");
-    has(&messages, "local Namespace = __crucible.toServer(\"X.Namespace\", __crucible.n.f64)");
-    has(&messages, "local Bracket = __crucible.toServer(\"X.Bracket\", __crucible.n.bool)");
-    has(&messages, "local Paren = __crucible.toServer(\"X.Paren\", __crucible.n[\"nil\"])");
+    has(&messages, "local Named = __crucible.toServer(\"X.Named\", __crucible.n.string, nil, nil)");
+    has(&messages, "local Namespace = __crucible.toServer(\"X.Namespace\", __crucible.n.f64, nil, nil)");
+    has(&messages, "local Bracket = __crucible.toServer(\"X.Bracket\", __crucible.n.bool, nil, nil)");
+    has(&messages, "local Paren = __crucible.toServer(\"X.Paren\", __crucible.n[\"nil\"], nil, nil)");
     has(&game.luau("server/service.luau"), "self.r = __crucible.receive(self, \"r\", Named, function(p, value)");
 }
 
@@ -3044,9 +3188,9 @@ export class Receiver extends Subsystem {{ readonly ping = receive(A, (player, v
     none(&reports_of(&game));
     let shared = game.luau("shared/kinds.luau");
     for line in [
-        "local A = __crucible.toServer(\"K.ToServer\", __crucible.n.object({ { \"a\", __crucible.n.string } }))",
+        "local A = __crucible.toServer(\"K.ToServer\", __crucible.n.object({ { \"a\", __crucible.n.string } }), nil, nil)",
         "local B = __crucible.toClient(\"K.ToClient\", __crucible.n.u8)",
-        "local C = __crucible.askServer(\"K.Ask\", __crucible.n.string, __crucible.n.f64, 5)",
+        "local C = __crucible.askServer(\"K.Ask\", __crucible.n.string, __crucible.n.f64, 5, nil, nil)",
         "local D = __crucible.replicated(\"K.Replicated\", 0, __crucible.n.f64)",
         "local E = __crucible.replicatedPerPlayer(\"K.PerPlayer\", false, __crucible.n.bool)",
     ] {

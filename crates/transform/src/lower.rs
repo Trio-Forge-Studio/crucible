@@ -8,7 +8,9 @@ use crucible_compiler::extension::{Kind, LowerCx, Node};
 use crucible_luau::{Expr, Field, Name, Stmt};
 
 use crate::EMIT;
-use crate::facts::{Check, Class, ClassKind, Declaration, Dependency, KeyLiteral, Literal, MapKey, Schema, Tail};
+use crate::facts::{
+    Allowance, Check, Class, ClassKind, Declaration, Dependency, KeyLiteral, Literal, MapKey, Schema, Tail,
+};
 
 fn string(text: &str) -> Expr {
     Expr::String(Cow::Owned(text.to_owned()))
@@ -150,7 +152,11 @@ pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &De
     }
     match &declaration.tail {
         Tail::None => {}
-        Tail::Timeout(seconds) => args.push(seconds.map_or(Expr::Nil, Expr::Number)),
+        Tail::Rate(allowance) => args.extend(allowance_args(*allowance)),
+        Tail::Ask { timeout, allowance } => {
+            args.push(number(*timeout));
+            args.extend(allowance_args(*allowance));
+        }
         Tail::ServerOnly(paths) => args.push(Expr::Table(
             paths
                 .iter()
@@ -159,6 +165,14 @@ pub(crate) fn declaration(cx: &mut LowerCx<'_, '_>, call: Node, declaration: &De
         )),
     }
     cx.helper(&EMIT, declaration.kind.name()).call(args)
+}
+
+fn number(value: Option<f64>) -> Expr {
+    value.map_or(Expr::Nil, Expr::Number)
+}
+
+fn allowance_args(allowance: Option<Allowance>) -> [Expr; 2] {
+    [number(allowance.map(|a| a.rate)), number(allowance.and_then(|a| a.burst))]
 }
 
 fn n(cx: &mut LowerCx<'_, '_>, name: &'static str) -> Expr {

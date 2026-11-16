@@ -1,6 +1,6 @@
 # Diagnostics
 
-Find what each Crucible compile error from CRU001 to CRU039 means and how to fix it.
+Find what each Crucible compile error from CRU001 to CRU040 means and how to fix it.
 
 Crucible's compiler checks game code while `crucible build` compiles it, so a game made from the template reports these errors in `npm run build` and `npm run check`. The editor's TypeScript service does not run these rules, so it never reports them. Code that type-checks in the editor can still fail the build.
 
@@ -41,6 +41,7 @@ Several rules depend on the file's side. The side is the nearest folder named `s
 | CRU027 | A profile store call runs on the side it reads or writes. |
 | CRU038 | Game code takes `effect`, `scope` and `onCleanup` from Crucible, not from Charm. |
 | CRU039 | A place that grants products grants each product of `crucible:experience` exactly once, and a retired one at most once. |
+| CRU040 | A message's `rate` is a number literal in (0, 1000], and its `burst` an integer literal in [1, 1000] beside a rate. |
 
 ## CRU001
 
@@ -276,16 +277,18 @@ CRU017: Declare <kind of declaration> as an exported top-level const in a <side>
 CRU017: <macro> needs explicit payload types; use undefined for no payload.
 CRU017: <macro> needs an explicit type argument.
 CRU017: <macro> needs at most one type argument.
-CRU017: askServer options must be { timeout: <number literal in (0, 120]> }.
+CRU017: askServer options must be { timeout?: <number literal in (0, 120]>, rate?: <number literal> }.
+CRU017: toServer options must be { rate: <number literal> }.
 CRU017: Unexpected declaration arguments.
 CRU017: Cannot read <macro>'s value type; give it an explicit type argument.
 ```
 
-Each declaration macro is the whole initializer of an `export const` at the top level of a module on the side the table names. It takes the type arguments and arguments in the table, and nothing more. `askServer` options are an object literal with one `timeout` property, a number literal greater than 0 and at most 120.
+Each declaration macro is the whole initializer of an `export const` at the top level of a module on the side the table names. It takes the type arguments and arguments in the table, and nothing more. `askServer` options are an object literal with any of the properties `timeout`, `rate` and `burst`, and at least one, each at most once. `timeout` is a number literal greater than 0 and at most 120. `toServer` options are an object literal with `rate`, `burst` or both, each at most once. A spread, a computed key or a variable in place of the object literal is CRU017. CRU040 checks the rate's and the burst's values.
 
 | Macro | Side | Type arguments | Arguments |
 | --- | --- | --- | --- |
-| `toServer`, `toClient` | shared | 1 | name |
+| `toServer` | shared | 1 | name, options |
+| `toClient` | shared | 1 | name |
 | `askServer` | shared | 2 | name, options |
 | `replicated`, `replicatedPerPlayer` | shared | 1 | name, initial value |
 | `profileStore` | shared | at most 1 | name, options |
@@ -493,3 +496,21 @@ CRU039: This grant's product is a handle whose key the compiler cannot see, so C
 ```
 
 A place that grants any developer product must grant each product `crucible:experience` declares exactly once, and each retired product, typed `RetiredProductHandle`, once or not at all, since a purchase made before it retired can still send a receipt. Crucible's data module answers Roblox's `ProcessReceipt` for every product once a place grants one, so a product without a grant there has its purchases refused, and a second grant would fail the server at boot. The rule reads each grant's handle through the type checker: a grant that takes a union of handles, such as one in a loop over `[Products.A, Products.B]`, counts once for each, and a grant whose handle is typed `ProductHandle` with no key is reported, because the rule cannot tell which product it grants. That grant is then the place's only CRU039 error: the rule does not report each product as missing a grant, since the fixed grant may be the one that grants it. A grant that takes a product ID is not counted. A product with no grant is reported at the place's first grant. A product has one grant call site, so a grant in each branch of a conditional is two grants: branch inside the grant's function instead. A place that grants nothing is exempt: Roblox offers its purchases again in a server that handles them. To fix it, add the missing grant or remove the second one.
+
+## CRU040
+
+```text
+CRU040: A rate is a number literal of requests per second in (0, 1000].
+CRU040: A burst is an integer literal of requests in [1, 1000].
+CRU040: A burst needs a rate beside it.
+```
+
+The `rate` of a `toServer` or `askServer` declaration is the number of requests per second each player may send, and its `burst` is the most requests a player may send at once. The compiler writes both into the declaration. A rate must be a number literal greater than 0 and at most 1,000, such as `8` or `0.5`. A burst must be an integer literal from 1 to 1,000, and the declaration must also have a rate. A variable, an expression such as `1 / 5` or `-0`, a negative number, `0` and a number above 1,000 fail, and so does a burst such as `1.5`. To fix it, write the number itself. To send without a limit, leave out both `rate` and `burst`. `crucible docs networking` describes what a rate and a burst do.
+
+```ts
+import { toServer } from "@trioforge/crucible";
+
+export const Tap = toServer<undefined>("Cannon.Tap", { rate: 8 });
+export const Spin = toServer<undefined>("Wheel.Spin", { rate: 5, burst: 1 });
+export const Rebirth = toServer<undefined>("Cannon.Rebirth", { rate: 0.5 });
+```

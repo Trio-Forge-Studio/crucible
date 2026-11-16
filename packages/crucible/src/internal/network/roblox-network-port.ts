@@ -61,6 +61,7 @@ export function robloxNetworkPort(): NetworkPort {
 				if (coroutine.status(thread) === "suspended") task.cancel(thread);
 			};
 		},
+		now: () => os.clock(),
 		resume: (thread, ...args) => {
 			task.spawn(thread, ...args);
 		},

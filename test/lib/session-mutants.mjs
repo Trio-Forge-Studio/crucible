@@ -39,8 +39,8 @@ const rules = [
 		[
 			"guard",
 			N,
-			"export function toServer<P>(_name: string): ToServer<P> {\n\terror(UNTRANSFORMED);",
-			"export function toServer<P>(_name: string): ToServer<P> {\n\treturn undefined as never;",
+			"export function toServer<P>(_name: string, _options?: ToServerOptions): ToServer<P> {\n\terror(UNTRANSFORMED);",
+			"export function toServer<P>(_name: string, _options?: ToServerOptions): ToServer<P> {\n\treturn undefined as never;",
 		],
 		["swap", "each macro throws one constant and takes no second argument of its type"],
 		["pair", "a macro is a single throw with nothing paired to it"],
@@ -347,8 +347,8 @@ const rules = [
 		[
 			"swap",
 			CS,
-			'["unavailable", "handler-error", "overloaded", "invalid"]',
-			'["handler-error", "unavailable", "overloaded", "invalid"]',
+			'["unavailable", "handler-error", "overloaded", "invalid", "limited"]',
+			'["handler-error", "unavailable", "overloaded", "invalid", "limited"]',
 		],
 		["pair", CS, 'if (this.pending.size() >= L.MAX_PENDING_ASKS) return failed("overloaded");', ""],
 	],
@@ -375,7 +375,7 @@ const rules = [
 		[
 			"guard",
 			SS,
-			"\t\tif (nonce <= peer.lastRequestNonce)\n\t\t\treturn this.reject(peer, definition, `${definition.name} with a nonce already used`);\n",
+			"\t\tif (!event && nonce <= peer.lastRequestNonce)\n\t\t\treturn this.reject(peer, definition, `${definition.name} with a nonce already used`);\n",
 			"",
 		],
 		[

@@ -30,6 +30,7 @@ export type {
 	AskResult,
 	AskFailure,
 	AskOptions,
+	ToServerOptions,
 	PayloadArgs,
 	f32,
 	f64,

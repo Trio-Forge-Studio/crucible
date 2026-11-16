@@ -369,6 +369,9 @@ local function serverPort(self, realm)
 		delay = function(seconds, callback)
 			return self:delay(seconds, callback)
 		end,
+		now = function()
+			return self.now
+		end,
 		resume = function(thread, ...)
 			self:resume(thread, ...)
 		end,

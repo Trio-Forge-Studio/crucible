@@ -183,6 +183,44 @@ return {
 			assert(pcall(port[name], {}, {}, {}), "next operation succeeds")
 		end
 	end,
+	["Lune network port follows a backend realm's clock so a rate refills"] = function()
+		local backend = harness.Backend.new()
+		local realm = backend:realm()
+		local port = harness.networkPort(realm)
+		local graph = harness.loadGame({ place = "build/sample-game.rbxl", network = port })
+		local Collect = graph.import(graph.place:GetService("ReplicatedStorage").TS.messages).Collect
+		local server = graph.import(graph.crucible.server)
+		server.boot({ load = {} })
+		local index
+		for i, name in string.split(port.published.catalog, "\n") do
+			if name == "Coins.Collect" then
+				index = i - 1
+			end
+		end
+		local player = require("@lune/roblox").Instance.new("Player")
+		player.Name = "Ann"
+		port.listeners.added(player)
+		local function packet(hex)
+			local bytes = string.gsub(hex, "(%x%x) ?", function(byte)
+				return string.char(tonumber(byte, 16) :: number)
+			end)
+			return buffer.fromstring(bytes)
+		end
+		port.receive(player, packet("04"), {})
+		local collect = packet(string.format("00 %02x 00 01", index))
+		for _ = 1, 11 do
+			port.receive(player, collect, {})
+		end
+		assert(server.Network.limited(Collect) == 1, "a rate of 10 refuses the eleventh pickup")
+		port.receive(player, collect, {})
+		assert(server.Network.limited(Collect) == 2, "the clock has not moved")
+		backend:advance(0.15)
+		port.receive(player, collect, {})
+		assert(server.Network.limited(Collect) == 2, "0.15 seconds refills one pickup")
+		port.receive(player, collect, {})
+		assert(server.Network.limited(Collect) == 3, "and only one")
+		graph.place:Destroy()
+	end,
 	["Lune graph replaces modules before consumers import them"] = function()
 		local graph = harness.loadGame({ place = "build/sample-game.rbxl" })
 		local module = graph.place:GetService("ReplicatedStorage").TS.profile

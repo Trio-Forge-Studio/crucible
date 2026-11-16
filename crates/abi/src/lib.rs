@@ -9,8 +9,9 @@ pub use declaration::declaration;
 
 /// Raised by any change a compiled game would notice: a function, parameter, record field, schema builder or check
 /// that is added, removed, renamed, moved or retyped. Version 2 adds the `crucible:experience` handles, which a runtime's
-/// `grant` must read, so a compiler that checks grants by handle never compiles against a runtime that has none.
-pub const VERSION: u32 = 2;
+/// `grant` must read, so a compiler that checks grants by handle never compiles against a runtime that has none. Version 3
+/// passes `toServer` and `askServer` a per-player rate and burst, which an older runtime would ignore.
+pub const VERSION: u32 = 3;
 
 /// The field of the runtime's `package.json` that records the ABI version the runtime implements.
 pub const MANIFEST_FIELD: &str = "crucibleAbi";
@@ -101,8 +102,15 @@ pub const RECEIVE: Function = Function {
 
 // A declaration macro's call passes its name, the arguments the game wrote after the name, its wire schemas and then
 // its tail.
-pub const TO_SERVER: Function =
-    Function { name: "toServer", parameters: &[required("name", STRING), required("payload", PASSED)] };
+pub const TO_SERVER: Function = Function {
+    name: "toServer",
+    parameters: &[
+        required("name", STRING),
+        required("payload", PASSED),
+        required("rate", "number | undefined"),
+        required("burst", "number | undefined"),
+    ],
+};
 pub const TO_CLIENT: Function =
     Function { name: "toClient", parameters: &[required("name", STRING), required("payload", PASSED)] };
 pub const ASK_SERVER: Function = Function {
@@ -112,6 +120,8 @@ pub const ASK_SERVER: Function = Function {
         required("request", PASSED),
         required("response", PASSED),
         required("timeout", "number | undefined"),
+        required("rate", "number | undefined"),
+        required("burst", "number | undefined"),
     ],
 };
 pub const REPLICATED: Function = Function {

@@ -30,6 +30,7 @@ export class ServerSession extends Session {
 	private catalog = "";
 	private published = false;
 	private reportedNoPeer = false;
+	private readonly limitedCounts = new Map<Definition, number>();
 
 	open() {
 		this.stage = Stage.Open;
@@ -97,6 +98,13 @@ export class ServerSession extends Session {
 		for (const peer of [...this.order]) this.deliver(peer, packet);
 	}
 
+	limited(token: unknown): number {
+		const definition = definitionOf(token);
+		if (definition === undefined || definition.kind === "to-client")
+			error("Network.limited needs a message declared with toServer or askServer", 0);
+		return this.limitedCounts.get(definition) ?? 0;
+	}
+
 	protected fire(peer: Peer, packet: Packet) {
 		this.port.fireClient(peer.player!, packet.bytes, packet.sidecar);
 	}
@@ -157,6 +165,34 @@ export class ServerSession extends Session {
 		runtimeDiagnostic("warning", `Crucible dropped ${what} from ${peer.player!.Name}${reason}`);
 	}
 
+	private admit(peer: Peer, definition: Definition): boolean {
+		const rate = definition.rate;
+		if (rate === undefined) return true;
+		const now = this.port.now();
+		const capacity = definition.burst ?? math.max(1, rate);
+		let bucket = peer.buckets.get(definition);
+		if (bucket === undefined) {
+			bucket = { tokens: capacity, at: now, reported: false };
+			peer.buckets.set(definition, bucket);
+		} else {
+			bucket.tokens = math.min(capacity, bucket.tokens + (now - bucket.at) * rate);
+			bucket.at = now;
+		}
+		if (bucket.tokens >= 1) {
+			bucket.tokens -= 1;
+			return true;
+		}
+		this.limitedCounts.set(definition, (this.limitedCounts.get(definition) ?? 0) + 1);
+		if (!bucket.reported) {
+			bucket.reported = true;
+			runtimeDiagnostic(
+				"warning",
+				`Crucible dropped ${definition.name} from ${peer.player!.Name}: over its rate of ${rate} per second`,
+			);
+		}
+		return false;
+	}
+
 	private receive(player: Player, count: number, packet?: unknown, sidecar?: unknown) {
 		const [ok, err] = pcall(() => this.dispatch(player, count, packet, sidecar));
 		if (!ok) runtimeDiagnostic("error", `Crucible network receive failed: ${tostring(err)}`);
@@ -192,9 +228,19 @@ export class ServerSession extends Session {
 		const event = header.opcode === Opcode.Event;
 		if (definition.kind !== (event ? "to-server" : "ask-server"))
 			return this.reject(peer, definition, `${definition.name} sent as the wrong kind of packet`);
+		const nonce = event ? 0 : header.nonce;
+		if (!event && nonce <= peer.lastRequestNonce)
+			return this.reject(peer, definition, `${definition.name} with a nonce already used`);
+		const refuse = (reason: ErrorReason) =>
+			this.fire(peer, controlPacket(Opcode.Error, [header.index, nonce], reason));
+		if (!this.admit(peer, definition)) {
+			if (event) return;
+			peer.lastRequestNonce = nonce;
+			return refuse(ErrorReason.Limited);
+		}
 		const [opened, reader] = pcall(openBody, packet as buffer, sidecar as Record<string, Instance>, header);
 		if (!opened) return this.reject(peer, definition, definition.name, failureReason(reader));
-		if (header.opcode === Opcode.Event) {
+		if (event) {
 			const [decoded, value] = pcall(decodeBody, definition.input, "payload", reader);
 			if (!decoded) {
 				if (!missingInstance(value)) this.reject(peer, definition, definition.name, failureReason(value));
@@ -205,12 +251,7 @@ export class ServerSession extends Session {
 			if (peer.counted >= L.MAX_ACTIVE_HANDLERS) return this.fail(peer, FailReason.Overloaded);
 			return this.start(peer, receiver, [player, value]);
 		}
-		const nonce = header.nonce;
-		if (nonce <= peer.lastRequestNonce)
-			return this.reject(peer, definition, `${definition.name} with a nonce already used`);
 		peer.lastRequestNonce = nonce;
-		const refuse = (reason: ErrorReason) =>
-			this.fire(peer, controlPacket(Opcode.Error, [header.index, nonce], reason));
 		const [decoded, value] = pcall(decodeBody, definition.input, "request", reader);
 		if (!decoded) {
 			if (!missingInstance(value)) this.reject(peer, definition, definition.name, failureReason(value));

@@ -103,3 +103,61 @@ find = '''
 '''
 replace = '''
 '''
+
+[[mutant]]
+name = "limit-ignored"
+why = "The server lets a request through although the player's bucket is empty."
+breaks = "Admitted"
+find = '''
+       ELSE IF tokens = 0 THEN
+'''
+replace = '''
+       ELSE IF FALSE THEN
+'''
+
+[[mutant]]
+name = "limit-spends-nothing"
+why = "A request the bucket lets through takes no request out of it, so the bucket never empties."
+breaks = "Admitted"
+find = '''
+          /\ tokens' = tokens - 1
+'''
+replace = '''
+          /\ tokens' = tokens
+'''
+
+[[mutant]]
+name = "refill-past-burst"
+why = "Time refills the bucket past what it holds, so a long pause lets a burst through."
+breaks = "Spent"
+find = '''
+    /\ tokens < Burst
+    /\ tokens' = tokens + 1
+'''
+replace = '''
+    /\ tokens' = tokens + 1
+'''
+
+[[mutant]]
+name = "limited-still-starts"
+why = "The server answers limited and also starts the handler."
+breaks = "LimitedNeverRuns"
+find = '''
+          /\ UNCHANGED <<speer, handler, counted, rate>>
+'''
+replace = '''
+          /\ handler' = [handler EXCEPT ![p.n] = "running"]
+          /\ counted' = counted + 1
+          /\ UNCHANGED <<speer, rate>>
+'''
+
+[[mutant]]
+name = "first-request-past-burst"
+why = "The bucket a player's first request creates holds more than its burst, as one that starts at its rate would."
+breaks = "Admitted"
+find = '''
+          /\ tokens' = tokens - 1
+'''
+replace = '''
+          /\ tokens' = IF admitted = 0 THEN Burst ELSE tokens - 1
+'''

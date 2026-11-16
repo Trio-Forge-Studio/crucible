@@ -29,11 +29,23 @@ pub struct Declaration {
     pub tail: Tail,
 }
 
+/// A message's per-player allowance: `rate` requests a second, held up to `burst`, or the runtime's default capacity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Allowance {
+    pub rate: f64,
+    pub burst: Option<f64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tail {
     None,
-    /// An ask's timeout in seconds, or `None` for the runtime's default.
-    Timeout(Option<f64>),
+    /// A `toServer`'s per-player allowance, or `None` for no limit.
+    Rate(Option<Allowance>),
+    /// An ask's timeout in seconds, or `None` for the runtime's default, and its allowance as `Rate` has it.
+    Ask {
+        timeout: Option<f64>,
+        allowance: Option<Allowance>,
+    },
     /// The paths of a profile store's `serverOnly` fields, each from the value's root.
     ServerOnly(Vec<Vec<Box<str>>>),
 }

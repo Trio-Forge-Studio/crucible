@@ -1,5 +1,5 @@
 import type { BootOptions } from "../index";
-import type { PayloadArgs, ToClient } from "../network";
+import type { AskServer, PayloadArgs, ToClient, ToServer } from "../network";
 import { boot as bootSide } from "../internal/boot";
 import { installConfigRuntime } from "../internal/configs/runtime";
 import { networkPort } from "../internal/network/port";
@@ -70,5 +70,10 @@ export namespace Network {
 	/** Encodes once and delivers the same packet to every player in the game now. */
 	export function broadcast<P>(message: ToClient<P>, ...payload: PayloadArgs<NoInfer<P>>): void {
 		active().broadcast(message, (payload as unknown[])[0]);
+	}
+
+	/** The requests of a rated message the server dropped or refused for their rate since boot, from every player. */
+	export function limited(message: ToServer<any> | AskServer<any, any>): number {
+		return active().limited(message);
 	}
 }

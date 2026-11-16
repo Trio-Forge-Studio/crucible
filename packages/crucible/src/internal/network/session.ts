@@ -80,6 +80,13 @@ export interface Cleanup {
 }
 
 /** @internal */
+export interface Bucket {
+	tokens: number;
+	at: number;
+	reported: boolean;
+}
+
+/** @internal */
 export interface Peer {
 	readonly player?: Player;
 	state: PeerState;
@@ -91,6 +98,7 @@ export interface Peer {
 	readonly cleanups: Cleanup[];
 	readonly rejected: Set<Definition | "envelope">;
 	readonly failedClaims: Set<Claim>;
+	readonly buckets: Map<Definition, Bucket>;
 }
 
 /** @internal */
@@ -106,6 +114,7 @@ export function newPeer(player?: Player): Peer {
 		cleanups: [],
 		rejected: new Set(),
 		failedClaims: new Set(),
+		buckets: new Map(),
 	};
 }
 
@@ -285,6 +294,7 @@ export abstract class Session implements NetworkLifecycle {
 		peer.running.clear();
 		peer.rejected.clear();
 		peer.failedClaims.clear();
+		peer.buckets.clear();
 		const cleanups = [...peer.cleanups];
 		peer.cleanups.clear();
 		for (let i = cleanups.size() - 1; i >= 0; i--) this.deferCleanup(peer, cleanups[i]);

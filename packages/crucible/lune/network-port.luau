@@ -1,4 +1,4 @@
-return function()
+return function(realm)
 	local port = {
 		installed = false,
 		created = false,
@@ -66,12 +66,24 @@ return function()
 		failing("fireServer")
 		table.insert(port.fired, { packet = packet, sidecar = sidecar })
 	end
-	function port.delay(_seconds, _callback)
+	function port.delay(seconds, callback)
 		local timer = {}
 		port.timers[timer] = true
+		local thread = if realm
+			then realm.delay(seconds, function()
+				port.timers[timer] = nil
+				callback()
+			end)
+			else nil
 		return function()
 			port.timers[timer] = nil
+			if thread then
+				realm.cancel(thread)
+			end
 		end
+	end
+	function port.now()
+		return if realm then realm.clock() else 0
 	end
 	function port.resume(thread, ...)
 		assert(coroutine.resume(thread, ...))

@@ -17,6 +17,7 @@ export const enum ErrorReason {
 	HandlerError = 1,
 	Overloaded = 2,
 	Invalid = 3,
+	Limited = 4,
 }
 
 /** @internal */
