@@ -10,8 +10,9 @@ const SS = src + "internal/network/server-session.ts";
 const CS = src + "internal/network/client-session.ts";
 const K = src + "internal/network/catalog.ts";
 const SN = src + "internal/network/session.ts";
+const PORT = "packages/crucible/lune/network-port.luau";
 const EN = src + "emit/network.ts";
-const specs = ["network-rates", "network-asks", "network-peers"];
+const specs = ["network-rates", "network-asks", "network-peers", "lune-harness"];
 
 // [name, file, before, after]. Each breaks one part of the per-player rate, and a spec must fail for it.
 const mutants = [
@@ -106,6 +107,7 @@ const mutants = [
 	["toServer drops its burst", EN, "input: payload, rate, burst })", "input: payload, rate })"],
 	["askServer drops its rate", EN, "\t\ttimeout,\n\t\trate,\n", "\t\ttimeout,\n"],
 	["askServer drops its burst", EN, "\t\trate,\n\t\tburst,\n\t})", "\t\trate,\n\t})"],
+	["the harness clock never moves", PORT, "return if realm then realm.clock() else 0", "return 0"],
 ];
 
 const missing = mutants.filter(([, file, before]) => {
@@ -164,7 +166,7 @@ try {
 		assert.equal(built.status, 0, `${name} must compile\n${built.stdout}${built.stderr}`);
 		const tested = specRun(scratch);
 		assert.equal(tested.status, 1, `${name} survived\n${tested.stdout}${tested.stderr}`);
-		const failure = (tested.stdout + tested.stderr).match(/FAIL (network[^\n]*)/);
+		const failure = (tested.stdout + tested.stderr).match(/FAIL ((?:network|lune-harness)[^\n]*)/);
 		assert.ok(failure, `${name} must fail a spec assertion`);
 		console.log(`KILLED ${name} | ${path.basename(file)} | first failure: ${failure[1]}`);
 		killed++;

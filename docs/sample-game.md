@@ -25,9 +25,11 @@ Each snippet below is a whole file from `examples/sample-game`, named above it. 
 import { toClient, toServer } from "@trioforge/crucible";
 import type { u8 } from "@trioforge/crucible";
 
-export const Collect = toServer<{ readonly size: u8 }>("Coins.Collect");
+export const Collect = toServer<{ readonly size: u8 }>("Coins.Collect", { rate: 10 });
 export const Collected = toClient<{ readonly gained: number }>("Coins.Collected");
 ```
+
+The server runs `Coins.Collect` at most 10 times a second for each player, as `npx crucible docs networking` describes.
 
 `src/shared/state.ts`
 

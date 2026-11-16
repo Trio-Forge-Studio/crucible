@@ -137,7 +137,7 @@ assert(profile.published[player] ~= nil)
 
 `engine.new()` returns an engine with `port` and `loggingPort`. It supports `instance`, `addTag`, `removeTag`, `setAttribute`, `setInWorld`, `move`, `destroy`, `clone`, `flush`, `frame`, `cycle` and `logged`. Signals queue until `flush()`. `frame(engine.FrameEvent.Heartbeat, dt)` and `cycle(dt, renders)` drive frame callbacks. `logs` and `gameLogs` capture output.
 
-`networkPort()` returns a port that records `fired`, `kicked`, `listeners` and `timers`. `failNext` names the next operation to throw, one of `"create"`, `"publish"`, `"discover"`, `"fireClient"` or `"fireServer"`. The failure is consumed once, before recording a send. It supplies an empty-game discovery catalog; games that exercise declared messages provide a network double implementing the catalog and transport they need.
+`networkPort(realm?)` returns a port that records `fired`, `kicked`, `listeners` and `timers`. Without a realm, its clock stays at 0 and its delays never fire. Pass a `Backend` realm and the port reads `realm.clock()` and runs its delays through `realm.delay`, so `backend:advance(seconds)` refills a message's `rate`, times out asks and ends handler lifetimes. Once the server boots, `listeners.added(player)` adds a player and `receive(player, packet, sidecar)` delivers that player's packet. `failNext` names the next operation to throw, one of `"create"`, `"publish"`, `"discover"`, `"fireClient"` or `"fireServer"`. The failure is consumed once, before recording a send. It supplies an empty-game discovery catalog; games that exercise declared messages provide a network double implementing the catalog and transport they need.
 
 ## Replace copied BAFM helpers
 

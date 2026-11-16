@@ -74,14 +74,25 @@ A request over the rate never reaches its callback:
 
 A rate never kicks the player. The first request over the rate for each player and message is reported as a warning, such as `Crucible dropped Cannon.Tap from Ann: over its rate of 8 per second`. `Network.limited(message)` on the server returns how many requests of a message the server dropped or refused for their rate since boot, from every player.
 
+A message is declared in a shared module:
+
 ```ts
+// src/shared/messages.ts
 import { toServer } from "@trioforge/crucible";
+import type { u8 } from "@trioforge/crucible";
+
+export const Collect = toServer<{ readonly size: u8 }>("Coins.Collect", { rate: 10 });
+```
+
+The server reads its count:
+
+```ts
+// src/server/pickups.ts
 import { Network } from "@trioforge/crucible/server";
+import { Collect } from "../shared/messages";
 
-const Tap = toServer<undefined>("Cannon.Tap", { rate: 8 });
-
-export function reportTaps() {
-	print(`dropped ${Network.limited(Tap)} taps over their rate`);
+export function reportPickups() {
+	print(`dropped ${Network.limited(Collect)} pickups over their rate`);
 }
 ```
 
