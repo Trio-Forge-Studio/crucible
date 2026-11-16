@@ -63,7 +63,7 @@ export const Spin = toServer<undefined>("Wheel.Spin", { rate: 5, burst: 1 });
 export const Rebirth = askServer<undefined, boolean>("Cannon.Rebirth", { rate: 1, timeout: 5 });
 ```
 
-Each player has an allowance for each rated message. It holds `burst` requests and refills at the rate. Without a `burst`, it holds one second of requests, and at least one. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. Every request counts, including one that does not decode or whose sidecar is malformed.
+Each player has an allowance for each rated message. It holds `burst` requests and refills at the rate. Without a `burst`, it holds one second of requests, and at least one. A player who sends `Cannon.Tap` 10 times at once runs the callback 8 times, and after that 8 times a second. A rate below 1, such as 0.5, allows one request and then one every 2 seconds. A player's allowance starts full and is dropped when the player leaves. A request counts once the server has read its message and checked its request number, even when its body does not decode or its sidecar is malformed. A packet too large to read, or an ask that reuses a request number, is dropped before that and spends nothing.
 
 `burst: 1` spaces requests evenly. `Wheel.Spin` runs once, and a second spin is refused until 0.2 seconds have passed, so two spins sent in the same frame run once. Strict spacing is sensitive to network jitter. Two spins a player sends 0.2 seconds apart can arrive closer together, and the second is refused. Leave `burst` out, or raise it, unless the game must refuse a request sent right after another.
 
@@ -96,7 +96,7 @@ export function reportPickups() {
 }
 ```
 
-A rate is a number literal greater than 0 and at most 1,000. A burst is an integer literal from 1 to 1,000, and needs a rate beside it. The compiler rejects any other value with CRU040. A message without a rate has no limit. Keep game rules, such as a cooldown that depends on a tool's stats, in the callback.
+A rate is a number literal greater than 0 and at most 1,000. A burst is an integer literal from 1 to 1,000, and needs a rate beside it. The compiler rejects any other number with CRU040. A value that is not a number, such as `NaN` or `Infinity`, is a type error, and an options object it cannot read, such as a spread or a repeated key, is CRU017. A message without a rate has no limit. Keep game rules, such as a cooldown that depends on a tool's stats, in the callback.
 
 ## Receive messages
 
