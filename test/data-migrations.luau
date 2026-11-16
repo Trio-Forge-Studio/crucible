@@ -200,6 +200,38 @@ return {
 			spec.eq(#DM.logged(a, diagnostic(path, reason)), 1, mode)
 		end
 	end,
+	["rule 75 a refusal the patch walk finds inside an array names its zero-based position"] = function()
+		for _, mode in { "marker", "table-key" } do
+			local _, a, _, handle = lastStep(function(api)
+				if mode == "marker" then
+					return { list = { 1, api.migrationDelete } }
+				end
+				return { list = { { [{}] = 1 } } }
+			end)
+			spec.eq(handle.value, false, `{mode} refused`)
+			local expected = if mode == "marker"
+				then diagnostic(".list[1]", "a table with a metatable")
+				else diagnostic(".list[0]", "a table key")
+			spec.eq(#DM.logged(a, expected), 1, mode)
+		end
+		local backend, a = D2.world(1)
+		a.store = a.profile(STORE, { coins = 0 }, {
+			migrations = {
+				function()
+					local list = { 1 }
+					list[2] = list
+					return { added = list }
+				end,
+				function()
+					return {}
+				end,
+			},
+		})
+		D2.seed(backend, nil, { payload = { coins = 1 } })
+		local _, handle = DM.load(backend, a)
+		spec.eq(handle.value, false, "earlier cycle refused")
+		spec.eq(#DM.logged(a, diagnostic(".added[1]", "a cycle")), 1, "earlier cycle path")
+	end,
 	["rule 75 a final cycle containing operations still reaches admission"] = function()
 		local _, a, _, handle = lastStep(function(api)
 			local cycle = { gone = api.migrationDelete }
