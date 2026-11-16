@@ -59,7 +59,7 @@ local function dataPort(self, realm)
 	local function resume(thread, ...)
 		backend:resume(thread, ...)
 	end
-	return {
+	local port = {
 		update = function(store, key, transform)
 			return backend:call(state, "update", store, key, transform)
 		end,
@@ -148,6 +148,9 @@ local function dataPort(self, realm)
 			return self.marketplace
 		end,
 	}
+	-- A spec may wrap the port's functions, which the engine reads on each call.
+	self.dataPort = port
+	return port
 end
 
 -- options are the sync world's: declare(realm) returns the declarations both realms evaluate, serve(server, d, world)

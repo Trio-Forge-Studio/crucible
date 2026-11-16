@@ -58,6 +58,7 @@ export type {
 	Json,
 	JsonRecord,
 	Migration,
+	VersionedRecord,
 } from "./data";
 
 export { migrationDelete, migrationReplace } from "./migrations";

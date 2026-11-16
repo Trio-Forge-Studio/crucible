@@ -127,11 +127,27 @@ assert(pending.done and pending.value == true)
 assert(profile.published[player] ~= nil)
 ```
 
-`profileFixture(realm, compiledStore, options?)` uses the compiled store's sealed defaults, persistence schema and migrations, including server-only fields. It returns a player-facing fixture with `published[player]` snapshots and a `reasons` list. Optional `onLoad(player, value, reason)` and `onRelease(player, value, reason)` callbacks transform values under the runtime's normal claim rules. `load(player, reason)`, `write(player, change)`, `save(player, timeout?)`, `release(player, reason?)`, `writable(player)`, `leave(player)`, `handoff(player)`, `resume(player)` and `await(player)` run through the production engine. `players()` lists writable players. `state(player)` returns `"absent"`, `"loading"`, `"active"`, `"sealed"` or `"ended"`. Release defaults to `"leave"`. Yielding methods run through `realm.run`, whose result has `done` and `value`.
+`profileFixture(realm, compiledStore, options?)` uses the compiled store's sealed defaults, persistence schema and migrations, including server-only fields. It returns a player-facing fixture with `published[player]` snapshots and a `reasons` list. Optional `onLoad(player, value, reason)` and `onRelease(player, value, reason)` callbacks transform values under the runtime's normal claim rules, and an optional `importLegacy(player, stored)` runs as the store's legacy import. `load(player, reason)`, `write(player, change)`, `save(player, timeout?)`, `release(player, reason?)`, `writable(player)`, `leave(player)`, `handoff(player)`, `resume(player)` and `await(player)` run through the production engine. `players()` lists writable players. `state(player)` returns `"absent"`, `"loading"`, `"importing"`, `"active"`, `"sealed"` or `"ended"`. Release defaults to `"leave"`. Yielding methods run through `realm.run`, whose result has `done` and `value`.
 
-`Backend.new()` creates committed storage and virtual time. `backend:realm({ id?, mono?, wall?, latency?, seed? })` creates an independent server realm. `realm.join(userId)`, `leave(player)`, `crash()` and `suspended` control presence and execution. `realm.clock()`, `wall()`, `spawn`, `wait`, `delay` and `cancel` form its fake clock and scheduler. `backend:advance(seconds)` runs due events and reports coroutine failures. `seed(store, key, value, userIds?, metadata?)`, `envelope(store, key)` and `stored(store, key)` seed or inspect copied committed values. `callsTo(filter)` lists calls matching fields such as `server`, `kind`, `store` and `key`.
+`Backend.new()` creates committed storage and virtual time. `backend:realm({ id?, mono?, wall?, latency?, seed? })` creates an independent server realm. `realm.join(userId)`, `leave(player)`, `crash()` and `suspended` control presence and execution. `realm.port` is the realm's data port: pass it to `loadGame` as `dataPort`, and its `players.onAdded` and `onRemoving` listeners hear `join` and `leave`, so a booted game loads and releases profiles the way it does on Roblox. `realm.clock()`, `wall()`, `spawn`, `wait`, `delay` and `cancel` form its fake clock and scheduler. `backend:advance(seconds)` runs due events and reports coroutine failures. `seed(store, key, value, userIds?, metadata?)`, `envelope(store, key)` and `stored(store, key)` seed or inspect copied committed values. `callsTo(filter)` lists calls matching fields such as `server`, `kind`, `store` and `key`.
 
 `backend:fail(kind, filter?, times?, options?)` injects `throttle`, `transient`, `committed`, `conflict`, `late`, `stall` or `reject` failures. Options include `seconds`, `code` and `after`. `gate(point, filter?)` parks future calls at `transform`, `commit`, `committed` or `response`; call the returned `release()` to continue. A crashed realm never runs again, but an already-sent write can still commit.
+
+This boots a compiled game on a realm, so its Subsystems' claims and legacy import run against the Backend's DataStore. The engine port reads the realm's clock, so `backend:advance` moves the profile's deadlines too:
+
+```luau
+local engine = harness.engine.new()
+engine.port.clock = realm.clock
+engine.port.wait = realm.wait
+engine.port.spawn = function(callback)
+	realm.spawn(callback)
+end
+local graph = harness.loadGame({ place = "build/game.rbxl", engine = engine, dataPort = realm.port })
+graph.import(graph.place:GetService("ServerScriptService").TS.systems.legacy)
+graph.import(graph.crucible.server).boot({ load = {} })
+local player = realm.join(4120)
+backend:advance(2)
+```
 
 ## Use the engine and network doubles
 

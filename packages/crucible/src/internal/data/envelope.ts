@@ -51,6 +51,8 @@ export interface Envelope {
 	readonly lease?: Lease;
 	readonly commit?: CommitMarker;
 	readonly receipts: readonly string[];
+	/** The legacy import ran to its end; it never runs again for this key. */
+	readonly imported?: true;
 	readonly inbox: readonly InboxItem[];
 	readonly quarantine: readonly QuarantinedItem[];
 	readonly seen: readonly string[];
@@ -155,6 +157,7 @@ function readEnvelope(raw: unknown, kind: EnvelopeKind): Envelope {
 		lease,
 		commit,
 		receipts: ids(t.receipts, "receipts", MAX_PURCHASE_IDS, PURCHASE_ID_MAX_BYTES),
+		imported: t.imported === undefined ? undefined : t.imported === true ? true : fail("bad imported"),
 		inbox: list(t.inbox, "inbox", INBOX_MAX_MESSAGES).map((raw) => item(raw, "inbox")),
 		quarantine: list(t.quarantine, "quarantine", QUARANTINE_MAX_MESSAGES).map((raw) => {
 			const reason = (raw as { reason?: unknown }).reason;

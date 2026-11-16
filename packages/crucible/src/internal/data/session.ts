@@ -15,10 +15,12 @@ export const NONE = -1;
 /**
  * @internal
  *   Loading --acquired, onLoad--> Active --leave / handoff / final phase / authority lost--> Sealed --release--> Ended
- *   Loading --failed, left or closed: abandon only--> Ended
+ *   Loading --acquired without the import's mark--> Importing --imported, onLoad--> Active
+ *   Loading or Importing --failed, left, closed or past the safe bound: abandon only--> Ended
  */
 export const enum Phase {
 	Loading,
+	Importing,
 	Active,
 	Sealed,
 	Ended,
@@ -31,12 +33,14 @@ export type SealReason = "leave" | "handoff" | "shutdown" | "authority" | "fence
 export type Released = "committed" | "fenced" | "given up";
 
 /**
- * @internal A session's authority over its player's profile, which specs/profile models. A loading session may be
- * abandoned, and its load then ends it. A sealed session has stopped writing; its release starts at once, except while
- * a handoff or a release runs its onRelease claims. An ended session either never loaded or holds its release's outcome.
+ * @internal A session's authority over its player's profile, which specs/profile models. A loading or importing
+ * session may be abandoned, and its load then ends it. A sealed session has stopped writing; its release starts at once,
+ * except while a handoff or a release runs its onRelease claims. An ended session either never loaded or holds its
+ * release's outcome.
  */
 export type Authority =
 	| { readonly phase: Phase.Loading; readonly abandoned: boolean }
+	| { readonly phase: Phase.Importing; readonly abandoned: boolean }
 	| { readonly phase: Phase.Active }
 	| { readonly phase: Phase.Sealed; readonly by: SealReason; readonly releasing: boolean }
 	| { readonly phase: Phase.Ended; readonly by?: undefined; readonly released?: undefined }
@@ -53,22 +57,37 @@ export type In<P extends Phase> = Extract<Authority, { readonly phase: P }>;
 /** @internal */
 export const LOADING: In<Phase.Loading> = { phase: Phase.Loading, abandoned: false };
 const ABANDONED: In<Phase.Loading> = { phase: Phase.Loading, abandoned: true };
+const IMPORTING: In<Phase.Importing> = { phase: Phase.Importing, abandoned: false };
+const ABANDONED_IMPORT: In<Phase.Importing> = { phase: Phase.Importing, abandoned: true };
 const ACTIVE: In<Phase.Active> = { phase: Phase.Active };
 const NEVER_LOADED: In<Phase.Ended> = { phase: Phase.Ended };
 
+/** @internal A load before it is writable: acquiring its lease, or running the legacy import. */
+export type Unloaded = In<Phase.Loading> | In<Phase.Importing>;
+
 /** @internal The load ends its session once it sees this (rule 20). */
-export function abandoned(_state: In<Phase.Loading>): In<Phase.Loading> {
-	return ABANDONED;
+export function abandoned(state: Unloaded): Unloaded {
+	return state.phase === Phase.Loading ? ABANDONED : ABANDONED_IMPORT;
 }
 
-/** @internal Rules 17 to 21: the acquired lease and onLoad's value make the session writable. */
-export function activated(_state: In<Phase.Loading>): In<Phase.Active> {
+/** @internal The lease is held and the record lacks the import's mark: the legacy import runs, unless abandoned. */
+export function importing(state: In<Phase.Loading>): In<Phase.Importing> {
+	return state.abandoned ? ABANDONED_IMPORT : IMPORTING;
+}
+
+/** @internal Rules 17 to 21: the acquired lease, the import's result and onLoad's value make the session writable. */
+export function activated(_state: Unloaded): In<Phase.Active> {
 	return ACTIVE;
 }
 
-/** @internal Rule 20: a load that stops or fails ends its session. */
-export function loadEnded(_state: In<Phase.Loading>): In<Phase.Ended> {
+/** @internal Rule 20: a load that stops or fails ends its session, and writes nothing an import read. */
+export function loadEnded(_state: Unloaded): In<Phase.Ended> {
 	return NEVER_LOADED;
+}
+
+/** @internal */
+export function unloaded(state: Authority): state is Unloaded {
+	return state.phase === Phase.Loading || state.phase === Phase.Importing;
 }
 
 /** @internal Rule 26: a seal stops every write at once. */
@@ -214,6 +233,8 @@ export class Session {
 	writing?: Write;
 	/** The highest revision carried by an operation that gave up after an ambiguous attempt. */
 	lost = NONE;
+	/** The legacy import ran to its end in this session or an earlier one; every snapshot carries it. */
+	imported = false;
 	want?: Priority;
 	renewAt = 0;
 
@@ -243,6 +264,7 @@ export class Session {
 			receipts: [...this.receipts],
 			acks,
 			marks,
+			imported: this.imported,
 		};
 	}
 

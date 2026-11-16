@@ -18,6 +18,15 @@ export interface JsonRecord {
 }
 
 /**
+ * A record as a profile store keeps it: its JSON, and how many of the store's migrations it has been through. Version 0
+ * runs every migration on it; the store's migration count runs none.
+ */
+export interface VersionedRecord {
+	readonly record: JsonRecord;
+	readonly version: number;
+}
+
+/**
  * One schema step. It gets a private copy of the stored record, unknown keys included, as plain JSON, and returns a
  * patch: an object merges into the stored object, any other value replaces the stored one, and an omitted key is kept.
  * Use migrationDelete to remove a key and migrationReplace to replace a value whole. Steps are append-only and pure.
@@ -296,6 +305,17 @@ export interface ProfileStore<T> {
 	 */
 	observe(listener: (event: ProfileEvent) => void): ProfileObserver;
 
+	/**
+	 * Server claim, a Subsystem field initializer, at most one per store: brings in a player's data from a store Crucible
+	 * did not write, once. It runs after the profile's lease is taken and before onLoad, and may yield. It gets the
+	 * stored record at its stored version, before migrations, or undefined for a new player, and returns the record to
+	 * start from, or undefined to keep the stored one. Its result goes through the store's migrations and admission.
+	 * Once a save holds it, it never runs again for that player; a load that fails or ends first runs it again next
+	 * time.
+	 */
+	importLegacy(
+		read: (player: Player, stored: VersionedRecord | undefined) => VersionedRecord | undefined,
+	): ProfileClaim;
 	/** Server claim, a Subsystem field initializer: changes a profile as it loads, before anything reads it. */
 	onLoad(transform: (player: Player, data: ProfileData<T>, reason: LoadReason) => ProfileData<T>): ProfileClaim;
 	/** Server claim: changes a profile as it releases. A claim that throws is skipped. */

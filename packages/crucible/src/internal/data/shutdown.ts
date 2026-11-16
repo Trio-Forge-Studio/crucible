@@ -7,7 +7,7 @@ import {
 	SHUTDOWN_FALLBACK_SECONDS,
 } from "./limits";
 import type { DataEngine } from "./profiles";
-import { abandoned, Phase } from "./session";
+import { abandoned, Phase, unloaded } from "./session";
 
 function pending(engine: DataEngine): boolean {
 	for (const runtime of engine.profiles)
@@ -32,7 +32,7 @@ export function shutdownData(engine: DataEngine, subsystem?: Subsystem) {
 	for (const runtime of engine.profiles)
 		for (const [, session] of runtime.sessions) {
 			const state = session.authority;
-			if (state.phase === Phase.Loading) session.authority = abandoned(state);
+			if (unloaded(state)) session.authority = abandoned(state);
 			else if (state.phase === Phase.Active && session.revision > session.confirmed) runtime.flush(session);
 		}
 	engine.wake();

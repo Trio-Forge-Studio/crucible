@@ -4,9 +4,10 @@
 (* session takes in the DataStore record, the local authority a session    *)
 (* holds while its safe bound lasts, the owned writes that renew the lease *)
 (* and carry the session's data, the release that ends it, and Roblox's    *)
-(* ProcessReceipt callbacks that grant developer products into it.         *)
-(* packages/crucible/src/internal/data/profiles.ts, session.ts, lease.ts   *)
-(* and receipts.ts implement it.                                           *)
+(* ProcessReceipt callbacks that grant developer products into it, and    *)
+(* the one-time legacy import that may run before a session turns         *)
+(* writable. packages/crucible/src/internal/data/profiles.ts, session.ts,  *)
+(* lease.ts and receipts.ts implement it.                                  *)
 (*                                                                         *)
 (* Every server reads one clock, `now` (A1). A request lands in the        *)
 (* DataStore atomically at some time after it was sent, and its answer can *)
@@ -39,33 +40,38 @@ VARIABLES
     acked,   \* purchases Roblox was answered PurchaseGranted for
     ran,     \* ghost: ran[p] counts the afterGrant effects run for p
     faults,  \* lost answers so far
-    next     \* the next unused token
+    next,    \* the next unused token
+    rerun,   \* ghost: an import started after the record held the import's mark
+    lost     \* ghost: the tokens whose import lost authority, by its safe bound or by the player leaving
 
-vars == <<now, at, here, store, sess, cur, req, cb, acked, ran, faults, next>>
+vars == <<now, at, here, store, sess, cur, req, cb, acked, ran, faults, next, rerun, lost>>
 
 Tokens == 1..MaxSessions
 First == CHOOSE s \in Servers : TRUE
 Second == CHOOSE s \in Servers : s # First
 Max(a, b) == IF a > b THEN a ELSE b
 
-\* The payload is what the grants did: payload[p] counts the grants of p it holds.
-NoGrants == [p \in Purchases |-> 0]
+\* The payload is what the grants and the import did: payload[p] counts the grants of p it holds, payload[Legacy]
+\* the times the legacy record was imported into it, and payload[Bad] an import result that failed admission.
+Legacy == "legacy"
+Bad == "bad"
+NoGrants == [k \in Purchases \cup {Legacy, Bad} |-> 0]
 
-\* A session's data as an owned write or a carrying acquire stores it.
-Snap(x) == [value |-> x.value, rev |-> x.rev, staged |-> x.staged]
+\* A session's data as an owned write or a carrying acquire stores it, with whether its import ran.
+Snap(x) == [value |-> x.value, rev |-> x.rev, staged |-> x.staged, imported |-> x.imported]
 
 Fresh(s) == [srv |-> s, phase |-> "loading", by |-> "none", releasing |-> FALSE,
              released |-> "none", epoch |-> 0, safe |-> 0, earliest |-> -1, value |-> NoGrants, rev |-> 0,
              staged |-> {}, durable |-> {}, effects |-> {}, writing |-> FALSE, op |-> 0,
-             want |-> FALSE, kept |-> FALSE, owes |-> FALSE]
+             want |-> FALSE, kept |-> FALSE, owes |-> FALSE, imported |-> FALSE]
 
 Unused == [Fresh(CHOOSE s \in Servers : TRUE) EXCEPT !.phase = "unused"]
 
 Absent == [epoch |-> 0, lease |-> 0, exp |-> 0, ctok |-> 0, crev |-> 0, cop |-> 0, payload |-> NoGrants,
-           receipts |-> {}]
+           receipts |-> {}, imported |-> FALSE]
 
-\* What an answer carries back: the envelope's epoch, payload and receipts.
-Env(r) == [epoch |-> r.epoch, payload |-> r.payload, receipts |-> r.receipts]
+\* What an answer carries back: the envelope's epoch, payload, receipts and the import's mark.
+Env(r) == [epoch |-> r.epoch, payload |-> r.payload, receipts |-> r.receipts, imported |-> r.imported]
 
 NoReq == [kind |-> "none", tok |-> 0, op |-> 0, rel |-> FALSE, sent |-> 0, first |-> -1, deadline |-> 0,
           epoch |-> 0, snap |-> Snap(Unused), sup |-> {}, st |-> "none", dec |-> "none", env |-> Env(Absent)]
@@ -93,30 +99,34 @@ LaneFree(s) == req[s].kind = "none"
 Settled(s) == \A u \in Tokens : sess[u].srv = s =>
                   ~sess[u].owes /\ ~(sess[u].phase = "sealed" /\ sess[u].released = "none")
 
-\* Each tick makes every active session's renewal due (armRenewal).
+\* Each tick makes every active session's renewal due (armRenewal). An import still running at its safe bound has
+\* lost authority.
 Tick ==
     /\ now < MaxTime
     /\ now' = now + 1
     /\ sess' = [t \in Tokens |-> IF sess[t].phase = "active" THEN [sess[t] EXCEPT !.want = TRUE] ELSE sess[t]]
-    /\ UNCHANGED <<at, here, store, cur, req, cb, acked, ran, faults, next>>
+    /\ lost' = lost \cup {t \in Tokens : sess[t].phase = "importing" /\ now' >= sess[t].safe}
+    /\ UNCHANGED <<at, here, store, cur, req, cb, acked, ran, faults, next, rerun>>
 
 \* The player teleports to the other server, once. The first server sees PlayerRemoving later.
 Move ==
     /\ at = First
     /\ at' = Second
     /\ here' = here \cup {Second}
-    /\ UNCHANGED <<now, store, sess, cur, req, cb, acked, ran, faults, next>>
+    /\ UNCHANGED <<now, store, sess, cur, req, cb, acked, ran, faults, next, rerun, lost>>
 
-\* PlayerRemoving: rule 43's release. A loading session is abandoned, and the wake ends its load at once; an
-\* active one seals.
+\* PlayerRemoving: rule 43's release. A loading or importing session is abandoned, and the wake ends its load at
+\* once; an active one seals.
 Leave(s) ==
+    LET importing == cur[s] # 0 /\ sess[cur[s]].phase = "importing" IN
     /\ s \in here
     /\ s # at
     /\ here' = here \ {s}
     /\ sess' = IF cur[s] = 0 THEN sess
-               ELSE IF sess[cur[s]].phase = "loading" THEN [sess EXCEPT ![cur[s]] = EndLoad(@)]
+               ELSE IF sess[cur[s]].phase \in {"loading", "importing"} THEN [sess EXCEPT ![cur[s]] = EndLoad(@)]
                ELSE [sess EXCEPT ![cur[s]] = Seal(@, "leave")]
-    /\ UNCHANGED <<now, at, store, cur, req, cb, acked, ran, faults, next>>
+    /\ lost' = IF importing THEN lost \cup {cur[s]} ELSE lost
+    /\ UNCHANGED <<now, at, store, cur, req, cb, acked, ran, faults, next, rerun>>
 
 \* A join or a resume loads a new session unless one is loading or active.
 StartLoad(s) ==
@@ -126,7 +136,7 @@ StartLoad(s) ==
     /\ sess' = [sess EXCEPT ![next] = Fresh(s)]
     /\ cur' = [cur EXCEPT ![s] = next]
     /\ next' = next + 1
-    /\ UNCHANGED <<now, at, here, store, req, cb, acked, ran, faults>>
+    /\ UNCHANGED <<now, at, here, store, req, cb, acked, ran, faults, rerun, lost>>
 
 \* This server's sealed sessions whose release settled, which an acquire may supersede (rule 29).
 Supersedes(s) == {[tok |-> u, epoch |-> sess[u].epoch, snap |-> Snap(sess[u])] :
@@ -140,7 +150,7 @@ SendAcquire(t) ==
     /\ Settled(s)
     /\ req' = [req EXCEPT ![s] = [NoReq EXCEPT !.kind = "acq", !.tok = t, !.sent = now, !.sup = Supersedes(s),
                                                !.st = "flight"]]
-    /\ UNCHANGED <<now, at, here, store, sess, cur, cb, acked, ran, faults, next>>
+    /\ UNCHANGED <<now, at, here, store, sess, cur, cb, acked, ran, faults, next, rerun, lost>>
 
 \* Rule 24: the lease is taken when absent, past expiry plus grace, or our own sealed session's.
 AcquireDecision(r) ==
@@ -156,7 +166,8 @@ Taken(r) ==
         base == [store EXCEPT !.epoch = @ + 1, !.lease = r.tok, !.exp = now + Lease]
     IN IF found # {} /\ store.epoch = x.epoch /\ (store.ctok # l \/ store.crev < x.snap.rev)
        THEN [base EXCEPT !.payload = x.snap.value, !.receipts = @ \cup x.snap.staged, !.ctok = l,
-                         !.crev = x.snap.rev, !.cop = IF store.ctok = l THEN store.cop ELSE 0]
+                         !.crev = x.snap.rev, !.cop = IF store.ctok = l THEN store.cop ELSE 0,
+                         !.imported = @ \/ x.snap.imported]
        ELSE base
 
 LandAcquire(s) ==
@@ -167,12 +178,14 @@ LandAcquire(s) ==
        /\ r.st = "flight"
        /\ store' = after
        /\ req' = [req EXCEPT ![s].st = "landed", ![s].dec = d, ![s].env = Env(after)]
-       /\ UNCHANGED <<now, at, here, sess, cur, cb, acked, ran, faults, next>>
+       /\ UNCHANGED <<now, at, here, sess, cur, cb, acked, ran, faults, next, rerun, lost>>
 
-\* Rules 17 to 21: a session becomes writable from the earliest send of a write that may have taken the lease.
+\* Rules 17 to 21: a session becomes writable from the earliest send of a write that may have taken the lease. A
+\* record without the import's mark sends it to the import first, with the same safe bound.
 Activate(x, env, safe) ==
-    [x EXCEPT !.phase = "active", !.epoch = env.epoch, !.safe = safe, !.earliest = -1, !.value = env.payload,
-              !.rev = 0, !.staged = env.receipts, !.durable = env.receipts]
+    [x EXCEPT !.phase = IF env.imported THEN "active" ELSE "importing", !.epoch = env.epoch, !.safe = safe,
+              !.earliest = -1, !.value = env.payload, !.rev = 0, !.staged = env.receipts, !.durable = env.receipts,
+              !.imported = env.imported]
 
 ReplyAcquire(s) ==
     LET r == req[s]
@@ -190,7 +203,24 @@ ReplyAcquire(s) ==
                     IF u = t THEN Activate(x, r.env, earliest + Local)
                     ELSE IF sess[u].srv = s /\ sess[u].released # "none" THEN [sess[u] EXCEPT !.kept = FALSE]
                     ELSE sess[u]]
-       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, faults, next>>
+       /\ rerun' = (rerun \/ (x.phase = "loading" /\ sess'[t].phase = "importing" /\ store.imported))
+       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, faults, next, lost>>
+
+\* The legacy import returns: nothing to import, a record that admission takes, or one it refuses. Past its safe
+\* bound the load ends instead, and a refused record fails the load. Otherwise the session turns writable with the
+\* mark and its first write due, at revision 1.
+Import(t) ==
+    LET x == sess[t] IN
+    /\ x.phase = "importing"
+    /\ \E res \in {"none", "good", "bad"} :
+          sess' = [sess EXCEPT ![t] =
+              IF now >= x.safe THEN EndLoad(x)
+              ELSE IF res = "bad" THEN EndLoad(x)
+              ELSE [x EXCEPT !.phase = "active", !.imported = TRUE, !.rev = 1, !.want = TRUE,
+                             !.value = CASE res = "good" -> [@ EXCEPT ![Legacy] = @ + 1]
+                                         [] res = "bad" -> [@ EXCEPT ![Bad] = 1]
+                                         [] OTHER -> @]]
+    /\ UNCHANGED <<now, at, here, store, cur, req, cb, acked, ran, faults, next, rerun, lost>>
 
 \* An acquire's answer is lost, whether or not it landed. The load sends another with the same token.
 FaultAcquire(s) ==
@@ -201,7 +231,7 @@ FaultAcquire(s) ==
     /\ req' = [req EXCEPT ![s] = NoReq]
     /\ sess' = IF sess[r.tok].phase = "loading" /\ sess[r.tok].earliest = -1
                THEN [sess EXCEPT ![r.tok].earliest = r.sent] ELSE sess
-    /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, next>>
+    /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, next, rerun, lost>>
 
 \* Rule 20: removes exactly the abandoned load's own lease.
 Abandon(t) ==
@@ -210,7 +240,7 @@ Abandon(t) ==
     /\ LaneFree(s)
     /\ sess' = [sess EXCEPT ![t].owes = FALSE]
     /\ store' = IF store.lease = t THEN [store EXCEPT !.lease = 0, !.exp = 0] ELSE store
-    /\ UNCHANGED <<now, at, here, cur, req, cb, acked, ran, faults, next>>
+    /\ UNCHANGED <<now, at, here, cur, req, cb, acked, ran, faults, next, rerun, lost>>
 
 \* Rules 28, 31, 32: one owned write at a time, sent when a renewal or a save is wanted; a sealed session's is
 \* its release.
@@ -230,7 +260,7 @@ Pump(t) ==
           ELSE /\ rel
                /\ req' = req
                /\ sess' = [sess EXCEPT ![t] = Released(@, "given up")]
-       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, faults, next>>
+       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, faults, next, rerun, lost>>
 
 \* Rules 27, 28: fenced on token and epoch, identified by op.
 OwnedDecision(r) ==
@@ -245,6 +275,7 @@ Written(r) ==
         newer == r.snap.rev > revision
     IN [store EXCEPT !.payload = IF newer THEN r.snap.value ELSE @,
                      !.receipts = IF newer THEN @ \cup r.snap.staged ELSE @,
+                     !.imported = IF newer THEN @ \/ r.snap.imported ELSE @,
                      !.lease = IF r.rel THEN 0 ELSE @,
                      !.exp = IF r.rel THEN 0 ELSE now + Lease,
                      !.ctok = r.tok, !.crev = Max(r.snap.rev, revision), !.cop = r.op]
@@ -257,7 +288,7 @@ LandOwned(s) ==
        /\ r.st = "flight"
        /\ store' = after
        /\ req' = [req EXCEPT ![s].st = "landed", ![s].dec = d, ![s].env = Env(after)]
-       /\ UNCHANGED <<now, at, here, sess, cur, cb, acked, ran, faults, next>>
+       /\ UNCHANGED <<now, at, here, sess, cur, cb, acked, ran, faults, next, rerun, lost>>
 
 \* Rule 28: a confirmed write is exactly what the stored envelope holds, for this token only. It extends the
 \* safe bound from the earliest send of the operation that may have stored it.
@@ -281,7 +312,7 @@ ReplyOwned(s) ==
             IF r.rel THEN Released(y, IF committed THEN "committed" ELSE "fenced")
             ELSE IF committed THEN y
             ELSE Seal(y, IF r.dec = "fenced" THEN "fenced" ELSE "authority")]
-       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, faults, next>>
+       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, faults, next, rerun, lost>>
 
 \* An owned write's answer is lost, whether or not it landed. The scheduler sends it again with the session's
 \* newest snapshot before its deadline, or gives it up: a release that gives up has not committed.
@@ -298,14 +329,14 @@ FaultOwned(s) ==
              /\ sess' = sess
           \/ /\ req' = [req EXCEPT ![s] = NoReq]
              /\ sess' = [sess EXCEPT ![t] = IF r.rel THEN Released(@, "given up") ELSE [@ EXCEPT !.writing = FALSE]]
-       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, next>>
+       /\ UNCHANGED <<now, at, here, store, cur, cb, acked, ran, next, rerun, lost>>
 
 \* armSeal: a passed safe bound seals the session and starts its release.
 SafeBound(t) ==
     /\ sess[t].phase = "active"
     /\ now >= sess[t].safe
     /\ sess' = [sess EXCEPT ![t] = Seal(@, "authority")]
-    /\ UNCHANGED <<now, at, here, store, cur, req, cb, acked, ran, faults, next>>
+    /\ UNCHANGED <<now, at, here, store, cur, req, cb, acked, ran, faults, next, rerun, lost>>
 
 \* Rule 61: PurchaseGranted runs the effects this session staged with its grant, once.
 Ack(t, p) ==
@@ -338,7 +369,7 @@ Call(s, p) ==
     /\ p \notin acked
     /\ cb[s][p].st = "idle"
     /\ Process(s, p)
-    /\ UNCHANGED <<now, at, here, store, cur, req, faults, next>>
+    /\ UNCHANGED <<now, at, here, store, cur, req, faults, next, rerun, lost>>
 
 \* Rule 63: a granting callback answers PurchaseGranted once its id is durable, and NotProcessedYet when its
 \* session ends or its wait times out.
@@ -351,7 +382,7 @@ Wait(s, p) ==
        \/ /\ p \notin sess[t].durable
           /\ cb' = [cb EXCEPT ![s][p] = NoCall]
           /\ UNCHANGED <<sess, acked, ran>>
-    /\ UNCHANGED <<now, at, here, store, cur, req, faults, next>>
+    /\ UNCHANGED <<now, at, here, store, cur, req, faults, next, rerun, lost>>
 
 Init ==
     /\ now = 0
@@ -366,6 +397,8 @@ Init ==
     /\ ran = [p \in Purchases |-> 0]
     /\ faults = 0
     /\ next = 1
+    /\ rerun = FALSE
+    /\ lost = {}
 
 Next ==
     \/ Tick
@@ -375,7 +408,7 @@ Next ==
           \/ LandAcquire(s) \/ ReplyAcquire(s) \/ FaultAcquire(s)
           \/ LandOwned(s) \/ ReplyOwned(s) \/ FaultOwned(s)
           \/ \E p \in Purchases : Call(s, p) \/ Wait(s, p)
-    \/ \E t \in Tokens : SendAcquire(t) \/ Abandon(t) \/ Pump(t) \/ SafeBound(t)
+    \/ \E t \in Tokens : SendAcquire(t) \/ Abandon(t) \/ Pump(t) \/ SafeBound(t) \/ Import(t)
 
 Spec == Init /\ [][Next]_vars
 
@@ -400,6 +433,16 @@ DurableStored == \A t \in Tokens : sess[t].phase \in {"active", "sealed"} => ses
 
 \* afterGrant effects run at most once per purchase, and only for one Roblox was told is granted.
 EffectsOnce == \A p \in Purchases : ran[p] <= 1 /\ (ran[p] = 1 => p \in acked)
+
+\* The legacy record is imported at most once, and no import starts once the record has held the import's mark.
+ImportOnce == ~rerun /\ store.payload[Legacy] <= 1 /\ \A t \in Tokens : sess[t].value[Legacy] <= 1
+
+\* A session whose import lost authority, by its safe bound or by the player leaving, never sends an owned write.
+NoWriteAfterLoss == \A s \in Servers : req[s].kind = "own" => req[s].tok \notin lost
+
+\* An import result that admission refuses never reaches a writable session or the record.
+AdmittedBeforeWritable ==
+    store.payload[Bad] = 0 /\ \A t \in Tokens : sess[t].phase \in {"active", "sealed"} => sess[t].value[Bad] = 0
 
 \* A session's data changes only while it is writable: a sealed or expired session stops writing.
 StopsWriting ==

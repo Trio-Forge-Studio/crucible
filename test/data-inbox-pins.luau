@@ -2,7 +2,7 @@ local spec = require("../packages/crucible/lune")
 local D2 = require("./lib/data-d2")
 
 local W = D2.WALL
-local LOADING, SEALED = 0, 2
+local LOADING, SEALED = 0, 3
 
 local function item(id: string, generation: number, attempts: number)
 	return D2.item(id, "none", { amount = 1 }, { generation = generation, attempts = attempts })

@@ -574,6 +574,7 @@ return {
 			publish = function() end,
 			delivered = function() end,
 			observe = function() end,
+			importer = function() end,
 		})
 		mode = "oversized"
 		local big = a.join(77)
@@ -748,6 +749,7 @@ return {
 			publish = function() end,
 			delivered = function() end,
 			observe = function() end,
+			importer = function() end,
 		})
 		for _, case in { { mode = "throw", user = USER }, { mode = "oversized", user = 88 } } do
 			mode = case.mode
