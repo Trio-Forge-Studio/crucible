@@ -1602,7 +1602,7 @@ const mutants = [
 		"import",
 		"guard",
 		D + "profiles.ts",
-		'if (!returned.ok) return { kind: "failed", reason: "threw" };',
+		'if (!returned.ok) return { kind: "failed", reason: `threw: ${tostring(returned.value)}` };',
 		"",
 		"legacy import: one that throws fails the load",
 	],

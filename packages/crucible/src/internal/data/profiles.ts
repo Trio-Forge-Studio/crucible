@@ -489,7 +489,7 @@ export class ProfileRuntime {
 		const returned = result.returned;
 		if (this.stopped(session)) return { kind: "stopped" };
 		if (returned === undefined || bootClock() >= session.safeUntil) return { kind: "expired" };
-		if (!returned.ok) return { kind: "failed", reason: "threw" };
+		if (!returned.ok) return { kind: "failed", reason: `threw: ${tostring(returned.value)}` };
 		if (returned.value === undefined) return { kind: "ok" };
 		const record = versioned(returned.value, this.schema.version);
 		return typeIs(record, "string") ? { kind: "failed", reason: record } : { kind: "ok", record };

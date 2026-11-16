@@ -241,7 +241,11 @@ return {
 		w:settle(2)
 		spec.eq(w:kicked(ann.player), LOAD_FAILED, "the player is kicked")
 		spec.eq(#w.events, 0, "a failed load reports nothing")
-		spec.eq(w:logged("legacy import threw; the load failed"), 1, "the failure is reported")
+		spec.eq(
+			w:logged("legacy import threw: legacy DataStore unavailable; the load failed"),
+			1,
+			"the failure is reported with its error"
+		)
 		local envelope = w:envelope(fixture.STORE, USER)
 		spec.eq(envelope.lease, nil, "the load removed its own lease")
 		spec.eq(envelope.payload, nil, "and wrote no record")
