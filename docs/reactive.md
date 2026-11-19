@@ -185,6 +185,7 @@ Ending an owner ends its child effects and scopes first, then runs its cleanups,
 | An `Instance` | `Destroy()` |
 | A `thread` | `task.cancel` |
 | An object with `destroy()` or `Destroy()` | That method, or `destroy()` when it has both |
+| An object with `Disconnect()` | `Disconnect()`, if it has neither destroy method |
 
 ```ts
 import { CrucibleBehaviour, own } from "@trioforge/crucible";
@@ -210,7 +211,7 @@ export class Thruster extends CrucibleBehaviour<"Thruster", BasePart> {
 }
 ```
 
-An owned value is a cleanup. It shares the owner, the newest-first order and the failure reporting of `onCleanup`. A failed release is reported with the source line of its function or method, or with the Instance's full name. Each call registers one release, so a value owned twice is released twice. The type `Ownable` lists what `own` takes. Anything else is a type error, and at runtime `own` throws `own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy() or Destroy()`.
+An owned value is a cleanup. It shares the owner, the newest-first order and the failure reporting of `onCleanup`. A failed release is reported with the source line of its function or method, or with the Instance's full name. Each call registers one release, so a value owned twice is released twice. The type `Ownable` lists what `own` takes. Anything else is a type error, and at runtime `own` throws `own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy(), Destroy() or Disconnect()`.
 
 Under an owner that has already ended, `effect` and `watch` create nothing and return a dispose that does nothing, `scope` returns one without running `setup`, `onCleanup` runs `release` at once, and `own` releases `value` at once.
 
@@ -329,7 +330,7 @@ onCleanup(5);
 export const attachment: Attachment = own(new Instance("Attachment"));
 // @ts-expect-error a number is not ownable
 own(5);
-// @ts-expect-error an object needs destroy() or Destroy()
+// @ts-expect-error an object needs destroy(), Destroy() or Disconnect()
 own({ close() {} });
 // @ts-expect-error own calls a function with no arguments
 own((dt: number) => print(dt));

@@ -300,8 +300,8 @@ const mutants = [
 		OWNERSHIP,
 		[
 			[
-				'		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;\n		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;',
-				'		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;\n		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;',
+				'		if (typeIs((value as ReleaseFields).destroy, "function")) return Release.DestroyMethod;\n		if (typeIs((value as ReleaseFields).Destroy, "function")) return Release.DestroyUpperMethod;',
+				'		if (typeIs((value as ReleaseFields).Destroy, "function")) return Release.DestroyUpperMethod;\n		if (typeIs((value as ReleaseFields).destroy, "function")) return Release.DestroyMethod;',
 			],
 		],
 	],
@@ -310,9 +310,21 @@ const mutants = [
 		"swap",
 		[28],
 		OWNERSHIP,
-		[["		else if (kind === Release.DestroyMethod)", "		else if (kind === Release.DestroyUpperMethod)"]],
+		[
+			[
+				"		else if (kind === Release.DestroyMethod) (value as Destroyable).destroy();\n		else if (kind === Release.DestroyUpperMethod) (value as UpperDestroyable).Destroy();",
+				"		else if (kind === Release.DestroyUpperMethod) (value as Destroyable).destroy();\n		else if (kind === Release.DestroyMethod) (value as UpperDestroyable).Destroy();",
+			],
+		],
 	],
 	["nil cleanup appended", "guard", [28], OWNERSHIP, [["	if (release === undefined) return;\n", ""]]],
+	[
+		"table Disconnect() never called",
+		"guard",
+		[28],
+		OWNERSHIP,
+		[["		else if (kind === Release.DisconnectMethod) (value as Disconnectable).Disconnect();\n", ""]],
+	],
 	[
 		"failure blamed on the next release",
 		"swap",

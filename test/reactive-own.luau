@@ -33,8 +33,19 @@ return {
 			table.insert(returned, r.api.own(part) == part)
 			table.insert(returned, r.api.own(thread) == thread)
 			r.api.own({ destroy = log("destroy") })
+			local signal = {
+				Disconnect = function(self)
+					log(self.label)()
+				end,
+				label = "Disconnect",
+			}
+			r.api.own(signal)
 			r.api.own({ Destroy = log("Destroy") })
-			r.api.own({ destroy = log("both: destroy"), Destroy = log("both: Destroy") })
+			r.api.own({
+				destroy = log("both: destroy"),
+				Destroy = log("both: Destroy"),
+				Disconnect = log("both: Disconnect"),
+			})
 		end)
 		spec.eq(typeof(returned[1]), "function", "own returns the function")
 		spec.eq(returned[2], true, "own returns the connection")
@@ -46,13 +57,13 @@ return {
 		dispose()
 		spec.list(
 			events,
-			{ "both: destroy", "Destroy", "destroy", "connection", "function" },
-			"newest first; an object with both methods goes through destroy()"
+			{ "both: destroy", "Destroy", "Disconnect", "destroy", "connection", "function" },
+			"newest first; destroy() takes precedence"
 		)
 		spec.eq(part.Parent, nil, "the Instance was destroyed")
 		spec.eq(coroutine.status(thread), "dead", "the thread was cancelled")
 		dispose()
-		spec.eq(#events, 5, "a second dispose releases nothing twice")
+		spec.eq(#events, 6, "a second dispose releases nothing twice")
 		spec.eq(r.logged("cleanup"), 0, "no failure reported")
 	end,
 	["rule 21 own in onEnable releases right after onDisable; what awake owns, after onDestroy"] = function()
@@ -132,6 +143,11 @@ return {
 		local log = logger(events)
 		r.root(function()
 			r.api.own(log("first"))
+			r.api.own({
+				Disconnect = function()
+					error("Disconnect failed")
+				end,
+			})
 			r.api.own(ownable.instance("Door", function()
 				error("parent locked")
 			end))
@@ -153,10 +169,11 @@ return {
 		spec.list(events, { "last", "first" }, "every other release ran")
 		spec.eq(r.logged("cleanup of Door (a root scope) failed: "), 1, "the Instance, named by describe")
 		spec.eq(r.logged("parent locked"), 1, "with its error")
-		spec.eq(r.logged("cleanup at "), 3, "code that failed is named where it was written")
+		spec.eq(r.logged("cleanup at "), 4, "code that failed is named where it was written")
 		spec.eq(r.logged("yielded"), 1, "the yielding destroy() was cancelled and reported")
 		spec.eq(r.logged("function failed"), 1, "the function's error")
 		spec.eq(r.logged("Destroy failed"), 1, "the Destroy() error")
+		spec.eq(r.logged("Disconnect failed"), 1, "the Disconnect() error")
 	end,
 	["rule 26 own inside an effect run releases before the next run, after the returned cleanup"] = function()
 		local r = world()

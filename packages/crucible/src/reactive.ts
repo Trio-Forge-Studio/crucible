@@ -41,7 +41,8 @@ export function onCleanup(release: () => void): void {
 
 /**
  * What `own` releases: a function, called with no arguments; a connection, disconnected; an Instance, destroyed; a
- * thread, cancelled with `task.cancel`; or an object, through its `destroy()` or else its `Destroy()`.
+ * thread, cancelled with `task.cancel`; or an object, through the first method it has among `destroy()`,
+ * `Destroy()` and `Disconnect()`.
  */
 export type Ownable =
 	| (() => void)
@@ -49,7 +50,8 @@ export type Ownable =
 	| Instance
 	| thread
 	| { destroy(): void }
-	| { Destroy(): void };
+	| { Destroy(): void }
+	| { Disconnect(): void };
 
 /**
  * Releases `value` once when the current owner ends, exactly as `onCleanup` would release a function that does it,

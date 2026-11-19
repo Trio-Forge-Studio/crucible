@@ -43,6 +43,8 @@ export const enum Release {
 	DestroyMethod,
 	/** A table's `Destroy()`. */
 	DestroyUpperMethod,
+	/** A table's `Disconnect()`. */
+	DisconnectMethod,
 	Disconnect,
 	DestroyInstance,
 	Cancel,
@@ -56,9 +58,14 @@ interface UpperDestroyable {
 	Destroy(): void;
 }
 
-interface DestroyFields {
+interface Disconnectable {
+	Disconnect(): void;
+}
+
+interface ReleaseFields {
 	readonly destroy?: unknown;
 	readonly Destroy?: unknown;
+	readonly Disconnect?: unknown;
 }
 
 /**
@@ -301,12 +308,10 @@ function releaseLabel(kind: Release, value: unknown): string {
 	if (kind === Release.Disconnect) return "of a connection";
 	if (kind === Release.DestroyInstance) return `of ${describe(value as Instance)}`;
 	if (kind === Release.Cancel) return "of a thread";
-	const code =
-		kind === Release.Call
-			? value
-			: kind === Release.DestroyMethod
-				? (value as DestroyFields).destroy
-				: (value as DestroyFields).Destroy;
+	let code = value;
+	if (kind === Release.DestroyMethod) code = (value as ReleaseFields).destroy;
+	else if (kind === Release.DestroyUpperMethod) code = (value as ReleaseFields).Destroy;
+	else if (kind === Release.DisconnectMethod) code = (value as ReleaseFields).Disconnect;
 	return typeIs(code, "function") ? `at ${originOf(code)}` : `of ${tostring(value)}`;
 }
 
@@ -368,7 +373,8 @@ function releaseBatch(batch: Batch): boolean {
 		openScope();
 		if (kind === Release.Call) (value as () => void)();
 		else if (kind === Release.DestroyMethod) (value as Destroyable).destroy();
-		else (value as UpperDestroyable).Destroy();
+		else if (kind === Release.DestroyUpperMethod) (value as UpperDestroyable).Destroy();
+		else if (kind === Release.DisconnectMethod) (value as Disconnectable).Disconnect();
 		batch.scoped = false;
 		if (closeScope()) return true;
 	}
@@ -629,7 +635,7 @@ export function registerCleanup(release: () => void) {
 }
 
 const NOT_OWNABLE =
-	"own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy() or Destroy()";
+	"own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy(), Destroy() or Disconnect()";
 
 function classify(value: unknown): Release {
 	const typeName = typeOf(value);
@@ -638,8 +644,9 @@ function classify(value: unknown): Release {
 	if (typeName === "function") return Release.Call;
 	if (typeName === "thread") return Release.Cancel;
 	if (typeName === "table") {
-		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;
-		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;
+		if (typeIs((value as ReleaseFields).destroy, "function")) return Release.DestroyMethod;
+		if (typeIs((value as ReleaseFields).Destroy, "function")) return Release.DestroyUpperMethod;
+		if (typeIs((value as ReleaseFields).Disconnect, "function")) return Release.DisconnectMethod;
 	}
 	error(`${NOT_OWNABLE}; got a ${typeName}`, 0);
 }
