@@ -28,7 +28,7 @@ export const enum Role {
 	Interval,
 	/** One Crucible effect. Its releases are its current run's, and end before the next run. */
 	Run,
-	/** `scope(setup)`: a child of its owner, or a root. */
+	/** `scope(setup)` or `lifetime()`: a child of its owner, or a root. */
 	Scope,
 }
 
@@ -43,6 +43,8 @@ export const enum Release {
 	DestroyMethod,
 	/** A table's `Destroy()`. */
 	DestroyUpperMethod,
+	/** A table's `Disconnect()`. */
+	DisconnectMethod,
 	Disconnect,
 	DestroyInstance,
 	Cancel,
@@ -56,9 +58,14 @@ interface UpperDestroyable {
 	Destroy(): void;
 }
 
-interface DestroyFields {
+interface Disconnectable {
+	Disconnect(): void;
+}
+
+interface ReleaseFields {
 	readonly destroy?: unknown;
 	readonly Destroy?: unknown;
+	readonly Disconnect?: unknown;
 }
 
 /**
@@ -182,13 +189,17 @@ function unlist(owner: Owner) {
 }
 
 /** A scope-like owner on a detached Charm effect scope, whose cleanup ends it. Listed on `parent` when given. */
-function scopeOwner(role: Role, parent: Owner | undefined, state: ObjectState | undefined): Owner {
-	const owner: Owner = { role, node: undefined!, state, ended: false };
+function initializeScope(owner: Owner, parent: Owner | undefined) {
 	owner.stop = effectScope(() => {
 		owner.node = getActiveSub()!;
 		return () => finish(owner);
 	}, true);
 	if (parent !== undefined) adopt(parent, owner);
+}
+
+function scopeOwner(role: Role, parent: Owner | undefined, state: ObjectState | undefined): Owner {
+	const owner: Owner = { role, node: undefined!, state, ended: false };
+	initializeScope(owner, parent);
 	return owner;
 }
 
@@ -301,12 +312,10 @@ function releaseLabel(kind: Release, value: unknown): string {
 	if (kind === Release.Disconnect) return "of a connection";
 	if (kind === Release.DestroyInstance) return `of ${describe(value as Instance)}`;
 	if (kind === Release.Cancel) return "of a thread";
-	const code =
-		kind === Release.Call
-			? value
-			: kind === Release.DestroyMethod
-				? (value as DestroyFields).destroy
-				: (value as DestroyFields).Destroy;
+	let code = value;
+	if (kind === Release.DestroyMethod) code = (value as ReleaseFields).destroy;
+	else if (kind === Release.DestroyUpperMethod) code = (value as ReleaseFields).Destroy;
+	else if (kind === Release.DisconnectMethod) code = (value as ReleaseFields).Disconnect;
 	return typeIs(code, "function") ? `at ${originOf(code)}` : `of ${tostring(value)}`;
 }
 
@@ -368,7 +377,8 @@ function releaseBatch(batch: Batch): boolean {
 		openScope();
 		if (kind === Release.Call) (value as () => void)();
 		else if (kind === Release.DestroyMethod) (value as Destroyable).destroy();
-		else (value as UpperDestroyable).Destroy();
+		else if (kind === Release.DestroyUpperMethod) (value as UpperDestroyable).Destroy();
+		else if (kind === Release.DisconnectMethod) (value as Disconnectable).Disconnect();
 		batch.scoped = false;
 		if (closeScope()) return true;
 	}
@@ -620,16 +630,56 @@ export function createScope(setup: () => void): () => void {
 	return () => dispose(scope);
 }
 
+class LifetimeOwner implements Owner {
+	readonly role = Role.Scope;
+	node: ReactiveNode = undefined!;
+	readonly state: ObjectState | undefined;
+	ended: boolean;
+
+	constructor(parent: Owner | undefined) {
+		this.state = parent?.state;
+		this.ended = parent !== undefined && isEnded(parent);
+		if (!this.ended) initializeScope(this, parent);
+	}
+
+	own<T>(value: T): T {
+		register(this, classify(value), value);
+		return value;
+	}
+
+	onCleanup(release: () => void): void {
+		registerCleanup(release, this);
+	}
+
+	run<T>(fn: () => T): T {
+		const active = setActiveSub(this.ended ? undefined : this.node);
+		openScope();
+		const [result, value] = call(fn, undefined, undefined, this.state, this);
+		setActiveSub(active);
+		if (closeScope()) drain();
+		if (result !== CallResult.Ok) error(value, 0);
+		return value as T;
+	}
+
+	end(): void {
+		dispose(this);
+	}
+}
+
 /** @internal */
-export function registerCleanup(release: () => void) {
-	const owner = resolveOwner();
+export function createLifetime() {
+	return new LifetimeOwner(resolveOwner());
+}
+
+/** @internal */
+export function registerCleanup(release: () => void, owner = resolveOwner()) {
 	// A nil from untyped Luau would shift every pair after it, so it is dropped.
 	if (release === undefined) return;
 	register(owner, Release.Call, release);
 }
 
 const NOT_OWNABLE =
-	"own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy() or Destroy()";
+	"own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy(), Destroy() or Disconnect()";
 
 function classify(value: unknown): Release {
 	const typeName = typeOf(value);
@@ -638,8 +688,9 @@ function classify(value: unknown): Release {
 	if (typeName === "function") return Release.Call;
 	if (typeName === "thread") return Release.Cancel;
 	if (typeName === "table") {
-		if (typeIs((value as DestroyFields).destroy, "function")) return Release.DestroyMethod;
-		if (typeIs((value as DestroyFields).Destroy, "function")) return Release.DestroyUpperMethod;
+		if (typeIs((value as ReleaseFields).destroy, "function")) return Release.DestroyMethod;
+		if (typeIs((value as ReleaseFields).Destroy, "function")) return Release.DestroyUpperMethod;
+		if (typeIs((value as ReleaseFields).Disconnect, "function")) return Release.DisconnectMethod;
 	}
 	error(`${NOT_OWNABLE}; got a ${typeName}`, 0);
 }

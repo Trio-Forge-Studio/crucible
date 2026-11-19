@@ -457,7 +457,7 @@ Only the Crucible compiler reports CRU032 to CRU036. It checks these rules in it
 | CRU034 | Array ipairs | Do not use Array<T> with ipairs(). Key values will not be shifted from 1-indexed to 0-indexed. |
 | CRU035 | Frame connections | This `<signal>` connection lasts the object's whole life. Implement Crucible's update, fixedUpdate, lateUpdate or preRender instead. |
 | CRU036 | Subsystem destruction | Crucible never destroys a subsystem. Do last writes in onShutdown, and give other lifetimes their own owner. |
-| CRU036 | Subsystem Janitor | A subsystem lives for the whole session. Put the Janitor on the lifetime that ends. |
+| CRU036 | Subsystem lifetime field | A subsystem lives for the whole session, so a lifetime made with it never ends early. Make the lifetime where the work it owns starts, and end it where that work ends. |
 
 CRU032 checks conditions, negation, and the left operand of `&&` and `||`. In an `if` condition using `??`, it checks the right operand. Numeric and string literals that cannot be zero or empty are allowed. Explicit boolean coercion with `!!` is allowed because the compiler preserves JavaScript truthiness. Generic constraints, unions, intersections, `any`, `unknown`, and empty object types participate in the check.
 
@@ -467,7 +467,7 @@ CRU034 checks arrays passed to `pairs` and `ipairs`. Maps and unconstrained valu
 
 CRU035 checks direct `RunService` frame signal connections from a constructor, `awake`, or `start` in a Subsystem or CrucibleBehaviour, including inherited abstract bases. It covers `Connect`, `Once`, and `ConnectParallel` on `Heartbeat`, `PostSimulation`, `Stepped`, `PreSimulation`, `RenderStepped`, `PreRender`, and `PreAnimation`. Nested callbacks and other methods are allowed. A behaviour may assign a connection to `this.field` when its own or an inherited `onDestroy` calls `this.field.Disconnect()` or `this.field?.Disconnect()`.
 
-CRU036 rejects a `destroy` method and a field initialized by `Janitor()` or `new Janitor()` on a Subsystem. Other lifetime owners and Janitors returned by another function are allowed.
+CRU036 rejects a `destroy` method on a Subsystem. It also rejects Subsystem fields initialized by `Janitor()`, `new Janitor()` or a call to Crucible's `lifetime()`. It follows aliases of Crucible's function. A Subsystem method can create a lifetime when work starts.
 
 During migration, these five rules retain the matching `oxlint-disable-next-line` directives from `roblox-ts/lua-truthiness`, `roblox-ts/misleading-lua-tuple-checks`, `roblox-ts/no-array-pairs`, `fragile-delivery/frame-hooks`, and `fragile-delivery/session-lifetime`.
 

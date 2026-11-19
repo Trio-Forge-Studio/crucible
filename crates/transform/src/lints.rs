@@ -231,17 +231,36 @@ impl Lints<'_, '_> {
             }
             if m.kind() == Kind::PropertyDeclaration
                 && let Some(value) = m.initializer().map(unwrap)
-                && matches!(value.kind(), Kind::NewExpression | Kind::CallExpression)
-                && value.expression().kind() == Kind::Identifier
-                && value.expression().source_text() == "Janitor"
+                && self.session_lifetime(value)
             {
                 self.report(
                     m,
                     Rule::SessionLifetime,
-                    "A subsystem lives for the whole session. Put the Janitor on the lifetime that ends.",
+                    "A subsystem lives for the whole session, so a lifetime made with it never ends early. \
+                     Make the lifetime where the work it owns starts, and end it where that work ends.",
                 );
             }
         }
+    }
+
+    fn session_lifetime(&mut self, value: Node) -> bool {
+        if !matches!(value.kind(), Kind::NewExpression | Kind::CallExpression) {
+            return false;
+        }
+        let callee = value.expression();
+        if callee.kind() == Kind::Identifier && callee.source_text() == "Janitor" {
+            return true;
+        }
+        if value.kind() != Kind::CallExpression {
+            return false;
+        }
+        let Some(symbol) = self.cx.symbol_at(unwrap(callee)) else { return false };
+        let symbol = self.cx.aliased(symbol);
+        symbol.name() == "lifetime"
+            && symbol
+                .declarations()
+                .into_iter()
+                .any(|d| d.kind() == Kind::FunctionDeclaration && self.cx.package_of(d).as_deref() == Some(PACKAGE))
     }
 
     fn charm_report(&mut self, at: Node, name: &str) {
