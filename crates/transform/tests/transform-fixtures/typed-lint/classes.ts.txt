@@ -1,4 +1,4 @@
-import { CrucibleBehaviour, Subsystem } from "@trioforge/crucible";
+import { CrucibleBehaviour, Subsystem, lifetime, lifetime as makeLifetime, type Lifetime } from "@trioforge/crucible";
 class Janitor {}
 const RunService = game.GetService("RunService");
 import { Releasing, Store, Zone } from "./bases";
@@ -32,4 +32,13 @@ class Janitorial extends Store {
 class PerPlayer extends Store { private janitor = janitorFor(undefined as never); awake() {} }
 class Behaviour extends Zone<"I"> { private janitor = new Janitor(); destroy() {} }
 class Loose { private janitor = new Janitor(); destroy() {} }
+export class SessionLifetime extends Store { private life = lifetime(); } // fires session-lifetime
+export class AliasedLifetime extends Subsystem { private life = makeLifetime(); } // fires session-lifetime
+export class BehaviourLifetime extends Zone<"J"> { private life = lifetime(); }
+export class WorkLifetime extends Store { private life?: Lifetime; begin() { this.life = lifetime(); } }
+export function localLifetime() {
+	function lifetime() { return {}; }
+	class LocalLifetime extends Store { private life = lifetime(); }
+	return LocalLifetime;
+}
 export { Direct, Through, ThroughOnce, Unstored, Own, Inherited, WrongField, Scoped, Other, Janitorial, PerPlayer, Behaviour, Loose, Plain };
