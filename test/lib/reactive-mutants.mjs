@@ -64,6 +64,32 @@ const mutants = [
 		[["	if (parent.role === Role.Run) arm(parent);\n", ""]],
 	],
 	[
+		"a lifetime is never listed on its parent",
+		"guard",
+		[23],
+		OWNERSHIP,
+		[["if (!this.ended) initializeScope(this, parent);", "if (!this.ended) initializeScope(this, undefined);"]],
+	],
+	[
+		"a lifetime run uses the caller's owner",
+		"pair",
+		[23],
+		OWNERSHIP,
+		[
+			[
+				"call(fn, undefined, undefined, this.state, this)",
+				"call(fn, undefined, undefined, resolveOwner()?.state, resolveOwner())",
+			],
+		],
+	],
+	[
+		"a lifetime never ends",
+		"guard",
+		[23, 28],
+		OWNERSHIP,
+		[["\tend(): void {\n\t\tdispose(this);\n\t}", "\tend(): void {}"]],
+	],
+	[
 		"a disposed run keeps its body",
 		"guard",
 		[36],
@@ -146,7 +172,12 @@ const mutants = [
 		"guard",
 		[36],
 		OWNERSHIP,
-		[["	if (run.body === undefined) run.stop?.();\n", ""]],
+		[
+			[
+				"		// A first run that ended its own Run did so before Charm returned the stop.\n		stopEnded(run);\n",
+				"",
+			],
+		],
 	],
 	[
 		"a failed first run keeps its run",
@@ -535,6 +566,12 @@ try {
 	fs.symlinkSync(
 		path.join(repo, "packages/crucible/node_modules"),
 		path.join(scratch, "packages/crucible/node_modules"),
+		"junction",
+	);
+	fs.mkdirSync(path.join(scratch, "examples/sample-game"), { recursive: true });
+	fs.symlinkSync(
+		path.join(repo, "examples/sample-game/node_modules"),
+		path.join(scratch, "examples/sample-game/node_modules"),
 		"junction",
 	);
 	const files = new Set(mutants.map((mutant) => mutant[3]));

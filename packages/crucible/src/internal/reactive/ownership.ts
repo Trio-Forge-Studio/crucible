@@ -28,7 +28,7 @@ export const enum Role {
 	Interval,
 	/** One Crucible effect. Its releases are its current run's, and end before the next run. */
 	Run,
-	/** `scope(setup)`: a child of its owner, or a root. */
+	/** `scope(setup)` or `lifetime()`: a child of its owner, or a root. */
 	Scope,
 }
 
@@ -189,13 +189,17 @@ function unlist(owner: Owner) {
 }
 
 /** A scope-like owner on a detached Charm effect scope, whose cleanup ends it. Listed on `parent` when given. */
-function scopeOwner(role: Role, parent: Owner | undefined, state: ObjectState | undefined): Owner {
-	const owner: Owner = { role, node: undefined!, state, ended: false };
+function initializeScope(owner: Owner, parent: Owner | undefined) {
 	owner.stop = effectScope(() => {
 		owner.node = getActiveSub()!;
 		return () => finish(owner);
 	}, true);
 	if (parent !== undefined) adopt(parent, owner);
+}
+
+function scopeOwner(role: Role, parent: Owner | undefined, state: ObjectState | undefined): Owner {
+	const owner: Owner = { role, node: undefined!, state, ended: false };
+	initializeScope(owner, parent);
 	return owner;
 }
 
@@ -626,9 +630,49 @@ export function createScope(setup: () => void): () => void {
 	return () => dispose(scope);
 }
 
+class LifetimeOwner implements Owner {
+	readonly role = Role.Scope;
+	node: ReactiveNode = undefined!;
+	readonly state: ObjectState | undefined;
+	ended: boolean;
+
+	constructor(parent: Owner | undefined) {
+		this.state = parent?.state;
+		this.ended = parent !== undefined && isEnded(parent);
+		if (!this.ended) initializeScope(this, parent);
+	}
+
+	own<T>(value: T): T {
+		register(this, classify(value), value);
+		return value;
+	}
+
+	onCleanup(release: () => void): void {
+		registerCleanup(release, this);
+	}
+
+	run<T>(fn: () => T): T {
+		const active = setActiveSub(this.ended ? undefined : this.node);
+		openScope();
+		const [result, value] = call(fn, undefined, undefined, this.state, this);
+		setActiveSub(active);
+		if (closeScope()) drain();
+		if (result !== CallResult.Ok) error(value, 0);
+		return value as T;
+	}
+
+	end(): void {
+		dispose(this);
+	}
+}
+
 /** @internal */
-export function registerCleanup(release: () => void) {
-	const owner = resolveOwner();
+export function createLifetime() {
+	return new LifetimeOwner(resolveOwner());
+}
+
+/** @internal */
+export function registerCleanup(release: () => void, owner = resolveOwner()) {
 	// A nil from untyped Luau would shift every pair after it, so it is dropped.
 	if (release === undefined) return;
 	register(owner, Release.Call, release);

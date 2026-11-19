@@ -1,4 +1,11 @@
-import { createEffect, createScope, createWatch, registerCleanup, registerOwned } from "./internal/reactive/ownership";
+import {
+	createEffect,
+	createLifetime,
+	createScope,
+	createWatch,
+	registerCleanup,
+	registerOwned,
+} from "./internal/reactive/ownership";
 
 /**
  * Keeps something outside Charm's graph in step with the atoms and computeds it reads. The body runs once now, and
@@ -29,6 +36,34 @@ export function watch<T>(source: () => T, onChange: (value: T, previous: T) => v
  */
 export function scope(setup: () => void): () => void {
 	return createScope(setup);
+}
+
+/**
+ * A lifetime held as a value. Unlike `own` and `onCleanup`, its methods need no current owner, so a signal handler
+ * or a plain class can add to it after its owner's setup returned.
+ */
+export interface Lifetime {
+	/** Whether the lifetime has started ending. */
+	readonly ended: boolean;
+	/** Registers `value` on this lifetime and returns it. An ended lifetime releases it at once. */
+	own<T extends Ownable>(value: T): T;
+	/** Registers `release` on this lifetime. An ended lifetime runs it at once. */
+	onCleanup(release: () => void): void;
+	/**
+	 * Runs `fn` as this lifetime and returns its result. It must not yield. A throw or yield is rethrown and
+	 * the lifetime keeps what `fn` already registered. An ended lifetime still runs `fn` as an ended owner.
+	 */
+	run<T>(fn: () => T): T;
+	/** Ends this lifetime and releases what it owns. Idempotent. */
+	end(): void;
+}
+
+/**
+ * Creates a lifetime under the current owner. It ends when that owner ends or when `end` is called. With no
+ * owner it is a root that only `end` ends. Under an ended owner it starts ended.
+ */
+export function lifetime(): Lifetime {
+	return createLifetime();
 }
 
 /**

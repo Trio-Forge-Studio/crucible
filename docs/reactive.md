@@ -170,6 +170,31 @@ Only Crucible's entry points carry an owner into the callbacks they hand to Char
 - Outside every owner it is a root that only its dispose ends. Roots work at module scope, before boot.
 - `setup` must not yield. If it throws or yields, what it created ends and the error is rethrown at the `scope` call.
 
+### Lifetimes
+
+`lifetime()` returns a handle. Call its `own` and `onCleanup` methods from anywhere, including signal handlers. It ends when its parent owner ends or when you call `end()`. A handle made outside any owner ends only when you call `end()`. The `ended` field becomes true as soon as it starts ending.
+
+`run(fn)` runs `fn` with the handle as its current owner and returns its result. Use it to create effects, watches or scopes that belong to the handle. The callback must not yield. A throw or yield is rethrown and the lifetime keeps what the callback already registered.
+
+```ts
+import { lifetime } from "@trioforge/crucible";
+
+export class DriveSession {
+	private readonly life = lifetime();
+
+	constructor(prompt: ProximityPrompt, drive: (dt: number) => void) {
+		const RunService = game.GetService("RunService");
+		this.life.own(prompt.Triggered.Once(() => {
+			this.life.own(RunService.Heartbeat.Connect(drive));
+		}));
+	}
+
+	stop() {
+		this.life.end();
+	}
+}
+```
+
 ### Cleanups
 
 `onCleanup(release)` registers `release` with the current owner. Register it right after you acquire the resource, so a later throw in the same hook or run leaks nothing.
@@ -213,7 +238,7 @@ export class Thruster extends CrucibleBehaviour<"Thruster", BasePart> {
 
 An owned value is a cleanup. It shares the owner, the newest-first order and the failure reporting of `onCleanup`. A failed release is reported with the source line of its function or method, or with the Instance's full name. Each call registers one release, so a value owned twice is released twice. The type `Ownable` lists what `own` takes. Anything else is a type error, and at runtime `own` throws `own() takes a function, an RBXScriptConnection, an Instance, a thread, or an object with destroy(), Destroy() or Disconnect()`.
 
-Under an owner that has already ended, `effect` and `watch` create nothing and return a dispose that does nothing, `scope` returns one without running `setup`, `onCleanup` runs `release` at once, and `own` releases `value` at once.
+Under an owner that has already ended, `effect` and `watch` create nothing and return a dispose that does nothing. `scope` returns one without running `setup`. `onCleanup` runs `release` at once and `own` releases `value` at once. `lifetime` returns an ended handle. Its `run` still runs the callback with the same ended-owner behaviour.
 
 ## When effects run
 
