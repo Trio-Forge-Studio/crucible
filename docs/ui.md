@@ -690,8 +690,9 @@ export function mountTopbar() {
 - An icon stays pressable while a trapped scope is open, so it can close the screen it opened. The Roblox menu still blocks it.
 - On a gamepad in play mode, DPadUp selects the last selected icon, or else the leftmost visible, enabled icon.
 - The caption appears after the mouse hovers for half a second, and never on touch or gamepad.
+- `image` fills half of the spot inside the round button. Pass `imageScale` to change that fraction, such as `0.75` for artwork that needs more room to read.
 - `Topbar.Label` draws plain text in the same pill, such as a frame-rate readout. It takes `name`, `text` and `order`, grows with its text and can't be pressed or selected.
-- To draw your own icon, call `useTopbarIcon` with the same options and attach its `action` to a button inside `Topbar.Root`. It writes `Highlighted`, `Pressed`, `Disabled`, `Selected` and a numeric `Notice` attribute, and returns `captionShown` for your caption.
+- To draw your own icon, call `useTopbarIcon` with the icon's state options, `selected`, `defaultSelected`, `onSelectedChange`, `disabled` and `notice`, and attach its `action` to a button inside `Topbar.Root`. It writes `Highlighted`, `Pressed`, `Disabled`, `Selected` and a numeric `Notice` attribute, and returns `captionShown` for your caption.
 
 ## Frame listeners
 
