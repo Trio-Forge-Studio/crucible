@@ -37,6 +37,7 @@ return {
 		local h = harness()
 		h.device("Keyboard")
 		local selected = h.vide.source(false)
+		local imageScale = h.vide.source(0.75)
 		local presses = {}
 		local gui = mount(h, {
 			side = "Left",
@@ -44,6 +45,7 @@ return {
 				{
 					name = "Settings",
 					image = "rbxassetid://1",
+					imageScale = imageScale,
 					caption = "Settings",
 					order = 2,
 					selected = selected,
@@ -66,6 +68,14 @@ return {
 		assert(daily.LayoutOrder == 1 and settings.LayoutOrder == 2, "order becomes LayoutOrder")
 		assert(child(icons, "UIPadding").PaddingLeft == roblox.UDim.new(0, 8), "the left edge uses the gap")
 		local button = child(settings, "ClickRegion")
+		local settingsImage = child(button, "IconSpot", "IconImage")
+		assert(
+			child(daily, "ClickRegion", "IconSpot", "IconImage").Size == roblox.UDim2.fromScale(0.5, 0.5),
+			"an image fills half the spot by default"
+		)
+		assert(settingsImage.Size == roblox.UDim2.fromScale(0.75, 0.75), "imageScale sizes the image")
+		imageScale(0.6)
+		assert(settingsImage.Size == roblox.UDim2.fromScale(0.6, 0.6), "the image follows its scale source")
 		assert(math.abs(button.BackgroundTransparency - 0.08) < 1e-6, "the default transparency matches TopbarPlus")
 		h.gui.PreferredTransparency = 0.5
 		assert(math.abs(button.BackgroundTransparency - 0.04) < 1e-6, "PreferredTransparency scales the background")

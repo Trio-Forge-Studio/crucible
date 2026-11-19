@@ -15,6 +15,7 @@ export interface TopbarRootProps {
 export interface TopbarIconProps extends TopbarIconOptions {
 	name: string;
 	image: Value<string>;
+	imageScale?: Value<number>;
 	caption?: Value<string>;
 	order: number;
 }
@@ -116,7 +117,10 @@ function TopbarIcon(props: TopbarIconProps): Vide.Node {
 						Name="IconImage"
 						AnchorPoint={center}
 						Position={UDim2.fromScale(0.5, 0.5)}
-						Size={UDim2.fromScale(0.5, 0.5)}
+						Size={() => {
+							const scale = read(props.imageScale ?? 0.5);
+							return UDim2.fromScale(scale, scale);
+						}}
 						BackgroundTransparency={1}
 						Image={props.image}
 						ZIndex={2}

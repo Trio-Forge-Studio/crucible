@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-59ed4e2f1fcc12a66084ed9164f4302ea3810b3ca6b92eee55be0a749cf031f8  build/sample-game.rbxl
+34cecd92e5af5abd6868bdb28e6cc79d3b24629f96846a984be7dd3dcd686f29  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -253,8 +253,8 @@ bd7245cde27f866047d3a57617b103188ea3fd0240f910abc5538db85221cc32  packages/cruci
 389e3c23434ceacffed5358590198e95910b272ed81bd280eb209a5d52d05619  packages/crucible/out/ui/toggle.luau
 d9144c564343eeabef420fe9a82a39787824ec86dd767945d5ddb7c6c448bc82  packages/crucible/out/ui/topbar-policy.d.ts
 7c725836fee21d387a670aa90c084f2f8765781bbe708f95250dd43b15f98dde  packages/crucible/out/ui/topbar-policy.luau
-b671b97d9cd4807c31e222b27216547fc2741f20302aaf531f441bdb90f90c38  packages/crucible/out/ui/topbar.d.ts
-0fe82c34f8f916baca04d1dd20a1622c155e153d8ac130915a8ba31bc88ac150  packages/crucible/out/ui/topbar.luau
+23b7b07db2e27c9d96fd5c7b090e38bb0bcef22735bcb6cb30990fd672bb0624  packages/crucible/out/ui/topbar.d.ts
+f8c7bb55f8779a390d90257965edc2d63d3383e01619807c95ad04d754bfaf87  packages/crucible/out/ui/topbar.luau
 a4f13347b1f155a2c351c68dd5542f934f4ad4264895fc1752c5cc105289717d  packages/crucible/out/ui/use-controllable.d.ts
 65ad7643e0746c36a142d05323625d70da3dbe7c0040d53468a391380876f8aa  packages/crucible/out/ui/use-controllable.luau
 e9392dc84759edc0f1999ddc65032d2b79155de0cf38edca34a3337502db3b9d  packages/crucible/out/ui/use-pan-zoom.d.ts
