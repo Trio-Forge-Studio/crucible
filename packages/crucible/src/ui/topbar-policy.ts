@@ -28,3 +28,10 @@ export function topbarLayout(height: number, insetY: number, tenFoot: boolean): 
 		sizeY: height === 0 ? 50 : -2,
 	};
 }
+// How far to move a caption centred under an icon so it stays at least `margin` inside the icon row.
+export function captionShift(center: number, width: number, left: number, right: number, margin: number): number {
+	const half = width / 2;
+	if (center + half > right - margin) return right - margin - (center + half);
+	if (center - half < left + margin) return left + margin - (center - half);
+	return 0;
+}

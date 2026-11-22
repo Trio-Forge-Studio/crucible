@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-2d13ea81e8ef86aced36dae6e1fdb0c59a79ab1f2d959ecaf6e159a18e0d3ce8  build/sample-game.rbxl
+b0c7984074d00c922d2a14ba22d2c5f04fd6f7f014e14c603e4927bbc8bb248d  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -251,10 +251,10 @@ f5d2b9866b97a12e503b3f5211e67e25909df4f91050b0ce4efab82f8401d0e6  packages/cruci
 454b3267ecc303b22a20f6a4f4562ef6de2fa9f2ce5e46c9f086ed06fb471763  packages/crucible/out/ui/toaster.luau
 bd7245cde27f866047d3a57617b103188ea3fd0240f910abc5538db85221cc32  packages/crucible/out/ui/toggle.d.ts
 389e3c23434ceacffed5358590198e95910b272ed81bd280eb209a5d52d05619  packages/crucible/out/ui/toggle.luau
-d9144c564343eeabef420fe9a82a39787824ec86dd767945d5ddb7c6c448bc82  packages/crucible/out/ui/topbar-policy.d.ts
-7c725836fee21d387a670aa90c084f2f8765781bbe708f95250dd43b15f98dde  packages/crucible/out/ui/topbar-policy.luau
+0edcf4bac5b888d189105c12d99d51a2797b0200e131715f06792c13caf6e87d  packages/crucible/out/ui/topbar-policy.d.ts
+1181a91c333ea448873c60ba8c2a9302b398afbea51cf57ffea2227fcec5e08d  packages/crucible/out/ui/topbar-policy.luau
 23b7b07db2e27c9d96fd5c7b090e38bb0bcef22735bcb6cb30990fd672bb0624  packages/crucible/out/ui/topbar.d.ts
-37db8d425b606b277199c3eaf5add090ed4fb2513fb7922308bf867ae9f32350  packages/crucible/out/ui/topbar.luau
+d436a923e9372d242d151ad9a1f37474d9bbb223048a7c745c775deaca94850c  packages/crucible/out/ui/topbar.luau
 a4f13347b1f155a2c351c68dd5542f934f4ad4264895fc1752c5cc105289717d  packages/crucible/out/ui/use-controllable.d.ts
 65ad7643e0746c36a142d05323625d70da3dbe7c0040d53468a391380876f8aa  packages/crucible/out/ui/use-controllable.luau
 e9392dc84759edc0f1999ddc65032d2b79155de0cf38edca34a3337502db3b9d  packages/crucible/out/ui/use-pan-zoom.d.ts

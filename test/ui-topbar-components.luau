@@ -87,6 +87,10 @@ return {
 		assert(child(caption, "Pill", "Chevron").Rotation == 45, "a chevron points at the icon")
 		local captionPadding = child(caption, "Pill", "Text", "UIPadding")
 		assert(captionPadding.PaddingLeft == roblox.UDim.new(0, 13), "the pill leaves 13 px beside its text")
+		icons.AbsoluteSize = roblox.Vector2.new(1241, 50)
+		settings.AbsolutePosition = roblox.Vector2.new(1185, 3)
+		settings.AbsoluteSize = roblox.Vector2.new(44, 44)
+		caption.AbsoluteSize = roblox.Vector2.new(91, 48)
 		button.MouseEnter:Fire()
 		assert(child(button, "IconSpot", "IconOverlay").Visible, "hover shows the overlay")
 		h.tick(0.5)
@@ -98,7 +102,14 @@ return {
 			h.tick(1 / 60)
 		end
 		assert(caption.GroupTransparency == 0, "the caption settles opaque")
-		assert(caption.Position == roblox.UDim2.new(0.5, 0, 1, 4), "the pill settles 12 px below the icon")
+		assert(
+			caption.Position == roblox.UDim2.new(0.5, -24, 1, 4),
+			"the pill settles 12 px below the icon, 12 px inside the row"
+		)
+		assert(
+			child(caption, "Pill", "Chevron").Position == roblox.UDim2.new(0.5, 24, 0, 0),
+			"the chevron stays under the icon"
+		)
 		button.MouseLeave:Fire()
 		h.tick(1 / 60)
 		assert(caption.Visible and caption.Position.Y.Offset == 4, "the caption fades out in place")

@@ -1,7 +1,7 @@
 import Vide, { cleanup, effect, read, source, untrack } from "@rbxts/vide";
 import { heartbeat } from "./frame-loop";
 import type { Children, Value } from "./props";
-import { topbarLayout } from "./topbar-policy";
+import { captionShift, topbarLayout } from "./topbar-policy";
 import { useTopbarIcon, type TopbarIconOptions } from "./use-topbar-icon";
 
 const GuiService = game.GetService("GuiService");
@@ -199,13 +199,30 @@ function TopbarIcon(props: TopbarIconProps): Vide.Node {
 }
 function TopbarCaption(props: { text: Value<string>; shown: () => boolean }): Vide.Node {
 	const motion = useCaptionMotion(props.shown);
+	const shift = source(0);
+	let caption: CanvasGroup | undefined;
+	const place = () => {
+		const icon = caption?.Parent;
+		const row = icon?.Parent;
+		if (!caption || !icon?.IsA("GuiObject") || !row?.IsA("GuiObject")) return;
+		const center = icon.AbsolutePosition.X + icon.AbsoluteSize.X / 2;
+		const left = row.AbsolutePosition.X;
+		shift(math.round(captionShift(center, caption.AbsoluteSize.X, left, left + row.AbsoluteSize.X, rightEdge)));
+	};
+	effect(() => {
+		if (props.shown()) place();
+	});
 	return (
 		<canvasgroup
 			Name="Caption"
+			action={(instance) => {
+				caption = instance;
+				cleanup(caption.GetPropertyChangedSignal("AbsoluteSize").Connect(place));
+			}}
 			Visible={() => motion().X > hiddenOpacity}
 			GroupTransparency={() => 1 - math.clamp(motion().X, 0, 1)}
 			AnchorPoint={new Vector2(0.5, 0)}
-			Position={() => new UDim2(0.5, 0, 1, captionGap - chevronSpace + math.round(motion().Y))}
+			Position={() => new UDim2(0.5, shift(), 1, captionGap - chevronSpace + math.round(motion().Y))}
 			Size={UDim2.fromOffset(0, 40 + chevronSpace)}
 			AutomaticSize={Enum.AutomaticSize.X}
 			BackgroundTransparency={1}
@@ -223,7 +240,7 @@ function TopbarCaption(props: { text: Value<string>; shown: () => boolean }): Vi
 				<frame
 					Name="Chevron"
 					AnchorPoint={new Vector2(0.5, 0.5)}
-					Position={UDim2.fromScale(0.5, 0)}
+					Position={() => new UDim2(0.5, -shift(), 0, 0)}
 					Size={UDim2.fromOffset(10, 10)}
 					Rotation={45}
 					BackgroundColor3={captionColor}
