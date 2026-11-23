@@ -83,10 +83,42 @@ return {
 		assert(child(daily, "Notice", "TextLabel").Text == "1", "a boolean notice reads 1")
 		assert(daily:FindFirstChild("Caption") == nil, "no caption draws nothing")
 		local caption = child(settings, "Caption")
+		assert(caption:IsA("CanvasGroup") and not caption.Visible, "the caption starts hidden")
+		assert(child(caption, "Pill", "Chevron").Rotation == 45, "a chevron points at the icon")
+		local captionPadding = child(caption, "Pill", "Text", "UIPadding")
+		assert(captionPadding.PaddingLeft == roblox.UDim.new(0, 13), "the pill leaves 13 px beside its text")
+		icons.AbsoluteSize = roblox.Vector2.new(1241, 50)
+		settings.AbsolutePosition = roblox.Vector2.new(1185, 3)
+		settings.AbsoluteSize = roblox.Vector2.new(44, 44)
+		caption.AbsoluteSize = roblox.Vector2.new(91, 48)
 		button.MouseEnter:Fire()
 		assert(child(button, "IconSpot", "IconOverlay").Visible, "hover shows the overlay")
 		h.tick(0.5)
-		assert(caption.Visible, "the caption shows after the hover delay")
+		assert(not caption.Visible, "the caption starts its fade on the next frame")
+		h.tick(1 / 60)
+		assert(caption.Visible and caption.GroupTransparency > 0.5, "the caption fades in")
+		assert(caption.Position.Y.Offset < 4, "the caption starts above its resting place")
+		for _ = 1, 60 do
+			h.tick(1 / 60)
+		end
+		assert(caption.GroupTransparency == 0, "the caption settles opaque")
+		assert(
+			caption.Position == roblox.UDim2.new(0.5, -24, 1, 4),
+			"the pill settles 12 px below the icon, 12 px inside the row"
+		)
+		assert(
+			child(caption, "Pill", "Chevron").Position == roblox.UDim2.new(0.5, 24, 0, 0),
+			"the chevron stays under the icon"
+		)
+		button.MouseLeave:Fire()
+		h.tick(1 / 60)
+		assert(caption.Visible and caption.Position.Y.Offset == 4, "the caption fades out in place")
+		for _ = 1, 60 do
+			h.tick(1 / 60)
+		end
+		assert(not caption.Visible, "the faded caption hides")
+		button.MouseEnter:Fire()
+		h.tick(0.5)
 		button.Activated:Fire()
 		assert(
 			presses[1] == true and child(button, "IconSpot").BackgroundTransparency == 1,

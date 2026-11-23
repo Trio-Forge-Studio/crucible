@@ -1,6 +1,7 @@
-import Vide, { cleanup, effect, read, source } from "@rbxts/vide";
+import Vide, { cleanup, effect, read, source, untrack } from "@rbxts/vide";
+import { heartbeat } from "./frame-loop";
 import type { Children, Value } from "./props";
-import { topbarLayout } from "./topbar-policy";
+import { captionShift, topbarLayout } from "./topbar-policy";
 import { useTopbarIcon, type TopbarIconOptions } from "./use-topbar-icon";
 
 const GuiService = game.GetService("GuiService");
@@ -29,6 +30,13 @@ const white = new Color3(1, 1, 1);
 const surface = Color3.fromRGB(18, 18, 21);
 const labelFont = new Font("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold);
 const labelTextSize = 16;
+const captionColor = Color3.fromRGB(39, 41, 48);
+const captionFont = new Font("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium);
+const chevronSpace = 8;
+const captionGap = 12;
+const captionLift = 8;
+const captionFrequency = 25;
+const hiddenOpacity = 0.01;
 function measure() {
 	const [inset] = GuiService.GetGuiInset();
 	return topbarLayout(GuiService.TopbarInset.Height, inset.Y, GuiService.IsTenFootInterface());
@@ -37,6 +45,43 @@ function watch<T>(property: "TopbarInset" | "PreferredTransparency", read: () =>
 	const value = source(read());
 	cleanup(GuiService.GetPropertyChangedSignal(property).Connect(() => value(read())));
 	return value;
+}
+// X is the caption's opacity and Y its offset in pixels. A critically damped spring fades it in while it slides down,
+// and fades it out in place.
+function useCaptionMotion(shown: () => boolean): () => Vector2 {
+	const motion = source(Vector2.zero);
+	let velocity = Vector2.zero;
+	let goal = Vector2.zero;
+	let stop: (() => void) | undefined;
+	cleanup(() => stop?.());
+	effect(() => {
+		const current = untrack(motion);
+		if (shown()) {
+			if (current.X <= hiddenOpacity) {
+				motion(new Vector2(0, -captionLift));
+				velocity = Vector2.zero;
+			}
+			goal = new Vector2(1, 0);
+		} else {
+			velocity = Vector2.zero;
+			goal = new Vector2(0, current.Y);
+		}
+		if (stop || untrack(motion) === goal) return;
+		stop = heartbeat((_, delta) => {
+			const displacement = motion().sub(goal);
+			const decay = math.exp(-captionFrequency * delta);
+			const drive = velocity.add(displacement.mul(captionFrequency));
+			const remaining = displacement.add(drive.mul(delta)).mul(decay);
+			velocity = velocity.sub(drive.mul(captionFrequency * delta)).mul(decay);
+			if (remaining.Magnitude < 1e-3 && velocity.Magnitude < 1e-3) {
+				motion(goal);
+				velocity = Vector2.zero;
+				stop?.();
+				stop = undefined;
+			} else motion(goal.add(remaining));
+		});
+	});
+	return motion;
 }
 function Round() {
 	return <uicorner CornerRadius={new UDim(1, 0)} />;
@@ -148,35 +193,78 @@ function TopbarIcon(props: TopbarIconProps): Vide.Node {
 					Font={Enum.Font.Arial}
 				/>
 			</frame>
-			{props.caption !== undefined ? (
+			{props.caption !== undefined ? <TopbarCaption text={props.caption} shown={icon.captionShown} /> : undefined}
+		</frame>
+	);
+}
+function TopbarCaption(props: { text: Value<string>; shown: () => boolean }): Vide.Node {
+	const motion = useCaptionMotion(props.shown);
+	const shift = source(0);
+	let caption: CanvasGroup | undefined;
+	const place = () => {
+		const icon = caption?.Parent;
+		const row = icon?.Parent;
+		if (!caption || !icon?.IsA("GuiObject") || !row?.IsA("GuiObject")) return;
+		const center = icon.AbsolutePosition.X + icon.AbsoluteSize.X / 2;
+		const left = row.AbsolutePosition.X;
+		shift(math.round(captionShift(center, caption.AbsoluteSize.X, left, left + row.AbsoluteSize.X, rightEdge)));
+	};
+	effect(() => {
+		if (props.shown()) place();
+	});
+	return (
+		<canvasgroup
+			Name="Caption"
+			action={(instance) => {
+				caption = instance;
+				cleanup(caption.GetPropertyChangedSignal("AbsoluteSize").Connect(place));
+			}}
+			Visible={() => motion().X > hiddenOpacity}
+			GroupTransparency={() => 1 - math.clamp(motion().X, 0, 1)}
+			AnchorPoint={new Vector2(0.5, 0)}
+			Position={() => new UDim2(0.5, shift(), 1, captionGap - chevronSpace + math.round(motion().Y))}
+			Size={UDim2.fromOffset(0, 40 + chevronSpace)}
+			AutomaticSize={Enum.AutomaticSize.X}
+			BackgroundTransparency={1}
+			ZIndex={4}
+		>
+			<frame
+				Name="Pill"
+				Position={UDim2.fromOffset(0, chevronSpace)}
+				Size={UDim2.fromOffset(0, 40)}
+				AutomaticSize={Enum.AutomaticSize.X}
+				BackgroundColor3={captionColor}
+				BorderSizePixel={0}
+			>
+				<uicorner />
 				<frame
-					Name="Caption"
-					Visible={icon.captionShown}
-					AnchorPoint={new Vector2(0.5, 0)}
-					Position={new UDim2(0.5, 0, 1, 17)}
-					AutomaticSize={Enum.AutomaticSize.XY}
-					BackgroundColor3={Color3.fromRGB(39, 41, 48)}
-					ZIndex={4}
-				>
-					<uicorner />
+					Name="Chevron"
+					AnchorPoint={new Vector2(0.5, 0.5)}
+					Position={() => new UDim2(0.5, -shift(), 0, 0)}
+					Size={UDim2.fromOffset(10, 10)}
+					Rotation={45}
+					BackgroundColor3={captionColor}
+					BorderSizePixel={0}
+				/>
+				<frame Name="Text" BackgroundTransparency={1} AutomaticSize={Enum.AutomaticSize.XY}>
 					<uipadding
 						PaddingTop={new UDim(0, 12)}
 						PaddingBottom={new UDim(0, 12)}
-						PaddingLeft={new UDim(0, 12)}
-						PaddingRight={new UDim(0, 12)}
+						PaddingLeft={new UDim(0, 13)}
+						PaddingRight={new UDim(0, 13)}
 					/>
 					<textlabel
 						AutomaticSize={Enum.AutomaticSize.X}
 						Size={UDim2.fromOffset(0, 16)}
 						BackgroundTransparency={1}
-						Text={props.caption}
+						Text={props.text}
 						TextSize={15}
-						FontFace={new Font("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium)}
+						FontFace={captionFont}
 						TextColor3={white}
 					/>
 				</frame>
-			) : undefined}
-		</frame>
+			</frame>
+		</canvasgroup>
 	);
 }
 // Roblox can keep an automatic size when the text changes to a string of the same length, so the label measures it.

@@ -26,4 +26,10 @@ return {
 		expect(M.topbarLayout(0, 0, false), 12, 15, 50, "a hidden top bar keeps a 50 px row")
 		expect(M.topbarLayout(0, 0, true), 10, 4, 50, "a hidden console top bar keeps a 50 px row")
 	end,
+	["top bar caption shifts inside the icon row and leaves room ones alone"] = function()
+		assert(M.captionShift(500, 90, 0, 1000, 12) == 0, "a caption with room stays centred")
+		assert(M.captionShift(966, 91, 0, 1000, 12) == -23.5, "a caption past the right edge moves left")
+		assert(M.captionShift(30, 80, 0, 1000, 12) == 22, "a caption past the left edge moves right")
+		assert(M.captionShift(966, 91, 100, 1100, 12) == 0, "the row's own position counts")
+	end,
 }
