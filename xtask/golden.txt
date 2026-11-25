@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-bdd6f6fa88553fe0edb9d90deaa960cf42532169ba9367f97c5fddb5ee287e78  build/sample-game.rbxl
+95390576bc2abf0097c77db29115afd985a0062f2f70d3b24a1957eddb4ffc40  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -58,7 +58,7 @@ af76c31f1ea483c03a9187909dce53fc583403793fb8593ac3944fe10cf1170f  packages/cruci
 621cdf88d1cdaff8f9e9416da38461d77e731d692b0519812000394a1d16be09  packages/crucible/out/internal/configs/port.d.ts
 fab880b62e65e72e721aec63b901bd72ea4ca79cd87145b2305cf4742b7684d9  packages/crucible/out/internal/configs/port.luau
 817456ea495ff8200522b4689a3bab8436e122c18dfff4753371b4aab31b2e34  packages/crucible/out/internal/configs/runtime.d.ts
-1945141c7473f7d7f8812c88e816676c5ce1c30989389e92488803d8fabc7463  packages/crucible/out/internal/configs/runtime.luau
+c35dba9cbfb8a5e4f3899b081f58185941c01fe936f0023ac909ab7da1bb4a5d  packages/crucible/out/internal/configs/runtime.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/construction-claim.d.ts
 d0f787db235ce4b31459dc909afd48d89b5267342ae4795716030b23bb3d1188  packages/crucible/out/internal/construction-claim.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/admission.d.ts
@@ -96,7 +96,7 @@ bc8768f6191b70baf3833feb7435352ee748d80d55921cc5f011f39e9d93833b  packages/cruci
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/records.d.ts
 b39bfcb1153940e0867a4d56f916d4521cb1805e6b23b5eb1eb83e59cc40a2d9  packages/crucible/out/internal/data/records.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/runtime.d.ts
-907ea908b9fcfc8392c8d3ff5921c0b4ee0ed3c3e7528a0bc3b1a0a4751f863a  packages/crucible/out/internal/data/runtime.luau
+3105b90f06709292b15c92a653b5eed729e1b81ee69a556085790f5188041d2b  packages/crucible/out/internal/data/runtime.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/scheduler.d.ts
 8e9c009f2dab2863e322fa1740fb89b6f5308dd2c9d24dc1aa4c8d48552056e4  packages/crucible/out/internal/data/scheduler.luau
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  packages/crucible/out/internal/data/session.d.ts
@@ -268,7 +268,7 @@ ed8033db7ce5b95509d6b091c7f59bee62918002d88f6132dd2e7536e5a9a067  packages/cruci
 a54f62951cd76b47ec476d80735afb807ba853a06c9653b7248bd881eb6d194d  packages/crucible/out/ui/use-radio-group.d.ts
 efb3359f90623cb2d77e39f13894a63a889f9435a059ffe60ca66c59e31a45d7  packages/crucible/out/ui/use-radio-group.luau
 c709ed83453c8eec6fcf9359ff1315ca3994232ccf0a06349f750f1c960882c7  packages/crucible/out/ui/use-slider.d.ts
-a4e7135fd7ce815d4e671bd610fdf5f9a44eb6329eed72184258cb95a6867c8a  packages/crucible/out/ui/use-slider.luau
+db0973cc7f046f342e571eccfe441463b8602f4169d5fb4d27c475b7bdd6e095  packages/crucible/out/ui/use-slider.luau
 72f869cb7c4d11a9aed52db16113370e66ba822942f56ed740c30ed9b8c9a1c0  packages/crucible/out/ui/use-tabs.d.ts
 10af3a67788390694d4e7ffccc10d8eef75ef959601273542daa032978225fbe  packages/crucible/out/ui/use-tabs.luau
 5b09b2d987657648b36fb6ea1d976a3f6a83cc69eedb07014df05b809d23679e  packages/crucible/out/ui/use-text-field.d.ts
@@ -280,4 +280,4 @@ af042bdba32c081e144323503af26af7fbbe32bf9d77decad1c882fded857e70  packages/cruci
 ca5de2b2b1a7cda9215513c50254d385e97805c86dafd8f1d61aaba79a67a8ef  packages/crucible/out/ui/use-topbar-icon.d.ts
 804e138f6cf3299d2d99e85dca8643d23f914224b8cb9a4d50e8b08e9b0b17f1  packages/crucible/out/ui/use-topbar-icon.luau
 566f22af67e9a062a156a87dcd8417eb8b9ce6495bb755d882d0b36e0da27ea8  packages/crucible/out/util/random/index.d.ts
-695b95e1cf29c93a4099db9736530f0147c11c84dcd8c99755f08e314dd8ba35  packages/crucible/out/util/random/init.luau
+5d33654e9a9ff2d97d961ba28f4b226896e54adf9de5969f363d084887a73fa9  packages/crucible/out/util/random/init.luau

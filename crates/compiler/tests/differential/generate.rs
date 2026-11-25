@@ -167,24 +167,6 @@ fn leaves(ty: Ty, arms: &mut Vec<(u32, S<Expr>)>) {
     arms.push((3, var(ty)));
 }
 
-/// The arguments of `push` or `unshift`. The compiler inserts each value before it evaluates the next, and `unshift`'s
-/// from the last, so only the argument evaluated first is any expression, and the rest are literals or variables:
-/// known.md, "push and unshift insert a value before they evaluate the next".
-fn inserted(element: Ty, free: S<Expr>, rest: std::ops::Range<usize>, unshift: bool) -> S<Vec<Expr>> {
-    let mut arms = Vec::new();
-    leaves(element, &mut arms);
-    (free, vec(Union::new_weighted(arms), rest))
-        .prop_map(move |(free, mut values)| {
-            if unshift {
-                values.push(free);
-            } else {
-                values.insert(0, free);
-            }
-            values
-        })
-        .boxed()
-}
-
 /// `INTS` that are not negative, and those above 0.
 const NON_NEGATIVE: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 19];
 const POSITIVE: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 19];
@@ -356,9 +338,9 @@ fn composite(ty: Ty, cx: Cx, arms: &mut Vec<(u32, S<Expr>)>) {
                     .prop_map(|(a, f)| Expr::FindIndex(a, f))
                     .boxed(),
             );
-            let ints = prop_oneof![1 => Just(Vec::new()), 2 => inserted(Ty::Int, e(Ty::Int), 0..2, false)];
+            let ints = vec(e(Ty::Int), 0..=2);
             push(2, (any::<u8>(), ints).prop_map(|(k, v)| Expr::Push(Ty::ArrInt, k, v)).boxed());
-            let strs = inserted(Ty::Str, e(Ty::Str), 0..2, false);
+            let strs = vec(e(Ty::Str), 1..=2);
             push(1, (any::<u8>(), strs).prop_map(|(k, v)| Expr::Push(Ty::ArrStr, k, v)).boxed());
             push(
                 2,
@@ -1053,12 +1035,7 @@ fn effect(cx: Cx) -> S<Expr> {
             1,
             (any::<u8>(), e(Ty::Str), e(Ty::Int)).prop_map(|(k, s, n)| Expr::CallVar(Ty::FnSIS, k, vec![s, n])).boxed(),
         ),
-        (
-            2,
-            (any::<u8>(), prop_oneof![1 => Just(Vec::new()), 2 => inserted(Ty::Int, e(Ty::Int), 0..2, false)])
-                .prop_map(|(k, v)| Expr::Push(Ty::ArrInt, k, v))
-                .boxed(),
-        ),
+        (2, (any::<u8>(), vec(e(Ty::Int), 0..=2)).prop_map(|(k, v)| Expr::Push(Ty::ArrInt, k, v)).boxed()),
         (1, (any::<u8>(), b(e(Ty::Int))).prop_map(|(k, a)| Expr::Assign(Ty::Int, k, a)).boxed()),
         (1, any::<u8>().prop_map(|k| Expr::Pop(Ty::ArrInt, k)).boxed()),
         (1, any::<u8>().prop_map(|k| Expr::ShiftArr(Ty::ArrStr, k)).boxed()),
@@ -1098,9 +1075,9 @@ fn mutation(cx: Cx) -> S<Mutation> {
     let mut arms: Vec<(u32, S<Mutation>)> = Vec::new();
     for ty in arrays {
         let element = ty.element();
-        let pushed = inserted(element, e(element), 0..2, false);
+        let pushed = vec(e(element), 1..=2);
         arms.push((3, (any::<u8>(), pushed).prop_map(move |(k, v)| Mutation::Push(ty, k, v)).boxed()));
-        let unshifted = inserted(element, e(element), 0..2, true);
+        let unshifted = vec(e(element), 1..=2);
         arms.push((1, (any::<u8>(), unshifted).prop_map(move |(k, v)| Mutation::Unshift(ty, k, v)).boxed()));
         arms.push((1, any::<u8>().prop_map(move |k| Mutation::Pop(ty, k)).boxed()));
         arms.push((1, any::<u8>().prop_map(move |k| Mutation::Shift(ty, k)).boxed()));

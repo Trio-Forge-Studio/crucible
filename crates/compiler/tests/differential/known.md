@@ -30,6 +30,12 @@ for (let i = 0; i < 2; i++) {
 - Node: runs.
 - Lune, before the fix: `!syntax "...: Expected identifier when parsing expression, got ';'"`.
 
+### Array insertion evaluated arguments out of order
+
+Multi-argument `push` used to insert the first value before evaluating the next argument, and `unshift` evaluated
+its arguments in reverse order. Both now evaluate the arguments left to right before inserting any values.
+The regression program is `regressions/array-insertion-order.ts`.
+
 ## Compiler, unlike roblox-ts
 
 ### An inherited toString is lost
@@ -61,38 +67,6 @@ declares `toString` and never turns an instance into a string.
 
 The compiler lowers these the way roblox-ts 3.0.0 does, and JavaScript differs. A fix parts from roblox-ts, and
 changes the output of code that compiles today.
-
-### push and unshift insert a value before they evaluate the next
-
-`push` and `unshift` with several arguments lower to one `table.insert` per argument, each with its argument inside,
-so an argument evaluated later sees the values inserted before it. `unshift` inserts from the last argument, so it
-also evaluates its arguments from last to first. JavaScript evaluates every argument first, from left to right.
-roblox-ts 3.0.0 does the same (`propertyCallMacros.js`, `push` and `unshift`). Evaluating each argument into a
-temporary first would change the runtime's own output, as `internal/configs/runtime.ts` pushes two call results at
-once, so it is not fixed here.
-
-```ts
-function look(xs: number[]): number {
-	trace(xs, "[n]");
-	return 9;
-}
-const xs: number[] = [];
-xs.push(0, look(xs));
-function say(n: number): number {
-	trace(n, "n");
-	return n;
-}
-const ys: number[] = [];
-ys.unshift(say(1), say(2));
-```
-
-- Node: `[]`, then `1`, `2`.
-- Lune: `[0]`, then `2`, `1`.
-
-**Compiler bug**, shared with roblox-ts, which does not document it. `known/push-inserts-before-it-evaluates-the-next.ts`.
-
-The generator gives `push` and `unshift` several arguments only when all but the one evaluated first are literals or
-variables.
 
 ### A negative fromIndex throws
 

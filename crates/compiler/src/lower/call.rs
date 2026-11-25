@@ -19,7 +19,9 @@ fn calls_super(call: Node) -> bool {
 fn reads_object_after_arguments(m: Macro) -> bool {
     matches!(
         m,
-        Macro::ReadonlySetHas
+        Macro::ArrayPush
+            | Macro::ArrayUnshift
+            | Macro::ReadonlySetHas
             | Macro::ReadonlyMapHas
             | Macro::ReadonlyMapGet
             | Macro::SetAdd
@@ -402,10 +404,12 @@ impl Lower<'_> {
     fn expand_method_macro(&mut self, m: Macro, n: Node, object: Expr, usage: Usage) -> Option<Expr> {
         let statement = usage == Usage::Statement;
         let arg_nodes: Vec<Node> = n.arguments().iter().collect();
+        let stage_args = arg_nodes.len() > 1 && matches!(m, Macro::ArrayPush | Macro::ArrayUnshift);
         let (args, block) = self.capture(|l| {
             l.ordered(arg_nodes.iter().copied(), |l, a| {
                 let value = l.expr(a);
-                if value.is_multi() { Expr::Paren(Box::new(value)) } else { value }
+                let value = if value.is_multi() { Expr::Paren(Box::new(value)) } else { value };
+                if stage_args { l.push_temp_if_complex(value) } else { value }
             })
         });
         let read_after: &[Expr] = if reads_object_after_arguments(m) { &args } else { &[] };

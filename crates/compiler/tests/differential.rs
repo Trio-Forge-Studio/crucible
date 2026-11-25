@@ -147,7 +147,7 @@ fn generated_programs_trace_the_same_in_node_and_lune() {
 #[test]
 #[ignore = "runs programs in Node and Lune, which must be on PATH"]
 fn shrinking_keeps_the_difference_it_started_from() {
-    const PROGRAM: usize = 11;
+    const PROGRAM: usize = 54;
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("differential-shrink-{}", std::process::id()));
     let mut edited = Runner::new(root.join("edited"));
     let mut run = |programs: &[ast::Program], sources: &[String]| {
