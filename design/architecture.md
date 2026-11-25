@@ -359,5 +359,5 @@ Each item has a default. On 2026-11-06 the work started with every default. `roa
 4. **A public plugin API for transforms.** Default is no. The trait stays internal.
 5. **Who provisions production.** Default is a maintainer running `crucible provision production` and committing the lock. The alternative is a CI job that opens a pull request with the lock change, which needs a bot token.
 6. **Release cadence.** Default is to keep one lockstep version for the runtime, compiler types and CLI.
-7. **Upgrade's roblox-ts migration.** FD has moved to TypeScript 7. Default is to keep the migration for one more minor release, then delete it.
+7. **Upgrade's roblox-ts migration.** FD has moved to TypeScript 7. Version 0.7.0 keeps the migration for games that still use roblox-ts. Its removal has no scheduled release.
 8. **The TypeScript 5 union ordering in emitted registration data.** Default is to keep it through phase 4 for byte-identical output, then canonicalize it in one labeled output change.
