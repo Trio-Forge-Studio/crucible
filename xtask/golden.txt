@@ -1,5 +1,5 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-b0c7984074d00c922d2a14ba22d2c5f04fd6f7f014e14c603e4927bbc8bb248d  build/sample-game.rbxl
+bdd6f6fa88553fe0edb9d90deaa960cf42532169ba9367f97c5fddb5ee287e78  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
@@ -211,8 +211,12 @@ b4ecf469985eebae52e30dac06371361e78a342285e695d34b5e377233e92ad6  packages/cruci
 ab6b877f88aeee4557f76b920f81d6011071144bd30e3ac53d4e0bc91a300b4e  packages/crucible/out/ui/frame-loop.luau
 f06d481bac489112f44e95d15f7c789f73b84c3b15d75a2993639348d2bea3ef  packages/crucible/out/ui/group.d.ts
 bf7099f09b3e5336e836122297b2df9d8f54a229f95cc97958795f758d383520  packages/crucible/out/ui/group.luau
-883d792590f51c89a5b31063cc32030a3755854841b518dcb9a5c149b1fc858b  packages/crucible/out/ui/index.d.ts
-306b1cf9d6659b863f468b19a94aa6f53105d8443f367a3bc16b20eddad5de98  packages/crucible/out/ui/init.luau
+e3a6bd4d0e2fa0cf54d1804bac7b9e75abf8a25837b536e2bd6752be14273ad1  packages/crucible/out/ui/icon.d.ts
+8139c90bf04bac793d97f7fe3334540abe4b21bfccf87c1218af09c0837db6a4  packages/crucible/out/ui/icon.luau
+31d465d41977c5e8e9f646c3a14ab626b0bed8fe2fea641e917c5ae33b84c651  packages/crucible/out/ui/index.d.ts
+d7221404d0f93334b985a6b7f0a4fb4c5b202859e82013d097c9c016b0d88224  packages/crucible/out/ui/init.luau
+3f17c9b4cd07511f9f5514b1fd6c1c70aadf3c766ff59ed070fe1cea8646c6d7  packages/crucible/out/ui/lucide.d.ts
+adc1e6a2c385b23dffe01d762eb11da63a56cb17c1dce93b6c81cf71a006ee1d  packages/crucible/out/ui/lucide.luau
 edc595616485afcde7a118abad3a768971df9bba194d2dddf4df5c17dee1cae8  packages/crucible/out/ui/modal-state.d.ts
 b87762408d54388772e62389b2b0777810b6d69814f4efd943027dca7eb882ea  packages/crucible/out/ui/modal-state.luau
 a6e8922a412696d506691d6767a8624505e80bdffd11134236c35c0cbfbf19bf  packages/crucible/out/ui/pan-zoom-state.d.ts
@@ -253,8 +257,8 @@ bd7245cde27f866047d3a57617b103188ea3fd0240f910abc5538db85221cc32  packages/cruci
 389e3c23434ceacffed5358590198e95910b272ed81bd280eb209a5d52d05619  packages/crucible/out/ui/toggle.luau
 0edcf4bac5b888d189105c12d99d51a2797b0200e131715f06792c13caf6e87d  packages/crucible/out/ui/topbar-policy.d.ts
 1181a91c333ea448873c60ba8c2a9302b398afbea51cf57ffea2227fcec5e08d  packages/crucible/out/ui/topbar-policy.luau
-23b7b07db2e27c9d96fd5c7b090e38bb0bcef22735bcb6cb30990fd672bb0624  packages/crucible/out/ui/topbar.d.ts
-d436a923e9372d242d151ad9a1f37474d9bbb223048a7c745c775deaca94850c  packages/crucible/out/ui/topbar.luau
+e1e907e06545d232eb7d86507a338e5649a05a06b5d440a6bc632eb17f1332e3  packages/crucible/out/ui/topbar.d.ts
+e76605931fff80d5b2400784fb9553e169110c59a2a1072fa6f7571ae3dc712c  packages/crucible/out/ui/topbar.luau
 a4f13347b1f155a2c351c68dd5542f934f4ad4264895fc1752c5cc105289717d  packages/crucible/out/ui/use-controllable.d.ts
 65ad7643e0746c36a142d05323625d70da3dbe7c0040d53468a391380876f8aa  packages/crucible/out/ui/use-controllable.luau
 e9392dc84759edc0f1999ddc65032d2b79155de0cf38edca34a3337502db3b9d  packages/crucible/out/ui/use-pan-zoom.d.ts

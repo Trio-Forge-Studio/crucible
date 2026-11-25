@@ -236,6 +236,9 @@ importers:
       '@trioforge/compiler-types':
         specifier: workspace:*
         version: link:../compiler-types
+      lucide-static:
+        specifier: 1.80.0
+        version: 1.80.0
 
 packages:
 
@@ -1013,6 +1016,9 @@ packages:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
 
+  lucide-static@1.80.0:
+    resolution: {integrity: sha512-RB4WCODLshIIEYhKQsbJKhNvzKpkkIHvL1xwIDLL6uJJ5Qg14NPgA2eXETVyvx+r4Md1zTH9gkeb5Cn3EwLD2A==}
+
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -1682,6 +1688,8 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
+
+  lucide-static@1.80.0: {}
 
   lz-string@1.5.0: {}
 

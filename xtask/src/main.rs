@@ -3,6 +3,7 @@ mod arch;
 mod build;
 mod diff;
 mod golden;
+mod icons;
 mod naming;
 mod overlay;
 mod proof;
@@ -23,7 +24,7 @@ use sha2::{Digest, Sha256};
 const SPEC_REPOSITORY: &str = "Roblox/creator-docs";
 const SPEC_PATH: &str = "content/en-us/reference/cloud/openapi.json";
 
-const USAGE: &str = "usage: cargo xtask <spec|golden|arch|abi|proof|schema|tla> ...";
+const USAGE: &str = "usage: cargo xtask <spec|golden|arch|abi|proof|schema|icons|tla> ...";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
         Some("abi") => abi::main(&args[1..]),
         Some("proof") => proof::main(&args[1..]),
         Some("schema") => schema::main(&args[1..]),
+        Some("icons") => icons::main(&args[1..]),
         Some("tla") => tla::main(&args[1..]),
         _ => Err(USAGE.into()),
     };

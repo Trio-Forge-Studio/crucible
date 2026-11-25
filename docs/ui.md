@@ -694,6 +694,41 @@ export function mountTopbar() {
 - `Topbar.Label` draws plain text in the same pill, such as a frame-rate readout. It takes `name`, `text` and `order`, grows with its text and can't be pressed or selected.
 - To draw your own icon, call `useTopbarIcon` with the icon's state options, `selected`, `defaultSelected`, `onSelectedChange`, `disabled` and `notice`, and attach its `action` to a button inside `Topbar.Root`. It writes `Highlighted`, `Pressed`, `Disabled`, `Selected` and a numeric `Notice` attribute, and returns `captionShown` for your caption.
 
+## Icons
+
+`icon(name)` accepts autocompleted icon names from Lucide 1.80.0. The `lucideVersion` export reports the bundled version. Each icon has a 60×60 px source rectangle and white strokes, so you can tint it with `ImageColor3`.
+
+```tsx
+import Vide from "@rbxts/vide";
+import { icon } from "@trioforge/crucible/ui";
+
+export function HomeIcon() {
+	return (
+		<imagelabel
+			{...icon("house")}
+			Size={UDim2.fromOffset(24, 24)}
+			BackgroundTransparency={1}
+			ImageColor3={Color3.fromRGB(255, 214, 102)}
+		/>
+	);
+}
+```
+
+Pass the icon directly to `Topbar.Icon` as its `image`. The prop also accepts a Roblox asset string or a Vide source that returns either form.
+
+```tsx
+import Vide from "@rbxts/vide";
+import { icon, Topbar } from "@trioforge/crucible/ui";
+
+export function SettingsTopbar() {
+	return (
+		<Topbar.Root side="Right" displayOrder={12}>
+			<Topbar.Icon name="Settings" image={icon("settings")} order={1} />
+		</Topbar.Root>
+	);
+}
+```
+
 ## Frame listeners
 
 `heartbeat(listener)` and `preRender(listener)` call `listener(now, delta)` on each `RunService.Heartbeat` or `PreRender`, and return a function that removes it. Every listener shares one connection per signal, which disconnects when the last listener is removed. The hooks use them for holds, slider repeats, glides and toast timers.

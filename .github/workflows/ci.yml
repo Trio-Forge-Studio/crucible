@@ -71,20 +71,22 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo xtask spec check
       - run: cargo xtask abi check
-      - run: cargo xtask schema check
-      - name: Check the architecture rules and that no violation is new against the base
-        shell: bash
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD^' }}
-        run: cargo xtask arch --base "$BASE"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
-      - name: Install the workspace and build the runtime for dev and create tests
-        working-directory: .
-        run: pnpm install --frozen-lockfile && pnpm --filter @trioforge/crucible build
+      - run: pnpm install --frozen-lockfile
+      - run: cargo xtask schema check
+      - run: cargo xtask icons check
+        if: runner.os != 'macOS'
+      - name: Check the architecture rules and that no violation is new against the base
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD^' }}
+        run: cargo xtask arch --base "$BASE"
+      - name: Build the runtime for dev and create tests
+        run: pnpm --filter @trioforge/crucible build
       - run: cargo test --workspace --locked
       # The golden build also writes build/sample-game.rbxl, which the network execution test loads.
       - name: Compare the build output with the golden baseline
