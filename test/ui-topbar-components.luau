@@ -38,13 +38,14 @@ return {
 		h.device("Keyboard")
 		local selected = h.vide.source(false)
 		local imageScale = h.vide.source(0.75)
+		local image = h.vide.source("rbxassetid://42")
 		local presses = {}
 		local gui = mount(h, {
 			side = "Left",
 			icons = {
 				{
 					name = "Settings",
-					image = "rbxassetid://1",
+					image = image,
 					imageScale = imageScale,
 					caption = "Settings",
 					order = 2,
@@ -69,6 +70,15 @@ return {
 		assert(child(icons, "UIPadding").PaddingLeft == roblox.UDim.new(0, 8), "the left edge uses the gap")
 		local button = child(settings, "ClickRegion")
 		local settingsImage = child(button, "IconSpot", "IconImage")
+		local glyph = h.require("icon").icon("settings")
+		image(glyph)
+		assert(settingsImage.Image == glyph.Image, "the label uses the icon sheet")
+		assert(settingsImage.ImageRectOffset == glyph.ImageRectOffset, "the label crops to the icon offset")
+		assert(settingsImage.ImageRectSize == glyph.ImageRectSize, "the label crops to the icon size")
+		image("rbxassetid://42")
+		assert(settingsImage.Image == "rbxassetid://42", "the label accepts an asset string")
+		assert(settingsImage.ImageRectOffset == roblox.Vector2.zero, "an asset string resets the crop offset")
+		assert(settingsImage.ImageRectSize == roblox.Vector2.zero, "an asset string resets the crop size")
 		assert(
 			child(daily, "ClickRegion", "IconSpot", "IconImage").Size == roblox.UDim2.fromScale(0.5, 0.5),
 			"an image fills half the spot by default"

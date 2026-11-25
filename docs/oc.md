@@ -65,7 +65,9 @@ Upload sends one create request, then polls for the asset ID. It never repeats t
 
 `--resume` accepts an operation ID or `operations/<id>` and sends GET requests only. It needs no file or creator. The default poll deadline is 300 seconds. After acceptance, a deadline, poll failure, or invalid asset receipt exits 8 with the resume command. A GET-only resume retains the read failure codes.
 
-The display name defaults to the file stem in title case. `--name` overrides it. `--type` accepts `model`, `decal`, `audio`, or `video`; the default comes from the file extension. Files must be nonempty regular files of at most 20,000,000 bytes. Supported extensions are FBX, glTF, GLB, RBXM, PNG, JPG, JPEG, BMP, TGA, OGG, MP3, WAV, FLAC, and MP4. Set `--group` or `--user` to choose the creator.
+The display name defaults to the file stem in title case. `--name` overrides it. `--type` accepts `model`, `decal`, `image`, `audio`, or `video`. The default comes from the file extension. PNG, JPG, JPEG, BMP, and TGA default to `decal`. Use `--type image` with those formats to get an Image asset ID for use in scripts. Files must be nonempty regular files of at most 20,000,000 bytes. Supported extensions are FBX, glTF, GLB, RBXM, PNG, JPG, JPEG, BMP, TGA, OGG, MP3, WAV, FLAC, and MP4. Set `--group` or `--user` to choose the creator.
+
+Use `--open-use` to request permission for any Roblox experience to use the asset. By default, Roblox uses the creator's asset privacy setting. [Roblox Open Cloud guide](https://create.roblox.com/docs/cloud/guides/experience-icons-and-thumbnails#upload-the-image)
 
 ## Publish a place
 

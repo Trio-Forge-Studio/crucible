@@ -45,10 +45,11 @@
 	},
 	"devDependencies": {
 		"@rbxts/charm": "0.11.1",
+		"@rbxts/charm-sync": "0.4.1",
 		"@rbxts/types": "1.0.959",
 		"@rbxts/vide": "0.6.1",
 		"@trioforge/compiler-types": "workspace:*",
-		"@rbxts/charm-sync": "0.4.1"
+		"lucide-static": "1.80.0"
 	},
 	"peerDependencies": {
 		"@rbxts/charm": "0.11.1",
@@ -63,6 +64,7 @@
 	"files": [
 		"out",
 		"LICENSE",
+		"LICENSE-lucide",
 		"lune"
 	],
 	"repository": {

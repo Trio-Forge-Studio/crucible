@@ -1,5 +1,6 @@
-import Vide, { cleanup, effect, read, source, untrack } from "@rbxts/vide";
+import Vide, { cleanup, derive, effect, read, source, untrack } from "@rbxts/vide";
 import { heartbeat } from "./frame-loop";
+import type { IconImage } from "./icon";
 import type { Children, Value } from "./props";
 import { captionShift, topbarLayout } from "./topbar-policy";
 import { useTopbarIcon, type TopbarIconOptions } from "./use-topbar-icon";
@@ -15,7 +16,7 @@ export interface TopbarRootProps {
 }
 export interface TopbarIconProps extends TopbarIconOptions {
 	name: string;
-	image: Value<string>;
+	image: Value<string | IconImage>;
 	imageScale?: Value<number>;
 	caption?: Value<string>;
 	order: number;
@@ -121,6 +122,12 @@ function TopbarRoot(props: TopbarRootProps): Vide.Node {
 }
 function TopbarIcon(props: TopbarIconProps): Vide.Node {
 	const icon = useTopbarIcon(props);
+	const image = derive((): IconImage => {
+		const value = read(props.image);
+		return typeIs(value, "string")
+			? { Image: value, ImageRectOffset: Vector2.zero, ImageRectSize: Vector2.zero }
+			: value;
+	});
 	const preferred = watch("PreferredTransparency", () => GuiService.PreferredTransparency);
 	const center = new Vector2(0.5, 0.5);
 	return (
@@ -167,7 +174,9 @@ function TopbarIcon(props: TopbarIconProps): Vide.Node {
 							return UDim2.fromScale(scale, scale);
 						}}
 						BackgroundTransparency={1}
-						Image={props.image}
+						Image={() => image().Image}
+						ImageRectOffset={() => image().ImageRectOffset}
+						ImageRectSize={() => image().ImageRectSize}
 						ZIndex={2}
 					/>
 				</frame>

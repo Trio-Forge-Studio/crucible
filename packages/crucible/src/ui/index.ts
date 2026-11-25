@@ -46,6 +46,8 @@ export { TextField, type TextFieldInputProps, type TextFieldRootProps } from "./
 export type { Orientation } from "./group";
 export type { AsChildProps, BindingChildren, ButtonPartProps, HostProps } from "./part";
 export { Topbar, type TopbarIconProps, type TopbarLabelProps, type TopbarRootProps, type TopbarSide } from "./topbar";
+export { icon, type IconImage, type IconName } from "./icon";
+export { lucideVersion } from "./lucide";
 export {
 	AlertDialog,
 	Dialog,
