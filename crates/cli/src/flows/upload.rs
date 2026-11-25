@@ -10,11 +10,14 @@ pub struct Args {
     #[arg(required_unless_present = "resume", conflicts_with = "resume")]
     pub file: Option<PathBuf>,
     /// Resume an accepted upload by operation ID using GET only.
-    #[arg(long,value_parser=operation_id,conflicts_with_all=["file","asset_type","name","description","group","user"])]
+    #[arg(long,value_parser=operation_id,conflicts_with_all=["file","asset_type","name","description","group","user","open_use"])]
     pub resume: Option<String>,
     /// Override the asset type inferred from the file extension.
     #[arg(long = "type", value_enum)]
     pub asset_type: Option<AssetType>,
+    /// Allow any Roblox experience to use the asset.
+    #[arg(long)]
+    pub open_use: bool,
     /// Override the display name inferred from the file stem.
     #[arg(long)]
     pub name: Option<String>,
@@ -32,6 +35,7 @@ pub struct Args {
 pub enum AssetType {
     Model,
     Decal,
+    Image,
     Audio,
     Video,
 }
@@ -56,6 +60,9 @@ fn prepare(args: Args) -> Result<Upload, Failure> {
     }
     let path = args.file.as_ref().expect("clap requires a file for creation");
     let (kind, media) = media(path)?;
+    if matches!(args.asset_type, Some(AssetType::Image)) && !matches!(kind, AssetType::Decal) {
+        return Err(Failure::usage("--type image requires a PNG, JPG, JPEG, BMP, or TGA file"));
+    }
     let kind = args.asset_type.unwrap_or(kind);
     let creator = match (args.group, args.user) {
         (Some(id), _) => json!({"groupId":id}),
@@ -63,7 +70,11 @@ fn prepare(args: Args) -> Result<Upload, Failure> {
         _ => return Err(Failure::usage("set --group or --user")),
     };
     let name = args.name.unwrap_or_else(|| title(path.file_stem().unwrap_or_default().to_string_lossy().as_ref()));
-    let request = json!({"assetType":kind,"displayName":name,"description":args.description,"creationContext":{"creator":creator}});
+    let mut context = json!({"creator":creator});
+    if args.open_use {
+        context["assetPrivacy"] = json!("OpenUse");
+    }
+    let request = json!({"assetType":kind,"displayName":name,"description":args.description,"creationContext":context});
     let body = BodyInput::Multipart {
         parts: vec![
             PartInput {

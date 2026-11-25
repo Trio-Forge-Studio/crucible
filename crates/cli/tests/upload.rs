@@ -56,6 +56,48 @@ fn uploads_one_fbx_with_group_ownership_and_polls_the_accepted_operation() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("Operation safe-id: waiting"));
 }
 #[test]
+fn uploads_png_as_an_open_use_image_when_requested() {
+    let (dir, model) = fixture();
+    let png = dir.path().join("sheet.png");
+    std::fs::write(&png, "png fixture").unwrap();
+    for (flags, kind, privacy) in [
+        (&["--type", "image", "--open-use"][..], "Image", Some("OpenUse")),
+        (&["--type", "image"][..], "Image", None),
+        (&[][..], "Decal", None),
+    ] {
+        let server = Server::new(vec![
+            Response::json(json!({"path":"operations/image-id"})),
+            Response::json(json!({"done":true,"response":{"assetId":"42"}})),
+        ]);
+        let out = command(&server.origin)
+            .args(["asset", "upload"])
+            .arg(&png)
+            .args(["--group", "35"])
+            .args(flags)
+            .output()
+            .unwrap();
+        assert_eq!(code(&out), 0, "{}", document(&out));
+        assert_eq!(document(&out)["assetType"], kind);
+        let calls = server.requests();
+        let multipart = String::from_utf8_lossy(&calls[0].body);
+        assert!(multipart.contains("Content-Type: image/png"));
+        let request =
+            multipart.split("Content-Type: application/json\r\n\r\n").nth(1).unwrap().split("\r\n").next().unwrap();
+        let request: serde_json::Value = serde_json::from_str(request).unwrap();
+        assert_eq!(request["assetType"], kind);
+        assert_eq!(request["creationContext"].get("assetPrivacy"), privacy.map(|value| json!(value)).as_ref());
+    }
+    let server = Server::new(vec![]);
+    let out = command(&server.origin)
+        .args(["asset", "upload"])
+        .arg(model)
+        .args(["--group", "35", "--type", "image"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&out), 2, "{}", document(&out));
+    assert!(server.requests().is_empty());
+}
+#[test]
 fn rejected_uploads_and_lost_responses_are_distinct_and_never_resent() {
     let (_dir, path) = fixture();
     for (reply, expected) in [
@@ -125,6 +167,7 @@ fn invalid_arguments_and_resume_paths_never_send_a_request() {
         vec!["--resume", "https://evil/id"],
         vec!["--resume", "operations/id?x"],
         vec!["--resume", "safe-id", "--group", "35"],
+        vec!["--resume", "safe-id", "--open-use"],
     ] {
         let out = command(&server.origin).args(["asset", "upload"]).args(&args).output().unwrap();
         assert_eq!(code(&out), 2, "{args:?}");
