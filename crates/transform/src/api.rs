@@ -14,12 +14,17 @@ pub(crate) enum Macro {
     Attribute,
     Boot,
     Inject,
+    Icon,
     Receive,
     Declaration(DeclarationKind),
 }
 
-const MACRO_ENTRIES: [(&str, &[Macro]); 3] =
-    [(".", &[Macro::Attribute, Macro::Inject]), ("./server", &[Macro::Boot]), ("./client", &[Macro::Boot])];
+const MACRO_ENTRIES: [(&str, &[Macro]); 4] = [
+    (".", &[Macro::Attribute, Macro::Inject]),
+    ("./server", &[Macro::Boot]),
+    ("./client", &[Macro::Boot]),
+    ("./ui", &[Macro::Icon]),
+];
 
 impl Macro {
     pub(crate) fn declarations() -> impl Iterator<Item = Macro> {
@@ -33,6 +38,7 @@ impl Macro {
             Macro::Declaration(kind) => kind.name(),
             Macro::Boot => "boot",
             Macro::Inject => "inject",
+            Macro::Icon => "icon",
         }
     }
 }

@@ -7,6 +7,7 @@ pub enum Fact {
     /// An `inject` call. Without a type argument its target is `Invalid`.
     Inject(Dependency),
     Attribute,
+    Icon(crate::IconRect),
     /// A declaration macro call, which lowers to the `@trioforge/crucible/emit` function of the same name.
     Declaration(Declaration),
     /// A `receive` call, which lowers to `receive(self, field, target, callback)`.

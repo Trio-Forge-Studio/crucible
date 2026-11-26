@@ -3,7 +3,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use crucible_compiler::{InstanceMap, Target, VirtualModule};
-use crucible_transform::{Attribute, Check, Class, ClassKind, Dependency};
+use crucible_transform::{Attribute, Check, Class, ClassKind, Dependency, IconAtlas, IconMode, IconRect};
 use support::{Analysis, repo};
 
 fn sample_place() -> (InstanceMap, PathBuf) {
@@ -107,9 +107,15 @@ fn the_sample_game_compiles_with_its_registrations_and_boot_globs() {
         source: "return { Products = { CoinPack = { key = \"coin-pack\", id = 1001 } } }\n",
     };
     let target = Target::Game { instances: &instances, include: &include, modules: &[experience] };
-    let modules = crucible_transform::compile(&repo().join("examples/sample-game/tsconfig.json"), target)
-        .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"))
-        .modules;
+    let atlas = IconAtlas::from([("coins".into(), IconRect { asset: "1".into(), x: 2, y: 2 })]);
+    let (compiled, info) = crucible_transform::compile_game(
+        &repo().join("examples/sample-game/tsconfig.json"),
+        target,
+        IconMode::Build(Ok(atlas)),
+    )
+    .unwrap_or_else(|failure| panic!("the sample game compiles:\n{failure}"));
+    assert_eq!(info.icons, ["coins"]);
+    let modules = compiled.modules;
     let mut paths: Vec<&str> = modules.iter().map(|m| m.path.as_str()).collect();
     paths.sort_unstable();
     assert_eq!(

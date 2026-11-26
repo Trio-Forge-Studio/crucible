@@ -70,7 +70,11 @@ return {
 		assert(child(icons, "UIPadding").PaddingLeft == roblox.UDim.new(0, 8), "the left edge uses the gap")
 		local button = child(settings, "ClickRegion")
 		local settingsImage = child(button, "IconSpot", "IconImage")
-		local glyph = h.require("icon").icon("settings")
+		local glyph = {
+			Image = "rbxassetid://9",
+			ImageRectOffset = roblox.Vector2.new(66, 2),
+			ImageRectSize = roblox.Vector2.new(60, 60),
+		}
 		image(glyph)
 		assert(settingsImage.Image == glyph.Image, "the label uses the icon sheet")
 		assert(settingsImage.ImageRectOffset == glyph.ImageRectOffset, "the label crops to the icon offset")

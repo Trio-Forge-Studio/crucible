@@ -76,7 +76,7 @@ local function signal()
 end
 
 -- The classes the sample's JSX names. Vide maps each lowercase tag to its class through ReflectionService.
-local UI_CLASSES = { "Frame", "ScreenGui", "TextButton", "TextLabel", "UIListLayout" }
+local UI_CLASSES = { "Frame", "ImageLabel", "ScreenGui", "TextButton", "TextLabel", "UIListLayout" }
 
 -- A GuiService that holds the selection and the Roblox menu flag, without moving either itself.
 local function guiService()

@@ -10,12 +10,11 @@ crucible-abi = { path = "../crates/abi" }
 crucible-project = { path = "../crates/project" }
 oc-registry = { path = "../crates/oc-registry" }
 proc-macro2 = "1"
+flate2 = "1"
 quote = "1"
-resvg = { version = "0.47", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 syn = { version = "2", default-features = false, features = ["full", "parsing", "printing", "visit-mut"] }
-tempfile = "3"
 toml = "1"
 ureq = { version = "3", features = ["json"] }

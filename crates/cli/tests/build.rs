@@ -1,5 +1,7 @@
 #[path = "support/game.rs"]
 mod game;
+#[path = "support/sequence.rs"]
+mod sequence;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -1456,7 +1458,7 @@ fn canonical(path: &Path) -> PathBuf {
 fn sample_game() -> Game {
     let game = Game { dir: tempfile::tempdir().unwrap() };
     let sample = repo().join("examples/sample-game");
-    for file in ["package.json", "crucible.toml", "crucible.lock", "default.project.json"] {
+    for file in ["package.json", "crucible.toml", "crucible.lock", "crucible-icons.lock", "default.project.json"] {
         fs::copy(sample.join(file), game.path(file)).unwrap();
     }
     copy_dir(&sample.join("src"), &game.path("src"));
@@ -1590,4 +1592,175 @@ fn a_place_whose_tsconfig_leaves_out_the_declaration_is_told_which_file_to_inclu
         ),
         "{stderr}"
     );
+}
+
+fn icons(game: &Game, server: &sequence::Server, group: bool, key: bool) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_crucible"));
+    command.current_dir(game.root()).arg("icons").env("CRUCIBLE_OC_ORIGIN", &server.origin);
+    if group {
+        command.args(["--group", "73"]);
+    }
+    if key {
+        command.env("CRUCIBLE_OC_API_KEY", "test-key");
+    } else {
+        command.env_remove("CRUCIBLE_OC_API_KEY");
+    }
+    command.output().unwrap()
+}
+
+#[test]
+fn the_icon_command_uploads_only_new_sheets_and_build_uses_the_updated_lock() {
+    use sequence::{Response, Server};
+
+    let game = sample_game();
+    let expected: toml::Value = toml::from_str(&game.read("crucible-icons.lock")).unwrap();
+    fs::remove_file(game.path("crucible-icons.lock")).unwrap();
+    let failed = game.build(&["--env", "sample"]);
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(!failed.status.success() && stderr.contains("CRU042: Missing crucible-icons.lock."), "{stderr}");
+    let offline = Server::new(vec![]);
+    let no_group = icons(&game, &offline, false, false);
+    let stderr = String::from_utf8_lossy(&no_group.stderr);
+    assert_eq!(no_group.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("--group <groupId>") && stderr.contains("sheet 1"), "{stderr}");
+    assert!(offline.requests().is_empty());
+
+    let server = Server::new(vec![
+        Response::json(json!({"path":"operations/new-sheet"})),
+        Response::json(json!({"done":true,"response":{"assetId":"821"}})),
+    ]);
+    let uploaded = icons(&game, &server, true, true);
+    assert!(uploaded.status.success(), "{}", String::from_utf8_lossy(&uploaded.stderr));
+    let calls = server.requests();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[0].head.starts_with("POST /assets/v1/assets "));
+    assert!(calls[1].head.starts_with("GET /assets/v1/operations/new-sheet "));
+    let body = String::from_utf8_lossy(&calls[0].body);
+    assert!(body.contains(r#""assetType":"Image""#));
+    assert!(body.contains(r#""assetPrivacy":"OpenUse""#));
+    assert!(body.contains(r#""groupId":"73""#));
+    // Roblox rejects an asset name longer than 50 characters with HTTP 400.
+    let name = body.split(r#""displayName":""#).nth(1).and_then(|rest| rest.split('"').next()).unwrap();
+    assert!(name.starts_with("Lucide icons 1 ") && name.len() <= 50, "{name}");
+    let lock: toml::Value = toml::from_str(&game.read("crucible-icons.lock")).unwrap();
+    assert_eq!(lock["sheets"][0]["asset"].as_str(), Some("821"));
+    assert_eq!(lock["sheets"][0]["sha256"], expected["sheets"][0]["sha256"]);
+    assert_eq!(lock["names"], expected["names"]);
+    let unchanged = icons(&game, &offline, false, false);
+    assert!(unchanged.status.success(), "{}", String::from_utf8_lossy(&unchanged.stderr));
+    assert!(offline.requests().is_empty());
+    let built = game.build(&["--env", "sample"]);
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    assert!(game.read("out/client/systems/menu.luau").contains("rbxassetid://821"));
+
+    let original = game.read("crucible-icons.lock");
+    for stale in [
+        original.replace("stroke = 1.25", "stroke = 2.0"),
+        original.replace("lucide = \"1.80.0\"", "lucide = \"1.0.0\""),
+    ] {
+        game.write("crucible-icons.lock", &stale);
+        let failed = game.build(&["--env", "sample"]);
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert!(
+            !failed.status.success() && stderr.contains("CRU042") && stderr.contains("`crucible icons`"),
+            "{stderr}"
+        );
+        let repaired = icons(&game, &offline, false, false);
+        assert!(repaired.status.success(), "{}", String::from_utf8_lossy(&repaired.stderr));
+        assert_eq!(game.read("crucible-icons.lock"), original);
+    }
+}
+
+#[test]
+fn an_accepted_icon_upload_resumes_with_get_and_an_unknown_upload_cannot_be_resent() {
+    use sequence::{Response, Server};
+
+    let game = sample_game();
+    fs::remove_file(game.path("crucible-icons.lock")).unwrap();
+    let stopped = Server::new(vec![
+        Response::json(json!({"path":"operations/accepted-sheet"})),
+        Response::Body(403, "poll refused".into()),
+    ]);
+    let interrupted = icons(&game, &stopped, true, true);
+    assert_eq!(interrupted.status.code(), Some(8), "{}", String::from_utf8_lossy(&interrupted.stderr));
+    assert_eq!(stopped.requests().len(), 2);
+    assert!(!game.path("crucible-icons.lock").exists());
+    let resumed = Server::new(vec![Response::json(json!({"done":true,"response":{"assetId":"513"}}))]);
+    let finished = icons(&game, &resumed, false, true);
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    let requests = resumed.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].head.starts_with("GET /assets/v1/operations/accepted-sheet "));
+    assert!(!game.path(".crucible/icons-upload.json").exists());
+
+    for lost in [Response::Reset, Response::Truncated(200)] {
+        let game = sample_game();
+        fs::remove_file(game.path("crucible-icons.lock")).unwrap();
+        let lost = Server::new(vec![lost]);
+        assert_eq!(icons(&game, &lost, true, true).status.code(), Some(5));
+        let unused = Server::new(vec![]);
+        let blocked = icons(&game, &unused, true, true);
+        let stderr = String::from_utf8_lossy(&blocked.stderr);
+        assert_eq!(blocked.status.code(), Some(5), "{stderr}");
+        assert!(stderr.contains("unresolved upload"), "{stderr}");
+        assert_eq!(lost.requests().len(), 1);
+        assert!(unused.requests().is_empty());
+    }
+}
+
+#[test]
+fn the_atlas_unions_places_and_prunes_names_removed_from_the_game() {
+    use sequence::{Response, Server};
+
+    let game = sample_game();
+    let manifest = game.read("crucible.toml");
+    game.write(
+        "crucible.toml",
+        &(manifest.clone()
+            + "\n[places.second]\nproject = \"second.project.json\"\ntsconfig = \"tsconfig.second.json\"\n"),
+    );
+    game.write("second.project.json", &game.read("default.project.json").replace("out/", "second-out/"));
+    game.json(
+        "tsconfig.second.json",
+        &json!({
+            "extends": "./tsconfig.json",
+            "compilerOptions": { "outDir": "second-out" },
+            "include": ["src/shared/alt.ts"],
+            "exclude": []
+        }),
+    );
+    game.config(|config| config["exclude"] = json!(["src/shared/alt.ts"]));
+    game.write(
+        "src/shared/alt.ts",
+        "import { icon } from \"@trioforge/crucible/ui\"; export const extra = icon(\"settings\");\n",
+    );
+    let bake = |asset: &str| {
+        let server = Server::new(vec![
+            Response::json(json!({"path":"operations/new-sheet"})),
+            Response::json(json!({"done":true,"response":{"assetId":asset}})),
+        ]);
+        let output = icons(&game, &server, true, true);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(server.requests().len(), 2);
+        toml::from_str::<toml::Value>(&game.read("crucible-icons.lock")).unwrap()
+    };
+    game.write("crucible.toml", &game.read("crucible.toml").replace("place = 1", "places = { start = 1, second = 2 }"));
+    let full = bake("31");
+    assert_eq!(
+        full["names"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        ["coins", "settings",]
+    );
+    game.write("crucible.toml", &manifest);
+    let pruned = bake("32");
+    assert_eq!(pruned["names"].as_array().unwrap().len(), 1);
+    assert_eq!(pruned["names"][0].as_str(), Some("coins"));
+    let menu = "src/client/systems/menu.tsx";
+    game.write(menu, &game.read(menu).replace("{...icon(\"coins\")}", ""));
+    let offline = Server::new(vec![]);
+    let empty = icons(&game, &offline, false, false);
+    assert!(empty.status.success(), "{}", String::from_utf8_lossy(&empty.stderr));
+    let empty: toml::Value = toml::from_str(&game.read("crucible-icons.lock")).unwrap();
+    assert!(empty["names"].as_array().unwrap().is_empty());
+    assert!(empty["sheets"].as_array().unwrap().is_empty());
+    assert!(offline.requests().is_empty());
 }

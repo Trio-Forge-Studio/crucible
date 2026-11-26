@@ -20,3 +20,6 @@ price = 299
 [badges.first-pickup]
 name = "First pickup"
 description = "Collect your first coin."
+
+[icons]
+stroke = 1.25

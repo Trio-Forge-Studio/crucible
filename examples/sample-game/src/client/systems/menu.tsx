@@ -1,7 +1,15 @@
 import { atom } from "@rbxts/charm";
 import Vide, { mount, source } from "@rbxts/vide";
 import { effect, own, Subsystem, watch } from "@trioforge/crucible";
-import { Checkbox, Dialog, installAnvil, modalOpen, startMenuRuntime, type InputDevice } from "@trioforge/crucible/ui";
+import {
+	Checkbox,
+	Dialog,
+	icon,
+	installAnvil,
+	modalOpen,
+	startMenuRuntime,
+	type InputDevice,
+} from "@trioforge/crucible/ui";
 
 const Players = game.GetService("Players");
 const UserInputService = game.GetService("UserInputService");
@@ -40,6 +48,13 @@ function Settings(props: { music: boolean; onMusicChange: (on: boolean) => void 
 							Size={UDim2.fromOffset(320, 160)}
 						>
 							<textlabel Text="Press E to collect a coin." Size={new UDim2(1, 0, 0, 40)} />
+							<imagelabel
+								{...icon("coins")}
+								Name="CoinIcon"
+								BackgroundTransparency={1}
+								Position={UDim2.fromOffset(148, 52)}
+								Size={UDim2.fromOffset(24, 24)}
+							/>
 							<Dialog.Close
 								Name="Done"
 								Text="Done"

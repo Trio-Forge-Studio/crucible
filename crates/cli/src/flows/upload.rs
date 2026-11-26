@@ -106,13 +106,32 @@ fn create(ex: &Executor<'_>, body: BodyInput) -> Result<String, Failure> {
         .ok_or_else(|| upload_hint(Failure::unknown("no valid operation ID")))
 }
 pub fn run(ex: &Executor<'_>, args: Args) -> Result<Value, Failure> {
+    run_recording(ex, args, |_| Ok(()))
+}
+
+pub enum UploadEvent<'a> {
+    Sending,
+    Accepted(&'a str),
+}
+
+pub fn run_recording(
+    ex: &Executor<'_>,
+    args: Args,
+    mut record: impl FnMut(UploadEvent<'_>) -> Result<(), Failure>,
+) -> Result<Value, Failure> {
     let (id, display_name, asset_type) = match prepare(args)? {
         Upload::Resume(id) => (id, None, None),
-        Upload::Create { body, display_name, asset_type } => (create(ex, body)?, Some(display_name), Some(asset_type)),
+        Upload::Create { body, display_name, asset_type } => {
+            record(UploadEvent::Sending)?;
+            (create(ex, body)?, Some(display_name), Some(asset_type))
+        }
     };
     ex.note(&format!("Operation {id}: waiting"));
     let resume = format!("crucible oc asset upload --resume {id}");
     ex.resume(resume);
+    if asset_type.is_some() {
+        record(UploadEvent::Accepted(&id)).map_err(|failure| failure.with("operationId", json!(id)))?;
+    }
     let result = ex
         .finish(super::op(ex.registry, super::GET_OPERATION), json!({"path":format!("operations/{id}"),"done":false}))
         .map_err(|f| f.with("operationId", json!(id)))?;

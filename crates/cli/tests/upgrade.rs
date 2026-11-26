@@ -128,10 +128,10 @@ fn apply_with_old_gitignore(gitignore: &str, old: &str) -> (String, String) {
 }
 
 #[test]
-fn an_untouched_gitignore_gains_dot_env_and_an_edited_one_is_left_alone() {
+fn an_untouched_gitignore_gains_local_state_patterns_and_an_edited_one_is_left_alone() {
     let old = "node_modules/\nout/\ninclude/\nbuild/\n";
     let (refreshed, report) = apply_with_old_gitignore(old, old);
-    assert_eq!(refreshed, format!("{old}.env\n"));
+    assert_eq!(refreshed, format!("{old}.env\n/.crucible/icons-upload.*\n"));
     assert!(report.contains(".gitignore"), "{report}");
 
     let edited = format!("{old}notes/\n");

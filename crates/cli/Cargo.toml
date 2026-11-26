@@ -16,6 +16,9 @@ crucible-compiler = { path = "../compiler" }
 crucible-transform = { path = "../transform" }
 serde.workspace = true
 serde_json.workspace = true
+flate2 = "1"
+resvg = { version = "0.47", default-features = false }
+toml = "1"
 jsonc-parser = { version = "0.27", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }

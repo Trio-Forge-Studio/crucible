@@ -732,6 +732,7 @@ dependencies = [
  "crucible-transform",
  "dotenvy",
  "env_logger",
+ "flate2",
  "httpmock",
  "jsonc-parser",
  "libc",
@@ -744,6 +745,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "rbx_binary",
+ "resvg",
  "rmp-serde",
  "rojo",
  "semver",
@@ -752,6 +754,7 @@ dependencies = [
  "sha2",
  "syntect",
  "tempfile",
+ "toml 1.1.8+spec-1.1.0",
  "two-face",
  "unicode-width 0.2.2",
  "ureq",
@@ -845,6 +848,7 @@ dependencies = [
  "crucible-luau",
  "crucible-project",
  "crucible-transform",
+ "serde",
  "serde_json",
 ]
 
@@ -5329,15 +5333,14 @@ version = "0.7.0"
 dependencies = [
  "crucible-abi",
  "crucible-project",
+ "flate2",
  "oc-registry",
  "proc-macro2 1.0.107",
  "quote 1.0.47",
- "resvg",
  "serde",
  "serde_json",
  "sha2",
  "syn 2.0.119",
- "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "ureq",
 ]

@@ -1,7 +1,7 @@
 use crate::child;
 use crucible_compiler::{Compiled, InstanceMap, Module, Target, VirtualModule};
 use crucible_project::{Manifest, ManifestError, Place};
-use crucible_transform::Receipts;
+use crucible_transform::{CompileInfo, IconMode, Receipts};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fmt;
@@ -102,12 +102,19 @@ pub fn build(
     }
     refuse_declared_out_dir_overlaps(root, manifest)?;
     let experience = crate::experience::prepare(root, manifest, env)?;
-    let compiles = compile_all(root, &selected, experience.as_deref())?;
+    let atlas = crate::icons::for_build(root, manifest.icons.stroke).map_err(|problem| {
+        Error::Failed(format!("CRU042: {problem} Run `crucible icons` to update the game's icon atlas."))
+    })?;
+    let icons = IconMode::Build(atlas.ok_or_else(|| format!("Missing {}.", crate::icons::FILE)));
+    let compiles = compile_all(root, &selected, experience.as_deref(), &icons)?;
     // A place that grants nothing is exempt from CRU039, so only the whole game shows a product nobody grants. A game
     // that assigns ProcessReceipt itself answers every product.
-    let answered = compiles.iter().any(|shared| shared.receipts.answered);
+    let answered = compiles.iter().any(|shared| shared.info.receipts.answered);
     if experience.is_some() && selected.len() == manifest.places.len() && !answered {
-        crate::experience::refuse_ungranted(manifest, compiles.iter().flat_map(|shared| &shared.receipts.granted))?;
+        crate::experience::refuse_ungranted(
+            manifest,
+            compiles.iter().flat_map(|shared| &shared.info.receipts.granted),
+        )?;
     }
     write(root, &compiles)?;
     let mut built = Vec::new();
@@ -126,24 +133,38 @@ pub fn build(
 struct SharedCompile<'m> {
     place: &'m Place,
     compiled: Compiled,
-    receipts: Receipts,
+    info: CompileInfo,
 }
 
 fn compile_all<'m>(
     root: &Path,
     selected: &[(&'m String, &'m Place)],
     experience: Option<&str>,
+    icons: &IconMode,
 ) -> Result<Vec<SharedCompile<'m>>, Error> {
+    let icon_input = tempfile::NamedTempFile::new()
+        .and_then(|mut file| {
+            serde_json::to_writer(file.as_file_mut(), icons)?;
+            Ok(file)
+        })
+        .map_err(|error| Error::Failed(format!("cannot write the compiler's icon input: {error}")))?;
     let mut compiles: Vec<SharedCompile<'m>> = Vec::new();
     for &(name, place) in selected {
         if compiles.iter().any(|shared| shared.place == place) {
             continue;
         }
-        let (compiled, receipts) =
-            compile(root, place, experience).map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
-        compiles.push(SharedCompile { place, compiled, receipts });
+        let (compiled, info) = compile(root, place, experience, icon_input.path())
+            .map_err(|error| Error::Failed(format!("place {name}: {error}")))?;
+        compiles.push(SharedCompile { place, compiled, info });
     }
     Ok(compiles)
+}
+
+pub fn collect_icons(root: &Path, manifest: &Manifest) -> Result<std::collections::BTreeSet<String>, Error> {
+    let experience = crate::experience::prepare(root, manifest, None)?;
+    let selected: Vec<_> = manifest.places.iter().collect();
+    let compiles = compile_all(root, &selected, experience.as_deref(), &IconMode::Collect)?;
+    Ok(compiles.into_iter().flat_map(|shared| shared.info.icons).collect())
 }
 
 struct Output<'m> {
@@ -255,13 +276,20 @@ struct ChildModules {
     granted: Vec<String>,
     /// Whether the place assigns `MarketplaceService.ProcessReceipt` itself.
     answered: bool,
+    icons: Vec<String>,
 }
 
 // tsrs never frees a program, so each compile runs in its own process and a build's peak memory is its largest place.
-fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Compiled, Receipts), String> {
+fn compile(
+    root: &Path,
+    place: &Place,
+    experience: Option<&str>,
+    icon_input: &Path,
+) -> Result<(Compiled, CompileInfo), String> {
     let exe = std::env::current_exe().map_err(|error| format!("cannot find the crucible executable: {error}"))?;
     let mut command = Command::new(exe);
     command.arg(COMPILE).arg(&place.tsconfig).arg(&place.project).arg(&place.include);
+    command.arg("--icon-input").arg(icon_input);
     // The bindings can outgrow a Windows command line, so they reach the child in a file.
     let bindings = experience
         .map(|source| {
@@ -288,10 +316,18 @@ fn compile(root: &Path, place: &Place, experience: Option<&str>) -> Result<(Comp
     let child: ChildModules =
         serde_json::from_slice(&json).map_err(|error| format!("cannot read the compiler's output: {error}"))?;
     let modules = child.modules.into_iter().map(|(path, source)| Module { path, source }).collect();
-    Ok((Compiled { out_dir: child.out_dir, modules }, Receipts { granted: child.granted, answered: child.answered }))
+    let info =
+        CompileInfo { receipts: Receipts { granted: child.granted, answered: child.answered }, icons: child.icons };
+    Ok((Compiled { out_dir: child.out_dir, modules }, info))
 }
 
-pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, experience: Option<PathBuf>) -> ExitCode {
+pub fn compile_main(
+    tsconfig: PathBuf,
+    project: PathBuf,
+    include: PathBuf,
+    experience: Option<PathBuf>,
+    icon_input: Option<PathBuf>,
+) -> ExitCode {
     child::exit_with_parent();
     let fail = |message: String| {
         eprint!("{}", relative_to_cwd(&format!("error: {message}\n")));
@@ -322,13 +358,27 @@ pub fn compile_main(tsconfig: PathBuf, project: PathBuf, include: PathBuf, exper
         .map(|(path, source)| VirtualModule { specifier: crucible_iac::bindings::SPECIFIER, path, source })
         .collect();
     let instances = InstanceMap::new(project.display().to_string(), mappings.folders, mappings.files);
-    match crucible_transform::compile_granting(
+    let icons = if let Some(path) = icon_input {
+        match std::fs::read(path).and_then(|bytes| Ok(serde_json::from_slice::<IconMode>(&bytes)?)) {
+            Ok(icons) => icons,
+            Err(error) => return fail(format!("cannot read the compiler's icon input: {error}")),
+        }
+    } else {
+        IconMode::default()
+    };
+    let collect = matches!(icons, IconMode::Collect);
+    match crucible_transform::compile_game(
         &tsconfig,
         Target::Game { instances: &instances, include: &include, modules: &modules },
+        icons,
     ) {
-        Ok((compiled, Receipts { granted, answered })) => {
-            let modules = compiled.modules.into_iter().map(|module| (module.path, module.source)).collect();
-            let child = ChildModules { out_dir: compiled.out_dir, modules, granted, answered };
+        Ok((compiled, CompileInfo { receipts: Receipts { granted, answered }, icons })) => {
+            let modules = if collect {
+                Vec::new()
+            } else {
+                compiled.modules.into_iter().map(|module| (module.path, module.source)).collect()
+            };
+            let child = ChildModules { out_dir: compiled.out_dir, modules, granted, answered, icons };
             match serde_json::to_writer(std::io::stdout().lock(), &child) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {

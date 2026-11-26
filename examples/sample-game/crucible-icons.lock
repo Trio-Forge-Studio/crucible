@@ -1,0 +1,8 @@
+lucide = "1.80.0"
+stroke = 1.25
+cell = 64
+names = ["coins"]
+
+[[sheets]]
+sha256 = "468bcdf53989e41e68e9a8edf8197afc89e9d159eb7db7146bc384ae564255f8"
+asset = "1"
