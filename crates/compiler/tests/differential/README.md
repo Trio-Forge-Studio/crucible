@@ -136,7 +136,6 @@ Each open entry of `known.md` is left out where the generator would write it, wi
 
 | Left out | Why |
 | --- | --- |
-| Several arguments of `push` or `unshift` with an effect, other than the one evaluated first | known.md, "push and unshift insert a value before they evaluate the next". |
 | A negative `fromIndex` of `indexOf` and `includes` | known.md, "A negative fromIndex throws". |
 | `includes` on an array that may hold NaN | known.md, "includes(NaN) is false". |
 | `join()` with no separator | known.md, "join() separates with a comma and a space". |

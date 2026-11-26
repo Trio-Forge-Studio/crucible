@@ -1,6 +1,6 @@
 # Crucible architecture roadmap
 
-The plan in `architecture.md` ships as 11 pull requests in four milestones, plus one deletion-only pull request. The move onto Charm and Vide in `stack.md` adds milestone "Stack" between milestones A and B. Each pull request tells one story, proves itself with the same generated table, and marks which commits you read and which you skim.
+The plan in `architecture.md` ships as 11 pull requests in four milestones. The move onto Charm and Vide in `stack.md` adds milestone "Stack" between milestones A and B. Each pull request tells one story, proves itself with the same generated table, and marks which commits you read and which you skim.
 
 ## How review works
 
@@ -216,11 +216,9 @@ TLA+ models of profile authority with receipts, then of asks, with invariants st
 
 The program generator, the two runners, the trace comparison, and a CI job with a fixed seed budget.
 
-### Deletion PR. `refactor(cli): remove the roblox-ts migration`
-
-This pull request ships in 0.7. Per decision 7, upgrade's roblox-ts migration stays for one more minor release after the Charm and Vide migration's 0.5.0. That release is 0.6.0, so 0.7 is the first without it. It only deletes code.
-
 ## Not scheduled
+
+Version 0.7.0 keeps the automatic roblox-ts migration in `crucible upgrade`. Removing it is a separate change for a future release.
 
 The TypeScript config front end (`crucible.config.ts`) waits until 0.6.0 has been used. If you still want it after that, it gets its own milestone, starting with a prototype in a child process.
 
@@ -234,5 +232,5 @@ The TypeScript config front end (`crucible.config.ts`) waits until 0.6.0 has bee
 | 4. Public plugin API | A new milestone after D. The trait stays internal until then. |
 | 5. CI provisions production | PR 8 gains a workflow that opens a lock pull request. It needs a bot token. |
 | 6. Independent versions | PR 4's handshake carries the compatibility check, and the release script changes. |
-| 7. Delete the migration now | The deletion PR moves into milestone A. |
+| 7. Delete the migration now | Schedule a deletion-only pull request. |
 | 8. Keep the TypeScript 5 ordering | PR 6 loses its last commit. |
