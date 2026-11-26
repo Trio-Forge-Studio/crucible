@@ -696,7 +696,20 @@ export function mountTopbar() {
 
 ## Icons
 
-`icon(name)` accepts autocompleted icon names from Lucide 1.80.0. The `lucideVersion` export reports the bundled version. Each icon has a 60×60 px source rectangle and white strokes, so you can tint it with `ImageColor3`.
+Call `icon("house")` with a string literal from the autocompleted Lucide names. Crucible reads the calls in every place in the game and bakes only the icons it finds. CRU041 reports a variable or any other argument that the compiler cannot bake.
+
+Set `stroke` in `crucible.toml` to a number greater than 0 and at most 4. The default is 2, in Lucide's 24-unit view box.
+
+```toml
+[icons]
+stroke = 1.25
+```
+
+Run `crucible icons --group <groupId>` from the game directory. It uploads new sheets as Open Use images under the group with the [Open Cloud key](oc.md). If all sheet hashes already have assets, `crucible icons` needs no group or key. Commit `crucible-icons.lock` beside `crucible.toml`. It records the Lucide version, stroke, cell size, sorted names and sheet hashes and asset IDs. An icon's position comes from its index in the names list.
+
+A game with no icon calls needs no icon lock. `crucible build` reports CRU042 if an icon has no locked entry or if the lock uses a different stroke or Lucide version. Run `crucible icons` again after changing the names or stroke. If a run stops after Roblox accepts an upload, the next run resumes the operation recorded in the local `.crucible/icons-upload.json`. If the upload response is lost before the operation ID arrives, Crucible reports the sheet hash and stops. Check the group’s Creations for that hash before clearing the upload’s journal entry.
+
+Each compiled call produces an image table with a 60×60 px source rectangle. The sheet has white strokes, so you can tint the image with `ImageColor3`.
 
 ```tsx
 import Vide from "@rbxts/vide";

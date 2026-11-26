@@ -10,6 +10,7 @@ crucible-abi = { path = "../abi" }
 crucible-compiler = { path = "../compiler" }
 crucible-luau = { path = "../luau" }
 serde_json.workspace = true
+serde.workspace = true
 
 [features]
 test-support = ["crucible-compiler/test-support"]

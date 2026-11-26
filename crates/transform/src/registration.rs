@@ -237,6 +237,7 @@ impl Walk<'_, '_> {
                 self.store(n, Fact::Attribute);
             }
             Some(Macro::Boot) => self.boot(n),
+            Some(Macro::Icon) => self.icon(n),
             Some(Macro::Receive) => self.receive(n, file),
             Some(Macro::Declaration(kind)) => self.declaration(n, kind, file),
             None => {}

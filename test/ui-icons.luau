@@ -1,31 +1,32 @@
 local harness = require("./lib/ui-harness")
 local roblox = require("@lune/roblox")
+local World = require("./lib/sample-world")
+local ui = require("./lib/ui-instances")
 
 return {
-	["Lucide icon rectangles follow the sheet grid"] = function()
-		local h = harness()
-		local ui = h.require()
-		local atlas = h.require("lucide")
-		assert(ui.lucideVersion == atlas.lucideVersion, "the UI entry reports the bundled Lucide version")
-		for _, case in
-			{
-				{ index = 1, sheet = 1, y = 2 },
-				{ index = 17, sheet = 1, y = 66 },
-				{ index = 257, sheet = 2, y = 2 },
-			}
-		do
-			local image = ui.icon(atlas.lucideNames[case.index])
-			assert(image.Image == atlas.lucideSheets[case.sheet], "each icon uses its sheet asset ID")
-			assert(string.match(image.Image, "^rbxassetid://%d+$"), "the sheet is a Roblox asset URI")
-			assert(image.ImageRectOffset == roblox.Vector2.new(2, case.y), "offset skips the transparent gutter")
-			assert(image.ImageRectSize == roblox.Vector2.new(60, 60), "all icon rectangles are 60×60")
-		end
-		h.stop()
+	["the compiler puts the locked image and crop in the sample menu"] = function()
+		local world = World.new()
+		world:bootServer()
+		world:settle()
+		local client = world:connect("Ann", 4120)
+		world:settle()
+		world:press(client, roblox.Enum.KeyCode.M)
+		local screen = assert(client.player.PlayerGui:FindFirstChild("SettingsMenu"), "M mounts the menu")
+		ui.fire(assert(screen:FindFirstChild("Help", true), "the help button mounts"), "Activated")
+		world.link:flush()
+		local icon = assert(screen:FindFirstChild("CoinIcon", true), "help mounts the coin icon")
+		assert(icon.Image == "rbxassetid://1", "the compiled icon uses the sample's locked asset")
+		assert(icon.ImageRectOffset == roblox.Vector2.new(2, 2), "the crop starts inside the gutter")
+		assert(icon.ImageRectSize == roblox.Vector2.new(60, 60), "the crop covers the icon cell")
+		world.place:Destroy()
 	end,
-	["an unknown Lucide icon reports its name"] = function()
+	["the runtime icon stub explains that compilation is required"] = function()
 		local h = harness()
-		local ok, message = pcall(h.require().icon, "missing-icon-name")
-		assert(not ok and string.find(tostring(message), "missing-icon-name", 1, true), "the error names the icon")
+		local ok, message = pcall(h.require().icon, "coins")
+		assert(
+			not ok and string.find(tostring(message), "must be compiled by Crucible", 1, true),
+			"the stub names the compiler requirement"
+		)
 		h.stop()
 	end,
 }

@@ -5,9 +5,9 @@ import { spawnSync } from "node:child_process";
 
 const repo = process.cwd();
 const run = fs.mkdtempSync(path.join(os.tmpdir(), "crucible-compiler-specs-"));
-const place = path.join(repo, "build/sample-game.rbxl");
+const place = path.join(run, "sample-source.rbxl");
 const declarations = path.join(repo, "packages/crucible/out");
-if (!fs.existsSync(place) || !fs.existsSync(path.join(declarations, "index.d.ts"))) {
+if (!fs.existsSync(path.join(declarations, "index.d.ts"))) {
 	console.error("run `pnpm build` first");
 	process.exit(1);
 }
@@ -22,7 +22,7 @@ fs.mkdirSync(path.join(run, "packages/crucible"), { recursive: true });
 fs.mkdirSync(path.join(run, "build"));
 
 const out = path.join(run, "packages/crucible/out");
-const game = path.join(run, "sample-game-out");
+const game = path.join(repo, "examples/sample-game/out");
 const compile = (...args) =>
 	step("cargo", [
 		"run",
@@ -38,18 +38,24 @@ const compile = (...args) =>
 		...args,
 	]);
 compile("packages/crucible/tsconfig.json", out);
-// crucible build wrote the sample's crucible:experience bindings, after the compiler's header line.
-const bindings = path.join(run, "crucible-experience.luau");
-const built = fs.readFileSync(path.join(repo, "examples/sample-game/out/shared/crucible-experience.luau"), "utf8");
-fs.writeFileSync(bindings, built.slice(built.indexOf("\n") + 1));
-compile(
-	"examples/sample-game/tsconfig.json",
-	game,
-	"examples/sample-game/default.project.json",
-	"examples/sample-game/include",
-	"crucible:experience",
-	"shared/crucible-experience.luau",
-	bindings,
+step(
+	"cargo",
+	[
+		"run",
+		"--quiet",
+		"--locked",
+		"--manifest-path",
+		path.join(repo, "Cargo.toml"),
+		"--bin",
+		"crucible",
+		"--",
+		"build",
+		"--env",
+		"sample",
+		"--output",
+		place,
+	],
+	{ cwd: path.join(repo, "examples/sample-game") },
 );
 
 (function copyDeclarations(dir) {

@@ -32,6 +32,8 @@ pub enum Command {
         #[arg(long)]
         plain: bool,
     },
+    /// Bake and upload the Lucide icons used by the game.
+    Icons(crate::icons::Args),
     /// Call Roblox Open Cloud. One JSON document per command.
     #[command(after_help = AGENT_GUIDE)]
     Oc(Oc),
@@ -56,6 +58,9 @@ pub enum Command {
         /// A file that holds the Luau of crucible:experience.
         #[arg(long)]
         experience: Option<PathBuf>,
+        /// The icon atlas or collection mode for this compile.
+        #[arg(long)]
+        icon_input: Option<PathBuf>,
     },
     /// Build one Rojo project. crucible build runs this in a child process.
     #[command(name = crate::build::ROJO_BUILD, hide = true)]

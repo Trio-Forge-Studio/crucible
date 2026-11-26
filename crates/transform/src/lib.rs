@@ -4,6 +4,7 @@ mod data;
 mod declarations;
 mod facts;
 mod grants;
+mod icons;
 mod lints;
 mod lower;
 mod network;
@@ -28,6 +29,7 @@ use facts::Fact;
 pub use facts::{
     Attribute, Check, Class, ClassKind, Declaration, Dependency, Field, KeyLiteral, Literal, MapKey, Schema, Tail,
 };
+pub use icons::{ICON_SIZE, IconAtlas, IconMode, IconRect};
 
 /// TypeScript's number for a Crucible error that is not a rule.
 const SETUP: i32 = 90000;
@@ -71,12 +73,18 @@ pub struct Receipts {
     pub answered: bool,
 }
 
-/// `compile`, and how the program answers purchases.
-pub fn compile_granting(tsconfig: &Path, target: Target<'_>) -> Result<(Compiled, Receipts), Failure> {
-    let mut crucible = Crucible::default();
+pub struct CompileInfo {
+    pub receipts: Receipts,
+    pub icons: Vec<String>,
+}
+
+/// Compiles with the game's icon atlas and returns the product and icon references.
+pub fn compile_game(tsconfig: &Path, target: Target<'_>, icons: IconMode) -> Result<(Compiled, CompileInfo), Failure> {
+    let mut crucible = Crucible { state: State { icons, ..State::default() }, ..Crucible::default() };
     let compiled = crucible_compiler::compile_with(tsconfig, target, &mut [&mut crucible])?;
     let grants = &crucible.state.grants;
-    Ok((compiled, Receipts { granted: grants.keys(), answered: grants.answers_receipts }))
+    let receipts = Receipts { granted: grants.keys(), answered: grants.answers_receipts };
+    Ok((compiled, CompileInfo { receipts, icons: crucible.state.icon_names.into_iter().collect() }))
 }
 
 #[cfg(feature = "test-support")]
@@ -84,7 +92,8 @@ pub fn analyze(
     tsconfig: &Path,
     target: Target<'_>,
 ) -> Result<(crucible_compiler::Facts, Crucible), Vec<crucible_compiler::Diagnostic>> {
-    let mut crucible = Crucible::default();
+    let mut crucible =
+        Crucible { state: State { icons: IconMode::Collect, ..State::default() }, ..Crucible::default() };
     let facts = crucible_compiler::analyze_with(tsconfig, target, &mut [&mut crucible])?;
     Ok((facts, crucible))
 }
@@ -103,6 +112,8 @@ pub(crate) struct State {
     facts: HashMap<SiteId, Fact>,
     network: network::Network,
     grants: grants::Grants,
+    icons: IconMode,
+    icon_names: std::collections::BTreeSet<String>,
     #[cfg(feature = "test-support")]
     recorded: Vec<(String, Span, Fact)>,
 }
@@ -173,6 +184,7 @@ impl Extension for Crucible {
             Fact::Declaration(declaration) => Some(lower::declaration(cx, call, declaration)),
             Fact::Receive { field } => Some(lower::receive(cx, call, field)),
             Fact::Boot => Some(lower::boot(cx, call)),
+            Fact::Icon(rect) => Some(icons::lower(rect)),
             Fact::Class(_) | Fact::Load(_) => None,
         }
     }

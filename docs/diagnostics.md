@@ -514,3 +514,19 @@ export const Tap = toServer<undefined>("Cannon.Tap", { rate: 8 });
 export const Spin = toServer<undefined>("Wheel.Spin", { rate: 5, burst: 1 });
 export const Rebirth = toServer<undefined>("Cannon.Rebirth", { rate: 0.5 });
 ```
+
+## CRU041
+
+```text
+CRU041: icon() needs a string literal, such as icon("house"). Crucible bakes only the icons it can see.
+```
+
+Pass a quoted Lucide name directly to `icon()`. If a condition changes which icon you display, call `icon()` with a literal in each branch.
+
+## CRU042
+
+```text
+CRU042: The icon atlas has no entry for "house". Run `crucible icons` to update the game's icon atlas.
+```
+
+The game's `crucible-icons.lock` must cover every `icon()` call and match the current stroke and Lucide version. Run `crucible icons --group <groupId>` if a new sheet needs an upload. See the [Icons section of the UI guide](ui.md#icons).
