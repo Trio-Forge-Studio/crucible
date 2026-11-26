@@ -1639,6 +1639,9 @@ fn the_icon_command_uploads_only_new_sheets_and_build_uses_the_updated_lock() {
     assert!(body.contains(r#""assetType":"Image""#));
     assert!(body.contains(r#""assetPrivacy":"OpenUse""#));
     assert!(body.contains(r#""groupId":"73""#));
+    // Roblox rejects an asset name longer than 50 characters with HTTP 400.
+    let name = body.split(r#""displayName":""#).nth(1).and_then(|rest| rest.split('"').next()).unwrap();
+    assert!(name.starts_with("Lucide icons 1 ") && name.len() <= 50, "{name}");
     let lock: toml::Value = toml::from_str(&game.read("crucible-icons.lock")).unwrap();
     assert_eq!(lock["sheets"][0]["asset"].as_str(), Some("821"));
     assert_eq!(lock["sheets"][0]["sha256"], expected["sheets"][0]["sha256"]);

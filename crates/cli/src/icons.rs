@@ -187,7 +187,7 @@ fn upload_sheet(
         resume,
         asset_type: Some(upload::AssetType::Image),
         open_use: true,
-        name: Some(format!("Lucide icons {} {}", index + 1, hash)),
+        name: Some(format!("Lucide icons {} {}", index + 1, &hash[..12])),
         description: "Lucide icons (ISC).".into(),
         group,
         user: None,
