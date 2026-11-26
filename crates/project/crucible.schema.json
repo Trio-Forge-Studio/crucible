@@ -32,6 +32,9 @@
       "description": "Settings of the universe.",
       "$ref": "#/$defs/Settings"
     },
+    "icons": {
+      "$ref": "#/$defs/Icons"
+    },
     "passes": {
       "description": "Game passes, by key.",
       "type": "object",
@@ -242,6 +245,20 @@
       "required": [
         "universe"
       ]
+    },
+    "Icons": {
+      "type": "object",
+      "properties": {
+        "stroke": {
+          "description": "Lucide stroke width in its 24-unit view box.",
+          "type": "number",
+          "format": "double",
+          "default": 2.0,
+          "exclusiveMinimum": 0,
+          "maximum": 4
+        }
+      },
+      "additionalProperties": false
     },
     "Place": {
       "type": "object",

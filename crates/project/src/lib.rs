@@ -22,6 +22,31 @@ pub struct Manifest {
     pub places: BTreeMap<String, Place>,
     pub envs: BTreeMap<String, Env>,
     pub experience: Declared,
+    pub icons: Icons,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Icons {
+    /// Lucide stroke width in its 24-unit view box.
+    #[serde(deserialize_with = "icon_stroke")]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 4))]
+    pub stroke: f64,
+}
+
+impl Default for Icons {
+    fn default() -> Self {
+        Self { stroke: 2.0 }
+    }
+}
+
+fn icon_stroke<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    let stroke = f64::deserialize(deserializer)?;
+    if stroke > 0.0 && stroke <= 4.0 {
+        Ok(stroke)
+    } else {
+        Err(serde::de::Error::custom("stroke must be greater than 0 and at most 4"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -116,6 +141,8 @@ struct RawManifest {
     #[schemars(extend("minProperties" = 1, "propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     places: Option<BTreeMap<String, Place>>,
     #[serde(default)]
+    icons: Icons,
+    #[serde(default)]
     #[schemars(extend("propertyNames" = { "pattern": "^[A-Za-z0-9_-]+$" }))]
     env: BTreeMap<String, RawEnv>,
     /// Settings of the universe.
@@ -208,6 +235,7 @@ impl Default for Manifest {
             )]),
             envs: BTreeMap::new(),
             experience: Declared::default(),
+            icons: Icons::default(),
         }
     }
 }
@@ -292,7 +320,7 @@ impl Manifest {
             passes: located(text, raw.passes),
             badges: located(text, raw.badges),
         };
-        Ok(Self { places, envs, experience })
+        Ok(Self { places, envs, experience, icons: raw.icons })
     }
 }
 
@@ -401,6 +429,18 @@ mod tests {
 
     fn error(text: &str) -> ManifestError {
         Manifest::parse(text).expect_err("manifest must be rejected")
+    }
+
+    #[test]
+    fn icon_stroke_defaults_and_accepts_numbers_in_range() {
+        assert_eq!(Manifest::parse("").unwrap().icons.stroke, 2.0);
+        assert_eq!(Manifest::parse("[icons]").unwrap().icons.stroke, 2.0);
+        for (text, stroke) in [("1.25", 1.25), ("4", 4.0)] {
+            assert_eq!(Manifest::parse(&format!("[icons]\nstroke = {text}")).unwrap().icons.stroke, stroke);
+        }
+        for value in ["0", "-1", "4.01", "inf", "nan", "\"2\""] {
+            assert!(Manifest::parse(&format!("[icons]\nstroke = {value}")).is_err(), "{value}");
+        }
     }
 
     #[test]
