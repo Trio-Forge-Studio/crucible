@@ -1,10 +1,10 @@
 # The SHA-256 of every file `pnpm build` writes, recorded by `cargo xtask golden record`.
-95390576bc2abf0097c77db29115afd985a0062f2f70d3b24a1957eddb4ffc40  build/sample-game.rbxl
+7cd6a6427f9d6ce903eef7a1594cc90d858ce13d928e3ec5b5bf8f50f0122044  build/sample-game.rbxl
 5d69cf99a9741048855decb1d8cb5d7668f362f40c769d1500ce8f9c20dd319f  examples/sample-game/include/Promise.lua
 4f7183154d504d5f20e5d20f208b4c6542a712038923665be58c75aafd043f68  examples/sample-game/include/RuntimeLib.lua
 c407724f5566d478265eec4fa078608407db0efbacec4f89d5ac946d07587a20  examples/sample-game/out/client/main.client.luau
 cccc73f108a671b398de5fa8aba78c2c0f12a4965763eeca4aa66fcfbd887b1b  examples/sample-game/out/client/systems/hud.luau
-aaa8a4e44ed707b7d35b28fd84e39f469f68a0400f70fe6c63aaff2f8921124e  examples/sample-game/out/client/systems/menu.luau
+47158febf76bdc63dd2a59c28d52e108e5f973bff10f9cc6551864cdf5595704  examples/sample-game/out/client/systems/menu.luau
 86c256762c38a4ad5500c69eb34c28b5516a4031cb77c80a37c3f5453fd02b78  examples/sample-game/out/client/systems/renderer.luau
 29a2e55f8bebaa735b38677d2ce3cee3e874e746ff1dbba6cc36768bd5bd3a5c  examples/sample-game/out/server/legacy.luau
 35177f16be8f4bcc17e20d3f54c10a9fb7adf708e90ed5a4bd53048e50f87ba3  examples/sample-game/out/server/main.server.luau
@@ -211,12 +211,11 @@ b4ecf469985eebae52e30dac06371361e78a342285e695d34b5e377233e92ad6  packages/cruci
 ab6b877f88aeee4557f76b920f81d6011071144bd30e3ac53d4e0bc91a300b4e  packages/crucible/out/ui/frame-loop.luau
 f06d481bac489112f44e95d15f7c789f73b84c3b15d75a2993639348d2bea3ef  packages/crucible/out/ui/group.d.ts
 bf7099f09b3e5336e836122297b2df9d8f54a229f95cc97958795f758d383520  packages/crucible/out/ui/group.luau
-e3a6bd4d0e2fa0cf54d1804bac7b9e75abf8a25837b536e2bd6752be14273ad1  packages/crucible/out/ui/icon.d.ts
-8139c90bf04bac793d97f7fe3334540abe4b21bfccf87c1218af09c0837db6a4  packages/crucible/out/ui/icon.luau
-31d465d41977c5e8e9f646c3a14ab626b0bed8fe2fea641e917c5ae33b84c651  packages/crucible/out/ui/index.d.ts
-d7221404d0f93334b985a6b7f0a4fb4c5b202859e82013d097c9c016b0d88224  packages/crucible/out/ui/init.luau
-3f17c9b4cd07511f9f5514b1fd6c1c70aadf3c766ff59ed070fe1cea8646c6d7  packages/crucible/out/ui/lucide.d.ts
-adc1e6a2c385b23dffe01d762eb11da63a56cb17c1dce93b6c81cf71a006ee1d  packages/crucible/out/ui/lucide.luau
+c55fcd2cfd5b841ce4212d22a716d82a845c942cf096d3779067e28e15371560  packages/crucible/out/ui/icon.d.ts
+cc0832c05be11d35dd20762eca54112feda0cdaaf653783f1a6cd8f46da5d145  packages/crucible/out/ui/icon.luau
+cfd1da18ac936b9c07a96f43028c384a8f35fc19c2a907cac9e03790824c70aa  packages/crucible/out/ui/index.d.ts
+8df0e92c56b3b5aeda16792925b37a28ac2af9e8cdb3e6c70b1d9a01a9d39810  packages/crucible/out/ui/init.luau
+eeb2e69ef064b9a667ad010456bd698c8a8723d2739848dc57d364c9abf59821  packages/crucible/out/ui/lucide.d.ts
 edc595616485afcde7a118abad3a768971df9bba194d2dddf4df5c17dee1cae8  packages/crucible/out/ui/modal-state.d.ts
 b87762408d54388772e62389b2b0777810b6d69814f4efd943027dca7eb882ea  packages/crucible/out/ui/modal-state.luau
 a6e8922a412696d506691d6767a8624505e80bdffd11134236c35c0cbfbf19bf  packages/crucible/out/ui/pan-zoom-state.d.ts
